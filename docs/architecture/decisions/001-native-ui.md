@@ -1,0 +1,13 @@
+# ADR-001 — Native Rust and GPUI; defer integration dependencies
+
+Status: proposed for `G.BOOT`, 2026-10-18. Implements the already accepted native/no-WebView direction; does not claim a renderer exists. Related: DESK requirements, Q.SEC-01/11, Q.PERF-03/05.
+
+Use Rust for the application and GPUI for the future macOS renderer. The renderer owns presentation, focus, accessibility and conversion of typed user actions. It receives only the [core UI boundary](../../../crates/talk-core/src/ui.rs). Authentication/browser login and unsupported external services use deliberate external-browser handoff. HTML prototypes remain reference assets.
+
+Pin the bootstrap to **Rust 1.99.1**, edition 2024, minimal toolchain plus rustfmt/clippy. The official [1.99.1 release](https://blog.rust-lang.org/2026/10/15/Rust-1.99.1/) was verified at authoring. This is the bootstrap toolchain choice, not a claim about all GPUI revisions. The [checked GPUI README](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/crates/gpui/README.md) describes an evolving pre-1.0 API and native platform prerequisites. Its [crate manifest](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/crates/gpui/Cargo.toml) declares Apache-2.0; this does not cover every transitive dependency, native codec or asset.
+
+The current lockfile deliberately has **zero third-party crates**. No GPUI revision is linked, downloaded or rendered; no SQLite, HTTP, async or media library is included. A headless bootstrap executable is justified only as a concrete composition check. It prints absence, accepts no credentials and provides no simulated chat/call UI.
+
+Before the first native slice, choose immutable dependency pins and retain a lockfile/SBOM with license and source evidence. GPUI's license makes it a candidate for this EUPL-1.2 workspace; distribution compatibility, notices, transitive code and any copied code still need independent review. Do not import Nextcloud AGPL implementation code as an unreviewed shortcut. Native media engine selection, codec/patent/distribution conditions, safe Rust bindings and isolated unsafe FFI are unresolved implementation prerequisites. An unsafe adapter exception requires a new bounded review; the bootstrap forbids unsafe code workspace-wide.
+
+Qualify the actual macOS deployment target, Xcode/SDK, signing/access controls, GPUI accessibility, GPU/frame integration and native performance on hardware. Other OSes remain future qualified platforms. A Linux compile of this standard-library scaffold establishes none of these properties. Record feasibility failures without substituting an embedded WebView or claiming an unsupported combination works.

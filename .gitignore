@@ -1,0 +1,10 @@
+/target/
+**/__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+!.env.example
+/.agent-dev-box.json
+/.runtime/
+/artifacts/private/

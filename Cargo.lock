@@ -1,0 +1,22 @@
+# Path-only bootstrap lockfile; validate with the pinned Cargo and --locked.
+# No registry dependency has been resolved or downloaded by the author.
+version = 4
+
+[[package]]
+name = "talk-adapters"
+version = "0.0.0"
+dependencies = [
+ "talk-core",
+]
+
+[[package]]
+name = "talk-bootstrap"
+version = "0.0.0"
+dependencies = [
+ "talk-adapters",
+ "talk-core",
+]
+
+[[package]]
+name = "talk-core"
+version = "0.0.0"

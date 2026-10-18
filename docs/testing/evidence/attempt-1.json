@@ -1,0 +1,161 @@
+{
+  "cleanup": {
+    "errors": [],
+    "finished": "2026-10-18T16:03:48.838325+00:00",
+    "remaining": {
+      "containers": 0,
+      "networks": 0,
+      "volumes": 0
+    },
+    "removed": {
+      "containers": 2,
+      "networks": 2,
+      "volumes": 2
+    },
+    "result": "pass",
+    "runtime_secrets_removed": true
+  },
+  "finished": "2026-10-18T16:03:48.838354+00:00",
+  "profiles": {
+    "r34": {
+      "assertions": [
+        {
+          "id": "LAB-001.image-platform",
+          "result": "pass"
+        },
+        {
+          "id": "LAB-001.image-digest",
+          "result": "pass"
+        },
+        {
+          "id": "LAB-001.package-sha256",
+          "result": "pass"
+        }
+      ],
+      "error": "object of type 'NoneType' has no len()",
+      "finished": "2026-10-18T16:03:14.477051+00:00",
+      "image_observed": {
+        "architecture": "amd64",
+        "digests": [
+          "nextcloud@sha256:ec9d2572e94dd5eb2a2cbaff010cb1f1448bdf167f60597b9adcc89f601bdff1"
+        ],
+        "id": "sha256:ec9d2572e94dd5eb2a2cbaff010cb1f1448bdf167f60597b9adcc89f601bdff1",
+        "os": "linux"
+      },
+      "operations": [],
+      "package_observed": {
+        "bytes": 53797999,
+        "sha256": "4a8d5cf52ed42223ea9937860f70c2e9dca1df8bfd5f75b871ae7569d2106110"
+      },
+      "pins": {
+        "admin_presets": [
+          "default",
+          "forced",
+          "presentation",
+          "voiceroom",
+          "webinar"
+        ],
+        "image": "docker.io/library/nextcloud@sha256:ec9d2572e94dd5eb2a2cbaff010cb1f1448bdf167f60597b9adcc89f601bdff1",
+        "image_tag_reference_only": "docker.io/library/nextcloud:34.0.5-apache",
+        "index_digest_reference_only": "sha256:6d69b9052afab060afe8d004e9b00820f95a040b42db967b31eef9a48661e8bc",
+        "nextcloud_version": "34.0.5",
+        "regular_presets": [
+          "default",
+          "forced",
+          "presentation",
+          "voiceroom",
+          "webinar"
+        ],
+        "release_source_commit": "0d736588dcfb42becf0e5688e0847e35d5b5efa2",
+        "talk_sha256": "4a8d5cf52ed42223ea9937860f70c2e9dca1df8bfd5f75b871ae7569d2106110",
+        "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v24.0.6/spreed-v24.0.6.tar.gz",
+        "talk_version": "24.0.6"
+      },
+      "result": "fail",
+      "started": "2026-10-18T16:02:59.394462+00:00"
+    },
+    "r35": {
+      "assertions": [
+        {
+          "id": "LAB-001.image-platform",
+          "result": "pass"
+        },
+        {
+          "id": "LAB-001.image-digest",
+          "result": "pass"
+        },
+        {
+          "id": "LAB-001.package-sha256",
+          "result": "pass"
+        }
+      ],
+      "error": "object of type 'NoneType' has no len()",
+      "finished": "2026-10-18T16:03:35.910265+00:00",
+      "image_observed": {
+        "architecture": "amd64",
+        "digests": [
+          "nextcloud@sha256:74c22796c8ff5537dd564394b47951cb90e4aa5e0f11467d062c539bb036bc35"
+        ],
+        "id": "sha256:74c22796c8ff5537dd564394b47951cb90e4aa5e0f11467d062c539bb036bc35",
+        "os": "linux"
+      },
+      "operations": [],
+      "package_observed": {
+        "bytes": 54265379,
+        "sha256": "2b3e3eae42d9bf8ba8da2ab244d16347a3cfacbb8bff346bd99cf32cd6f9c65e"
+      },
+      "pins": {
+        "admin_presets": [
+          "announcement",
+          "channel",
+          "classified",
+          "default",
+          "forced",
+          "presentation",
+          "voiceroom",
+          "webinar"
+        ],
+        "image": "docker.io/library/nextcloud@sha256:74c22796c8ff5537dd564394b47951cb90e4aa5e0f11467d062c539bb036bc35",
+        "image_tag_reference_only": "docker.io/library/nextcloud:35.0.2-apache",
+        "index_digest_reference_only": "sha256:a588aa5353703b44106a6129adaaf7bf22521b7a4754f9f529b3228d6aa390c5",
+        "nextcloud_version": "35.0.2",
+        "regular_presets": [
+          "channel",
+          "classified",
+          "default",
+          "forced",
+          "presentation",
+          "voiceroom",
+          "webinar"
+        ],
+        "release_source_commit": "eed360d176edcb6888dad60965cb694e6bf62ae3",
+        "talk_sha256": "2b3e3eae42d9bf8ba8da2ab244d16347a3cfacbb8bff346bd99cf32cd6f9c65e",
+        "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v25.0.6/spreed-v25.0.6.tar.gz",
+        "talk_version": "25.0.6"
+      },
+      "result": "fail",
+      "started": "2026-10-18T16:03:24.757557+00:00"
+    }
+  },
+  "result": "fail",
+  "run_id": "nmtlab-20261018t160259z-f563cbc3",
+  "runtime": {
+    "architecture": "x86_64",
+    "docker_server": "29.1.3",
+    "kernel": "7.0.0-30-generic",
+    "os": "Linux",
+    "python": "3.14.4"
+  },
+  "schema": 1,
+  "scope": "HTTP-loopback CORE API smoke, SQLite, no media",
+  "source_commit": "uncommitted bootstrap; bind these file hashes at review",
+  "source_sha256": {
+    "tests/lab/README.md": "39aa6cfc69cdad7102f5f90d63bbc47fe53d8bb15a77120cc56a6de6e1369cd0",
+    "tests/lab/cleanup.sh": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+    "tests/lab/lab.py": "79af5561069e5c38642ad4f0e0e4d618d2f20143fd7994437845cbedbcfc810f",
+    "tests/lab/pins.json": "b68678ed94d2d1c9f8ae343cf11d634a5c643dfdb44f3ecd01e5891e60914a4a",
+    "tests/lab/reprovision.sh": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36"
+  },
+  "specification_commit": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+  "started": "2026-10-18T16:02:59.347139+00:00"
+}

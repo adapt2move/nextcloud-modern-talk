@@ -1,0 +1,72 @@
+name: Bootstrap checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Documentation and Rust contracts (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Check out candidate
+        # Official actions/checkout v7.0.1; provenance in docs/development.md.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Check documentation and architecture
+        run: |
+          python3 --version
+          python3 tools/check_docs.py
+          python3 tools/check_architecture.py
+
+      - name: Select the repository's pinned Rust toolchain
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("rust-toolchain.toml").read_text(encoding="utf-8"))
+          channel = config["toolchain"]["channel"]
+          if not re.fullmatch(r"\d+\.\d+\.\d+|nightly-\d{4}-\d{2}-\d{2}", channel):
+              raise SystemExit("Pin an exact Rust release or dated nightly in rust-toolchain.toml")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"RUSTUP_TOOLCHAIN={channel}\n")
+          PY
+
+      - name: Install and identify the pinned toolchain
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+          rustc --version --verbose
+          cargo --version
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace targets
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Lint workspace targets
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run workspace and documentation tests
+        run: cargo test --workspace --locked
+
+      # No service containers, secret-backed fixtures, native performance claim,
+      # or publication. workflow_dispatch repeats these same bootstrap checks.

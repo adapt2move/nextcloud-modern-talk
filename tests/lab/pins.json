@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "specification_commit": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+  "profile_kind": "HTTP isolated-bridge CORE API smoke, SQLite, no media",
+  "platform": "linux/amd64",
+  "profiles": {
+    "r34": {
+      "nextcloud_version": "34.0.5",
+      "image_tag_reference_only": "docker.io/library/nextcloud:34.0.5-apache",
+      "image": "docker.io/library/nextcloud@sha256:ec9d2572e94dd5eb2a2cbaff010cb1f1448bdf167f60597b9adcc89f601bdff1",
+      "index_digest_reference_only": "sha256:6d69b9052afab060afe8d004e9b00820f95a040b42db967b31eef9a48661e8bc",
+      "talk_version": "24.0.6",
+      "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v24.0.6/spreed-v24.0.6.tar.gz",
+      "talk_sha256": "4a8d5cf52ed42223ea9937860f70c2e9dca1df8bfd5f75b871ae7569d2106110",
+      "release_source_commit": "0d736588dcfb42becf0e5688e0847e35d5b5efa2",
+      "regular_presets": ["default", "forced", "presentation", "voiceroom", "webinar"],
+      "admin_presets": ["default", "forced", "presentation", "voiceroom", "webinar"]
+    },
+    "r35": {
+      "nextcloud_version": "35.0.2",
+      "image_tag_reference_only": "docker.io/library/nextcloud:35.0.2-apache",
+      "image": "docker.io/library/nextcloud@sha256:74c22796c8ff5537dd564394b47951cb90e4aa5e0f11467d062c539bb036bc35",
+      "index_digest_reference_only": "sha256:a588aa5353703b44106a6129adaaf7bf22521b7a4754f9f529b3228d6aa390c5",
+      "talk_version": "25.0.6",
+      "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v25.0.6/spreed-v25.0.6.tar.gz",
+      "talk_sha256": "2b3e3eae42d9bf8ba8da2ab244d16347a3cfacbb8bff346bd99cf32cd6f9c65e",
+      "release_source_commit": "eed360d176edcb6888dad60965cb694e6bf62ae3",
+      "regular_presets": ["channel", "classified", "default", "forced", "presentation", "voiceroom", "webinar"],
+      "admin_presets": ["announcement", "channel", "classified", "default", "forced", "presentation", "voiceroom", "webinar"]
+    }
+  }
+}
