@@ -1,0 +1,360 @@
+{
+  "records": [
+    {
+      "case": "baseline",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+      },
+      "expected_exit": 0,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "positive-consumer",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+      },
+      "compiler": {
+        "argv": [
+          "cargo",
+          "check",
+          "--locked",
+          "--workspace",
+          "--all-targets"
+        ],
+        "exit_code": 0,
+        "stderr": "    Checking talk-core v0.0.0 ([fixture-temp]/positive-consumer/crates/talk-core)\n    Checking talk-adapters v0.0.0 ([fixture-temp]/positive-consumer/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 ([fixture-temp]/positive-consumer/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s\n",
+        "stdout": ""
+      },
+      "expected_exit": 0,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "positive-grouped-consumer",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+      },
+      "compiler": {
+        "argv": [
+          "cargo",
+          "check",
+          "--locked",
+          "--workspace",
+          "--all-targets"
+        ],
+        "exit_code": 0,
+        "stderr": "    Checking talk-bootstrap v0.0.0 ([fixture-temp]/positive-grouped-consumer/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s\n",
+        "stdout": ""
+      },
+      "expected_exit": 0,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "core-adapter-edge",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: talk-core: forbidden/missing dependency edge\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "target-specific-edge",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: talk-core: unreviewed manifest section\narchitecture: talk-core: hidden platform/build/test edges need review\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "presentation-adapter",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: presentation import must use the core UI boundary or local formatting\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-vec",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "raw-route",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: crates/talk-core/src/identity.rs: raw protocol route leaked into core\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-btreemap",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-hashmap",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-hashset",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-btreeset",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-vecdeque",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-linkedlist",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "unbounded-binaryheap",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes an unbounded container type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "worker-reexport",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes a secret, worker or frame type\narchitecture: renderer contract has an unreviewed data export/import\narchitecture: renderer data exports differ from the reviewed vocabulary\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "grouped-worker-import",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: boundary imports need explicit paths without aliases/globs\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "grouped-worker-without-alias",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: presentation import must use the core UI boundary or local formatting\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "data-wildcard",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: boundary imports need explicit paths without aliases/globs\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "frame-field",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract exposes a secret, worker or frame type\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "secret-field",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 1,
+        "stderr": "architecture: renderer contract contains secret/transport-bearing identifiers\n",
+        "stdout": ""
+      },
+      "expected_exit": 1,
+      "lock_unchanged": true,
+      "pass": true
+    },
+    {
+      "case": "restored-baseline",
+      "checker": {
+        "argv": [
+          "python3",
+          "tools/check_architecture.py"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+      },
+      "expected_exit": 0,
+      "lock_unchanged": true,
+      "pass": true
+    }
+  ],
+  "scope": "isolated compile/lexical-boundary fixtures only; no native qualification",
+  "status": "pass"
+}

@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Enforce the reviewed bootstrap graph and renderer boundary; Python 3.11+.
 
-This is a conservative source guard, not a Rust parser or security proof.
-The compile check enforces crate edges. Independent negative fixtures must exercise
-new dependencies, renderer adapter access, raw boundary containers and endpoint leakage.
+This is a conservative lexical guard, not a Rust parser, sandbox or information-flow
+proof. Reviewed UI exports are checked as explicit paths, including grouped imports.
+Aliases/globs and unsupported import syntax are rejected at the inspected boundaries.
+Direct standard growable containers are rejected by identifier, including qualified
+spellings. Type resolution, transitive field bounds, macro expansion and all possible
+Rust encodings need compiler plus human review; this guard does not prove them.
+Independent positive/negative fixtures must exercise the usable renderer surface as
+well as forbidden dependencies, containers, worker types and endpoint leakage.
 """
 
 from pathlib import Path
@@ -37,6 +42,99 @@ def without_comments(source: str) -> str:
     return re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/',
                   lambda match: match[0] if match[0].startswith('"') else " ",
                   source, flags=re.S)
+
+
+# This is the reviewed transitive data vocabulary, not permission to reexport modules.
+UI_EXPORTS = {
+    *(('crate', 'bounded', name) for name in ('LimitExceeded', 'Page', 'Text')),
+    ('crate', 'identity', 'PersistenceState'),
+    *(('crate', 'ids', name) for name in (
+        'AccountId', 'AccountScope', 'CallGeneration', 'CallScope', 'ConversationId',
+        'HostId', 'RuntimeGeneration', 'VaultGeneration',
+    )),
+    ('crate', 'policy', 'Decision'),
+}
+UNBOUNDED = (
+    r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"
+    r"BinaryHeap|PathBuf|OsString|CString|Cow)\b"
+)
+WORKER_OR_FRAME = (
+    r"\b(?:Future|Task|Secret|Credential|Token|Frame|Surface|PortError|Bootstrap|"
+    r"Admission|Cancellation|IdentityPort|NextcloudPort|MediaPort|OperationContext|"
+    r"Arc|Rc|Mutex|RwLock|RefCell)\b"
+)
+USE = re.compile(r"\b(?:(pub(?:\s*\([^)]*\))?)\s+)?use\s+([^;]+);", re.S)
+
+
+def use_paths(expression: str) -> list[tuple[str, ...]] | None:
+    """Flatten simple/nested grouped paths; reject aliases/globs/unknown grammar.
+
+    This parses only the deliberately narrow import grammar, not Rust source.
+    Keeping the original path means braces cannot hide a forbidden dependency.
+    """
+    tokens = re.findall(r"::|[A-Za-z_][A-Za-z_0-9]*|[{},]", expression)
+    if ''.join(tokens) != re.sub(r"\s+", '', expression):
+        return None
+    cursor = 0
+    leaves: list[tuple[str, ...]] = []
+
+    def tree(prefix: tuple[str, ...]) -> None:
+        nonlocal cursor
+        if cursor >= len(tokens):
+            raise ValueError('incomplete import')
+        token = tokens[cursor]
+        cursor += 1
+        if token == '{':
+            while cursor < len(tokens) and tokens[cursor] != '}':
+                tree(prefix)
+                if cursor < len(tokens) and tokens[cursor] == ',':
+                    cursor += 1
+                elif cursor >= len(tokens) or tokens[cursor] != '}':
+                    raise ValueError('invalid group separator')
+            if cursor >= len(tokens) or tokens[cursor] != '}':
+                raise ValueError('unclosed group')
+            cursor += 1
+        elif re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", token):
+            path = prefix + (token,)
+            if cursor < len(tokens) and tokens[cursor] == '::':
+                cursor += 1
+                tree(path)
+            else:
+                leaves.append(path)
+        else:
+            raise ValueError('unsupported import')
+
+    try:
+        if tokens and tokens[0] == '::':
+            cursor += 1
+        tree(())
+        return leaves if cursor == len(tokens) and leaves else None
+    except ValueError:
+        return None
+
+
+def checked_imports(source: str, boundary: bool) -> str:
+    exports: set[tuple[str, ...]] = set()
+    for match in USE.finditer(source):
+        paths = use_paths(match[2])
+        require(paths is not None, 'boundary imports need explicit paths without aliases/globs')
+        for path in paths or []:
+            if boundary:
+                require(match[1] == 'pub' and path in UI_EXPORTS,
+                        'renderer contract has an unreviewed data export/import')
+                exports.add(path)
+            else:
+                allowed = (len(path) >= 2 and path[:2] == ('talk_core', 'ui')) or (
+                    len(path) >= 2 and path[0] == 'std'
+                    and path[1] not in {'net', 'fs', 'process', 'thread', 'os'}
+                )
+                require(allowed, 'presentation import must use the core UI boundary or local formatting')
+    if boundary:
+        require(exports == UI_EXPORTS, 'renderer data exports differ from the reviewed vocabulary')
+    remainder = USE.sub(' ', source)
+    require(not re.search(r"\b(?:use|extern\s+crate)\b", remainder),
+            'uninspected boundary import syntax')
+    return remainder
 
 
 def check() -> None:
@@ -99,14 +197,18 @@ def check() -> None:
                 f"{path.relative_to(ROOT)}: included source/data bypasses boundary inspection")
 
     boundary = without_comments((ROOT / "crates/talk-core/src/ui.rs").read_text(encoding="utf-8"))
-    require(not re.search(r"\b(?:String|Vec|Box|Future|Task|Secret|Credential|Token|Frame|Surface|PortError)\b", boundary),
-            "renderer contract exposes an unbounded, secret, I/O or frame type")
+    require(not re.search(UNBOUNDED, boundary),
+            "renderer contract exposes an unbounded container type")
+    require(not re.search(WORKER_OR_FRAME, boundary),
+            "renderer contract exposes a secret, worker or frame type")
     require(not re.search(r"\b(?:secrets?|credentials?|tokens?|passwords?|http|authorization)\b", boundary, re.I),
             "renderer contract contains secret/transport-bearing identifiers")
-    require(not re.search(r"\bpub\s+use\b|crate\s*::\s*(?:ports|application|lifecycle)", boundary),
-            "renderer contract reaches worker-side implementation types")
+    boundary_body = checked_imports(boundary, boundary=True)
+    require(not re.search(r"\b(?:crate|super|talk_core|talk_adapters)\s*::|\bmod\b|\w+\s*!", boundary_body),
+            "renderer contract reaches outside reviewed data exports or generates uninspected types")
     presentation = without_comments((ROOT / "apps/bootstrap/src/presentation.rs").read_text(encoding="utf-8"))
-    require(not re.search(r"talk_adapters|talk_core\s*::\s*(?!ui\b)\w+|crate\s*::|super\s*::|std\s*::\s*(?:net|fs|process|thread)|\b(?:include|include_str|include_bytes)!", presentation),
+    presentation_body = checked_imports(presentation, boundary=False)
+    require(not re.search(r"talk_adapters|talk_core\s*::\s*(?!ui\b)\w+|crate\s*::|super\s*::|std\s*::\s*(?:net|fs|process|thread|os)|\b(?:include|include_str|include_bytes)\s*!|\bmod\s+\w+\s*;", presentation_body),
             "presentation must depend only on the core UI boundary and bounded local formatting")
 
 

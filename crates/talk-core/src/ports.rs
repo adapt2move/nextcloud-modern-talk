@@ -4,7 +4,10 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::identity::{PersistenceState, Settlement, StoreIntent};
+use crate::identity::{
+    AttemptCommand, AttemptReport, IdentityStatus, MaintenanceCommand, MaintenanceContext,
+    MaintenanceReport, PendingAttemptContext, RecoveryContext, RestoredIdentity,
+};
 use crate::ids::{AccountId, AccountScope, CallScope, ConversationId};
 use crate::lifecycle::Cancellation;
 use crate::policy::{Moment, PolicyInputs};
@@ -87,31 +90,48 @@ pub trait NextcloudPort: Send {
     ) -> Task<'_, ProtocolReply>;
 }
 
-/// The identity owner holds pending login material privately. A StoreIntent contains IDs
-/// only; Stage must resolve a still-live attempt and commit metadata before provider I/O.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IdentityCommand {
-    Stage(StoreIntent),
-    Activate(StoreIntent),
-    Resolve(AccountScope),
-    Reconcile(StoreIntent),
-    DeleteAbandonedAttempt(StoreIntent),
-    SuppressRestoration(AccountId),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct IdentityReport {
-    pub persistence: PersistenceState,
-    pub settlement: Settlement,
-}
-
+/// One identity owner, with distinct pre-runtime, authenticated and maintenance seams.
+/// Calls do bounded nonblocking admission before returning an observation task. Accepted
+/// ledger/provider work belongs to the supervisor, not to the task: dropping it cannot
+/// discard a dispatched writer, its durable intent or later settlement. Cancellation
+/// closes activation/admission immediately; it never manufactures a retained-P choice.
+/// The supervisor keeps 8 descriptors/account (7 ordinary, 1 reserved for suppression),
+/// 1 provider operation/account and at most 2 provider workers globally. Overflow rejects
+/// new work; local closure never queues. Expired slices retain unresolved durable markers.
+/// No implementation of that supervisor or durability exists in this bootstrap.
 pub trait IdentityPort: Send {
     fn availability(&self) -> Availability;
-    fn transition(
+
+    /// Authorize/stage/activate a pending attempt. No runtime is required as input.
+    /// Stored activation rechecks confirmed N and commits Eligible(N) before issuing a
+    /// runtime. Session-only activation verifies the receipt's current ledger revision
+    /// and still-live attempt; receipt delivery or writer completion never activates.
+    fn attempt(
         &mut self,
-        context: OperationContext,
-        command: IdentityCommand,
-    ) -> Task<'_, IdentityReport>;
+        context: PendingAttemptContext,
+        command: AttemptCommand,
+    ) -> Task<'_, AttemptReport>;
+
+    /// Cold restoration from intact committed eligibility plus exact confirmed item and
+    /// fresh canonical account validation. Never enumerate to choose a credential.
+    /// Cancellation/drop prevents activation; missing/corrupt metadata requires recovery.
+    fn restore(&mut self, context: RecoveryContext) -> Task<'_, RestoredIdentity>;
+
+    /// Authenticated operation/status resolution. Secret borrowing remains private to
+    /// the identity/validated transport owner; no reusable authentication object returns.
+    fn resolve(&mut self, context: OperationContext) -> Task<'_, IdentityStatus>;
+
+    /// Only the supervisor invokes this seam. Check context deadline/account, correlate
+    /// exact intent/N/P/writer and transition IDs, then serialize/revalidate ledger state.
+    /// No runtime token is consulted for maintenance authority. A referenced retained
+    /// runtime is independently revalidated as evidence, not used as job cancellation.
+    /// Cancel/retain invalidate the attempt locally before waiting for durable commit.
+    /// Settlement/deletion preserve disposition; late results cannot reopen admission.
+    fn maintain(
+        &mut self,
+        context: MaintenanceContext,
+        command: MaintenanceCommand,
+    ) -> Task<'_, MaintenanceReport>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

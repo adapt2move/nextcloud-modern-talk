@@ -1,0 +1,51 @@
+{
+  "frames": [
+    {
+      "width": 1280,
+      "height": 720,
+      "yuv_bytes": 1818624,
+      "bgra_bytes": 3686400
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "yuv_bytes": 3719168,
+      "bgra_bytes": 8306688
+    }
+  ],
+  "profiles": [
+    {
+      "cameras": 0,
+      "screens": 0,
+      "controlled_MiB": 12
+    },
+    {
+      "cameras": 1,
+      "screens": 0,
+      "controlled_MiB": 76
+    },
+    {
+      "cameras": 2,
+      "screens": 0,
+      "controlled_MiB": 140
+    },
+    {
+      "cameras": 4,
+      "screens": 0,
+      "controlled_MiB": 268
+    },
+    {
+      "cameras": 4,
+      "screens": 1,
+      "controlled_MiB": 388
+    },
+    {
+      "cameras": 5,
+      "screens": 2,
+      "controlled_MiB": 572
+    }
+  ],
+  "two_slots_controlled_MiB": 1144,
+  "two_slots_plus_auxiliary_MiB": 1408,
+  "scope": "arbitrary-precision derivation only; not production overflow tests or a native budget pass"
+}

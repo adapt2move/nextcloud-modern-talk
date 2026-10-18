@@ -1,10 +1,15 @@
 //! Renderer boundary: bounded display data and user intents, with no network/native types.
 //! No media frame, credential, endpoint, authorization header or signaling payload belongs here.
 
-use crate::bounded::{Page, Text};
-use crate::identity::PersistenceState;
-use crate::ids::{AccountId, AccountScope, CallScope, ConversationId};
-use crate::policy::Decision;
+// Explicit data-only exports are the complete renderer vocabulary. Adding an export
+// requires review of its transitive fields and the matching checker allowlist.
+pub use crate::bounded::{LimitExceeded, Page, Text};
+pub use crate::identity::PersistenceState;
+pub use crate::ids::{
+    AccountId, AccountScope, CallGeneration, CallScope, ConversationId, HostId, RuntimeGeneration,
+    VaultGeneration,
+};
+pub use crate::policy::Decision;
 
 pub const MAX_VISIBLE_CONVERSATIONS: usize = 100;
 pub const MAX_VISIBLE_MESSAGES: usize = 100;

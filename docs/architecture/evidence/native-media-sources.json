@@ -1,0 +1,1472 @@
+{
+  "schema": "native-media-source-evidence-v1",
+  "scope": "Public source provenance and author-selected derivation; no build, exhaustive dependency closure, independent audit or native qualification.",
+  "proposal_base_commit": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+  "selected_engine": {
+    "name": "Upstream WebRTC native C++",
+    "repository": "https://webrtc.googlesource.com/src",
+    "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+    "tree": "f1bb4132a097a0c65c00f1a0f425a9b403798116",
+    "source_commit_time": "Sun Oct 18 15:47:13 2026",
+    "selection_kind": "immutable source baseline; rolling upstream, not release/binary certification",
+    "discovery": "refs/heads/main resolved once, then immutable source URLs fetched",
+    "binding": "Project-owned versioned bounded IPC from Rust adapter to native C++/Objective-C++ media helper; native WebRTC pointers and platform FFI remain inside helper",
+    "libvpx_commit": "5e680f30801d03c21078f8c4b772464752516211",
+    "chromium_third_party_commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+    "opus_upstream_provenance": "55513e81d8f606bd75d0ff773d2144e5f2a732f5 plus Chromium local changes; actual bytes pinned by third_party commit",
+    "integration": "none",
+    "binary_artifact": null,
+    "full_dependency_sbom": null
+  },
+  "source_claims": [
+    {
+      "id": "SRC-01",
+      "claim": "Canonical native engine, exact commit and DEPS baseline; no binary qualification.",
+      "sources": [
+        "W:commit",
+        "W:README.md",
+        "W:DEPS",
+        "W:native-api.md"
+      ]
+    },
+    {
+      "id": "SRC-02",
+      "claim": "Engine and VP8/Opus source license/provenance terms; no complete distribution clearance.",
+      "sources": [
+        "W:LICENSE",
+        "W:PATENTS",
+        "W:webrtc.gni",
+        "VPX:LICENSE",
+        "VPX:PATENTS",
+        "TP:opus/README.chromium",
+        "TP:opus/src/COPYING",
+        "TP:libvpx/README.chromium"
+      ]
+    },
+    {
+      "id": "SRC-03",
+      "claim": "Native factory, SDP/ICE/TURN and observer/resource API seams. Selected pin removes the old separate-worker factory overload.",
+      "sources": [
+        "W:api/create_peerconnection_factory.h",
+        "W:api/peer_connection_interface.h",
+        "W:api/audio/audio_device.h",
+        "W:api/rtp_sender_interface.h",
+        "W:api/rtp_receiver_interface.h"
+      ]
+    },
+    {
+      "id": "SRC-04",
+      "claim": "Frame transform and encrypt/decrypt extension interfaces exist; they are not Talk E2EE or a guarantee of callback execution in the selected concrete path.",
+      "sources": [
+        "W:api/frame_transformer_interface.h",
+        "W:api/crypto/frame_encryptor_interface.h",
+        "W:api/crypto/frame_decryptor_interface.h",
+        "W:api/rtp_sender_interface.h",
+        "W:api/rtp_receiver_interface.h"
+      ]
+    },
+    {
+      "id": "SRC-05",
+      "claim": "Decoder pool/resolution settings do not establish complete memory caps; VP8 native decode occurs before output pool allocation/copy; encoded images can allocate/reallocate.",
+      "sources": [
+        "W:api/video_codecs/video_decoder.h",
+        "W:api/video_codecs/video_decoder_factory.h",
+        "W:common_video/include/video_frame_buffer_pool.h",
+        "W:common_video/video_frame_buffer_pool.cc",
+        "W:modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc",
+        "W:api/video/encoded_image.cc"
+      ]
+    },
+    {
+      "id": "SRC-06",
+      "claim": "Pinned libvpx has a CONFIG_SIZE_LIMIT guard before VP8 decoder initialization; configure exposes a size limit. Chromium generator/config use 16384x16384. External frame buffer API documents VP9-only support.",
+      "sources": [
+        "VPX:vp8/vp8_dx_iface.c",
+        "VPX:configure",
+        "VPX:vpx/vpx_decoder.h",
+        "TP:libvpx/generate_gni.sh",
+        "TP:libvpx/BUILD.gn",
+        "TP:libvpx/source/config/linux/arm64-highbd/vpx_config.h"
+      ]
+    },
+    {
+      "id": "SRC-07",
+      "claim": "Talk internal-signaling settings/docs, concrete peer implementation and external HPB protocol; neither constitutes native released-profile interoperability evidence.",
+      "sources": [
+        "T24:docs/internal-signaling.md",
+        "T25:docs/internal-signaling.md",
+        "T24:src/utils/webrtc/simplewebrtc/peer.js",
+        "T25:src/utils/webrtc/simplewebrtc/peer.js",
+        "HPB:docs/standalone-signaling-api-v1.md"
+      ]
+    },
+    {
+      "id": "SRC-08",
+      "claim": "Talk key sessions/rotation and custom VP8/Opus frame encryption format require separate native work. T24/T25 key-management and frame-worker files have matching bytes.",
+      "sources": [
+        "T24:src/utils/e2ee/encryption.js",
+        "T25:src/utils/e2ee/encryption.js",
+        "T24:src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+        "T25:src/utils/e2ee/JitsiEncryptionWorkerContext.js"
+      ]
+    },
+    {
+      "id": "SRC-09",
+      "claim": "Native alternatives: libdatachannel transport/C binding scope and external media processing examples; GStreamer peerconnection/RTP pipeline API.",
+      "sources": [
+        "ALT-DC:README.md",
+        "ALT-DC:LICENSE",
+        "ALT-DC:examples/README.md",
+        "ALT-GST:subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c"
+      ]
+    },
+    {
+      "id": "SRC-10",
+      "claim": "Apple source queue has documented minimum/default three frames; CoreVideo allocation threshold is pool-specific, not an aggregate engine cap.",
+      "sources": [
+        "APPLE:scstreamconfiguration",
+        "APPLE:scstreamconfiguration/queuedepth",
+        "APPLE:kcvreturnwouldexceedallocationthreshold"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "T24:docs/internal-signaling.md",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "docs/internal-signaling.md",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/internal-signaling.md",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/internal-signaling.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.235159+00:00",
+      "bytes": 3044,
+      "sha256": "501140f4777e6163526734151bb6d60e8c21412bac143a3fa9e7e765000d6f80",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-07"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "T24:docs/capabilities.md",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "docs/capabilities.md",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/capabilities.md",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/capabilities.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.249694+00:00",
+      "bytes": 21721,
+      "sha256": "0161726910d4235714c31eb13269b986ee761551bd51c4ab825d28fa80238b95",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T24:src/utils/e2ee/encryption.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "src/utils/e2ee/encryption.js",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/e2ee/encryption.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/e2ee/encryption.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.247701+00:00",
+      "bytes": 18564,
+      "sha256": "b5f910e8f5a71d08b7bdb1a02e74567154eaddc87c65bfdda56b796dd21e0131",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-08"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T24:src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.255857+00:00",
+      "bytes": 11922,
+      "sha256": "e950d517b26e2fa1370eb9111df6a59aeebb4f86db1a82348d906566e58dbcc9",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-08"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T24:src/utils/webrtc/simplewebrtc/peer.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "src/utils/webrtc/simplewebrtc/peer.js",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/webrtc/simplewebrtc/peer.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/src/utils/webrtc/simplewebrtc/peer.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.252984+00:00",
+      "bytes": 30794,
+      "sha256": "2b2024d73b155bec83ff91332128025118cb2dea3904553265384dce86032ff6",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-07"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T24:lib/Capabilities.php",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79",
+      "path": "lib/Capabilities.php",
+      "url": "https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Capabilities.php",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Capabilities.php",
+      "retrieved_at_utc": "2026-10-18T17:07:23.185340+00:00",
+      "bytes": 17629,
+      "sha256": "6b104ae22531f460773eaa718fa94a66eb5a4f137249ec321ca9556542e8934d",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T25:docs/internal-signaling.md",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "docs/internal-signaling.md",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/internal-signaling.md",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/internal-signaling.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.476390+00:00",
+      "bytes": 3044,
+      "sha256": "501140f4777e6163526734151bb6d60e8c21412bac143a3fa9e7e765000d6f80",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-07"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T25:docs/capabilities.md",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "docs/capabilities.md",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/capabilities.md",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/capabilities.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.501046+00:00",
+      "bytes": 23123,
+      "sha256": "2ab5fb2a4339048fe6b570301e6265724be24734a48bb5665d3608cc7ef371cc",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "T25:src/utils/e2ee/encryption.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "src/utils/e2ee/encryption.js",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/e2ee/encryption.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/e2ee/encryption.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.544471+00:00",
+      "bytes": 18564,
+      "sha256": "b5f910e8f5a71d08b7bdb1a02e74567154eaddc87c65bfdda56b796dd21e0131",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-08"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "T25:src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/e2ee/JitsiEncryptionWorkerContext.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.530077+00:00",
+      "bytes": 11922,
+      "sha256": "e950d517b26e2fa1370eb9111df6a59aeebb4f86db1a82348d906566e58dbcc9",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-08"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "T25:src/utils/webrtc/simplewebrtc/peer.js",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "src/utils/webrtc/simplewebrtc/peer.js",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/webrtc/simplewebrtc/peer.js",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/src/utils/webrtc/simplewebrtc/peer.js",
+      "retrieved_at_utc": "2026-10-18T17:07:23.553653+00:00",
+      "bytes": 30772,
+      "sha256": "0ed5dba4fc442ea11bce5d6e268b7712bcce829ab7f2a3be49f58934f0ef0696",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-07"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "T25:lib/Capabilities.php",
+      "repository": "https://github.com/nextcloud/spreed",
+      "commit": "f35255ab86f31e8ee894641f6970a09ce4b90927",
+      "path": "lib/Capabilities.php",
+      "url": "https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Capabilities.php",
+      "retrieval_url": "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Capabilities.php",
+      "retrieved_at_utc": "2026-10-18T17:07:23.530974+00:00",
+      "bytes": 18132,
+      "sha256": "bf73117e6a2bcbbe10eac27d2f9c57feb3f013a3163d108b796f27fda76b7d18",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "HPB:docs/standalone-signaling-api-v1.md",
+      "repository": "https://github.com/strukturag/nextcloud-spreed-signaling",
+      "commit": "c3817ac2402ef764b8d4e6dc03ac7e60ffab49d3",
+      "path": "docs/standalone-signaling-api-v1.md",
+      "url": "https://github.com/strukturag/nextcloud-spreed-signaling/blob/c3817ac2402ef764b8d4e6dc03ac7e60ffab49d3/docs/standalone-signaling-api-v1.md",
+      "retrieval_url": "https://raw.githubusercontent.com/strukturag/nextcloud-spreed-signaling/c3817ac2402ef764b8d4e6dc03ac7e60ffab49d3/docs/standalone-signaling-api-v1.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.796792+00:00",
+      "bytes": 53233,
+      "sha256": "5cacb68ce5892fcbcaf6bcc7c583585a1cf2afb99b5b6bfb51005836f3f9b4a8",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-07"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "ALT-DC:README.md",
+      "repository": "https://github.com/paullouisageneau/libdatachannel",
+      "commit": "bdc5ff28e9d3b863144c94a677ecf5bf043aaf15",
+      "path": "README.md",
+      "url": "https://github.com/paullouisageneau/libdatachannel/blob/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/README.md",
+      "retrieval_url": "https://raw.githubusercontent.com/paullouisageneau/libdatachannel/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/README.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.779727+00:00",
+      "bytes": 10702,
+      "sha256": "c96ccc026bc00ed23f2938fc692ca97f19215599dee799e6c31e5d0dfdbeeef1",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-09"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "ALT-DC:LICENSE",
+      "repository": "https://github.com/paullouisageneau/libdatachannel",
+      "commit": "bdc5ff28e9d3b863144c94a677ecf5bf043aaf15",
+      "path": "LICENSE",
+      "url": "https://github.com/paullouisageneau/libdatachannel/blob/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/LICENSE",
+      "retrieval_url": "https://raw.githubusercontent.com/paullouisageneau/libdatachannel/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/LICENSE",
+      "retrieved_at_utc": "2026-10-18T17:07:23.854380+00:00",
+      "bytes": 16726,
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-09"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "ALT-DC:examples/README.md",
+      "repository": "https://github.com/paullouisageneau/libdatachannel",
+      "commit": "bdc5ff28e9d3b863144c94a677ecf5bf043aaf15",
+      "path": "examples/README.md",
+      "url": "https://github.com/paullouisageneau/libdatachannel/blob/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/examples/README.md",
+      "retrieval_url": "https://raw.githubusercontent.com/paullouisageneau/libdatachannel/bdc5ff28e9d3b863144c94a677ecf5bf043aaf15/examples/README.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.867503+00:00",
+      "bytes": 1588,
+      "sha256": "6e1b566eefc7aca9539abe313f2de6b7e0f841a4bdde0e89fd25e91cd56fde86",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-09"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "ALT-GST:README.md",
+      "repository": "https://github.com/GStreamer/gstreamer",
+      "commit": "82cd8b72f719a87182104b879482f15b7888c71f",
+      "path": "README.md",
+      "url": "https://github.com/GStreamer/gstreamer/blob/82cd8b72f719a87182104b879482f15b7888c71f/README.md",
+      "retrieval_url": "https://raw.githubusercontent.com/GStreamer/gstreamer/82cd8b72f719a87182104b879482f15b7888c71f/README.md",
+      "retrieved_at_utc": "2026-10-18T17:07:23.850791+00:00",
+      "bytes": 20533,
+      "sha256": "03e8010105134194f18a791e29e0a345cb9215402169088477a9201b52c69e38",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "ALT-GST:LICENSE",
+      "repository": "https://github.com/GStreamer/gstreamer",
+      "commit": "82cd8b72f719a87182104b879482f15b7888c71f",
+      "path": "LICENSE",
+      "url": "https://github.com/GStreamer/gstreamer/blob/82cd8b72f719a87182104b879482f15b7888c71f/LICENSE",
+      "retrieval_url": "https://raw.githubusercontent.com/GStreamer/gstreamer/82cd8b72f719a87182104b879482f15b7888c71f/LICENSE",
+      "retrieved_at_utc": "2026-10-18T17:07:23.836574+00:00",
+      "bytes": 26431,
+      "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "ALT-GST:subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c",
+      "repository": "https://github.com/GStreamer/gstreamer",
+      "commit": "82cd8b72f719a87182104b879482f15b7888c71f",
+      "path": "subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c",
+      "url": "https://github.com/GStreamer/gstreamer/blob/82cd8b72f719a87182104b879482f15b7888c71f/subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c",
+      "retrieval_url": "https://raw.githubusercontent.com/GStreamer/gstreamer/82cd8b72f719a87182104b879482f15b7888c71f/subprojects/gst-plugins-bad/ext/webrtc/gstwebrtcbin.c",
+      "retrieved_at_utc": "2026-10-18T17:07:24.245652+00:00",
+      "bytes": 327454,
+      "sha256": "869fd20efa2f717e90805b0638c212ae37ce3d8c6c659ed629fe1a60b44cf7d9",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-09"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "VPX:LICENSE",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "LICENSE",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/LICENSE",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/LICENSE?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.217168+00:00",
+      "bytes": 1537,
+      "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "VPX:PATENTS",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "PATENTS",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/PATENTS",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/PATENTS?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.263708+00:00",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "VPX:vpx/vpx_decoder.h",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "vpx/vpx_decoder.h",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vpx/vpx_decoder.h",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vpx/vpx_decoder.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.549172+00:00",
+      "bytes": 15377,
+      "sha256": "aa784c3f27af14aa7a9e4d14386aee523eb3e50f957194e5c690bb83855eff43",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "VPX:vpx/vpx_frame_buffer.h",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "vpx/vpx_frame_buffer.h",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vpx/vpx_frame_buffer.h",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vpx/vpx_frame_buffer.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.169518+00:00",
+      "bytes": 3206,
+      "sha256": "edc0bc4626e4c93e668a9d1ed6c58316df905c2187384480d58f47c44acfcb22",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "VPX:vp8/vp8_dx_iface.c",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "vp8/vp8_dx_iface.c",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vp8/vp8_dx_iface.c",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/vp8/vp8_dx_iface.c?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.317276+00:00",
+      "bytes": 24462,
+      "sha256": "63cb31002f63c3e462790bbbf24af03fc2a439bd7144ee9b3c0b8cf0c827d020",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/frame_transformer_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/frame_transformer_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/frame_transformer_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/frame_transformer_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.457568+00:00",
+      "bytes": 9585,
+      "sha256": "36507158a1e9021a36ed8cbe63ea2f348cdb111eb75090d85174463edd0d564c",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-04"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/task_queue/task_queue_factory.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/task_queue/task_queue_factory.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/task_queue/task_queue_factory.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/task_queue/task_queue_factory.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.454005+00:00",
+      "bytes": 1666,
+      "sha256": "0f6326c1c71878238a02c0b3e6e20b5a2c9f1997dda7a4e3ad0273ce2c07f980",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/rtc_event_log/rtc_event_log.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/rtc_event_log/rtc_event_log.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtc_event_log/rtc_event_log.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtc_event_log/rtc_event_log.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.504274+00:00",
+      "bytes": 2413,
+      "sha256": "bb803a7d0ba8124aa579bf2cb8ab1becd969207de1e68b696beedef03b6c223a",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:native-api.md",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "native-api.md",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/native-api.md",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/native-api.md?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:07:24.513822+00:00",
+      "bytes": 4645,
+      "sha256": "a287040af09a2cb9cf30818e61cf4afe385aa382f0e45499104f6d688757e46b",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-01"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:docs/native-code/development/index.md",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "docs/native-code/development/index.md",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/docs/native-code/development/index.md",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/docs/native-code/development/index.md?format=TEXT",
+      "base64": true,
+      "status": "failed",
+      "error": "HTTP Error 404: Not Found",
+      "supports_claims": []
+    },
+    {
+      "id": "TP:libvpx/source/config/linux/arm64-highbd/vpx_config.h",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libvpx/source/config/linux/arm64-highbd/vpx_config.h",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/source/config/linux/arm64-highbd/vpx_config.h",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/source/config/linux/arm64-highbd/vpx_config.h?format=TEXT",
+      "status": "retrieved",
+      "retrieved_at_utc": "2026-10-18T17:12:58.094693+00:00",
+      "bytes": 3428,
+      "sha256": "0fa1e9914b5ac6ea233cbef258cb5b5bab0d48e138eefc57f2b299004fee9501",
+      "hash_scope": "decoded raw file bytes",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "VPX:configure",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "commit": "5e680f30801d03c21078f8c4b772464752516211",
+      "path": "configure",
+      "url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/configure",
+      "retrieval_url": "https://chromium.googlesource.com/webm/libvpx/+/5e680f30801d03c21078f8c4b772464752516211/configure?format=TEXT",
+      "status": "retrieved",
+      "bytes": 27433,
+      "sha256": "a610d6837950eb4dfe1cef4f4ebac778fd51ee6f335c4c66f0868f8858203725",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:10:27.542619+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "TP:libvpx/BUILD.gn",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libvpx/BUILD.gn",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/BUILD.gn",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/BUILD.gn?format=TEXT",
+      "status": "retrieved",
+      "bytes": 20417,
+      "sha256": "3f0f12f30428d469aaf0bc0a3df02b9c713058867ce1b0e97ba8cbae640d25b5",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:10:27.409046+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "TP:libvpx/source/config/mac/arm64/vpx_config.h",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libvpx/source/config/mac/arm64/vpx_config.h",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/source/config/mac/arm64/vpx_config.h",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/source/config/mac/arm64/vpx_config.h?format=TEXT",
+      "decode": "base64",
+      "status": "failed",
+      "error": "HTTP Error 404: Not Found",
+      "supports_claims": []
+    },
+    {
+      "id": "TP:libvpx/generate_gni.sh",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libvpx/generate_gni.sh",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/generate_gni.sh",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/generate_gni.sh?format=TEXT",
+      "status": "retrieved",
+      "bytes": 21996,
+      "sha256": "020f1bd03d9a28a0c7b9ad2bee53e223ce3bf666bd54827f0c01d805ff2167f1",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:10:27.425713+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-06"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "APPLE:scstreamconfiguration",
+      "path": "scstreamconfiguration.json",
+      "url": "https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration",
+      "retrieval_url": "https://developer.apple.com/tutorials/data/documentation/screencapturekit/scstreamconfiguration.json",
+      "source_kind": "mutable official documentation snapshot",
+      "status": "retrieved",
+      "bytes": 74046,
+      "sha256": "38d6716449567f19d53a4faacca5616bc6ea163e162c66d664ebce39b8f9e5ba",
+      "hash_scope": "HTTP response body",
+      "retrieved_at_utc": "2026-10-18T17:10:27.713759+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-10"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "APPLE:scstreamconfiguration/queuedepth",
+      "path": "scstreamconfiguration/queuedepth.json",
+      "url": "https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration/queuedepth",
+      "retrieval_url": "https://developer.apple.com/tutorials/data/documentation/screencapturekit/scstreamconfiguration/queuedepth.json",
+      "source_kind": "mutable official documentation snapshot",
+      "status": "retrieved",
+      "bytes": 12551,
+      "sha256": "c64d02c5e350e94418af7eb6ea8fe53a1bee263681d1458e3c7f10068d8e1e66",
+      "hash_scope": "HTTP response body",
+      "retrieved_at_utc": "2026-10-18T17:10:27.609594+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-10"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "APPLE:kcvreturnwouldexceedallocationthreshold",
+      "path": "kcvreturnwouldexceedallocationthreshold.json",
+      "url": "https://developer.apple.com/documentation/corevideo/kcvreturnwouldexceedallocationthreshold",
+      "retrieval_url": "https://developer.apple.com/tutorials/data/documentation/corevideo/kcvreturnwouldexceedallocationthreshold.json",
+      "source_kind": "mutable official documentation snapshot",
+      "status": "retrieved",
+      "bytes": 15175,
+      "sha256": "a01d248ec72a5fada971d9ebec25a50ffbe22436db337ab27b187de02bed9889",
+      "hash_scope": "HTTP response body",
+      "retrieved_at_utc": "2026-10-18T17:10:28.051292+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-10"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:commit",
+      "path": "commit.json",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77?format=JSON",
+      "status": "retrieved",
+      "bytes": 2277,
+      "sha256": "418286a56c0e668b7ba0cc5d1c9f8cd18299812d69f8c4353767307a3954fcfe",
+      "hash_scope": "HTTP response body",
+      "retrieved_at_utc": "2026-10-18T17:10:27.639619+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-01"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "TP:opus/README.chromium",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "opus/README.chromium",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/README.chromium",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/README.chromium?format=TEXT",
+      "status": "retrieved",
+      "bytes": 1499,
+      "sha256": "b3462b72d621616f2e62f5c9954f0e30288d6fc102bed5b358c99ac23811f604",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:09:15.166757+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "TP:opus/src/COPYING",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "opus/src/COPYING",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/src/COPYING",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/src/COPYING?format=TEXT",
+      "status": "retrieved",
+      "bytes": 1945,
+      "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:09:15.269983+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "TP:opus/src/README",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "opus/src/README",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/src/README",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/opus/src/README?format=TEXT",
+      "status": "retrieved",
+      "bytes": 7198,
+      "sha256": "9bdf02594da8c33af8b7bdb7a2ac98f6fdc6abc71d5fb198e7b186286a681dca",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:09:15.193302+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "TP:libvpx/README.chromium",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libvpx/README.chromium",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/README.chromium",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libvpx/README.chromium?format=TEXT",
+      "status": "retrieved",
+      "bytes": 1970,
+      "sha256": "b263c95b0e800304ff754b2244448afb1312ec147f707239a8a8f720d7f0b1b6",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:09:15.175652+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "TP:boringssl/README.chromium",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "boringssl/README.chromium",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/boringssl/README.chromium",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/boringssl/README.chromium?format=TEXT",
+      "status": "retrieved",
+      "bytes": 445,
+      "sha256": "6619a1f621477625c25a82597bed4e90873c2f4dd25a02ef446ea6dcff4c4ba0",
+      "hash_scope": "decoded raw file bytes",
+      "retrieved_at_utc": "2026-10-18T17:09:15.398026+00:00",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "TP:libsrtp/README.chromium",
+      "repository": "https://chromium.googlesource.com/chromium/src/third_party",
+      "commit": "8a83e63525b495aa7f35648a3b4b676279deb864",
+      "path": "libsrtp/README.chromium",
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libsrtp/README.chromium",
+      "retrieval_url": "https://chromium.googlesource.com/chromium/src/third_party/+/8a83e63525b495aa7f35648a3b4b676279deb864/libsrtp/README.chromium?format=TEXT",
+      "status": "failed",
+      "error": "HTTP Error 404: Not Found",
+      "supports_claims": []
+    },
+    {
+      "id": "W:LICENSE",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "LICENSE",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/LICENSE",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/LICENSE?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:17.887699+00:00",
+      "bytes": 1511,
+      "sha256": "ab00a482b6a3902e40211b43c5d0441962ea99b6cc7c25c0f243fa270b78d482",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:PATENTS",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "PATENTS",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/PATENTS",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/PATENTS?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:17.862092+00:00",
+      "bytes": 1388,
+      "sha256": "01462e2068d1a04c2274f3389773014c14ed9bc3446b28303543bd3e3c064145",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:DEPS",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "DEPS",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/DEPS",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/DEPS?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:17.993000+00:00",
+      "bytes": 48007,
+      "sha256": "d060df2421433efe13a0ab4f227174676f0b07f3c10a4be13b81d8dbe761a86f",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-01"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:README.md",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "README.md",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/README.md",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/README.md?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:17.994967+00:00",
+      "bytes": 1277,
+      "sha256": "f48373cd9e18363129403076d86e581d57222ed048d2e039ab6848c4f49b734f",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-01"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:webrtc.gni",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "webrtc.gni",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/webrtc.gni",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/webrtc.gni?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:17.892321+00:00",
+      "bytes": 53463,
+      "sha256": "164d8a65dc99b31c3468960bf40b0e365dcdb91dd6490d66f5f0e7d34e42915b",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-02"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/create_peerconnection_factory.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/create_peerconnection_factory.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/create_peerconnection_factory.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/create_peerconnection_factory.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.101939+00:00",
+      "bytes": 2067,
+      "sha256": "ba8b08d4075714afded83fa4bcccef155ed800457c9e4fdfd36323dd5a8f45db",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-03"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/peer_connection_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/peer_connection_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/peer_connection_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/peer_connection_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.265388+00:00",
+      "bytes": 78237,
+      "sha256": "4b4c86027c5176e3a9b5b0a6bb6e45fa0857ec198ebffd21c9a622e585439ebb",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-03"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/rtp_sender_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/rtp_sender_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_sender_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_sender_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.118472+00:00",
+      "bytes": 8238,
+      "sha256": "a80b300b4c77923e4bd528f2d4b3b2f22bc6068a79012e9e202e78c070e827d6",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-03",
+        "SRC-04"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/rtp_receiver_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/rtp_receiver_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_receiver_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_receiver_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.144368+00:00",
+      "bytes": 6840,
+      "sha256": "743db331cf322770547ce367568febc3d857b9cc74a254f03670c69ec05a7a42",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-03",
+        "SRC-04"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/crypto/frame_encryptor_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/crypto/frame_encryptor_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/frame_encryptor_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/frame_encryptor_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.217636+00:00",
+      "bytes": 2546,
+      "sha256": "9e2254cc13a699d91380685976cf437832879e2f4e416509cc30524d94f8a7db",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-04"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/crypto/frame_decryptor_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/crypto/frame_decryptor_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/frame_decryptor_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/frame_decryptor_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.227787+00:00",
+      "bytes": 3476,
+      "sha256": "c91f8d773e1e2f81da7dc0e1953f319995502872346dcc012cc6ac0abdb89a99",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-04"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/crypto/crypto_options.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/crypto/crypto_options.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/crypto_options.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/crypto/crypto_options.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.365043+00:00",
+      "bytes": 5198,
+      "sha256": "3c044918c1d027fe4e50ace1d90c4ad058217dc61473a98ea0079c4b2d8701ab",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/video_codecs/video_decoder.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video_codecs/video_decoder.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_decoder.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_decoder.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.402071+00:00",
+      "bytes": 5090,
+      "sha256": "d3fa25d4f06d7cd1b590b385aca1a26d475cdd59c8b02b80592f0b3ec556d25d",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/video_codecs/video_decoder_factory.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video_codecs/video_decoder_factory.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_decoder_factory.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_decoder_factory.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.427973+00:00",
+      "bytes": 2840,
+      "sha256": "c2f3f3cba8e1df002aabdd150fa0964c22a4347c8addcd3005bbe41cb7f1d744",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/video_codecs/video_encoder_factory.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video_codecs/video_encoder_factory.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_encoder_factory.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video_codecs/video_encoder_factory.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.506108+00:00",
+      "bytes": 5630,
+      "sha256": "b8cd84183c524af3b1d4ca96f6970619cd36830833190450dc47f4f9cc340496",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/video/video_frame_buffer.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video/video_frame_buffer.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/video_frame_buffer.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/video_frame_buffer.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.484632+00:00",
+      "bytes": 13379,
+      "sha256": "ab02bbd4a8f718866b2864fdb8143292bd7445fa0352eb60c633e932950346e7",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:common_video/include/video_frame_buffer_pool.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "common_video/include/video_frame_buffer_pool.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/common_video/include/video_frame_buffer_pool.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/common_video/include/video_frame_buffer_pool.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.475419+00:00",
+      "bytes": 3625,
+      "sha256": "ec5e82ab9f2976e9c188228cdfd37e9016eedb219795976415a3ec80b79a2b0c",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:common_video/video_frame_buffer_pool.cc",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "common_video/video_frame_buffer_pool.cc",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/common_video/video_frame_buffer_pool.cc",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/common_video/video_frame_buffer_pool.cc?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.602414+00:00",
+      "bytes": 12640,
+      "sha256": "b8988dfacdc8c3b4f0db76c537e5ee579bca75b04580ac024ee24e2372bc2eb7",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/video/encoded_image.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video/encoded_image.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/encoded_image.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/encoded_image.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.649693+00:00",
+      "bytes": 11987,
+      "sha256": "74d78307f0ef80a712050b8456ddcd055c86a093c634485ae90f3b9fa92c3304",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/video/encoded_image.cc",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/video/encoded_image.cc",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/encoded_image.cc",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/video/encoded_image.cc?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.666710+00:00",
+      "bytes": 3203,
+      "sha256": "938b53ba866d35e8d2974a06a01b85f4b3deb4cfd337c76b8be02e68e0b104bf",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/modules/video_coding/codecs/vp8/libvpx_vp8_decoder.cc?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.758406+00:00",
+      "bytes": 11900,
+      "sha256": "3d9ae72342c7da3cd7d49ae1f55e5a7f533d8344bcd0d299e0585e0f0d8cbece",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-05"
+      ],
+      "cited_in_decision": true
+    },
+    {
+      "id": "W:api/audio/audio_device.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/audio/audio_device.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/audio/audio_device.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/audio/audio_device.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.745058+00:00",
+      "bytes": 7985,
+      "sha256": "c2708287a56ee4c25d6c13f1e6d487b0728f42fd81952a3a9d67d014dd3f8e6c",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [
+        "SRC-03"
+      ],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:modules/audio_device/include/audio_device.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "modules/audio_device/include/audio_device.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/modules/audio_device/include/audio_device.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/modules/audio_device/include/audio_device.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.743236+00:00",
+      "bytes": 700,
+      "sha256": "9d9fc226c51e688402de049ab0b93f45cb29b06a6a6c009bccc4e1e1ca5e9025",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/media_stream_interface.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/media_stream_interface.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/media_stream_interface.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/media_stream_interface.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.829938+00:00",
+      "bytes": 14552,
+      "sha256": "0a58a14aacfccdede3779618a8ffb1e74954723e7d29a84118a3fb651e44d6ae",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:api/rtp_parameters.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "api/rtp_parameters.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_parameters.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/api/rtp_parameters.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.850421+00:00",
+      "bytes": 33403,
+      "sha256": "6b110ce098903bdd5f22d051f3192b0940443222599aac6ae733fdb900d7cfe9",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    },
+    {
+      "id": "W:sdk/objc/api/peerconnection/RTCPeerConnectionFactory.h",
+      "repository": "https://webrtc.googlesource.com/src",
+      "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+      "path": "sdk/objc/api/peerconnection/RTCPeerConnectionFactory.h",
+      "url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/sdk/objc/api/peerconnection/RTCPeerConnectionFactory.h",
+      "retrieval_url": "https://webrtc.googlesource.com/src/+/a306485b7fc0fe38dd2651420e383f92f196cd77/sdk/objc/api/peerconnection/RTCPeerConnectionFactory.h?format=TEXT",
+      "retrieved_at_utc": "2026-10-18T17:06:18.938962+00:00",
+      "bytes": 5633,
+      "sha256": "8317ad273ccf611dbbdae0201be0c0d7feb09126896836952bbe8e1bfdc42bc5",
+      "hash_scope": "decoded raw file bytes",
+      "status": "retrieved",
+      "evidence_limit": "A retrieved source snapshot; only identified claims below were assessed. Not whole-file security review or build execution.",
+      "supports_claims": [],
+      "cited_in_decision": false
+    }
+  ],
+  "author_selected_allocation_contract": {
+    "not_upstream_features": true,
+    "MiB": 1048576,
+    "frame_calculations": [
+      {
+        "kind": "camera",
+        "width": 1280,
+        "height": 720,
+        "yuv_padded_width": 1408,
+        "yuv_padded_height": 848,
+        "I420_rounded_bytes": 1818624,
+        "BGRA_rounded_bytes": 3686400,
+        "YUV_slot_bytes": 2097152,
+        "BGRA_slot_bytes": 4194304,
+        "YUV_slot_count": 12,
+        "BGRA_slot_count": 8
+      },
+      {
+        "kind": "screen",
+        "width": 1920,
+        "height": 1080,
+        "yuv_padded_width": 2048,
+        "yuv_padded_height": 1208,
+        "I420_rounded_bytes": 3719168,
+        "BGRA_rounded_bytes": 8306688,
+        "YUV_slot_bytes": 4194304,
+        "BGRA_slot_bytes": 8388608,
+        "YUV_slot_count": 12,
+        "BGRA_slot_count": 8
+      }
+    ],
+    "profiles": [
+      {
+        "profile": "preview_camera",
+        "camera_streams": 1,
+        "screen_streams": 0,
+        "surface_MiB": 56,
+        "compressed_video_MiB": 8,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 76
+      },
+      {
+        "profile": "direct_audio",
+        "camera_streams": 0,
+        "screen_streams": 0,
+        "surface_MiB": 0,
+        "compressed_video_MiB": 0,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 12
+      },
+      {
+        "profile": "direct_video",
+        "camera_streams": 2,
+        "screen_streams": 0,
+        "surface_MiB": 112,
+        "compressed_video_MiB": 16,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 140
+      },
+      {
+        "profile": "conference_four_person",
+        "camera_streams": 4,
+        "screen_streams": 0,
+        "surface_MiB": 224,
+        "compressed_video_MiB": 32,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 268
+      },
+      {
+        "profile": "conference_screen_sender",
+        "camera_streams": 4,
+        "screen_streams": 1,
+        "surface_MiB": 336,
+        "compressed_video_MiB": 40,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 388
+      },
+      {
+        "profile": "conference_screen_receiver",
+        "camera_streams": 4,
+        "screen_streams": 1,
+        "surface_MiB": 336,
+        "compressed_video_MiB": 40,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 388
+      },
+      {
+        "profile": "maximal_single_slot",
+        "camera_streams": 5,
+        "screen_streams": 2,
+        "surface_MiB": 504,
+        "compressed_video_MiB": 56,
+        "audio_MiB": 4,
+        "control_MiB": 8,
+        "controlled_buffer_MiB": 572
+      }
+    ],
+    "two_maximal_slots_controlled_MiB": 1144,
+    "auxiliary_ceiling_per_helper_MiB": 128,
+    "watchdog_private_ceiling_MiB": 8,
+    "two_slots_plus_auxiliary_MiB": 1408,
+    "audio_100ms_f32_stereo_48k_bytes": 38400,
+    "pcm_12_lanes_two_64KiB_blocks_bytes": 1572864,
+    "qualification": "All media admission blocked pending before-allocation control of every required path. These ceilings are not process-footprint limits or measured budgets."
+  },
+  "retrieval_notes": [
+    "Google Gitiles sources were verified by direct HTTPS format=TEXT retrieval and base64 decoding; SHA-256 is over decoded raw file bytes.",
+    "The web tool could not open four Google Gitiles pinned pages; direct HTTPS retrieval succeeded. No web-tool error was treated as evidence.",
+    "Raw GitHub URLs identify official upstream repositories at immutable commits.",
+    "Apple documentation is mutable; exact retrieved JSON body hashes and UTC times identify snapshots, not immutable Apple releases.",
+    "Three attempted paths returned 404. They support no claims. The macOS arm64 config path was corrected by reading pinned BUILD.gn and fetching linux/arm64-highbd/vpx_config.h.",
+    "Retrieved extra files with no supports_claims entry are supplementary reads, not whole-file audits.",
+    "No upstream implementation source is proposed for repository inclusion. The source manifest can reproduce exact public snapshots."
+  ],
+  "limitations": [
+    "No native allocation-hook implementation or exhaustive allocator-path proof",
+    "No inference that headers or a size guard cap all native allocations",
+    "No released Talk/HPB/TURN interoperability inference from research pins",
+    "No E2EE implementation or cryptographic dependency selection beyond engine hooks",
+    "No complete license/advisory/distribution clearance",
+    "No Mac SDK/device/capture/GPU/footprint or deadline evidence",
+    "No independent approval or PM gate acceptance"
+  ],
+  "reproduction": {
+    "gitiles": "Fetch retrieval_url, base64-decode format=TEXT responses, then SHA-256 decoded bytes; commit JSON is hashed as received, including its anti-XSSI prefix.",
+    "github": "Fetch raw retrieval_url and SHA-256 response bytes.",
+    "apple": "Fetch JSON retrieval_url and compare response bytes with recorded hash; a later change is a new snapshot, not a refutation of the recorded one.",
+    "arithmetic": "docs/architecture/media-allocation.md section F; arbitrary-precision audit, not production overflow tests."
+  }
+}

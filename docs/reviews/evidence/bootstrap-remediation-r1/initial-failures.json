@@ -1,0 +1,73 @@
+{
+  "scope": "Initial author failures preserved; superseded by corrected preliminary execution, not waived.",
+  "format": {
+    "records": [
+      {
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exit_code": 1,
+        "stdout": "Diff in [candidate]/crates/talk-core/tests/identity_boundary.rs:177:\n     ] {\n         let different_request = Abandonment::new(different, AbandonChoice::SessionOnly).unwrap();\n         assert!(\n-            SessionOnlyCommit::from_acknowledgement(maintenance(), different_request, report).is_err()\n+            SessionOnlyCommit::from_acknowledgement(maintenance(), different_request, report)\n+                .is_err()\n         );\n     }\n }\nDiff in [candidate]/crates/talk-core/tests/presentation_boundary.rs:1:\n //! Compile regression: the renderer names every payload through its one allowed surface.\n use talk_core::ui::{\n     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, ConversationRow, Decision,\n-    HostId, LimitExceeded, MediaIntent, Page, PersistenceState, RuntimeGeneration, Text, UserIntent,\n-    VaultGeneration, ViewSnapshot,\n+    HostId, LimitExceeded, MediaIntent, Page, PersistenceState, RuntimeGeneration, Text,\n+    UserIntent, VaultGeneration, ViewSnapshot,\n };\n \n fn join_label(row: &ConversationRow) -> &'static str {\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all"
+        ],
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    ],
+    "changed_files": [
+      {
+        "path": "crates/talk-core/tests/presentation_boundary.rs",
+        "before_sha256": "4b928e6bb296e7e02221d9690e15965d13122aed5dbf0b2af503e66349a40eb9",
+        "after_sha256": "7cef4ae7e225009d1c0fe18a943948d7d36c400b00e70ce165b3023e4c6ab5e5"
+      },
+      {
+        "path": "crates/talk-core/tests/identity_boundary.rs",
+        "before_sha256": "91b7268ede812db4561a631ee54639a0d4ca4a99bf554fc76652bf5e0106c286",
+        "after_sha256": "b799b02cc3d2f89672229ded622e29b1a45237a2844bebd92ea01d9966b158bd"
+      }
+    ],
+    "scope": "VM rustfmt corrections explicitly exported and applied locally before any subsequent upload"
+  },
+  "initial_input_manifest_sha256": "bc4e45c534f061a7b5b51c170dd10c2061214305a8fd8a49e09774a7bf88c371",
+  "clippy_failure": {
+    "argv": [
+      "cargo",
+      "clippy",
+      "--workspace",
+      "--all-targets",
+      "--locked",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 101,
+    "stdout": "",
+    "stderr": "    Checking talk-core v0.0.0 ([validation-temp]/source/crates/talk-core)\n    Checking talk-adapters v0.0.0 ([validation-temp]/source/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 ([validation-temp]/source/apps/bootstrap)\nerror: manual implementation of a no-op waker\n  --> crates/talk-adapters/tests/unconfigured_identity.rs:22:6\n   |\n22 | impl Wake for NoWake {\n   |      ^^^^\n   |\n   = help: use `std::task::Waker::noop()` instead\n   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#manual_noop_waker\n   = note: `-D clippy::manual-noop-waker` implied by `-D warnings`\n   = help: to override `-D warnings` add `#[allow(clippy::manual_noop_waker)]`\n\nerror: could not compile `talk-adapters` (test \"unconfigured_identity\") due to 1 previous error\nwarning: build failed, waiting for other jobs to finish...\n",
+    "source_before": "bc4e45c534f061a7b5b51c170dd10c2061214305a8fd8a49e09774a7bf88c371",
+    "source_after": "bc4e45c534f061a7b5b51c170dd10c2061214305a8fd8a49e09774a7bf88c371"
+  },
+  "correction": "Replaced manual NoWake/Wake implementation in new unconfigured identity test with std::task::Waker::noop(); no lint exemption or dependency change."
+}
