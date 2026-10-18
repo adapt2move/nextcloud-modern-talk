@@ -1,0 +1,75 @@
+# User journeys and shared states
+
+Status: **Planned**. This is the end-to-end acceptance layer. Each journey uses the detailed specifications; no success here is implied by a mock screen. Account, room, participant, and call state remain distinct.
+
+## Journeys
+
+### JNY-001
+
+**First account.** Enter HTTPS server → validate → open system browser → complete server authentication/2FA → receive device credentials → confirm storage plus restoration eligibility or explicitly continue session-only after durable restoration suppression → fetch identity/capabilities → load conversations. Success: the account's real data appears with truthful persistence/cleanup status. An uncertain write remains visible and cannot restore automatically. Cancel/expiry invalidates the attempt and returns to recoverable login; late completion cannot activate it. Reauthorization cancellation can retain only the deliberately selected valid older session under AUTH-005. Covers AUTH-001–005 and STATE-001–003.
+
+### JNY-002
+
+**Daily chat.** Pick account → filter/open room → load unread context → compose or restore draft → reply/attach as allowed → send → reconcile server message. Success: one canonical message appears in the intended room and another compatible client can read it. Offline/error keeps text and truthful delivery state. Covers CONV-001, MSG-001–005/010, CONTENT-001, DESK-007.
+
+### JNY-003
+
+**Create a guest conference.** Choose a returned preset → set name/invitees → select guest access separately from discovery → merge parameters and apply invariants/gates → review → create → reconcile returned room → copy/share its allowed link deliberately. Guest opens link → resolves identity/password/admission → views conversation → deliberately joins through conference prejoin. Success: membership and publication match policy; a classified preset never becomes a guest conference through forced settings. Covers CONV-002–007, CALL-004, MOD-001.
+
+### JNY-004
+
+**Accept a colleague's direct call.** Ring without capture → select Annehmen → show connecting call surface → resolve only necessary OS permission/consent/security steps → connect with permitted media. The “Bereit, wenn du es bist.” screen never appears. Cancellation during any step invalidates the attempt. Covers CALL-001–003/009/011 and CT-011–013.
+
+### JNY-005
+
+**Join and participate in a conference.** Voluntary join → device prejoin → current consent/security/admission → connected call → choose devices/layout, chat/raise hand/share screen as allowed → leave. Success: capture stops and room membership remains. A waiting participant sees lobby status rather than a failed call. Covers CALL-004–014 and MOD-001.
+
+### JNY-006
+
+**Moderate an event.** Inspect permissions → configure lobby/admission → manage participants → create/start/stop breakouts → start/stop recording if allowed → end call only with explicit authority/confirmation. Success: every affected participant receives the actual state, with consent and publication restrictions enforced. Covers MOD-001–004, CALL-009/010/014.
+
+### JNY-007
+
+**Work across accounts and hosts.** Receive a notification for account B while viewing A → open B's referenced room → verify federated host if applicable → retrieve context → act with B's permissions. Success: no A draft, secret, device setting, or cache becomes associated with B. Remote failure is identified independently. Covers AUTH-006, INT-001, DESK-002/007.
+
+### JNY-008
+
+**Recover from interruption.** Lose network/control connectivity or sleep while composing/in call → show stale/degraded/reconnecting state → preserve permitted unsent data and media intent → expire/suspend affected media grants within the approved bounds even if RTP survives → refresh policy and reconcile room/call existence → offer safe retry/rejoin. Confirmed account rejection instead shuts down that account locally under AUTH-007; reauthorization alone cannot resend or restart capture. Success: no duplicate send, invisible media activation, resurrected ended call, revoked-room write or old-generation callback revival. Covers AUTH-007, MSG-003/004, CALL-014, COMP-003, DESK-007/008.
+
+### JNY-009
+
+**Return to a message later.** Search or follow pin/reminder/thread → resolve message context → read/respond or show deleted/expired/denied state → optionally schedule a new message. Success: scopes and times are clear, and no stale excerpt overrides retention. Covers MSG-006/011–014 and CONTENT-007.
+
+### JNY-010
+
+**Safely remove an account.** Inspect active work → explicitly remove → stop account activity → attempt remote token revocation → remove accessible local secrets/cache → report any denied secret cleanup or failed remote revocation. Success: no automatic restoration or background access; incomplete cleanup remains truthful. Covers AUTH-008/009 and DESK-008.
+
+## Shared state contracts
+
+### STATE-001
+
+**Loading is bounded and cancellable.** Distinguish initial load, refreshing old data, pagination, and submitting an action. Keep useful confirmed content during refresh, labeled stale when necessary. Prevent repeat submission while pending without trapping the user indefinitely. Cancellation invalidates callbacks, not just the spinner. Acceptance: stale completions cannot overwrite a newer account/room/call selection.
+
+### STATE-002
+
+**Empty states state what is empty.** “Noch keine Unterhaltungen”, “Noch keine Nachrichten”, “Keine Suchtreffer”, “Keine Dateien”, and “Keine ausstehenden Einladungen” require a successful scoped response. Offer only authorized next actions. Acceptance: access denied, offline without a cache, and failed fetch are never presented as an empty result.
+
+### STATE-003
+
+**Unavailable, denied, and unknown are different.** Hide inapplicable feature creation, but explain a disabled action when it is needed to understand existing content or a user attempt. “Auf diesem Server nicht verfügbar”, “Keine Berechtigung”, “Durch Richtlinie gesperrt”, “Verbindung wird geprüft”, and “Noch nicht in diesem Client unterstützt” must not be conflated. Acceptance: unknown capability/policy never grants a sensitive operation, and known supported content is not erased just because its creation UI is deferred.
+
+### STATE-004
+
+**Network and server errors preserve intent.** Apply bounded backoff/cancellation, honor retry information, and distinguish network loss, maintenance, rate limits, server failure, unsupported operation, and remote federation failure. Reconcile uncertain mutations before retry. Acceptance: retry cannot duplicate a send/invite/dial-out or apply an obsolete form to a different account. A server upgrade requirement is not retried as a network error.
+
+### STATE-005
+
+**Permission and lifecycle races invalidate actions.** Confirmed account rejection, room deletion, participant removal, role change, expiry, end of call and capability-hash change may arrive during a form or OS dialog. Revalidate before mutation and after uncertain responses; COMP-003 also requires bounded refresh for changes with no hash/event. Acceptance: AUTH-007 invalidates the rejected account's generation and stops local work/media independently of remote leave. A late approval/success cannot resurrect an obsolete object, renew expired authority, expose removed content or turn on media.
+
+### STATE-006
+
+**Privacy follows content into every surface.** Apply room/account restrictions to list previews, search, notifications, tooltips, pinned items, accessibility announcements, caches, diagnostics, clipboard/export, and external handoffs. Acceptance: sensitive/classified content does not leak through an alternate view even when the main timeline is protected. A hidden preview is not a claim that the server stores content with E2EE.
+
+### STATE-007
+
+**Success is observable and limited.** Confirm actions only when the responsible component has confirmed them: server acceptance, OS permission, secure-store write, file save, or actual media connection. Acceptance: no “Gesendet”, “Sicher gespeichert”, “Aufnahme beendet”, “Verbunden”, or “Gelöscht” label is derived solely from a local click or animation. Explain partial success and remaining work in the same context.

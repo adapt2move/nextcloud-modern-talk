@@ -1,0 +1,32 @@
+/* Revision 04 · Blue variant. Natural portrait and avatar colors are retained. */
+:root{--ink:#26354b;--muted:#6d7c91;--line:#e6ecf4;--soft:#f6f8fc;--accent:#356fc1;--tint:#eaf1fb;--warm:#e3edfb;--cool:#cbdced}
+.desktop{background:radial-gradient(ellipse at 12% 0%,#f0f6ff 0%,transparent 50%),radial-gradient(ellipse at 100% 95%,#cbdced 0%,transparent 50%),#e5edf5}
+.window{background:linear-gradient(155deg,#e3edfb 0%,#dce8f6 43%,#cbdced 100%);box-shadow:0 35px 80px -28px #2b46624d,0 0 0 1px #ffffffbd,0 2px 8px #365a7d10}
+button:focus-visible,a:focus-visible{outline-color:#6295d8}
+.brandmark:before{border-color:#356fc1}.brandmark:after{background:#6c99d6;border-color:#e3edfb}
+.step.current{color:#3565a5}.step.current b,.state-symbol .badge{background:var(--accent);border-color:var(--accent)}
+.state-symbol{background:#edf3fc;color:#4d7bb6}.warning-symbol{background:#faf1df;color:#ac8a45}
+.input-wrap{border-color:#b5c9e5;box-shadow:0 0 0 3px #f0f5fc}
+.send,.head-actions .join-button,.row-end .unread-count,.toggle,.incoming-actions .round{background:var(--accent)}
+.incoming-actions .decline .round{background:#b26b58}
+.space-logo{color:#4c76ac}.conversation-row.active,.conversation-row.selected-room{background:#3d76c11a}
+.row-copy strong{color:#354d6b}.row-copy small{color:#6c7f99}.row-copy small.live{color:#3565a5}.live i{background:#4a83ce}
+.room-avatar{background:#d6e5f7;color:#4d78b1}.room-avatar.blue{background:#d4e5ef;color:#4c7a96}
+.online:after{background:#659974;border-color:#dce8f6}.sidebar-bottom small i{background:#70a080}
+.reaction.selected{background:#eaf2fd;border-color:#c7dbf5;color:#3565a5}
+.room-call-banner{background:#edf4fd;border-color:#d8e6f8;color:#3969a6}.room-call-banner>.room-avatar{background:#dceafa}
+.selected .radio{border-color:#4b80c5}.preset-card.selected{border-color:#6393d3;box-shadow:0 0 0 2px #edf3fc;background:#f6f9ff}
+.theme-choice.selected .theme-preview{border-color:#6393d3;box-shadow:0 0 0 2px #edf3fc}
+.preview-sidebar{background:linear-gradient(#e3edfb,#cbdced)}
+.call-sheet{background:#1c293b;color:#eaf0f8}.call-controls{background:#202f44}
+.video-tile{background:#2b3b52}.video-tile.speaking{border-color:#83b2f2}
+.camera-off{background:radial-gradient(ellipse at 50% 70%,#3c506c,#2b3c54)}
+.call-clock i{background:#84b1ef}.speaking-waves i{background:#b4d2fb}
+.call-control.active>span.control-face{background:#d7e7fc;color:#315e98;border-color:#d7e7fc}
+.call-control.selected>span.control-face{background:#3c587e;color:#dceaff}
+.call-control.leave>span.control-face{background:#b85d4b;border-color:#b85d4b;color:white}
+.call-side{background:#fafcff;color:#354d6b}.call-side-tabs .selected{color:#3565a5}.call-side-tabs .selected:after{background:#5f90d0}
+.share-banner{background:#d8e8fc;color:#325f9b}.presentation-main{border-color:#83b2f2}
+.share-choice.selected .share-thumbnail{border-color:#6393d3;box-shadow:0 0 0 3px #eaf2fc}
+.voice-person{background:#293d55}.voice-person.speaking{border-color:#83b2f2;background:radial-gradient(ellipse,#3c5779,#293d55)}
+.voice-state{color:#a7c6ef}.voice-state i{background:#89b5ef}
