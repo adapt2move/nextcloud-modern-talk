@@ -1,0 +1,683 @@
+{
+  "schema": 1,
+  "role": "delegated bootstrap integrator; not independent reviewer",
+  "gate": "G.BOOT pending; BI-001 open; no product feature status change",
+  "accepted_specification": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+  "base_commit": "d1522594fc16ea884c436e73fe08b0fdabc4a14f",
+  "candidate_c1": {
+    "commit": "d55f39613337f0172b5c209235ae2f43b154a31d",
+    "tree": "5f3e3e401079243832652889e626174f0bf0db9c",
+    "sha256": "396a9e4a4359dacd410a59a1604eac1cfc188bb32d3d4f2ee38dc7e4b56a104f",
+    "files": {
+      ".github/PULL_REQUEST_TEMPLATE.md": "ad8e6589db25e1ce009e5117fedcd16a0a53032662fb4f3dba19e0c87034755c",
+      ".github/workflows/ci.yml": "76e516942f8e81c5c08fc62d3e73a1b176c9632bde8a2951b689fa89b130385b",
+      ".gitignore": "32d0b1b900cb3dd30f732ab72ac0b0838d3b72b889c9165a78d9c252e8e73006",
+      "AGENTS.md": "3239287a55360d1ebb5a640b3d730bca23c7c6461abb1d91eae4bd5c1fdbff3d",
+      "CONTRIBUTING.md": "34d1e571a7d87b7a0f846a92151ae37ab98d656c15a40ceeb2c44b06c6035a97",
+      "Cargo.lock": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8",
+      "Cargo.toml": "231943f9ba6c1c17f9045f6db39bf4df8e15948462bbdfad2d55d50627c251bb",
+      "LICENSE": "57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4",
+      "NOTICE.md": "32f132d980dc38fb62a767b30f33dd98f87fb60ce4d24e3e16455ace6e408683",
+      "README.md": "6594b09ca46e531799d70ef8da034a10e1aa946dfa7c439cc066394f48638b81",
+      "SECURITY.md": "584ee0523f938a84a7d8094f155983d66a3a1259206c96cf459d2fdfe92f6694",
+      "apps/bootstrap/Cargo.toml": "7431f00e0153758eff9baf26e7891b15fe323d4f47e6456997a6a1ac250b0a8e",
+      "apps/bootstrap/src/main.rs": "7d48c1e30c02acd6494ac2a3fcaa953a581f75b461cb2de1cd5e3f6c4f239dd7",
+      "apps/bootstrap/src/presentation.rs": "168500895f05a8dc02ec1aba2f5caf55f8224a568278ea75ec645b5ca98572f9",
+      "crates/talk-adapters/Cargo.toml": "324109105055fd93160ddacf366a2b7cdd62eee9b24450b60879df384996c1b9",
+      "crates/talk-adapters/src/identity.rs": "6db0966cf779b9d5979703a6b7d8f40f2462cc8100a8d0c62851b426bee67cc9",
+      "crates/talk-adapters/src/lib.rs": "68a6242d4fc700c44cf389a5bb3904f6e96f05f244b2cb8f9ae0cda68d47ed71",
+      "crates/talk-adapters/src/media.rs": "2d1747792ed91c72a44d5acd80f0071f2334443775844592dd39c382f826e5fc",
+      "crates/talk-adapters/src/nextcloud.rs": "331d599793e78114a09d9f03ef7a99395d87367069da01a2e69cccbd19f6bcfc",
+      "crates/talk-core/Cargo.toml": "3db7fae3a2c1872e504a14fd1a69effa27b2e896d6d737133f1ca75af32f6a9e",
+      "crates/talk-core/src/application.rs": "bec44bd364fab470f4fe99d5f039fe98e26290170d2bab771c603c0cdfab4880",
+      "crates/talk-core/src/bounded.rs": "2f012cb7054feffc961622bd2c879872aee4d9c91d005fbf914378dd078fb425",
+      "crates/talk-core/src/identity.rs": "22f99e38e393e3e5ea1fcde7f7cf4bdd861ceb635dfa0e4272647c4e27699683",
+      "crates/talk-core/src/ids.rs": "124e5ad03564974e5a5937dd65d1a172f43434fef651dac206c4cd7435f508be",
+      "crates/talk-core/src/lib.rs": "24151457f0a0f92e4f49815d17a2aae9d72d39c5aae31e2e754f90d4b7f21735",
+      "crates/talk-core/src/lifecycle.rs": "44bf0f55075fb79e93871b91cabf43ffe2f1259ff38eebabdd41b3c42dd1c770",
+      "crates/talk-core/src/policy.rs": "1f060650fdbd7174acd28bcd8b3f0b4bbf95a7520a156cb71035e55edcca3c7c",
+      "crates/talk-core/src/ports.rs": "4051c768e7eebc552816d9f5c6f50ca3dd61242058e113898def21b79b50041d",
+      "crates/talk-core/src/ui.rs": "becbd8593139e92273816dbaab7a27322f4cd3e6aeb1f68a6e1074f7f686aec2",
+      "crates/talk-core/tests/contracts.rs": "f53f0fd370faea2f2e80d33007857e303f072c25b3a4b24fc1358ed06e34f0c0",
+      "docs/README.md": "cb9a212f53111285cb505097cfd257c60dab3ec9afe7337eb6b332c1ba7f1a02",
+      "docs/architecture/README.md": "2dd9c499c76baaf9da18bb2e5273efdfa85c14005233f26d23d4557b3fd74357",
+      "docs/architecture/decisions/001-native-ui.md": "d02ed80ddb841916aec1ecb4cb73c5342b2c4372356c4f6f7af13f91abdd93cf",
+      "docs/architecture/decisions/002-deep-modules.md": "238a2f6e028511606cd0312ff2845f9426d7c5dd71b8dfa19b48b6369e32935c",
+      "docs/architecture/decisions/003-credential-lifecycle.md": "a09b1f51faa9e6e6dc40edd1ce4895819ccc38103c9b2229ea39369f7426bccd",
+      "docs/architecture/decisions/004-policy-media-lifecycle.md": "15684c226633b9666c808e2e6f14df2cdf6539c21e0427630b4d5d48c83892ac",
+      "docs/architecture/measurement.md": "25b3df210dee7ecb807c8f2a3575f5bd2dcce66f615f2bffc6752e82ff82981e",
+      "docs/architecture/source-evidence.md": "e65707e0aa9690c8c32e0e8de2c2c2dd2533708716ee9f2bd1ba2d508774ca8e",
+      "docs/compatibility/README.md": "97083bfc7f05fdcbfea484403e807919b3d02859dfcf2f82f8bc76de98779d16",
+      "docs/compatibility/baselines-and-sources.md": "370f2c0891697fcfc0b0f974e36b70e5184d2f425c66860337d91ecb02479fed",
+      "docs/compatibility/feature-inventory.md": "3a50dc0a253a265156ad298db5776572c79e698471481f33ceaca7ae419d6f62",
+      "docs/compatibility/test-matrix.md": "ea8392d039c8eb416e218ecbacdd8c89e0dcbc26c6f01c345fa3f76b0260c0fa",
+      "docs/design/README.md": "4c2b9a18b8dd899d3da4f7fde554cf1a23183206612c5c30e862976f6ab60228",
+      "docs/design/artifacts.md": "0735a262627aa92f280cdae8efd4284bc88ede5e3d8ce00523fe5adef92934f2",
+      "docs/design/assets/blue/01-server.png": "22ce0c029d9b527f2a1fe9dc8cd92bf52107d7bd4c04061b7222ad761b8c5eab",
+      "docs/design/assets/blue/02-browser.png": "a25579db888a7f2d8e80e75c2f3845d3a9b7d19513d393e0a2a3368519f3c44e",
+      "docs/design/assets/blue/03-ready.png": "a82f1ad2f1f8ae067b7dd4845008af9b7c6968ddd6f4c54749f4cbe63ca82285",
+      "docs/design/assets/blue/04-expired.png": "8680be481b4bfdd43814a9ba5577f243922d14f7401a2a5f0167e574849f530e",
+      "docs/design/assets/blue/05-chat.png": "1ddc38706864b31c9347b0e0fda58871e1cc18ff9d8235852ebc39205f8b256b",
+      "docs/design/assets/blue/06-thread.png": "db27b025903c13c891eacce17ea49dc228613a5bf56e30b976700b8837360619",
+      "docs/design/assets/blue/07-search.png": "4f807ef283c58f0aea790acb30b37a860e61a628bb065197dfa43b69f5e163fc",
+      "docs/design/assets/blue/08-settings.png": "548074d8112dd182d518e51f44040c6973290dcba48b69a066171738317eeb0c",
+      "docs/design/assets/blue/09-prejoin.png": "9427c089d0b0a0fe8a8cac8c1d4fb191c60f2c6e0073c1773e9be58d69baa5ae",
+      "docs/design/assets/blue/10-call.png": "62d7407506af33c5f2a964c2280b6845dd668f7c97a0ef1f32f7d49a669937fd",
+      "docs/design/assets/blue/11-sharepicker.png": "176c1bfb834af0d9ab497fd8a11a10f11e582b7c4a3c7cab1e5f317a9f6cc594",
+      "docs/design/assets/blue/12-sharing.png": "716686b05d1805bc349cf88f5b438b0ceb770c5683d306a9309a137aa2e8b328",
+      "docs/design/assets/blue/13-incoming.png": "d4126d56b6d568b99d22da5eb48994f3750c3da4905453ef6847f2d57487e31a",
+      "docs/design/assets/blue/14-create34.png": "b26737c09a53e29fa25e480f234fc5aecc2fdd7ea3dcec2558942250c35b8ccc",
+      "docs/design/assets/blue/15-create35.png": "a726be715911484e80e2cc7425a56740c560f89025b571587e9ecec774ae6a3a",
+      "docs/design/assets/blue/16-room.png": "af1b8c6122ea4861dbda06fac450c373411f6307adb1fd698b5b7c3b4e326bce",
+      "docs/design/assets/blue/17-discover.png": "1be4f04f759ddc492f02884da85a033b69c467b7fbdad83aba25c26f9618efa2",
+      "docs/design/assets/blue/18-voice.png": "eba0578060f86e16cb5114e17081a7ba1a449e78235cfcd318dca3ff889735ce",
+      "docs/design/assets/blue/19-direct-call.png": "d8b57bb1c9cd61e3ae96905ed75aec2f4841de94971d1c87f0836aa93d57ce7a",
+      "docs/design/assets/blue/20-voice-room.png": "80c070a7575201c270bbd2ebfe3d24ee08d5635fff9f4a0a2902159117fa01fa",
+      "docs/design/assets/blue/contexts/09-prejoin-designbesprechung.png": "5a81cdc42ab14be835e2038f3578c07a32f7cb4bdea9f67501293e1c7fb87997",
+      "docs/design/assets/blue/contexts/09-prejoin-teamkueche.png": "38ccc6b663c727aaeaac39df58e8efc01e82dd7de75f97e73dd03e8a95b8d0f2",
+      "docs/design/assets/fonts/Manrope-LICENSE.txt": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b",
+      "docs/design/assets/fonts/Manrope-Variable.ttf": "3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6",
+      "docs/design/assets/sage/01-server.png": "e9530d0f1e6d4bafa9d70a2afa85bf5318b50bb7ff9a878210a6f7b161759c5b",
+      "docs/design/assets/sage/02-browser.png": "50b43a463534c58bbb3b6a297a559ed5f54b91926b4dbabbfc97cdba653a97df",
+      "docs/design/assets/sage/03-ready.png": "870de8707e0a38bc92e1692c9f8f630b576ea92f55f18a72b54b53c77af10d4b",
+      "docs/design/assets/sage/04-expired.png": "d77c148b0a2dad7f3fcfeccedccfab0d7c7f90461ab48116faa539577785a5c8",
+      "docs/design/assets/sage/05-chat.png": "275bcda18dbcfa240eddae102c5dc92cc4d6dd61012515b6bf5504ed3669145c",
+      "docs/design/assets/sage/06-thread.png": "6f0ca68193af4cccdbf113a4ad9584db6669be5ead703ffcd67cbc899e7c3dcd",
+      "docs/design/assets/sage/07-search.png": "a493ca53047278b3cafd868f4d84a71d0cc0bb4e45dbda2b5f8c250b3e6b01f6",
+      "docs/design/assets/sage/08-settings.png": "88e50f5145cff5efcd354cd9a0972798ebfac3907cd7db601aa2c04592d2a03f",
+      "docs/design/assets/sage/09-prejoin.png": "8e8ca1885989ff49e2bfda6d19ea21455beb1706039cec88ab3d3a749c72de8b",
+      "docs/design/assets/sage/10-call.png": "fce33c5bd91d8a0a1cca59094acfc99814627b77aa6453e6f56ec087a4144250",
+      "docs/design/assets/sage/11-sharepicker.png": "5f97ffef483bddfacddddcf253d065520d24257c38641beda5cf27eda6f97233",
+      "docs/design/assets/sage/12-sharing.png": "30746635dcb246b32c48835e22c53dbbd04d9128d6e4227bd66561c6166f4fb5",
+      "docs/design/assets/sage/13-incoming.png": "476ffa7944188fed0cfea6f2f344dd533722a18b6d0b7fcb111aaf14b904f7cc",
+      "docs/design/assets/sage/14-create34.png": "a27fe37ffd43cbace23e6a225cf19705e6c2598bbeee5ace4cec18150a576f58",
+      "docs/design/assets/sage/15-create35.png": "a91ef00c9c86e8063165b33b15c0673fa5ce995b11fdfc15baabddbbfaa22d46",
+      "docs/design/assets/sage/16-room.png": "fd4b633428228918cde6d3a0a67e6a5bed340cd26ddeb08ede81298dd9b21f59",
+      "docs/design/assets/sage/17-discover.png": "20be77a0276ad0bc4f98cb0f8bd6a4be02e7689b98545345b07070f1e9fe7170",
+      "docs/design/assets/sage/18-voice.png": "e111b2615eb94a59276630dce469934ab2201d84233c88be53a94611d60d9849",
+      "docs/design/assets/sage/19-direct-call.png": "fcf14a92231e1b0404bda62930cacc59507d9db83c39b6b9a3cf58e76c2c378f",
+      "docs/design/assets/sage/20-voice-room.png": "bc1eeffdd16ea1d93a0d15ae4a7b9dcdb0cc31fd76b7d83e795f62cead67681e",
+      "docs/design/assets/sage/contexts/09-prejoin-designbesprechung.png": "4ad2f23ace0cccb503db29d761cfaa146a78c946391dd6c047bb6636994386a8",
+      "docs/design/assets/sage/contexts/09-prejoin-teamkueche.png": "ddc42d9a668bbfcd6d19842f9bb67fc5d5cd2334a45da1c95c533a90352cea1e",
+      "docs/design/assets/superseded/blue/13-incoming-v04.png": "355ad40dce623d35b1bf0adc29be9c38d63390b3620fb661994b84378246b446",
+      "docs/design/assets/superseded/blue/14-create34-v05.png": "8540e9e89064f346bb8833e384883290481fde8f8e91225cd107dc6904f57e9e",
+      "docs/design/assets/superseded/blue/15-create35-v05.png": "dfb9b3445ed704cf9206604b027ed8ffd73bc9182871f1a01446d22879ec1832",
+      "docs/design/assets/superseded/blue/17-discover-v05.png": "43b07c63e543e2f71542bc712c6d55a0a494c11dd0e3fb9251eeee7bfb27fe58",
+      "docs/design/assets/superseded/blue/18-voice-v05.png": "c508e47626dc855d8e929aca617bbb62e5224fc78f6612bda89f112e8f8ebda3",
+      "docs/design/assets/superseded/sage/13-incoming-v04.png": "8da6c8e94c66e18e545f02a02f054b567a4876fbd9c4a43cd237c3a57924cc97",
+      "docs/design/assets/superseded/sage/14-create34-v05.png": "c5354834e8a64ca1e2a668ada493a4e1d4c98dc7810f3a6a6fb905a10533034d",
+      "docs/design/assets/superseded/sage/15-create35-v05.png": "07c44177142fea4d0f0de393766bf5e57d3713b89a11c51ee7c5fc0a8e2297c3",
+      "docs/design/assets/superseded/sage/17-discover-v05.png": "4a83710a7ae56cb6c6cd593fbfc9556aa63587066692f6683098a3e8de527a28",
+      "docs/design/assets/superseded/sage/18-voice-v05.png": "cbc60af3a8553ea97dac7f59b5e3e0e487b11e5c69894226f406062a15d85fc6",
+      "docs/design/flows.md": "57985abab7afa5b24fc921b7ff57b86b4e7265190249dfa20594838269fd34e3",
+      "docs/design/principles.md": "b747cb415a5610ce5879d5ba0fb8672a6a289a4b1e22b6dd637aa71362654858",
+      "docs/design/prototypes/blue/palette-blue.css": "4595c73e1f0ce4f8e805b494eb7ee8561cea0cb8e2c29624c8d27cae0afe8f4b",
+      "docs/design/prototypes/blue/ui-sketch.html": "ecaa49181d3cde44f3d91887b5ac29b6289f8230c179261320cd4a3067b59124",
+      "docs/design/prototypes/index.html": "1ad2ba434e2cdc89be09f724fc2d667d792082ae88c71cbd42dd06addfbfff1c",
+      "docs/design/prototypes/sage/index.html": "0dbdc741d945b63de9eb834afad1036bd7c459c02f56359f06e997bdda15e38c",
+      "docs/design/prototypes/sage/ui-sketch.html": "219ce85a460397b47385f3badddfe33613269d36e565a2a28fe9f9a4e97a6244",
+      "docs/design/prototypes/talk-features.html": "b9f76f2b35465b54a82ff3c99be264fd448b9b71a96d0e8ae419850f8fff06e1",
+      "docs/design/prototypes/talk-model-and-compatibility.html": "11e53b3122bb7ec15020467d8b720cc9584c2eb1732cee0ae71c3fa114cf590a",
+      "docs/design/tokens.md": "3dbc4fa127076c873d7fe514ca62d142b2111c372f527591c4fe3d57ae46165e",
+      "docs/development.md": "f3b798f6421babb37369ac1ebe16725725201985a79f3087f1543e2e772d2417",
+      "docs/product/README.md": "fa6000d435af01a208a92005404b7ed330d29ee54aad77ce9ffc27fd5b4ebe86",
+      "docs/product/accounts.md": "d03fe9fc1888c67da1da60b094c03a27670ef0919a04f9f216636e3bf1908607",
+      "docs/product/calls.md": "d0bf5bd5013a1764b4581bc8fd6b3daf4cc31a203f49d0f7bc4fb2f95d52a389",
+      "docs/product/conversations.md": "1f746e087e824069c2ad6880e83e2ce11479de6451b7112d456e2b5ea7c08f95",
+      "docs/product/desktop-and-accessibility.md": "87dc4d6b2374dcad10900c95dd2b298a9daaec2e663abf00b7afdf5bb24f140f",
+      "docs/product/files-and-content.md": "4a6e41f1118c435dfe11465b98a9f3ab2a8abdde7cd4b88219d6001a27968390",
+      "docs/product/journeys-and-states.md": "44b8f669059379d61c9dea9558bc22146dccb3a51080630fe6b325cd2b45ede2",
+      "docs/product/messaging.md": "eee59ace54a6105f5729dfbc3aff6b72ff7133af26b061ce4098cd5f76182a87",
+      "docs/product/moderation-and-integrations.md": "12fd3c4c583aae873bb9b263b2fd6095d96e10211eb5035944a4165b2c683a74",
+      "docs/product/terminology.md": "bbc98a617cff5e317d9bd14d0423f8a4ce580ebd3b8f095e14d4ec4859e0e99f",
+      "docs/quality/acceptance-report-template.md": "18289d1282953539641532693534895671b6a190638f89c9f7a0994e89375e54",
+      "docs/quality/index.md": "cda4671cef04e7a912212acdf618427b7986d2499d26ead3ae61fd3ef0b51876",
+      "docs/quality/performance.md": "89ef72053f3a2333b642bb9f1d4c0cbaf79d4f26e02b32892740797ca0e1523f",
+      "docs/quality/review-report-template.md": "d78ca6aecd78a5d78875d81d49e491f2d495d1a0865bc50bf2fd5dffb25ea792",
+      "docs/quality/security.md": "4b7506eb4a3ac318752d68548db5d817bd9811ace86de7fbc87250c214ec1691",
+      "docs/quality/test-servers.md": "a11bb36216c6c442a8d092d8bbb6ce4c582f79f58a3f6dae4bbfcd8301ad9dc0",
+      "docs/quality/verification.md": "e4c60ce8e61896003a340e69e073eb6b22acdab3dbd2022a94547d29d5b8561a",
+      "docs/quality/workload-manifest-template.md": "c1d0e53f496fe51dba5a2870565aeb550fdc6a1fad90de3b54434382452daba4",
+      "docs/reviews/design-remediation-r1.md": "4bd5173d813fd6d7fedadd7dadad5f80253ff1017c37ee824fd9979a60b26ff1",
+      "docs/reviews/design-spec-review-r2.md": "ad6de23864c92fc8f8cc8d784a81558d43419efda5ea9915821d9d9061055761",
+      "docs/reviews/design-spec-review.md": "94e47d6a743742f60dde7157023db2307f13b0b08144be80b4e9ace6360da57e",
+      "docs/reviews/product-remediation-r1.md": "a9236e2a380937f63909e787ea9c3a08c7c2377306618529c3c76f87d2b06162",
+      "docs/reviews/product-spec-review-r2.md": "5f58fa1954d172ae18c50b5cececb49f5d1026c85ca9820a7323d50d826173f6",
+      "docs/reviews/product-spec-review.md": "f37f8c014c9a88e9d2fa3ee871b001b8f70d2eeb7b2816d6dee1eede0363e3f3",
+      "docs/reviews/quality-remediation-r1.md": "d4c55586c106ab4bc1048cc9fdbb2161333d21a9adea5e6df8378dac131fa946",
+      "docs/reviews/quality-spec-review-r2.md": "9f64f886fbc289998e357c38f3db71e58ca0886518547cc691fdd204380750b2",
+      "docs/reviews/quality-spec-review.md": "26c8b5e69c13abcaf595afef9e16a341301b286c943a5606279e239f3cee88f7",
+      "docs/status.md": "b9274fdc93fbda03b0784780e49d32f2476daf14ff2707f4cc6fadafef6fcadd",
+      "docs/testing/README.md": "c3c4ee8d17a7ddd3468415f3f42fd315a6d7f1cc5e801ce68c5fbc50a0a7f541",
+      "docs/testing/backend-smoke-2026-10-18.md": "1d3f87b0f0162f69c1260dc2c47f46b4d11aecbf336b3b2a38b9cea2e5340614",
+      "docs/testing/evidence/attempt-1.json": "3a0f7e88bb5a5e77567ea54e8ff2695d239c3a4a413caf76760b1b2ecdff2725",
+      "docs/testing/evidence/attempt-2.json": "d4f019e23b3ae6dedd385ffd44c026b0dccdae66cc6cdf3ba9cecddbe5337085",
+      "docs/testing/evidence/attempt-3.json": "1903b374ae948a686faecd2f6df617724128f5c87e83604b34eea2fe4d4298b1",
+      "docs/testing/evidence/backend-smoke.json": "6b85d61c3a1957b67a30fb710a46f21d96cd2f9dd0d7f43b526df13a4221d84d",
+      "docs/testing/evidence/lifecycle.json": "6715fa225151e46d9e342eb4afab754e63e06749cd25f9ad92be00ac47ff7445",
+      "docs/testing/evidence/post-cleanup.json": "72c4a97e036b23aed71f45508edb8cd1a3319207a363f9dd93203348ad73a858",
+      "rust-toolchain.toml": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1",
+      "rustfmt.toml": "f32d2f03b3f4b1e295c79ed49d543f1205c7dac7c3dc74f05a5a27af4fea0584",
+      "tests/lab/README.md": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+      "tests/lab/cleanup.sh": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+      "tests/lab/lab.py": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+      "tests/lab/pins.json": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+      "tests/lab/reprovision.sh": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36",
+      "tools/check_architecture.py": "ccce17cb6d0f8fc43e0a3196050b1af368522eef194daee24d80e33eb1fc4a59",
+      "tools/check_docs.py": "6e35d9bb5e52b9b8eb2cfa8c84c37ed06e394f5b35f03ee1c34702523fe2f80b"
+    }
+  },
+  "manifest_encoding": "SHA-256 of UTF-8 lines <file SHA-256> + two spaces + relative POSIX path + LF, sorted by path; all 156 committed files, no Git metadata or generated output",
+  "platform": {
+    "distribution": "Ubuntu 26.04.1 LTS",
+    "os": "Linux",
+    "kernel": "7.0.0-30-generic",
+    "architecture": "x86_64",
+    "python": "3.14.4",
+    "vm_size": "CPX22"
+  },
+  "command_transport": "agent-dev-box exec --session <existing-parent-session> --; project cwd <repo>; build target outside source checkout",
+  "output_sanitization": {
+    "path_aliases": [
+      "<repo>",
+      "<target>",
+      "<toolchain>",
+      "<installer>"
+    ],
+    "transport_job_ids": "omitted",
+    "command_output": "stdout and stderr retained as returned by each VM subprocess; paths replaced only"
+  },
+  "bootstrap_toolchain": {
+    "initial_path_probe": "No rustup/cargo/rustc on PATH; shell lookup returned exit 1",
+    "install_attempt_1": {
+      "exit_code": 1,
+      "output": "No managed-cloud network policy file on assigned dev-box VM\nbash: line 3: HOME: unbound variable\n"
+    },
+    "install_attempt_2": {
+      "exit_code": 0,
+      "script": "set -eu\nexport CARGO_HOME=<toolchain>/cargo\nexport RUSTUP_HOME=<toolchain>/rustup\nif [ -f /etc/codex/network-policy.json ]; then cat /etc/codex/network-policy.json; else printf '%s\\n' 'No managed-cloud network policy file on assigned dev-box VM'; fi\nif [ -x \"$CARGO_HOME/bin/rustup\" ]; then\n  \"$CARGO_HOME/bin/rustup\" --version\n  \"$CARGO_HOME/bin/rustup\" toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy\nelse\n  install -d -m 700 <installer>\n  cd <installer>\n  curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 2 --max-time 60 https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init -o rustup-init\n  curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 2 --max-time 60 https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256 -o rustup-init.sha256\n  sha256sum -c rustup-init.sha256\n  chmod 700 rustup-init\n  ./rustup-init -y --no-modify-path --default-toolchain 1.99.1 --profile minimal --component rustfmt --component clippy\nfi\nexport PATH=\"$CARGO_HOME/bin:$PATH\"\ncd <repo>\nrustup --version\nrustup show active-toolchain\nrustup component list --installed\nrustc --version --verbose\ncargo --version\nrustfmt --version\ncargo clippy --version\n",
+      "output": "No managed-cloud network policy file on assigned dev-box VM\n./rustup-init: OK\ninfo: profile set to minimal\ninfo: default host tuple is x86_64-unknown-linux-gnu\ninfo: syncing channel updates for 1.99.1-x86_64-unknown-linux-gnu\ninfo: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)\ninfo: downloading 5 components\ninfo: default toolchain set to 1.99.1-x86_64-unknown-linux-gnu\n\n  1.99.1-x86_64-unknown-linux-gnu installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)\n\n\nRust is installed now. Great!\n\nTo get started you need Cargo's bin directory \n(<toolchain>/cargo/bin) in your PATH\nenvironment variable. This has not been done automatically.\n\nTo configure your current shell, you need to source\nthe corresponding env file under <toolchain>/cargo.\n\nConsider running the right command for your shell (note the leading DOT):\n. \"<toolchain>/cargo/env\" # For sh/ash/dash/pdksh/bash\ncargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu\nCC_x86_64-unknown-linux-gnu = None\ncargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu\nCC_x86_64_unknown_linux_gnu = None\ncargo:rerun-if-env-changed=HOST_CC\nHOST_CC = None\ncargo:rerun-if-env-changed=CC\nCC = None\ncargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT\ncargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS\nCRATE_CC_NO_DEFAULTS = None\ncargo:rerun-if-env-changed=CFLAGS\nCFLAGS = None\ncargo:rerun-if-env-changed=HOST_CFLAGS\nHOST_CFLAGS = None\ncargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu\nCFLAGS_x86_64_unknown_linux_gnu = None\ncargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu\nCFLAGS_x86_64-unknown-linux-gnu = None\nrustup 1.29.1 (d95a37b6a 2026-08-13)\ninfo: This is the version for the rustup toolchain manager, not the rustc compiler.\ninfo: the currently active `rustc` version is `rustc 1.99.1 (58cf8f9c3 2026-10-13)`\n1.99.1-x86_64-unknown-linux-gnu (overridden by '<repo>/rust-toolchain.toml')\ncargo-x86_64-unknown-linux-gnu\nclippy-x86_64-unknown-linux-gnu\nrust-std-x86_64-unknown-linux-gnu\nrustc-x86_64-unknown-linux-gnu\nrustfmt-x86_64-unknown-linux-gnu\nrustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\ncargo 1.99.1 (5f94df478 2026-08-27)\nrustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)\nclippy 0.1.99 (58cf8f9c35 2026-10-13)\n"
+    },
+    "installer_sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    "installer_verification": "Official static.rust-lang.org HTTPS binary and sibling .sha256; sha256sum -c returned OK before execution; rustup verified downloaded release components",
+    "note": "HOME was absent in the remote shell; retry used explicit toolchain-owned CARGO_HOME and RUSTUP_HOME, with no compiler substitution"
+  },
+  "rounds": [
+    {
+      "label": "initial-docs",
+      "commands": [
+        {
+          "argv": [
+            "python3",
+            "tools/check_docs.py"
+          ],
+          "exit_code": 1,
+          "stderr": "docs/reviews/design-spec-review.md:46: missing fragment: '../design/artifacts.md#revision-05'\n",
+          "stdout": "Documentation: 55 Markdown files, 629 local references, 0 non-document fragments unchecked, 1 errors.\n"
+        },
+        {
+          "argv": [
+            "python3",
+            "tools/check_architecture.py"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+        }
+      ],
+      "finished_utc": "2026-10-18T16:28:22.636764+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:28:22.338015+00:00"
+    },
+    {
+      "label": "initial-rust",
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "exit_code": 1,
+          "stderr": "",
+          "stdout": "Diff in <repo>/crates/talk-core/src/ui.rs:56:\n     /// Opens voluntary device prejoin; it does not enable capture by itself.\n     PrepareConference(CallScope),\n     /// Direct acceptance has no device-prejoin interstitial. Mandatory gates still apply.\n-    AcceptDirect { call: CallScope, media: MediaIntent },\n-    JoinPrepared { call: CallScope, media: MediaIntent },\n+    AcceptDirect {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n+    JoinPrepared {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n     Leave(CallScope),\n     Logout(AccountId),\n }\nDiff in <repo>/crates/talk-core/tests/contracts.rs:1:\n use talk_core::bounded::{Page, Text};\n-use talk_core::identity::{CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore};\n+use talk_core::identity::{\n+    CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore,\n+};\n use talk_core::ids::{\n     AccountId, AccountScope, CallGeneration, CallScope, ClockEpoch, ConversationId, HostId,\n     LoginAttemptId, OperationId, RuntimeGeneration, VaultGeneration,\nDiff in <repo>/crates/talk-core/tests/contracts.rs:102:\n #[test]\n fn a_capability_alone_never_grants_permission_and_expiry_remains_denied() {\n     let call = scope(1, 1, 1);\n-    let lease = Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n+    let lease =\n+        Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n     let mut gate = Gate {\n         capability: Fact::Yes,\n         configured: Fact::Yes,\nDiff in <repo>/crates/talk-core/tests/contracts.rs:112:\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Unknown);\n     gate.effective_permission = Fact::Yes;\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Allowed);\n-    assert_eq!(gate.resolve(Some(lease), call, time(13_000)), Decision::Stale);\n+    assert_eq!(\n+        gate.resolve(Some(lease), call, time(13_000)),\n+        Decision::Stale\n+    );\n     gate.invariant_allows = Fact::No;\n     assert_eq!(gate.resolve(None, call, time(2)), Decision::Denied);\n }\nDiff in <repo>/crates/talk-core/tests/contracts.rs:140:\n     assert!(!marker.may_delete(AccountId::from_local(2), attempted));\n     assert!(!can_restore(RestoreDisposition::Unresolved, previous));\n     assert!(!can_restore(RestoreDisposition::Suppressed, attempted));\n-    assert!(can_restore(RestoreDisposition::Eligible(previous), previous));\n-    assert!(!can_restore(RestoreDisposition::Eligible(previous), attempted));\n+    assert!(can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        previous\n+    ));\n+    assert!(!can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        attempted\n+    ));\n     marker.settlement = Settlement::SettledAbsent;\n     assert!(marker.complete());\n }\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "check",
+            "--workspace",
+            "--all-targets",
+            "--locked"
+          ],
+          "exit_code": 0,
+          "stderr": "    Checking talk-core v0.0.0 (<repo>/crates/talk-core)\n    Checking talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s\n",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "exit_code": 0,
+          "stderr": "    Checking talk-core v0.0.0 (<repo>/crates/talk-core)\n    Checking talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s\n",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ],
+          "exit_code": 0,
+          "stderr": "   Compiling talk-core v0.0.0 (<repo>/crates/talk-core)\n   Compiling talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n   Compiling talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.68s\n     Running unittests src/lib.rs (<target>/debug/deps/talk_adapters-947fe98e3f507c1b)\n     Running unittests src/main.rs (<target>/debug/deps/talk_bootstrap-43bf7d073b32b8ec)\n     Running unittests src/lib.rs (<target>/debug/deps/talk_core-bc9ae74cff272829)\n     Running tests/contracts.rs (<target>/debug/deps/contracts-eb8396596924162b)\n   Doc-tests talk_adapters\n   Doc-tests talk_core\n",
+          "stdout": "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 7 tests\ntest a_capability_alone_never_grants_permission_and_expiry_remains_denied ... ok\ntest abandonment_cleanup_never_deletes_a_retained_item_or_trusts_early_absence ... ok\ntest action_and_transport_errors_do_not_invalidate_the_account ... ok\ntest boundary_limits_count_utf8_bytes_and_refuse_page_overflow ... ok\ntest closed_account_rejects_late_work_without_cancelling_another_account ... ok\ntest delayed_read_cannot_extend_lease_from_receipt_time ... ok\ntest lease_cannot_cross_accounts_calls_runtime_generations_or_sleep_epochs ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "run",
+            "--locked",
+            "-p",
+            "talk-bootstrap"
+          ],
+          "exit_code": 0,
+          "stderr": "   Compiling talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s\n     Running `<target>/debug/talk-bootstrap`\n",
+          "stdout": "Nextcloud Modern Talk: contract bootstrap only.\nRenderer, network, vault, media and runtime are unconfigured.\n"
+        }
+      ],
+      "finished_utc": "2026-10-18T16:28:32.978030+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:28:31.281832+00:00"
+    },
+    {
+      "label": "format-mutation",
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "finished_utc": "2026-10-18T16:28:59.392235+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "70d8983eb98935fd77715635bac43c5280edfb77f2393ee5a0d0ed11223739ec",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:28:59.248062+00:00"
+    },
+    {
+      "label": "post-format",
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "exit_code": 1,
+          "stderr": "",
+          "stdout": "Diff in <repo>/crates/talk-core/src/ui.rs:56:\n     /// Opens voluntary device prejoin; it does not enable capture by itself.\n     PrepareConference(CallScope),\n     /// Direct acceptance has no device-prejoin interstitial. Mandatory gates still apply.\n-    AcceptDirect { call: CallScope, media: MediaIntent },\n-    JoinPrepared { call: CallScope, media: MediaIntent },\n+    AcceptDirect {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n+    JoinPrepared {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n     Leave(CallScope),\n     Logout(AccountId),\n }\nDiff in <repo>/crates/talk-core/tests/contracts.rs:1:\n use talk_core::bounded::{Page, Text};\n-use talk_core::identity::{CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore};\n+use talk_core::identity::{\n+    CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore,\n+};\n use talk_core::ids::{\n     AccountId, AccountScope, CallGeneration, CallScope, ClockEpoch, ConversationId, HostId,\n     LoginAttemptId, OperationId, RuntimeGeneration, VaultGeneration,\nDiff in <repo>/crates/talk-core/tests/contracts.rs:102:\n #[test]\n fn a_capability_alone_never_grants_permission_and_expiry_remains_denied() {\n     let call = scope(1, 1, 1);\n-    let lease = Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n+    let lease =\n+        Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n     let mut gate = Gate {\n         capability: Fact::Yes,\n         configured: Fact::Yes,\nDiff in <repo>/crates/talk-core/tests/contracts.rs:112:\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Unknown);\n     gate.effective_permission = Fact::Yes;\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Allowed);\n-    assert_eq!(gate.resolve(Some(lease), call, time(13_000)), Decision::Stale);\n+    assert_eq!(\n+        gate.resolve(Some(lease), call, time(13_000)),\n+        Decision::Stale\n+    );\n     gate.invariant_allows = Fact::No;\n     assert_eq!(gate.resolve(None, call, time(2)), Decision::Denied);\n }\nDiff in <repo>/crates/talk-core/tests/contracts.rs:140:\n     assert!(!marker.may_delete(AccountId::from_local(2), attempted));\n     assert!(!can_restore(RestoreDisposition::Unresolved, previous));\n     assert!(!can_restore(RestoreDisposition::Suppressed, attempted));\n-    assert!(can_restore(RestoreDisposition::Eligible(previous), previous));\n-    assert!(!can_restore(RestoreDisposition::Eligible(previous), attempted));\n+    assert!(can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        previous\n+    ));\n+    assert!(!can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        attempted\n+    ));\n     marker.settlement = Settlement::SettledAbsent;\n     assert!(marker.complete());\n }\n"
+        },
+        {
+          "argv": [
+            "rustc",
+            "--version",
+            "--verbose"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "--version"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "cargo 1.99.1 (5f94df478 2026-08-27)\n"
+        },
+        {
+          "argv": [
+            "rustfmt",
+            "--version"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "clippy",
+            "--version"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "clippy 0.1.99 (58cf8f9c35 2026-10-13)\n"
+        },
+        {
+          "argv": [
+            "rustup",
+            "show",
+            "active-toolchain"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "1.99.1-x86_64-unknown-linux-gnu (overridden by '<repo>/rust-toolchain.toml')\n"
+        },
+        {
+          "argv": [
+            "rustup",
+            "component",
+            "list",
+            "--installed"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "cargo-x86_64-unknown-linux-gnu\nclippy-x86_64-unknown-linux-gnu\nrust-std-x86_64-unknown-linux-gnu\nrustc-x86_64-unknown-linux-gnu\nrustfmt-x86_64-unknown-linux-gnu\n"
+        },
+        {
+          "argv": [
+            "sha256sum",
+            "<installer>/rustup-init",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            "<target>/debug/talk-bootstrap"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  <installer>/rustup-init\n97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8  Cargo.lock\nf715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1  rust-toolchain.toml\nd39468f4b212f28e3a45089c8771a734a95742ad750008b5f138badb85f7e84f  <target>/debug/talk-bootstrap\n"
+        }
+      ],
+      "finished_utc": "2026-10-18T16:29:28.855921+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:29:28.337999+00:00"
+    },
+    {
+      "label": "format-mutation-captured",
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": ""
+        }
+      ],
+      "finished_utc": "2026-10-18T16:29:58.461165+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "70d8983eb98935fd77715635bac43c5280edfb77f2393ee5a0d0ed11223739ec",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "5eae2fa1dcde1ca01ec79c698c9cf0bdf1683a5cb2ee06a514bf8cbb0565d10c",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:29:58.285209+00:00"
+    },
+    {
+      "label": "committed-c1",
+      "commands": [
+        {
+          "argv": [
+            "python3",
+            "tools/check_docs.py"
+          ],
+          "exit_code": 1,
+          "stderr": "docs/reviews/design-spec-review.md:46: missing fragment: '../design/artifacts.md#revision-05'\n",
+          "stdout": "Documentation: 55 Markdown files, 629 local references, 0 non-document fragments unchecked, 1 errors.\n"
+        },
+        {
+          "argv": [
+            "python3",
+            "tools/check_architecture.py"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "architecture: reviewed bootstrap dependency and boundary rules hold\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "check",
+            "--workspace",
+            "--all-targets",
+            "--locked"
+          ],
+          "exit_code": 0,
+          "stderr": "    Checking talk-core v0.0.0 (<repo>/crates/talk-core)\n    Checking talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s\n",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "exit_code": 0,
+          "stderr": "    Checking talk-core v0.0.0 (<repo>/crates/talk-core)\n    Checking talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n    Checking talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s\n",
+          "stdout": ""
+        },
+        {
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ],
+          "exit_code": 0,
+          "stderr": "   Compiling talk-core v0.0.0 (<repo>/crates/talk-core)\n   Compiling talk-adapters v0.0.0 (<repo>/crates/talk-adapters)\n   Compiling talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s\n     Running unittests src/lib.rs (<target>/debug/deps/talk_adapters-947fe98e3f507c1b)\n     Running unittests src/main.rs (<target>/debug/deps/talk_bootstrap-43bf7d073b32b8ec)\n     Running unittests src/lib.rs (<target>/debug/deps/talk_core-bc9ae74cff272829)\n     Running tests/contracts.rs (<target>/debug/deps/contracts-eb8396596924162b)\n   Doc-tests talk_adapters\n   Doc-tests talk_core\n",
+          "stdout": "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 7 tests\ntest a_capability_alone_never_grants_permission_and_expiry_remains_denied ... ok\ntest abandonment_cleanup_never_deletes_a_retained_item_or_trusts_early_absence ... ok\ntest action_and_transport_errors_do_not_invalidate_the_account ... ok\ntest boundary_limits_count_utf8_bytes_and_refuse_page_overflow ... ok\ntest delayed_read_cannot_extend_lease_from_receipt_time ... ok\ntest closed_account_rejects_late_work_without_cancelling_another_account ... ok\ntest lease_cannot_cross_accounts_calls_runtime_generations_or_sleep_epochs ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+        },
+        {
+          "argv": [
+            "cargo",
+            "run",
+            "--locked",
+            "-p",
+            "talk-bootstrap"
+          ],
+          "exit_code": 0,
+          "stderr": "   Compiling talk-bootstrap v0.0.0 (<repo>/apps/bootstrap)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s\n     Running `<target>/debug/talk-bootstrap`\n",
+          "stdout": "Nextcloud Modern Talk: contract bootstrap only.\nRenderer, network, vault, media and runtime are unconfigured.\n"
+        },
+        {
+          "argv": [
+            "sha256sum",
+            "<target>/debug/talk-bootstrap"
+          ],
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "d39468f4b212f28e3a45089c8771a734a95742ad750008b5f138badb85f7e84f  <target>/debug/talk-bootstrap\n"
+        }
+      ],
+      "finished_utc": "2026-10-18T16:31:57.982162+00:00",
+      "platform": {
+        "architecture": "x86_64",
+        "kernel": "7.0.0-30-generic",
+        "os": "Linux",
+        "python": "3.14.4"
+      },
+      "source_after": {
+        "sha256": "396a9e4a4359dacd410a59a1604eac1cfc188bb32d3d4f2ee38dc7e4b56a104f",
+        "file_count": 156
+      },
+      "source_before": {
+        "sha256": "396a9e4a4359dacd410a59a1604eac1cfc188bb32d3d4f2ee38dc7e4b56a104f",
+        "file_count": 156
+      },
+      "started_utc": "2026-10-18T16:31:56.280684+00:00"
+    }
+  ],
+  "mechanical_correction": {
+    "command": "cargo fmt --all",
+    "files": [
+      "crates/talk-core/src/ui.rs",
+      "crates/talk-core/tests/contracts.rs"
+    ],
+    "diff": "--- authored/crates/talk-core/src/ui.rs\n+++ formatted/crates/talk-core/src/ui.rs\n@@ -56,8 +56,14 @@\n     /// Opens voluntary device prejoin; it does not enable capture by itself.\n     PrepareConference(CallScope),\n     /// Direct acceptance has no device-prejoin interstitial. Mandatory gates still apply.\n-    AcceptDirect { call: CallScope, media: MediaIntent },\n-    JoinPrepared { call: CallScope, media: MediaIntent },\n+    AcceptDirect {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n+    JoinPrepared {\n+        call: CallScope,\n+        media: MediaIntent,\n+    },\n     Leave(CallScope),\n     Logout(AccountId),\n }\n--- authored/crates/talk-core/tests/contracts.rs\n+++ formatted/crates/talk-core/tests/contracts.rs\n@@ -1,5 +1,7 @@\n use talk_core::bounded::{Page, Text};\n-use talk_core::identity::{CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore};\n+use talk_core::identity::{\n+    CleanupMarker, RestoreDisposition, Settlement, StoreIntent, can_restore,\n+};\n use talk_core::ids::{\n     AccountId, AccountScope, CallGeneration, CallScope, ClockEpoch, ConversationId, HostId,\n     LoginAttemptId, OperationId, RuntimeGeneration, VaultGeneration,\n@@ -102,7 +104,8 @@\n #[test]\n fn a_capability_alone_never_grants_permission_and_expiry_remains_denied() {\n     let call = scope(1, 1, 1);\n-    let lease = Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n+    let lease =\n+        Lease::from_qualified_refresh(call, Source::Conversation, time(0), time(1)).unwrap();\n     let mut gate = Gate {\n         capability: Fact::Yes,\n         configured: Fact::Yes,\n@@ -112,7 +115,10 @@\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Unknown);\n     gate.effective_permission = Fact::Yes;\n     assert_eq!(gate.resolve(Some(lease), call, time(2)), Decision::Allowed);\n-    assert_eq!(gate.resolve(Some(lease), call, time(13_000)), Decision::Stale);\n+    assert_eq!(\n+        gate.resolve(Some(lease), call, time(13_000)),\n+        Decision::Stale\n+    );\n     gate.invariant_allows = Fact::No;\n     assert_eq!(gate.resolve(None, call, time(2)), Decision::Denied);\n }\n@@ -140,8 +146,14 @@\n     assert!(!marker.may_delete(AccountId::from_local(2), attempted));\n     assert!(!can_restore(RestoreDisposition::Unresolved, previous));\n     assert!(!can_restore(RestoreDisposition::Suppressed, attempted));\n-    assert!(can_restore(RestoreDisposition::Eligible(previous), previous));\n-    assert!(!can_restore(RestoreDisposition::Eligible(previous), attempted));\n+    assert!(can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        previous\n+    ));\n+    assert!(!can_restore(\n+        RestoreDisposition::Eligible(previous),\n+        attempted\n+    ));\n     marker.settlement = Settlement::SettledAbsent;\n     assert!(marker.complete());\n }\n",
+    "diff_sha256": "5fecb4e8a8d2241eb00b7600e005a10aa9c059c1008576e66c98ce6ce065de94",
+    "semantics": "layout and trailing commas only; interfaces and requirements unchanged",
+    "transport_failure": "First standalone formatting result was replaced by automatic source upload before a separate retrieval; local hash guard refused the transfer. The post-format check reproduced the initial format failure. Formatting and source export were repeated within one remote job, then downloaded, hash-verified and applied locally."
+  },
+  "lockfile": {
+    "sha256": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8",
+    "changed": false,
+    "generate_lockfile_run": false
+  },
+  "artifact": {
+    "name": "talk-bootstrap",
+    "profile": "debug; unoptimized + debuginfo",
+    "sha256": "d39468f4b212f28e3a45089c8771a734a95742ad750008b5f138badb85f7e84f",
+    "scope": "headless unconfigured composition diagnostic; not a product build or performance result"
+  },
+  "backend_binding": {
+    "report": "docs/testing/evidence/backend-smoke.json",
+    "report_sha256": "6b85d61c3a1957b67a30fb710a46f21d96cd2f9dd0d7f43b526df13a4221d84d",
+    "all_five_files_match_c1": true,
+    "source_sha256": {
+      "tests/lab/README.md": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+      "tests/lab/cleanup.sh": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+      "tests/lab/lab.py": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+      "tests/lab/pins.json": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+      "tests/lab/reprovision.sh": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36"
+    },
+    "rerun": false
+  },
+  "finding": {
+    "id": "BI-001",
+    "state": "open",
+    "category": "documentation validation blocker",
+    "requirement": "Q.VER-03/07; baseline and historical-review preservation",
+    "source": "docs/reviews/design-spec-review.md:46",
+    "target": "docs/design/artifacts.md#revision-05",
+    "expected": "Existing preserved review links resolve without modifying accepted historical evidence",
+    "actual": "Target heading is Revision 05 — historical, with no revision-05 anchor; check_docs exits 1",
+    "scope": "Both files are unchanged from the accepted baseline; checker was not altered or bypassed",
+    "owner": "PM assigns separately authorized correction; independent verifier rechecks"
+  },
+  "hygiene": {
+    "public_files": 156,
+    "scan_hits": [],
+    "integration_changed_files": [
+      "crates/talk-core/src/ui.rs",
+      "crates/talk-core/tests/contracts.rs",
+      "docs/architecture/README.md",
+      "docs/status.md"
+    ],
+    "accepted_tracked_changes": []
+  },
+  "unrun": [
+    "negative checker fixtures (independent verifier owns them)",
+    "GitHub CI workflow execution",
+    "new backend fixture run",
+    "native login, GPUI, vault, WebRTC, media, capture, accessibility, performance",
+    "complete CT scenarios and product acceptance",
+    "independent four-discipline G.BOOT review and PM acceptance"
+  ]
+}

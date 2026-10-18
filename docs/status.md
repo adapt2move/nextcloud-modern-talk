@@ -2,6 +2,8 @@
 
 Last integrated: **2026-10-18**. This records authored bootstrap scope and preliminary integrator execution, not an independent approval or a release claim. Infrastructure-only change: **no product feature status change; all 140 remain Planned**.
 
+[Integration round 1](reviews/bootstrap-integration-r1.md) binds source commit `d55f39613337f0172b5c209235ae2f43b154a31d` to the committed-source rerun, all five backend harness hashes, sanitized command evidence and open finding BI-001. Its C2 continuation changes only reports/evidence and this IST link; independent reviewers must inspect final HEAD.
+
 ## Gate state
 
 | Gate | State and evidence |
