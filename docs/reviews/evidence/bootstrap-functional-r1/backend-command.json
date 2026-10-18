@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "sh",
+    "tests/lab/reprovision.sh",
+    "--output",
+    "[review-temp]/backend-output",
+    "--budget-seconds",
+    "1800"
+  ],
+  "elapsed_seconds": 77.83,
+  "exit_code": 0,
+  "outer_timeout": false,
+  "stderr": "",
+  "stdout": "run: nmtlab-20261018t165226z-c08d0f63\nrecovery state: /run/nmtlab-20261018t165226z-c08d0f63-kqjfn28h/state.json\nr34: verifying pinned image and package\nr34: installed exact versions; running API checks\nr35: verifying pinned image and package\nr35: installed exact versions; running API checks\n{\n  \"result\": \"pass\",\n  \"cleanup\": {\n    \"result\": \"pass\",\n    \"removed\": {\n      \"containers\": 2,\n      \"volumes\": 2,\n      \"networks\": 2\n    },\n    \"remaining\": {\n      \"containers\": 0,\n      \"volumes\": 0,\n      \"networks\": 0\n    },\n    \"runtime_secrets_removed\": true,\n    \"errors\": [],\n    \"finished\": \"2026-10-18T16:53:44.495541+00:00\"\n  }\n}\n"
+}

@@ -1,0 +1,48 @@
+{
+  "assertions_pass": false,
+  "ct_ids": [
+    "CT-001",
+    "CT-002",
+    "CT-003",
+    "CT-004",
+    "CT-005",
+    "CT-006",
+    "CT-007",
+    "CT-008",
+    "CT-009",
+    "CT-010",
+    "CT-011",
+    "CT-012",
+    "CT-013",
+    "CT-014",
+    "CT-015",
+    "CT-016",
+    "CT-017",
+    "CT-018",
+    "CT-019",
+    "CT-020",
+    "CT-021",
+    "CT-022",
+    "CT-023",
+    "CT-024",
+    "CT-025",
+    "CT-026",
+    "CT-027",
+    "CT-028"
+  ],
+  "defined_requirement_journey_state_ids": 109,
+  "feature_requirement_link_occurrences": 158,
+  "feature_rows": 140,
+  "features_without_matrix_reference": [],
+  "features_without_requirement_link": [
+    "F-183"
+  ],
+  "note": "Corrects the reviewer-only first parser, which omitted INT and slash-compressed feature references. Initial output retained as traceability.json. No candidate/specification changes.",
+  "statuses": [
+    "Planned"
+  ],
+  "undefined_requirement_links": [],
+  "unique_ct_ids": 28,
+  "unique_feature_ids": 140,
+  "unknown_matrix_features": []
+}

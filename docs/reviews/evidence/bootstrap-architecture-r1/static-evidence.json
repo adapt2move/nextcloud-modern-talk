@@ -1,0 +1,118 @@
+{
+  "review": "bootstrap-architecture-r1",
+  "date": "2026-10-18",
+  "discipline": "architecture/modules",
+  "method": "Static reads of immutable Git objects, manual contract tracing, Git diffs and SHA-256 hashing only. No project code, checker, test, service or VM command executed.",
+  "candidate": {
+    "commit": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+    "tree": "36133a4336cab291ca174ec9890b9a61c32ce599",
+    "source_archive_sha256": "989d3d14c3d411763f821fd3c6eb57cc3743f69162e79017b96dabd538daa4bd",
+    "immediate_base": "c1cc08ee03ef154c495a20ad0d6c220a1889a3df",
+    "source_c1": "d55f39613337f0172b5c209235ae2f43b154a31d",
+    "bootstrap_base": "d1522594fc16ea884c436e73fe08b0fdabc4a14f",
+    "accepted_specification": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+    "initial_git_status_porcelain": "",
+    "executable_artifact": "not built or independently inspected"
+  },
+  "toolchain": {
+    "declaration": "Rust 1.99.1; minimal profile; rustfmt and Clippy; edition 2024",
+    "executed": "not run",
+    "dependencies": "Three local packages at 0.0.0; no third-party Rust dependencies in the inspected manifests/lockfile",
+    "integration_evidence": "docs/reviews/bootstrap-integration-r1.md; attributed preliminary evidence, not independently executed here"
+  },
+  "sha256": {
+    "Cargo.lock": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8",
+    "rust-toolchain.toml": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1",
+    "Cargo.toml": "231943f9ba6c1c17f9045f6db39bf4df8e15948462bbdfad2d55d50627c251bb",
+    "crates/talk-core/src/ports.rs": "4051c768e7eebc552816d9f5c6f50ca3dd61242058e113898def21b79b50041d",
+    "crates/talk-core/src/ui.rs": "becbd8593139e92273816dbaab7a27322f4cd3e6aeb1f68a6e1074f7f686aec2",
+    "crates/talk-core/src/identity.rs": "22f99e38e393e3e5ea1fcde7f7cf4bdd861ceb635dfa0e4272647c4e27699683",
+    "crates/talk-core/src/lifecycle.rs": "44bf0f55075fb79e93871b91cabf43ffe2f1259ff38eebabdd41b3c42dd1c770",
+    "crates/talk-core/src/policy.rs": "1f060650fdbd7174acd28bcd8b3f0b4bbf95a7520a156cb71035e55edcca3c7c",
+    "tools/check_architecture.py": "ccce17cb6d0f8fc43e0a3196050b1af368522eef194daee24d80e33eb1fc4a59",
+    "docs/architecture/decisions/002-deep-modules.md": "238a2f6e028511606cd0312ff2845f9426d7c5dd71b8dfa19b48b6369e32935c",
+    "docs/architecture/decisions/003-credential-lifecycle.md": "a09b1f51faa9e6e6dc40edd1ce4895819ccc38103c9b2229ea39369f7426bccd",
+    "docs/architecture/decisions/004-policy-media-lifecycle.md": "15684c226633b9666c808e2e6f14df2cdf6539c21e0427630b4d5d48c83892ac",
+    "docs/architecture/measurement.md": "25b3df210dee7ecb807c8f2a3575f5bd2dcce66f615f2bffc6752e82ff82981e",
+    "docs/testing/evidence/backend-smoke.json": "6b85d61c3a1957b67a30fb710a46f21d96cd2f9dd0d7f43b526df13a4221d84d",
+    "tests/lab/lab.py": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678"
+  },
+  "static_command_results": [
+    {
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "exit_code": 0,
+      "result": "Empty at review start and before report creation."
+    },
+    {
+      "command": "git log --format='%H %T %P%nAuthor: %an%nSubject: %s' -5 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+      "exit_code": 0,
+      "result": "Candidate -> C2 -> C1 -> specification report continuation -> accepted specification; all full objects resolved."
+    },
+    {
+      "command": "git archive --format=tar 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be | sha256sum",
+      "exit_code": 0,
+      "result": "989d3d14c3d411763f821fd3c6eb57cc3743f69162e79017b96dabd538daa4bd"
+    },
+    {
+      "command": "git diff c1cc08ee03ef154c495a20ad0d6c220a1889a3df 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+      "exit_code": 0,
+      "result": "Only explicit revision-05 anchor in docs/design/artifacts.md and honest BI-001/IST updates in docs/status.md."
+    },
+    {
+      "command": "git diff --name-status d55f39613337f0172b5c209235ae2f43b154a31d c1cc08ee03ef154c495a20ad0d6c220a1889a3df",
+      "exit_code": 0,
+      "result": "Adds bootstrap-integration-r1.md and its JSON evidence; modifies docs/status.md only."
+    },
+    {
+      "command": "git diff --exit-code d55f39613337f0172b5c209235ae2f43b154a31d 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be -- apps crates Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml tools docs/architecture tests/lab",
+      "exit_code": 0,
+      "result": "Empty; source/contracts/checkers/toolchain/harness unchanged from C1."
+    },
+    {
+      "command": "git diff --name-status d1522594fc16ea884c436e73fe08b0fdabc4a14f 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be -- docs/product docs/compatibility docs/quality docs/design docs/reviews/product-spec-review-r2.md docs/reviews/quality-spec-review-r2.md docs/reviews/design-spec-review-r2.md LICENSE NOTICE.md",
+      "exit_code": 0,
+      "result": "Only docs/design/artifacts.md changed; exact additive anchor diff inspected."
+    },
+    {
+      "command": "git show <candidate>:<repository-relative path> | sha256sum",
+      "exit_code": 0,
+      "result": "Repeated separately for each path in sha256; no worktree inputs used."
+    },
+    {
+      "command": "git show <candidate>:<repository-relative path> | nl -ba",
+      "exit_code": 0,
+      "result": "Numbered source inspected for ports.rs, ui.rs, checker lines 82-115, ADR-003 lines 5-73 and ADR-002 lines 5-40; report locations refer to candidate blobs."
+    }
+  ],
+  "findings": [
+    {
+      "id": "BAR1-01",
+      "severity": "high",
+      "state": "open",
+      "result": "fail - static contract review",
+      "summary": "IdentityPort does not expose the required session-only/cancel-and-retain decisions and requires runtime-scoped cancellation for identity work that must precede or outlive that runtime."
+    },
+    {
+      "id": "BAR1-02",
+      "severity": "medium",
+      "state": "open",
+      "result": "fail - static contract review",
+      "summary": "The renderer boundary exposes data types whose direct imports and UI reexports are rejected by the declared guard; the allowed UI path keeps them private."
+    }
+  ],
+  "not_run": [
+    "python3 tools/check_architecture.py, including positive/negative fixtures",
+    "python3 tools/check_docs.py, including BI-001 and negative fixture",
+    "cargo fmt --all -- --check",
+    "cargo check --locked --workspace --all-targets",
+    "cargo clippy --locked --workspace --all-targets -- -D warnings",
+    "cargo test --locked --workspace",
+    "cargo run --locked -p talk-bootstrap",
+    "GitHub CI, released-backend rerun, upstream source re-fetch",
+    "Native login/vault/crash/media/policy timing/renderer tests and performance measurements",
+    "Workload reconstruction, actual-profile validation and lifetime/peak collector qualification",
+    "Any VM provisioning, execution, cost inspection or lifecycle operation"
+  ],
+  "verdict": "changes required",
+  "scope_limit": "Bootstrap contracts/scaffolding only. Product security, media integration and native performance remain unverified. PM acceptance is separate."
+}

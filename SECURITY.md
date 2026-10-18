@@ -9,24 +9,19 @@ certification.
 
 ## Reporting privately
 
-**Private reporting status: not yet verified.** This policy was prepared before
-repository publication. No monitored private mailbox or response SLA has been
-established by this work.
+**Private reporting status: enabled and verified on 2026-10-18.** During
+repository setup, GitHub's private-vulnerability-reporting API confirmed
+`enabled: true` for `adapt2move/nextcloud-modern-talk` after enablement.
+This confirms the repository setting; no monitoring arrangement, response SLA
+or promise of a human response is established by this work.
 
-If available, use **Security → Report a vulnerability** on the
+Use **Security → Report a vulnerability** on the
 [repository security page](https://github.com/adapt2move/nextcloud-modern-talk/security).
-Check that GitHub offers a private report before entering details. The link alone
-does not establish that reporting is enabled or monitored.
+Confirm that GitHub offers a private report before entering details. If the route
+becomes unavailable, do not post vulnerability details in a public issue; no
+alternative private address is verified here.
 
-If the private route is unavailable, an interim, **unverified contact approach**
-is a content-free public issue asking the maintainers to establish a private
-security channel. For example: “Please provide a private security contact.”
-Do not include the vulnerability, exploit details, credentials, production data,
-logs or attachments in that issue. Wait for a maintainer to establish the private
-route before sharing sensitive information; this document does not promise a
-response or identify an alternative verified address.
-
-Once a private route is confirmed, provide the affected commit/version, platform,
+In a private report, provide the affected commit/version, platform,
 impact, relevant requirement/module IDs and a minimal synthetic reproduction.
 Use disposable accounts and redact tokens, real conversations and private host
 details even in private reports. Maintainers do not need production credentials
@@ -34,7 +29,7 @@ to receive a report.
 
 ## Release preparation
 
-Before a product release, maintainers must enable and verify GitHub private
+Before a product release, maintainers must reverify GitHub private
 vulnerability reporting or another private route, confirm who monitors it, and
 update this file with the verified route, supported versions and response
 expectations. GitHub documents how to

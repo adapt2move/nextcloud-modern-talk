@@ -1,0 +1,5 @@
+{
+  "path": "target/debug/talk-bootstrap",
+  "profile": "debug, diagnostic only, not a client or release artifact",
+  "sha256": "1fd0aee65e162b09c2aa696005e1d5146bb10f21fefeea167e1833e79a8b7fce"
+}

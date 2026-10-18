@@ -1,0 +1,396 @@
+{
+  "accepted_specification": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+  "attribution": "Independent delegated reviewer for performance and coarse security; no authorship of reviewed candidate.",
+  "bootstrap_source": "d55f39613337f0172b5c209235ae2f43b154a31d",
+  "c1_to_candidate_paths": [
+    "docs/design/artifacts.md",
+    "docs/reviews/bootstrap-integration-r1.md",
+    "docs/reviews/evidence/bootstrap-integration-r1.json",
+    "docs/status.md"
+  ],
+  "c2_to_candidate_stat": "docs/design/artifacts.md | 2 ++\n docs/status.md           | 8 +++++---\n 2 files changed, 7 insertions(+), 3 deletions(-)",
+  "candidate": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+  "candidate_tar_sha256": "989d3d14c3d411763f821fd3c6eb57cc3743f69162e79017b96dabd538daa4bd",
+  "candidate_tree": "36133a4336cab291ca174ec9890b9a61c32ce599",
+  "comparison_base": "c1cc08ee03ef154c495a20ad0d6c220a1889a3df",
+  "existing_accepted_spec_paths_changed": [
+    "docs/design/artifacts.md"
+  ],
+  "final_head": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+  "final_tracked_diff_vs_candidate": [],
+  "findings": [
+    "BPR1-01",
+    "BSR1-01",
+    "BSR1-02"
+  ],
+  "hygiene_scan": {
+    "matches": {
+      "credential_url": [],
+      "generated_lab_password": [],
+      "github_token": [],
+      "private_host_path": [],
+      "private_key": []
+    },
+    "patterns": {
+      "credential_url": "https?://[^\\s/<>:]+:[^\\s/@<>]+@",
+      "generated_lab_password": "\\bNmt_[A-Za-z0-9_-]{48}\\b",
+      "github_token": "\\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})\\b",
+      "private_host_path": "/(?:home|Users|opt/t3|root)/[A-Za-z0-9_.-]+",
+      "private_key": "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    },
+    "scope": "Limited patterns across committed UTF-8 text; no entropy scanner, canary execution, binary/visual or full audit.",
+    "text_files": 103
+  },
+  "lab_cleanup": {
+    "errors": [],
+    "finished": "2026-10-18T16:13:22.803754+00:00",
+    "remaining": {
+      "containers": 0,
+      "networks": 0,
+      "volumes": 0
+    },
+    "removed": {
+      "containers": 2,
+      "networks": 2,
+      "volumes": 2
+    },
+    "result": "pass",
+    "runtime_secrets_removed": true
+  },
+  "lab_evidence_attribution": "Author-executed historical evidence; static hashes and cleanup fields inspected only; no independent backend rerun by this reviewer.",
+  "lab_source_binding": {
+    "tests/lab/README.md": {
+      "candidate_sha256": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+      "matches": true,
+      "recorded_sha256": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00"
+    },
+    "tests/lab/cleanup.sh": {
+      "candidate_sha256": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+      "matches": true,
+      "recorded_sha256": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132"
+    },
+    "tests/lab/lab.py": {
+      "candidate_sha256": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+      "matches": true,
+      "recorded_sha256": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678"
+    },
+    "tests/lab/pins.json": {
+      "candidate_sha256": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+      "matches": true,
+      "recorded_sha256": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016"
+    },
+    "tests/lab/reprovision.sh": {
+      "candidate_sha256": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36",
+      "matches": true,
+      "recorded_sha256": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36"
+    }
+  },
+  "notes": "Python standard-library subprocess/hashlib/json/re processing read committed blobs and recorded static metadata. No repository Python checker or lab script was imported/executed.",
+  "primary_source_checks": [
+    {
+      "observation": "Inspected policy config emission, local grid list and conditional external-signaling E2EE capability. No propagation or native encryption qualification.",
+      "urls": [
+        "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Capabilities.php",
+        "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Capabilities.php"
+      ]
+    },
+    {
+      "observation": "Both tables mark E2EE and grid enforcement as not changing the capability hash.",
+      "urls": [
+        "https://raw.githubusercontent.com/nextcloud/spreed/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/settings.md",
+        "https://raw.githubusercontent.com/nextcloud/spreed/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/settings.md"
+      ]
+    },
+    {
+      "observation": "Unauthorized constant and v2 HTTP status mapping checked; not live endpoint/app-password rejection evidence.",
+      "urls": [
+        "https://raw.githubusercontent.com/nextcloud/server/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/public/AppFramework/OCSController.php",
+        "https://raw.githubusercontent.com/nextcloud/server/77e3cab12d2215bf94d6de67f23b98ed7bad236e/lib/private/AppFramework/OCS/V2Response.php",
+        "https://raw.githubusercontent.com/nextcloud/server/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/private/AppFramework/OCS/V2Response.php"
+      ]
+    },
+    {
+      "observation": "Separate physical footprint and lifetime peak declarations; no Mac API permission, returned revision or abnormal-exit collection qualification.",
+      "urls": [
+        "https://raw.githubusercontent.com/apple-oss-distributions/xnu/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/osfmk/mach/task_info.h",
+        "https://raw.githubusercontent.com/apple-oss-distributions/xnu/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/sys/resource.h"
+      ]
+    },
+    {
+      "observation": "Release points to exact pinned commit; action manifest uses Node 24. Workflow not executed and action bundle not fully audited.",
+      "urls": [
+        "https://github.com/actions/checkout/releases/tag/v7.0.1",
+        "https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "https://raw.githubusercontent.com/actions/checkout/3d3c42e5aac5ba805825da76410c181273ba90b1/action.yml"
+      ]
+    },
+    {
+      "observation": "Official release existence checked. First direct announcement fetch returned internal tool error, retry through release-index link succeeded. No installer/toolchain binary executed by reviewer.",
+      "urls": [
+        "https://blog.rust-lang.org/releases/",
+        "https://blog.rust-lang.org/2026/10/15/Rust-1.99.1/"
+      ]
+    }
+  ],
+  "project_execution": "not run; owned by separate functional verifier",
+  "reproduction_commands": [
+    "git status --short",
+    "git show --no-patch --format=fuller 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+    "git ls-tree -r --long 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+    "git show 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be:<reviewed-path>",
+    "git diff c1cc08ee03ef154c495a20ad0d6c220a1889a3df 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+    "git archive --format=tar 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be | sha256sum",
+    "git show 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be:<reviewed-path> | sha256sum"
+  ],
+  "review_id": "bootstrap-quality-r1",
+  "reviewed_at_utc": "2026-10-18T16:54:29.952500+00:00",
+  "same_round_shared_evidence": {
+    "path": "docs/reviews/bootstrap-architecture-review-r1.md",
+    "scope": "Untracked independently authored round-1 report supplied by PM after initial static analysis; not candidate source. BSR1-01 independently agrees with BAR1-01; BAR1-02 checked statically, execution left to functional verifier. Performance resource conclusion remains separately qualified by BPR1-01.",
+    "sha256": "9dbf04a4a6255872eab4e528f7b337109ecee5d2654f2097670bf6c1ae0445f2"
+  },
+  "schema": 1,
+  "scope": "Static contract/scaffolding inspection only. No project/fixture tests, service, benchmark or VM lifecycle performed.",
+  "source_objects": {
+    ".github/workflows/ci.yml": {
+      "git_blob": "25e151bf4dfece0c6bb930b04b442b3cb15d2060",
+      "sha256": "76e516942f8e81c5c08fc62d3e73a1b176c9632bde8a2951b689fa89b130385b"
+    },
+    "AGENTS.md": {
+      "git_blob": "67b5787c2fea2ab2a6481211fc89acc3d7c57b61",
+      "sha256": "3239287a55360d1ebb5a640b3d730bca23c7c6461abb1d91eae4bd5c1fdbff3d"
+    },
+    "Cargo.lock": {
+      "git_blob": "d8a0e01081e46aedbc215e4336d793baf5bbb219",
+      "sha256": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8"
+    },
+    "Cargo.toml": {
+      "git_blob": "3d87f7d26851ef2641dd3c0c665a72d653d365e4",
+      "sha256": "231943f9ba6c1c17f9045f6db39bf4df8e15948462bbdfad2d55d50627c251bb"
+    },
+    "LICENSE": {
+      "git_blob": "6d8cea430e21d06532225018850da91a3f44abf5",
+      "sha256": "57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4"
+    },
+    "NOTICE.md": {
+      "git_blob": "0363eeffb9b5aab9c9918f44214452ad45ab6eb9",
+      "sha256": "32f132d980dc38fb62a767b30f33dd98f87fb60ce4d24e3e16455ace6e408683"
+    },
+    "SECURITY.md": {
+      "git_blob": "75e30d6abf453fd5f7aa186e0d2be8c26fde0748",
+      "sha256": "584ee0523f938a84a7d8094f155983d66a3a1259206c96cf459d2fdfe92f6694"
+    },
+    "apps/bootstrap/Cargo.toml": {
+      "git_blob": "d233d0c64b23be77bd944d0bdcf32d2d386195e6",
+      "sha256": "7431f00e0153758eff9baf26e7891b15fe323d4f47e6456997a6a1ac250b0a8e"
+    },
+    "apps/bootstrap/src/main.rs": {
+      "git_blob": "41749b3a9442ec496915e397e97ff4c56e379003",
+      "sha256": "7d48c1e30c02acd6494ac2a3fcaa953a581f75b461cb2de1cd5e3f6c4f239dd7"
+    },
+    "apps/bootstrap/src/presentation.rs": {
+      "git_blob": "e2eb043e9a7f2f5310d521c8684638ab1103cc7c",
+      "sha256": "168500895f05a8dc02ec1aba2f5caf55f8224a568278ea75ec645b5ca98572f9"
+    },
+    "crates/talk-adapters/Cargo.toml": {
+      "git_blob": "2245559e5f05bf07e4359456e9fbb10b1e4560d0",
+      "sha256": "324109105055fd93160ddacf366a2b7cdd62eee9b24450b60879df384996c1b9"
+    },
+    "crates/talk-adapters/src/identity.rs": {
+      "git_blob": "71ea4c65b57a90306525c4264007bdedee5412f5",
+      "sha256": "6db0966cf779b9d5979703a6b7d8f40f2462cc8100a8d0c62851b426bee67cc9"
+    },
+    "crates/talk-adapters/src/lib.rs": {
+      "git_blob": "76baf3731a5aac513baa27b6191e2dd5cd90c680",
+      "sha256": "68a6242d4fc700c44cf389a5bb3904f6e96f05f244b2cb8f9ae0cda68d47ed71"
+    },
+    "crates/talk-adapters/src/media.rs": {
+      "git_blob": "7604f3a9bbf173a208f7176d42ce6db36bd1da61",
+      "sha256": "2d1747792ed91c72a44d5acd80f0071f2334443775844592dd39c382f826e5fc"
+    },
+    "crates/talk-adapters/src/nextcloud.rs": {
+      "git_blob": "dc7836992b6fd330da1da41a2a602ef50980eadb",
+      "sha256": "331d599793e78114a09d9f03ef7a99395d87367069da01a2e69cccbd19f6bcfc"
+    },
+    "crates/talk-core/Cargo.toml": {
+      "git_blob": "aed3fddb3836c729af9863b0cb7b1e6f190855c4",
+      "sha256": "3db7fae3a2c1872e504a14fd1a69effa27b2e896d6d737133f1ca75af32f6a9e"
+    },
+    "crates/talk-core/src/application.rs": {
+      "git_blob": "2e21882aa082d8e05d9e6a43f3fde6d804a5b068",
+      "sha256": "bec44bd364fab470f4fe99d5f039fe98e26290170d2bab771c603c0cdfab4880"
+    },
+    "crates/talk-core/src/bounded.rs": {
+      "git_blob": "757f58b100dfb5844d0ad9f21531c9be41c5f1af",
+      "sha256": "2f012cb7054feffc961622bd2c879872aee4d9c91d005fbf914378dd078fb425"
+    },
+    "crates/talk-core/src/identity.rs": {
+      "git_blob": "6743132a61a2f613a8f0db0ef0c8ce3d02052b7f",
+      "sha256": "22f99e38e393e3e5ea1fcde7f7cf4bdd861ceb635dfa0e4272647c4e27699683"
+    },
+    "crates/talk-core/src/ids.rs": {
+      "git_blob": "aaff81aa58d22c975255172051f4d5628539684a",
+      "sha256": "124e5ad03564974e5a5937dd65d1a172f43434fef651dac206c4cd7435f508be"
+    },
+    "crates/talk-core/src/lib.rs": {
+      "git_blob": "494256cf9d33d27bcd3f306aa39b8a6ed378fddd",
+      "sha256": "24151457f0a0f92e4f49815d17a2aae9d72d39c5aae31e2e754f90d4b7f21735"
+    },
+    "crates/talk-core/src/lifecycle.rs": {
+      "git_blob": "fcca13f0992f93e7251607943d57140feb7135f6",
+      "sha256": "44bf0f55075fb79e93871b91cabf43ffe2f1259ff38eebabdd41b3c42dd1c770"
+    },
+    "crates/talk-core/src/policy.rs": {
+      "git_blob": "f9706673b265bfa37590ee28d88946028f1de964",
+      "sha256": "1f060650fdbd7174acd28bcd8b3f0b4bbf95a7520a156cb71035e55edcca3c7c"
+    },
+    "crates/talk-core/src/ports.rs": {
+      "git_blob": "5ff01d00fb698c76a46084c9a6aa755f9a3c052f",
+      "sha256": "4051c768e7eebc552816d9f5c6f50ca3dd61242058e113898def21b79b50041d"
+    },
+    "crates/talk-core/src/ui.rs": {
+      "git_blob": "205b734ea83e6542a3fc2c6d0ecf8aa8d8cc4964",
+      "sha256": "becbd8593139e92273816dbaab7a27322f4cd3e6aeb1f68a6e1074f7f686aec2"
+    },
+    "crates/talk-core/tests/contracts.rs": {
+      "git_blob": "afb2304f4fc65638f18776c8bf3ebd66d824fe62",
+      "sha256": "f53f0fd370faea2f2e80d33007857e303f072c25b3a4b24fc1358ed06e34f0c0"
+    },
+    "docs/architecture/README.md": {
+      "git_blob": "6d5954d8a189a76967d9ec3135810091727761bc",
+      "sha256": "2dd9c499c76baaf9da18bb2e5273efdfa85c14005233f26d23d4557b3fd74357"
+    },
+    "docs/architecture/decisions/001-native-ui.md": {
+      "git_blob": "8c6d8cea39e9d3da63bd3157c1900331311f889a",
+      "sha256": "d02ed80ddb841916aec1ecb4cb73c5342b2c4372356c4f6f7af13f91abdd93cf"
+    },
+    "docs/architecture/decisions/002-deep-modules.md": {
+      "git_blob": "ac302927a44a12f7f07f32bac519956d7392bf32",
+      "sha256": "238a2f6e028511606cd0312ff2845f9426d7c5dd71b8dfa19b48b6369e32935c"
+    },
+    "docs/architecture/decisions/003-credential-lifecycle.md": {
+      "git_blob": "76096a27577f7cc4ceedf180a5e0e872ba9e097a",
+      "sha256": "a09b1f51faa9e6e6dc40edd1ce4895819ccc38103c9b2229ea39369f7426bccd"
+    },
+    "docs/architecture/decisions/004-policy-media-lifecycle.md": {
+      "git_blob": "e08820daa3a6c474549f6a0026f299ebaa6a4b5c",
+      "sha256": "15684c226633b9666c808e2e6f14df2cdf6539c21e0427630b4d5d48c83892ac"
+    },
+    "docs/architecture/measurement.md": {
+      "git_blob": "2634e994524bdea00759c360992f9c96eab66e51",
+      "sha256": "25b3df210dee7ecb807c8f2a3575f5bd2dcce66f615f2bffc6752e82ff82981e"
+    },
+    "docs/development.md": {
+      "git_blob": "c4cfef7ed20226114d47b43ce7bc707c4dec7886",
+      "sha256": "f3b798f6421babb37369ac1ebe16725725201985a79f3087f1543e2e772d2417"
+    },
+    "docs/quality/performance.md": {
+      "git_blob": "001fad0b9c8405c5c25073bb684678d2048e010d",
+      "sha256": "89ef72053f3a2333b642bb9f1d4c0cbaf79d4f26e02b32892740797ca0e1523f"
+    },
+    "docs/quality/security.md": {
+      "git_blob": "09ec9c9c938c019293817a2a56a5e7bfede19308",
+      "sha256": "4b7506eb4a3ac318752d68548db5d817bd9811ace86de7fbc87250c214ec1691"
+    },
+    "docs/quality/verification.md": {
+      "git_blob": "a78b3fcb09f9392634f3acd66f2ddfd640cec606",
+      "sha256": "e4c60ce8e61896003a340e69e073eb6b22acdab3dbd2022a94547d29d5b8561a"
+    },
+    "docs/quality/workload-manifest-template.md": {
+      "git_blob": "097b1744ef850f638ababf0ec0e4bc436f48f58c",
+      "sha256": "c1d0e53f496fe51dba5a2870565aeb550fdc6a1fad90de3b54434382452daba4"
+    },
+    "docs/reviews/bootstrap-integration-r1.md": {
+      "git_blob": "e3c1f441535360d02b660e8b9f92b68d7b3bb189",
+      "sha256": "362f66aa452200836b8063fbb3b9d740ad5eef42ed495644fddcf09f387d46b3"
+    },
+    "docs/reviews/design-spec-review-r2.md": {
+      "git_blob": "bd1eeec470ad45d502728bf4f3089ce2a2b8df98",
+      "sha256": "ad6de23864c92fc8f8cc8d784a81558d43419efda5ea9915821d9d9061055761"
+    },
+    "docs/reviews/evidence/bootstrap-integration-r1.json": {
+      "git_blob": "ca2061c8bb1de30fcad4c052aa96a1cad47e5967",
+      "sha256": "29015f8a62dbbe24e057c078f511762d9cb10ce46222298169d8a31933d212aa"
+    },
+    "docs/reviews/product-spec-review-r2.md": {
+      "git_blob": "c944872f52ef462f30329b108e1eed8af83620ae",
+      "sha256": "5f58fa1954d172ae18c50b5cececb49f5d1026c85ca9820a7323d50d826173f6"
+    },
+    "docs/reviews/quality-spec-review-r2.md": {
+      "git_blob": "6c339dfde0db63f4a1b371139938d4d6d0a049a7",
+      "sha256": "9f64f886fbc289998e357c38f3db71e58ca0886518547cc691fdd204380750b2"
+    },
+    "docs/status.md": {
+      "git_blob": "d31b218de4196b02dc5eb7413e581838b0ffbb1d",
+      "sha256": "721b13aaafec669d8b1697e970ba00a4254e782668a31835b44af8e35e3eba78"
+    },
+    "docs/testing/backend-smoke-2026-10-18.md": {
+      "git_blob": "c866b3b47ea5a139465a97892e7b6ebe69815aad",
+      "sha256": "1d3f87b0f0162f69c1260dc2c47f46b4d11aecbf336b3b2a38b9cea2e5340614"
+    },
+    "docs/testing/evidence/backend-smoke.json": {
+      "git_blob": "ae280cfe67f366352ac7dbbce4382e2e39aba0d1",
+      "sha256": "6b85d61c3a1957b67a30fb710a46f21d96cd2f9dd0d7f43b526df13a4221d84d"
+    },
+    "docs/testing/evidence/lifecycle.json": {
+      "git_blob": "69257b85e445f27005bdefd31a4ad888b5629f71",
+      "sha256": "6715fa225151e46d9e342eb4afab754e63e06749cd25f9ad92be00ac47ff7445"
+    },
+    "docs/testing/evidence/post-cleanup.json": {
+      "git_blob": "b2f880e9fb6d3974d9ad6a708b7231178062d1d4",
+      "sha256": "72c4a97e036b23aed71f45508edb8cd1a3319207a363f9dd93203348ad73a858"
+    },
+    "rust-toolchain.toml": {
+      "git_blob": "57ef39fe93d7c441367e8dc3e5d2956d07289a5a",
+      "sha256": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1"
+    },
+    "tests/lab/README.md": {
+      "git_blob": "172e805fbfa93c32bb0e83bd02b9117c11dd73b8",
+      "sha256": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00"
+    },
+    "tests/lab/cleanup.sh": {
+      "git_blob": "3a7b266b87d57999d7dd171525a0728c4f16d474",
+      "sha256": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132"
+    },
+    "tests/lab/lab.py": {
+      "git_blob": "8727f5954c00457681d8e0eeccbfee98056314ee",
+      "sha256": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678"
+    },
+    "tests/lab/pins.json": {
+      "git_blob": "6471150bc193507bbf1540fed8eb7212db547567",
+      "sha256": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016"
+    },
+    "tests/lab/reprovision.sh": {
+      "git_blob": "ac122feb03e9b5e4295064161e49f82ee4a4bfe9",
+      "sha256": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36"
+    }
+  },
+  "specification_report_continuation": "d1522594fc16ea884c436e73fe08b0fdabc4a14f",
+  "static_policy_arithmetic": {
+    "D_ms": 3000,
+    "E_ms": 250,
+    "F_ms": 15000,
+    "R_max_ms": 10000,
+    "S_ms": 2000,
+    "S_plus_R_plus_D_ms": 15000,
+    "commit_to_publication_bound_if_qualified_ms": 15250,
+    "commit_to_release_bound_if_qualified_ms": 16000,
+    "control_envelope_KiB_per_minute_per_call": 512,
+    "control_envelope_bits_per_second_combined": 69905.06666666667,
+    "estimated_control_KiB_per_minute_per_call": 322,
+    "estimated_control_bits_per_second_combined": 43963.73333333333,
+    "lease_lifetime_from_request_start_ms": 13000,
+    "requests_per_minute_max_per_call": 35,
+    "result": "Arithmetic inspected; no source, deadline, traffic, CPU or wakeup guarantee measured.",
+    "round_KiB": 46,
+    "rounds_per_minute_max": 7
+  },
+  "static_review_tools": {
+    "architecture": "x86_64",
+    "git": "git version 2.47.3",
+    "os": "Linux",
+    "python": "3.13.5"
+  },
+  "tracked_changes_at_capture": [],
+  "untracked_state": "Distinct concurrent reviewer outputs excluded from exact candidate and never treated as candidate source changes."
+}

@@ -1,0 +1,26 @@
+{
+  "transport": "agent-dev-box exec; explicit base64/gzip allowlisted review evidence transfer",
+  "compressed_bundle_sha256": "037b0ee73a9b07e9f81ba153f2be9c94adcabb2f54473ffcf8b08be5e72eb07e",
+  "files": {
+    "backend-after.json": "6230c8f3c5ccb1aa58cf8ef3c2cdbf5aa9517013fc92fd0d6ef3e1651175ee14",
+    "backend-before.json": "9cd8e3bd439f7d2b2890bd2b9e43f7236a3a92393441c867d10a290fe714838d",
+    "backend-binding.json": "af7a71134da7d3e7dbad02c3285041a4cab2e2b3045182adf5d5b3992348829b",
+    "backend-command.json": "0ecce40ba75f24d08523e6b3ef4ff77551d9be474f58f1a8b18c19c00041b870",
+    "backend-report.json": "6874334d2fec5fc56ad1bf82ef48496746277c43c00d538bc1263dc26263603f",
+    "bootstrap-checks.json": "46d8490c83187e4a653816650a06c899d83a7536fd453f4fc6322ff1c682e515",
+    "build-artifact.json": "a79db5d69cde33bcfa44ecfb63d22110bd093add155f3df1171acdeebc7457d6",
+    "checker-fixtures.json": "bd55c88a21a0ec9f8177b349d4d9a190989b690725dd98a00f7c319263eaaca4",
+    "cleanup.json": "4c394b837b88d788ce245fa9107dc666914e918dbf2710b98c1afe186b9eb3ee",
+    "docs-missing-file-recheck.json": "e747569ee6ca5cb8dce177d0a08cd3c71294997231f12c9cc8155561d01e629c",
+    "renderer-consumer.json": "0a18ee74487483c25f5e58b028900d296136f77202218fee6073f17be7ce9556",
+    "source-after-checks-and-fixtures.json": "335f38b48d71ffa23eafb3e2e5130a89989dabfe2426973547c2b2b4f7b82b28",
+    "source-before.json": "335f38b48d71ffa23eafb3e2e5130a89989dabfe2426973547c2b2b4f7b82b28",
+    "source-final.json": "00aefc09facd578e979c96376fef7a75f620903bf631d041fb6b71e4c3de7d3c",
+    "toolchain.json": "591109357da58496efef16f0876be461fbe782a012cd9eb782c9f6526f76c959",
+    "traceability-final.json": "5060ac5aebab842e0445a34f346a3e7e1de7e405ec02203efd978519fb814a48",
+    "traceability-recheck.json": "d6f74cf48de6d72f6e3d0135d813ac2baa8454219ca534490d2f5651467f05a1",
+    "traceability.json": "d251302e78e76753fd8a1aee9fee05f77af458eef66828f4da93152aed5808fd",
+    "unconfigured-probe.json": "30342b5d79d6b8d707e44c75e4a717e83841fe3ea69e3940230a82c7eaf3ce7b"
+  },
+  "all_file_hashes_verified": true
+}

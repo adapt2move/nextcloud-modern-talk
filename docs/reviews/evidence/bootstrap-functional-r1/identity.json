@@ -1,0 +1,28 @@
+{
+  "commit": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+  "tree": "36133a4336cab291ca174ec9890b9a61c32ce599",
+  "archive_sha256": "989d3d14c3d411763f821fd3c6eb57cc3743f69162e79017b96dabd538daa4bd",
+  "archive_bytes": 16650240,
+  "manifest_sha256": "aeb94bc07f3fba32b8024b472af57659ca36d5049c1caa6f19e2fe1d3447c684",
+  "tracked_files": 158,
+  "bases": {
+    "c1cc08ee03ef154c495a20ad0d6c220a1889a3df": {
+      "tree": "4e125fbebbead40723db65306b9a2da1d5b0bac3",
+      "diff_name_status": "M\tdocs/design/artifacts.md\nM\tdocs/status.md\n"
+    },
+    "d55f39613337f0172b5c209235ae2f43b154a31d": {
+      "tree": "5f3e3e401079243832652889e626174f0bf0db9c",
+      "diff_name_status": "M\tdocs/design/artifacts.md\nA\tdocs/reviews/bootstrap-integration-r1.md\nA\tdocs/reviews/evidence/bootstrap-integration-r1.json\nM\tdocs/status.md\n"
+    },
+    "d1522594fc16ea884c436e73fe08b0fdabc4a14f": {
+      "tree": "626f470776770430e681cab6b66979eb3bda0b4b",
+      "diff_name_status": "A\t.github/PULL_REQUEST_TEMPLATE.md\nA\t.github/workflows/ci.yml\nA\t.gitignore\nA\tAGENTS.md\nA\tCONTRIBUTING.md\nA\tCargo.lock\nA\tCargo.toml\nA\tREADME.md\nA\tSECURITY.md\nA\tapps/bootstrap/Cargo.toml\nA\tapps/bootstrap/src/main.rs\nA\tapps/bootstrap/src/presentation.rs\nA\tcrates/talk-adapters/Cargo.toml\nA\tcrates/talk-adapters/src/identity.rs\nA\tcrates/talk-adapters/src/lib.rs\nA\tcrates/talk-adapters/src/media.rs\nA\tcrates/talk-adapters/src/nextcloud.rs\nA\tcrates/talk-core/Cargo.toml\nA\tcrates/talk-core/src/application.rs\nA\tcrates/talk-core/src/bounded.rs\nA\tcrates/talk-core/src/identity.rs\nA\tcrates/talk-core/src/ids.rs\nA\tcrates/talk-core/src/lib.rs\nA\tcrates/talk-core/src/lifecycle.rs\nA\tcrates/talk-core/src/policy.rs\nA\tcrates/talk-core/src/ports.rs\nA\tcrates/talk-core/src/ui.rs\nA\tcrates/talk-core/tests/contracts.rs\nA\tdocs/README.md\nA\tdocs/architecture/README.md\nA\tdocs/architecture/decisions/001-native-ui.md\nA\tdocs/architecture/decisions/002-deep-modules.md\nA\tdocs/architecture/decisions/003-credential-lifecycle.md\nA\tdocs/architecture/decisions/004-policy-media-lifecycle.md\nA\tdocs/architecture/measurement.md\nA\tdocs/architecture/source-evidence.md\nM\tdocs/design/artifacts.md\nA\tdocs/development.md\nA\tdocs/reviews/bootstrap-integration-r1.md\nA\tdocs/reviews/evidence/bootstrap-integration-r1.json\nA\tdocs/status.md\nA\tdocs/testing/README.md\nA\tdocs/testing/backend-smoke-2026-10-18.md\nA\tdocs/testing/evidence/attempt-1.json\nA\tdocs/testing/evidence/attempt-2.json\nA\tdocs/testing/evidence/attempt-3.json\nA\tdocs/testing/evidence/backend-smoke.json\nA\tdocs/testing/evidence/lifecycle.json\nA\tdocs/testing/evidence/post-cleanup.json\nA\trust-toolchain.toml\nA\trustfmt.toml\nA\ttests/lab/README.md\nA\ttests/lab/cleanup.sh\nA\ttests/lab/lab.py\nA\ttests/lab/pins.json\nA\ttests/lab/reprovision.sh\nA\ttools/check_architecture.py\nA\ttools/check_docs.py\n"
+    },
+    "adfb44a2aab2e29ba6574c9dacc09475c534bccf": {
+      "tree": "ed92146c92d6b067fd95d09a4bf884ed28dad48f",
+      "diff_name_status": "A\t.github/PULL_REQUEST_TEMPLATE.md\nA\t.github/workflows/ci.yml\nA\t.gitignore\nA\tAGENTS.md\nA\tCONTRIBUTING.md\nA\tCargo.lock\nA\tCargo.toml\nA\tREADME.md\nA\tSECURITY.md\nA\tapps/bootstrap/Cargo.toml\nA\tapps/bootstrap/src/main.rs\nA\tapps/bootstrap/src/presentation.rs\nA\tcrates/talk-adapters/Cargo.toml\nA\tcrates/talk-adapters/src/identity.rs\nA\tcrates/talk-adapters/src/lib.rs\nA\tcrates/talk-adapters/src/media.rs\nA\tcrates/talk-adapters/src/nextcloud.rs\nA\tcrates/talk-core/Cargo.toml\nA\tcrates/talk-core/src/application.rs\nA\tcrates/talk-core/src/bounded.rs\nA\tcrates/talk-core/src/identity.rs\nA\tcrates/talk-core/src/ids.rs\nA\tcrates/talk-core/src/lib.rs\nA\tcrates/talk-core/src/lifecycle.rs\nA\tcrates/talk-core/src/policy.rs\nA\tcrates/talk-core/src/ports.rs\nA\tcrates/talk-core/src/ui.rs\nA\tcrates/talk-core/tests/contracts.rs\nA\tdocs/README.md\nA\tdocs/architecture/README.md\nA\tdocs/architecture/decisions/001-native-ui.md\nA\tdocs/architecture/decisions/002-deep-modules.md\nA\tdocs/architecture/decisions/003-credential-lifecycle.md\nA\tdocs/architecture/decisions/004-policy-media-lifecycle.md\nA\tdocs/architecture/measurement.md\nA\tdocs/architecture/source-evidence.md\nM\tdocs/design/artifacts.md\nA\tdocs/development.md\nA\tdocs/reviews/bootstrap-integration-r1.md\nA\tdocs/reviews/evidence/bootstrap-integration-r1.json\nA\tdocs/reviews/product-spec-review-r2.md\nA\tdocs/status.md\nA\tdocs/testing/README.md\nA\tdocs/testing/backend-smoke-2026-10-18.md\nA\tdocs/testing/evidence/attempt-1.json\nA\tdocs/testing/evidence/attempt-2.json\nA\tdocs/testing/evidence/attempt-3.json\nA\tdocs/testing/evidence/backend-smoke.json\nA\tdocs/testing/evidence/lifecycle.json\nA\tdocs/testing/evidence/post-cleanup.json\nA\trust-toolchain.toml\nA\trustfmt.toml\nA\ttests/lab/README.md\nA\ttests/lab/cleanup.sh\nA\ttests/lab/lab.py\nA\ttests/lab/pins.json\nA\ttests/lab/reprovision.sh\nA\ttools/check_architecture.py\nA\ttools/check_docs.py\n"
+    }
+  },
+  "local_tracked_diff_before": "",
+  "local_tracked_status_before": ""
+}
