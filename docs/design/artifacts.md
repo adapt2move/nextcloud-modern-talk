@@ -29,6 +29,8 @@ The inherited material came from the project's original 18-view blue/sage design
 - **D-S14/15/17:** Preset/discovery wording now distinguishes opening a conversation from deliberate call entry. Both palettes have updated captures.
 - **Galleries:** D-S20 is added without renumbering D-S01–D-S19. Visible counts come from the data; obsolete current revision labels are removed. D-S13 → D-S19 remains the incoming direct-call route without prejoin.
 
+<a id="revision-05"></a>
+
 ## Revision 05 — historical
 
 Revision 05 had 19 views per palette. It changed incoming direct-call **Annehmen** to D-S19, with exactly Mara and Alex and no conference device check. The representative local intent is microphone on after authorization/required gates, camera off. Four-person conferences remained separate. Those incoming/direct-call PNGs are retained unchanged in revision 06. The [independent round 1 review](../reviews/design-spec-review.md) accepted that artifact-level distinction and requested the subsequent voice/context/gallery corrections.

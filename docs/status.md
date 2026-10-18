@@ -2,14 +2,14 @@
 
 Last integrated: **2026-10-18**. This records authored bootstrap scope and preliminary integrator execution, not an independent approval or a release claim. Infrastructure-only change: **no product feature status change; all 140 remain Planned**.
 
-[Integration round 1](reviews/bootstrap-integration-r1.md) binds source commit `d55f39613337f0172b5c209235ae2f43b154a31d` to the committed-source rerun, all five backend harness hashes, sanitized command evidence and open finding BI-001. Its C2 continuation changes only reports/evidence and this IST link; independent reviewers must inspect final HEAD.
+[Integration round 1](reviews/bootstrap-integration-r1.md) binds source commit `d55f39613337f0172b5c209235ae2f43b154a31d` to the committed-source rerun, all five backend harness hashes, sanitized command evidence and the original BI-001 finding. Its C2 continuation changes only reports/evidence and this IST link; independent reviewers must inspect final HEAD.
 
 ## Gate state
 
 | Gate | State and evidence |
 | --- | --- |
 | `G.SPEC` | PM accepted the independently passed specification input `adfb44a2aab2e29ba6574c9dacc09475c534bccf`, with report-only continuation `d1522594fc16ea884c436e73fe08b0fdabc4a14f`. [Product round 2](reviews/product-spec-review-r2.md) carries the accepted quality/design evidence. |
-| `G.BOOT` | **Pending; not approved.** Preliminary integration checks ran on the assigned development VM. Rust/architecture checks passed after explicit formatting; the documentation check has the open historical-link failure below. Independent checker fixtures, all four reviews, final-candidate confirmation and PM acceptance remain pending. |
+| `G.BOOT` | **Pending; not approved.** Preliminary integration checks ran on the assigned development VM. Rust/architecture checks passed after explicit formatting; the BI-001 documentation-link correction below awaits independent executed verification. Independent checker fixtures, all four reviews, final-candidate confirmation and PM acceptance remain pending. |
 | `G.PRODUCT`, `G.RELEASE` | Not reached. Full implementation waits for PM acceptance of `G.BOOT`. |
 
 ## Present versus absent
@@ -34,7 +34,9 @@ The original architecture author did not execute builds or tests. The integrator
 
 The initial format check failed in `crates/talk-core/src/ui.rs` and `crates/talk-core/tests/contracts.rs`. Explicit VM `cargo fmt --all` changed layout/trailing commas only; the resulting files were copied back and hash-verified locally, and the format recheck passed. The first retrieval attempt encountered an automatic source upload that restored the unformatted local bytes; formatting and export were repeated within one VM job. No interface or behavior was redesigned. The lockfile needed no correction. Exact committed-source reruns and artifact identities belong in the integration report; these are author/integration evidence only.
 
-**Open integration finding BI-001:** `python3 tools/check_docs.py` exits 1 because [historical design review](reviews/design-spec-review.md), line 46, links to `../design/artifacts.md#revision-05`, while the preserved target now has heading “Revision 05 — historical” and no `revision-05` anchor. The initial scan reported 55 Markdown files, 629 local references and this one error. Both files predate the bootstrap. They remain unchanged under the accepted-baseline/history preservation requirement; the checker was not weakened or bypassed. PM must assign a separately authorized correction and independent recheck before claiming a complete bootstrap-check pass.
+**Integration finding BI-001 — fixed pending verification:** The initial `python3 tools/check_docs.py` scan exited 1 (55 Markdown files, 629 local references, one error): [historical design review](reviews/design-spec-review.md), line 46, links to `../design/artifacts.md#revision-05`, while the target heading is “Revision 05 — historical”. The PM-authorized correction adds `<a id="revision-05"></a>` immediately before that unchanged heading in `docs/design/artifacts.md`. Historical review texts and evidence, screenshots and accepted product/design semantics remain unchanged; the checker was not weakened or bypassed.
+
+Static source inspection confirmed that the existing checker recognizes explicit HTML `id` anchors. This author ran no project checks, negative fixtures, builds, services or VM lifecycle operations. The dedicated independent verifier must execute `python3 tools/check_docs.py` and its negative fixture against the resulting committed candidate before BI-001 is closed. `G.BOOT` remains pending; **no product feature status change; all 140 remain Planned**.
 
 Before accepting this bootstrap: resolve BI-001 and review findings, independently rerun the canonical checks and checker negative fixtures, confirm exact candidate/artifact/toolchain identities, complete architecture/module, function/compatibility, performance and coarse-security reviews, and obtain PM acceptance. Negative fixtures were deliberately not run by the integrator. The formatting correction's resulting bytes still need independent review. No author self-approval is recorded.
 
