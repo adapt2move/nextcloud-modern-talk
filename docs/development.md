@@ -2,8 +2,9 @@
 
 Read [current state](status.md), the [architecture](architecture/README.md) and
 [contributor process](../CONTRIBUTING.md) first. The bootstrap provides contracts
-and maintenance infrastructure. Product work starts only after the manager's
-`G.BOOT` acceptance; the [ordered gates](quality/verification.md#qver-01--ordered-gates)
+and maintenance infrastructure. The manager's [exact-source `G.BOOT` acceptance](reviews/bootstrap-acceptance.md)
+permits a later delegated product increment; this documentation publication starts
+none. The [ordered gates](quality/verification.md#qver-01--ordered-gates) continue to
 govern changes and public claims.
 
 ## Environment and toolchain

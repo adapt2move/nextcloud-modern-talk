@@ -1,0 +1,104 @@
+{
+  "scope": "Independently retrieved existing GitHub CI status/logs. No check was run or rerun by this reviewer. Workflow does not run the diagnostic, supplemental boundary runner or author probe.",
+  "observed_at_utc": "2026-10-18T18:01:58.779637+00:00",
+  "run": {
+    "id": 39150907632,
+    "head_sha": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+    "head_branch": "main",
+    "status": "completed",
+    "conclusion": "success",
+    "event": "push",
+    "run_attempt": 1,
+    "created_at": "2026-10-18T17:43:39Z",
+    "updated_at": "2026-10-18T17:43:59Z",
+    "html_url": "https://github.com/adapt2move/nextcloud-modern-talk/actions/runs/39150907632",
+    "path": ".github/workflows/ci.yml"
+  },
+  "jobs": [
+    {
+      "id": 117744177812,
+      "name": "Documentation and Rust contracts (Linux)",
+      "conclusion": "success",
+      "labels": [
+        "ubuntu-24.04"
+      ],
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out candidate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check documentation and architecture",
+          "conclusion": "success"
+        },
+        {
+          "name": "Select the repository's pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install and identify the pinned toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check formatting",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check workspace targets",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint workspace targets",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run workspace and documentation tests",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out candidate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "log_retrieval_command": "gh run view 39150907632 --repo adapt2move/nextcloud-modern-talk --log",
+  "retrieved_log_sha256": "242264b2fe26f48c17152a0991057240bec18923f4d21ccd6cd3a07b0545edeb",
+  "retrieved_log_bytes": 50847,
+  "relevant_log_lines": [
+    "Documentation and Rust contracts (Linux)\tCheck documentation and architecture\t2026-10-18T17:43:46.0696821Z Python 3.12.3",
+    "Documentation and Rust contracts (Linux)\tCheck documentation and architecture\t2026-10-18T17:43:46.3588660Z Documentation: 64 Markdown files, 779 local references, 0 non-document fragments unchecked, 0 errors.",
+    "Documentation and Rust contracts (Linux)\tCheck documentation and architecture\t2026-10-18T17:43:46.4146467Z architecture: reviewed bootstrap dependency and boundary rules hold",
+    "Documentation and Rust contracts (Linux)\tInstall and identify the pinned toolchain\t2026-10-18T17:43:55.4225234Z   1.99.1-x86_64-unknown-linux-gnu installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "Documentation and Rust contracts (Linux)\tInstall and identify the pinned toolchain\t2026-10-18T17:43:55.4371188Z rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "Documentation and Rust contracts (Linux)\tInstall and identify the pinned toolchain\t2026-10-18T17:43:55.4372865Z commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67",
+    "Documentation and Rust contracts (Linux)\tInstall and identify the pinned toolchain\t2026-10-18T17:43:55.4459445Z cargo 1.99.1 (5f94df478 2026-08-27)",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5198950Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5214765Z test authenticated_and_post_cancellation_maintenance_paths_never_fake_success ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5215989Z test fresh_account_and_cold_restore_have_no_runtime_input_and_remain_unconfigured ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5218824Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5228808Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5241752Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5260923Z test abandonment_cleanup_never_deletes_a_retained_item_or_trusts_early_absence ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5267007Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5280260Z test abandonment_rejects_a_mixed_account_or_wrong_previous_generation ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5281457Z test explicit_retention_can_acknowledge_only_named_p_and_cancel_does_not_infer_it ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5282781Z test late_settlement_cleanup_and_plain_suppression_cannot_be_activation_receipts ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5285861Z test receipt_cannot_pass_attempt_cancellation_deadline_or_changed_identity ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5287099Z test maintenance_is_bounded_after_runtime_closure_and_scoped_to_one_account ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5288461Z test uncertain_n_session_only_needs_the_exact_committed_suppression_ack ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5289749Z test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5296207Z test bounded_snapshot_decisions_persistence_and_typed_intents_are_public ... ok",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5297280Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5421455Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "Documentation and Rust contracts (Linux)\tRun workspace and documentation tests\t2026-10-18T17:43:56.5732968Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ]
+}

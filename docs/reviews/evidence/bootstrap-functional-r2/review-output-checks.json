@@ -1,0 +1,45 @@
+{
+  "candidate_manifest_file_count": 219,
+  "candidate_worktree_mismatches": [],
+  "checked_at_utc": "2026-10-18T18:09:02.601194+00:00",
+  "current_head": {
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "54cde8e317ed0ea98d88255b9f12cb9a1151229b\n"
+  },
+  "json_evidence_files_parse": true,
+  "missing_local_paths": [],
+  "operational_scope": "No VM command, session mutation, hibernation attempt, project execution, commit or push performed. Only assigned new report/evidence written.",
+  "report_local_link_occurrences": 41,
+  "report_whitespace_check": {
+    "argv": [
+      "git",
+      "diff",
+      "--no-index",
+      "--check",
+      "/dev/null",
+      "docs/reviews/bootstrap-functional-review-r2.md"
+    ],
+    "exit_code": 1,
+    "stderr": "",
+    "stdout": ""
+  },
+  "scope": "Reviewer output integrity/source continuity only; no project checker, test or application run.",
+  "tracked_status": {
+    "argv": [
+      "git",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=no"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  "whitespace_check_interpretation": "No diagnostics; git diff --no-index exit 1 reflects an added file relative to /dev/null, not a test failure."
+}

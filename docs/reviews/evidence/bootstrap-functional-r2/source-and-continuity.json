@@ -1,0 +1,547 @@
+{
+  "accepted_continuation_changed_paths": [
+    "docs/design/artifacts.md"
+  ],
+  "accepted_continuation_existing_files": 101,
+  "accepted_spec": "adfb44a2aab2e29ba6574c9dacc09475c534bccf",
+  "accepted_spec_continuation": "d1522594fc16ea884c436e73fe08b0fdabc4a14f",
+  "archive_matches_requested": {
+    "54cde8e317ed0ea98d88255b9f12cb9a1151229b": true,
+    "d11d99131d63e5fded7de6e0a7f6c7fb8f473913": true
+  },
+  "archive_sha256": {
+    "54cde8e317ed0ea98d88255b9f12cb9a1151229b": "d2c647058e4e8073939086ea0558aeafabb88a0e5fc04ad90cf003ff36d0a9af",
+    "d11d99131d63e5fded7de6e0a7f6c7fb8f473913": "2ce839ff80315aa7adcbf8266cb799fec1f4b11bb8a3ee78f919f5fcb581eebd"
+  },
+  "author_source_manifest": {
+    "all_recorded_exits_zero": true,
+    "all_rows_modes_hashes_and_path_order_match": true,
+    "file_count": 216,
+    "final_source_matches": true,
+    "matches_before_after_all_ten_records": true,
+    "provenance": "Author execution, independently bound and inspected; no author run relabelled as reviewer execution.",
+    "recomputed_sha256": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc"
+  },
+  "backend_carry_forward": {
+    "carry_forward_reason": "All five harness/support bytes and release/profile pins identical; candidate changes contracts and documentation, no network/backend adapter behavior implemented.",
+    "matches_prior_binding": true,
+    "prior_candidate": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+    "profiles": {
+      "r34": {
+        "assertion_counts": {
+          "not applicable": 1,
+          "pass": 96
+        },
+        "backend_versions": {
+          "php": "8.5.11",
+          "sqlite": "3.46.1"
+        },
+        "http_operations": 25,
+        "observed_nc": "34.0.5.1",
+        "observed_talk": "24.0.6",
+        "pins": {
+          "admin_presets": [
+            "default",
+            "forced",
+            "presentation",
+            "voiceroom",
+            "webinar"
+          ],
+          "image": "docker.io/library/nextcloud@sha256:ec9d2572e94dd5eb2a2cbaff010cb1f1448bdf167f60597b9adcc89f601bdff1",
+          "image_tag_reference_only": "docker.io/library/nextcloud:34.0.5-apache",
+          "index_digest_reference_only": "sha256:6d69b9052afab060afe8d004e9b00820f95a040b42db967b31eef9a48661e8bc",
+          "nextcloud_version": "34.0.5",
+          "regular_presets": [
+            "default",
+            "forced",
+            "presentation",
+            "voiceroom",
+            "webinar"
+          ],
+          "release_source_commit": "0d736588dcfb42becf0e5688e0847e35d5b5efa2",
+          "talk_sha256": "4a8d5cf52ed42223ea9937860f70c2e9dca1df8bfd5f75b871ae7569d2106110",
+          "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v24.0.6/spreed-v24.0.6.tar.gz",
+          "talk_version": "24.0.6"
+        }
+      },
+      "r35": {
+        "assertion_counts": {
+          "pass": 111
+        },
+        "backend_versions": {
+          "php": "8.5.11",
+          "sqlite": "3.46.1"
+        },
+        "http_operations": 30,
+        "observed_nc": "35.0.2.2",
+        "observed_talk": "25.0.6",
+        "pins": {
+          "admin_presets": [
+            "announcement",
+            "channel",
+            "classified",
+            "default",
+            "forced",
+            "presentation",
+            "voiceroom",
+            "webinar"
+          ],
+          "image": "docker.io/library/nextcloud@sha256:74c22796c8ff5537dd564394b47951cb90e4aa5e0f11467d062c539bb036bc35",
+          "image_tag_reference_only": "docker.io/library/nextcloud:35.0.2-apache",
+          "index_digest_reference_only": "sha256:a588aa5353703b44106a6129adaaf7bf22521b7a4754f9f529b3228d6aa390c5",
+          "nextcloud_version": "35.0.2",
+          "regular_presets": [
+            "channel",
+            "classified",
+            "default",
+            "forced",
+            "presentation",
+            "voiceroom",
+            "webinar"
+          ],
+          "release_source_commit": "eed360d176edcb6888dad60965cb694e6bf62ae3",
+          "talk_sha256": "2b3e3eae42d9bf8ba8da2ab244d16347a3cfacbb8bff346bd99cf32cd6f9c65e",
+          "talk_url": "https://github.com/nextcloud-releases/spreed/releases/download/v25.0.6/spreed-v25.0.6.tar.gz",
+          "talk_version": "25.0.6"
+        }
+      }
+    },
+    "report_sha256": "6874334d2fec5fc56ad1bf82ef48496746277c43c00d538bc1263dc26263603f",
+    "rerun_in_round2": false,
+    "run_id": "nmtlab-20261018t165226z-c08d0f63",
+    "scope": "HTTP isolated-bridge CORE API smoke, SQLite, no media",
+    "source_files": {
+      "tests/lab/README.md": {
+        "matches_prior_binding": true,
+        "sha256": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+        "unchanged_from_round1": true
+      },
+      "tests/lab/cleanup.sh": {
+        "matches_prior_binding": true,
+        "sha256": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+        "unchanged_from_round1": true
+      },
+      "tests/lab/lab.py": {
+        "matches_prior_binding": true,
+        "sha256": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+        "unchanged_from_round1": true
+      },
+      "tests/lab/pins.json": {
+        "matches_prior_binding": true,
+        "sha256": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+        "unchanged_from_round1": true
+      },
+      "tests/lab/reprovision.sh": {
+        "matches_prior_binding": true,
+        "sha256": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36",
+        "unchanged_from_round1": true
+      }
+    },
+    "source_label_warning": "uncommitted bootstrap; bind these file hashes at review"
+  },
+  "candidate": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+  "candidate_content_manifest_sha256": "2a01b9615b5a21e65648467165e72dad5d51e2d5456541273fbc7fe24424eaca",
+  "candidate_file_count": 219,
+  "changed_round1_report_and_evidence_paths": [],
+  "commands": [
+    "git status --porcelain=v1 --untracked-files=no",
+    "git rev-parse HEAD HEAD^{tree}",
+    "git ls-tree -r -z COMMIT",
+    "git cat-file blob OID",
+    "git show COMMIT:PATH",
+    "git archive --format=tar COMMIT",
+    "SHA256(json.dumps(files, sort_keys=True).encode()) for path/sha256/executable rows in Git order"
+  ],
+  "continuation_added_paths": [
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-artifacts.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-boundary-fixtures.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-checks.json"
+  ],
+  "continuation_existing_changed_paths": [
+    "docs/reviews/bootstrap-remediation-r1.md",
+    "docs/status.md"
+  ],
+  "date_utc": "2026-10-18T18:01:33.296322+00:00",
+  "diffs": [
+    {
+      "base": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+      "candidate": "68e6f5299bae9deb234ed1ef0ab3976878796afe",
+      "changed_existing_paths": [
+        "README.md",
+        "SECURITY.md",
+        "docs/status.md"
+      ],
+      "command": "git diff --no-ext-diff --no-renames --full-index --binary 0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be 68e6f5299bae9deb234ed1ef0ab3976878796afe",
+      "name_status": [
+        "M\tREADME.md",
+        "M\tSECURITY.md",
+        "A\tdocs/reviews/bootstrap-architecture-review-r1.md",
+        "A\tdocs/reviews/bootstrap-functional-review-r1.md",
+        "A\tdocs/reviews/bootstrap-performance-review-r1.md",
+        "A\tdocs/reviews/bootstrap-security-review-r1.md",
+        "A\tdocs/reviews/evidence/bootstrap-architecture-r1/static-evidence.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/backend-after.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/backend-before.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/backend-binding.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/backend-command.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/backend-report.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/baseline-continuity.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/bootstrap-checks.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/build-artifact.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/candidate-manifest.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/candidate-vs-c2.diff",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/checker-fixtures.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/cleanup.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/docs-missing-file-recheck.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/evidence-manifest.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/final-transfer.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/finalize.py",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/identity.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/lifecycle.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/local-final-identity.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/renderer-consumer.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/renderer-consumer.py",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/run_backend.py",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/source-after-checks-and-fixtures.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/source-before.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/source-final.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/supplement.py",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/toolchain.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/trace-recheck.py",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/traceability-final.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/traceability-recheck.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/traceability.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/transfer.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/unconfigured-probe.json",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/unconfigured-probe.rs",
+        "A\tdocs/reviews/evidence/bootstrap-functional-r1/verify.py",
+        "A\tdocs/reviews/evidence/bootstrap-quality-r1/static-review.json",
+        "M\tdocs/status.md"
+      ],
+      "sha256": "a23f6a5989e7c236bccdda00dc2f98499c8151dcacbdfdafc446f413f4c736bf"
+    },
+    {
+      "base": "68e6f5299bae9deb234ed1ef0ab3976878796afe",
+      "candidate": "d11d99131d63e5fded7de6e0a7f6c7fb8f473913",
+      "changed_existing_paths": [
+        "README.md",
+        "crates/talk-adapters/src/identity.rs",
+        "crates/talk-core/src/identity.rs",
+        "crates/talk-core/src/ports.rs",
+        "crates/talk-core/src/ui.rs",
+        "docs/architecture/README.md",
+        "docs/architecture/decisions/001-native-ui.md",
+        "docs/architecture/decisions/002-deep-modules.md",
+        "docs/architecture/decisions/003-credential-lifecycle.md",
+        "docs/architecture/decisions/004-policy-media-lifecycle.md",
+        "docs/architecture/measurement.md",
+        "docs/architecture/source-evidence.md",
+        "docs/status.md",
+        "tools/check_architecture.py"
+      ],
+      "command": "git diff --no-ext-diff --no-renames --full-index --binary 68e6f5299bae9deb234ed1ef0ab3976878796afe d11d99131d63e5fded7de6e0a7f6c7fb8f473913",
+      "name_status": [
+        "M\tREADME.md",
+        "M\tcrates/talk-adapters/src/identity.rs",
+        "A\tcrates/talk-adapters/tests/unconfigured_identity.rs",
+        "M\tcrates/talk-core/src/identity.rs",
+        "M\tcrates/talk-core/src/ports.rs",
+        "M\tcrates/talk-core/src/ui.rs",
+        "A\tcrates/talk-core/tests/identity_boundary.rs",
+        "A\tcrates/talk-core/tests/presentation_boundary.rs",
+        "M\tdocs/architecture/README.md",
+        "M\tdocs/architecture/decisions/001-native-ui.md",
+        "M\tdocs/architecture/decisions/002-deep-modules.md",
+        "M\tdocs/architecture/decisions/003-credential-lifecycle.md",
+        "M\tdocs/architecture/decisions/004-policy-media-lifecycle.md",
+        "A\tdocs/architecture/decisions/005-native-media.md",
+        "A\tdocs/architecture/evidence/native-media-sources.json",
+        "M\tdocs/architecture/measurement.md",
+        "A\tdocs/architecture/media-allocation.md",
+        "M\tdocs/architecture/source-evidence.md",
+        "A\tdocs/reviews/bootstrap-remediation-r1.md",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/allocation-arithmetic.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/boundary-fixtures.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/initial-failures.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/preliminary-checks.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/provenance.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/toolchain.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/unconfigured-probe.rs",
+        "M\tdocs/status.md",
+        "A\ttests/contracts/README.md",
+        "A\ttests/contracts/presentation_consumer.rs",
+        "A\ttests/contracts/run_boundary_fixtures.py",
+        "M\ttools/check_architecture.py"
+      ],
+      "sha256": "f2a691fabd5814bc85a592225a239fe779c02ba327ebad82ed69df8c11ead89a"
+    },
+    {
+      "base": "d11d99131d63e5fded7de6e0a7f6c7fb8f473913",
+      "candidate": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+      "changed_existing_paths": [
+        "docs/reviews/bootstrap-remediation-r1.md",
+        "docs/status.md"
+      ],
+      "command": "git diff --no-ext-diff --no-renames --full-index --binary d11d99131d63e5fded7de6e0a7f6c7fb8f473913 54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+      "name_status": [
+        "M\tdocs/reviews/bootstrap-remediation-r1.md",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/committed-artifacts.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/committed-boundary-fixtures.json",
+        "A\tdocs/reviews/evidence/bootstrap-remediation-r1/committed-checks.json",
+        "M\tdocs/status.md"
+      ],
+      "sha256": "2b7b7163ec66b25a0386e7b80536e97fd2e85cd171314e3ea786a7b687192922"
+    }
+  ],
+  "head": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+  "method": "Host static Git/blob, SHA-256 and JSON inspection only. No project module, checker, fixture, test or service executed/imported. Writes confined to own evidence.",
+  "public_base": "68e6f5299bae9deb234ed1ef0ab3976878796afe",
+  "reviewer": "independent round-2 function/compatibility reviewer",
+  "round1_candidate": "0b6e94db7faa4bee3d2ae88a5d2da2a5567e05be",
+  "schema": 1,
+  "selected_input_hashes": {
+    ".github/workflows/ci.yml": {
+      "executable": false,
+      "path": ".github/workflows/ci.yml",
+      "sha256": "76e516942f8e81c5c08fc62d3e73a1b176c9632bde8a2951b689fa89b130385b"
+    },
+    "Cargo.lock": {
+      "executable": false,
+      "path": "Cargo.lock",
+      "sha256": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8"
+    },
+    "Cargo.toml": {
+      "executable": false,
+      "path": "Cargo.toml",
+      "sha256": "231943f9ba6c1c17f9045f6db39bf4df8e15948462bbdfad2d55d50627c251bb"
+    },
+    "apps/bootstrap/Cargo.toml": {
+      "executable": false,
+      "path": "apps/bootstrap/Cargo.toml",
+      "sha256": "7431f00e0153758eff9baf26e7891b15fe323d4f47e6456997a6a1ac250b0a8e"
+    },
+    "apps/bootstrap/src/main.rs": {
+      "executable": false,
+      "path": "apps/bootstrap/src/main.rs",
+      "sha256": "7d48c1e30c02acd6494ac2a3fcaa953a581f75b461cb2de1cd5e3f6c4f239dd7"
+    },
+    "apps/bootstrap/src/presentation.rs": {
+      "executable": false,
+      "path": "apps/bootstrap/src/presentation.rs",
+      "sha256": "168500895f05a8dc02ec1aba2f5caf55f8224a568278ea75ec645b5ca98572f9"
+    },
+    "crates/talk-adapters/Cargo.toml": {
+      "executable": false,
+      "path": "crates/talk-adapters/Cargo.toml",
+      "sha256": "324109105055fd93160ddacf366a2b7cdd62eee9b24450b60879df384996c1b9"
+    },
+    "crates/talk-adapters/src/identity.rs": {
+      "executable": false,
+      "path": "crates/talk-adapters/src/identity.rs",
+      "sha256": "02b9e2a8380fd727de269e978ae383f329e79112561c54a70d43127bda9c10a8"
+    },
+    "crates/talk-adapters/src/lib.rs": {
+      "executable": false,
+      "path": "crates/talk-adapters/src/lib.rs",
+      "sha256": "68a6242d4fc700c44cf389a5bb3904f6e96f05f244b2cb8f9ae0cda68d47ed71"
+    },
+    "crates/talk-adapters/src/media.rs": {
+      "executable": false,
+      "path": "crates/talk-adapters/src/media.rs",
+      "sha256": "2d1747792ed91c72a44d5acd80f0071f2334443775844592dd39c382f826e5fc"
+    },
+    "crates/talk-adapters/src/nextcloud.rs": {
+      "executable": false,
+      "path": "crates/talk-adapters/src/nextcloud.rs",
+      "sha256": "331d599793e78114a09d9f03ef7a99395d87367069da01a2e69cccbd19f6bcfc"
+    },
+    "crates/talk-adapters/tests/unconfigured_identity.rs": {
+      "executable": false,
+      "path": "crates/talk-adapters/tests/unconfigured_identity.rs",
+      "sha256": "4493156ce7003bdeee9cc8742f43818d9fd0918b389110b2268801b67b71a3b2"
+    },
+    "crates/talk-core/Cargo.toml": {
+      "executable": false,
+      "path": "crates/talk-core/Cargo.toml",
+      "sha256": "3db7fae3a2c1872e504a14fd1a69effa27b2e896d6d737133f1ca75af32f6a9e"
+    },
+    "crates/talk-core/src/application.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/application.rs",
+      "sha256": "bec44bd364fab470f4fe99d5f039fe98e26290170d2bab771c603c0cdfab4880"
+    },
+    "crates/talk-core/src/bounded.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/bounded.rs",
+      "sha256": "2f012cb7054feffc961622bd2c879872aee4d9c91d005fbf914378dd078fb425"
+    },
+    "crates/talk-core/src/identity.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/identity.rs",
+      "sha256": "7a83a5d5ea82e38523a8485598b79d16b0aec06863cb46e4b57f2ad867a0ac37"
+    },
+    "crates/talk-core/src/ids.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/ids.rs",
+      "sha256": "124e5ad03564974e5a5937dd65d1a172f43434fef651dac206c4cd7435f508be"
+    },
+    "crates/talk-core/src/lib.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/lib.rs",
+      "sha256": "24151457f0a0f92e4f49815d17a2aae9d72d39c5aae31e2e754f90d4b7f21735"
+    },
+    "crates/talk-core/src/lifecycle.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/lifecycle.rs",
+      "sha256": "44bf0f55075fb79e93871b91cabf43ffe2f1259ff38eebabdd41b3c42dd1c770"
+    },
+    "crates/talk-core/src/policy.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/policy.rs",
+      "sha256": "1f060650fdbd7174acd28bcd8b3f0b4bbf95a7520a156cb71035e55edcca3c7c"
+    },
+    "crates/talk-core/src/ports.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/ports.rs",
+      "sha256": "dbe218b781f5fd51976c7c6eb788d653d28ab932af243d4da88a94c1dac72107"
+    },
+    "crates/talk-core/src/ui.rs": {
+      "executable": false,
+      "path": "crates/talk-core/src/ui.rs",
+      "sha256": "4bfc81809cb5f925e889e9577a71541537178a653178630abff872f08e576e7f"
+    },
+    "crates/talk-core/tests/contracts.rs": {
+      "executable": false,
+      "path": "crates/talk-core/tests/contracts.rs",
+      "sha256": "f53f0fd370faea2f2e80d33007857e303f072c25b3a4b24fc1358ed06e34f0c0"
+    },
+    "crates/talk-core/tests/identity_boundary.rs": {
+      "executable": false,
+      "path": "crates/talk-core/tests/identity_boundary.rs",
+      "sha256": "b799b02cc3d2f89672229ded622e29b1a45237a2844bebd92ea01d9966b158bd"
+    },
+    "crates/talk-core/tests/presentation_boundary.rs": {
+      "executable": false,
+      "path": "crates/talk-core/tests/presentation_boundary.rs",
+      "sha256": "7cef4ae7e225009d1c0fe18a943948d7d36c400b00e70ce165b3023e4c6ab5e5"
+    },
+    "docs/architecture/decisions/003-credential-lifecycle.md": {
+      "executable": false,
+      "path": "docs/architecture/decisions/003-credential-lifecycle.md",
+      "sha256": "8d80872c91f30431e01bffbac6c90adf78b7b91d2e4d64d43378a8d1ab735287"
+    },
+    "docs/architecture/decisions/005-native-media.md": {
+      "executable": false,
+      "path": "docs/architecture/decisions/005-native-media.md",
+      "sha256": "8c21b117add042ea5d53372849d67a7e67ecf90b3a24a5b004ebe82562e68be1"
+    },
+    "docs/architecture/media-allocation.md": {
+      "executable": false,
+      "path": "docs/architecture/media-allocation.md",
+      "sha256": "6aab951a3d1f39117c50e0be9664876a006b6c06ccc9804b7b07137ff14a617d"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/allocation-arithmetic.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/allocation-arithmetic.json",
+      "sha256": "60850f9975dd022054bd465c700c822bb58328840c0fd4b600bd424661d931be"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/boundary-fixtures.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/boundary-fixtures.json",
+      "sha256": "a39010e2319a282970e412afd07f807f93e43fda6b8d704f28c1a8691d818444"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-artifacts.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/committed-artifacts.json",
+      "sha256": "b0a57d81d2c5eaa8d9b8d5ea9f87abf27ae2e106377d376f39008aeabff5f0f1"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-boundary-fixtures.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/committed-boundary-fixtures.json",
+      "sha256": "1c75846efc90fd4091f215a7aaffe417f6018d3e2f0dcd01ce24633dfde36fad"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-checks.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/committed-checks.json",
+      "sha256": "aa1b76824c905c0d6351711980a264e80482d3fe4e9240db79dd12963f232d14"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/initial-failures.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/initial-failures.json",
+      "sha256": "a9d6b654dbbdbc99afa9a98cdfd65bc4c34d761b66c15548f620b57fc35f908f"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/preliminary-checks.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/preliminary-checks.json",
+      "sha256": "080876931ab0a797e23b1a72d28d05300e75cf9b6fbc0afc40a72a74a23863e3"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/provenance.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/provenance.json",
+      "sha256": "12eeaa2a03f52373ec78585f2b976a95785abca6c8dc0d17b0a7c15381b5e7ce"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/toolchain.json": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/toolchain.json",
+      "sha256": "ead205ef2f380d2df920d9aed492867989420e16cdcf56edd1a50086e3129039"
+    },
+    "docs/reviews/evidence/bootstrap-remediation-r1/unconfigured-probe.rs": {
+      "executable": false,
+      "path": "docs/reviews/evidence/bootstrap-remediation-r1/unconfigured-probe.rs",
+      "sha256": "3d496bbcfee832c82467c539c66699d0afd9a6b18d3a87b9385943342b9bf5ba"
+    },
+    "rust-toolchain.toml": {
+      "executable": false,
+      "path": "rust-toolchain.toml",
+      "sha256": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1"
+    },
+    "rustfmt.toml": {
+      "executable": false,
+      "path": "rustfmt.toml",
+      "sha256": "f32d2f03b3f4b1e295c79ed49d543f1205c7dac7c3dc74f05a5a27af4fea0584"
+    },
+    "tests/contracts/README.md": {
+      "executable": false,
+      "path": "tests/contracts/README.md",
+      "sha256": "dfbe61dae8efdeb8da0c2cff1eb0e262770b70a0d7a2ec3ea60b506f6cc45c70"
+    },
+    "tests/contracts/presentation_consumer.rs": {
+      "executable": false,
+      "path": "tests/contracts/presentation_consumer.rs",
+      "sha256": "f5c84d5fcdeae8553b2c79d3e41ce0bfc355f4474f1e7c631c5a45c7bb2a555b"
+    },
+    "tests/contracts/run_boundary_fixtures.py": {
+      "executable": false,
+      "path": "tests/contracts/run_boundary_fixtures.py",
+      "sha256": "6879c100be0bb5f114f6011f7c774f8dd80e21d1de5bc638214bb809013460d5"
+    },
+    "tools/check_architecture.py": {
+      "executable": false,
+      "path": "tools/check_architecture.py",
+      "sha256": "cb160a160eec821602863dacad1fdac2009c7086d80acc174125dcf9afc996e8"
+    },
+    "tools/check_docs.py": {
+      "executable": false,
+      "path": "tools/check_docs.py",
+      "sha256": "6e35d9bb5e52b9b8eb2cfa8c84c37ed06e394f5b35f03ee1c34702523fe2f80b"
+    }
+  },
+  "source_commit": "d11d99131d63e5fded7de6e0a7f6c7fb8f473913",
+  "source_tree": "280feb50066965fa1eb995ecd77ad53baf7b0244",
+  "static_tools": {
+    "git": "git version 2.47.3",
+    "platform": "Linux x86_64",
+    "python": "Python 3.13.5"
+  },
+  "traceability": {
+    "all_rows_planned": true,
+    "claim": "Full 109-requirement/140-feature/28-CT relation carried from round-1 traceability evidence through identical product/compatibility/quality blobs; present count is independent static recount only.",
+    "feature_rows": 140,
+    "prior_evidence_sha256": "5060ac5aebab842e0445a34f346a3e7e1de7e405ec02203efd978519fb814a48",
+    "unique_feature_ids": 140,
+    "unknown_status_rows": []
+  },
+  "tracked_status": "",
+  "tree": "ccde84f7a2ab850f5aaa2ff4fb0e4d76c7e3f115",
+  "unchanged_round1_report_and_evidence_paths": 52
+}

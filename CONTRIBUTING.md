@@ -3,8 +3,10 @@
 This is an EUPL-1.2 project in the architecture/bootstrap phase. The accepted
 [product specification review](docs/reviews/product-spec-review-r2.md) covers the
 specification at `adfb44a2aab2e29ba6574c9dacc09475c534bccf`; it does not approve a
-working client. Full product implementation waits for a recorded `G.BOOT`
-acceptance. Read [current state](docs/status.md), the
+working client. The [recorded `G.BOOT` acceptance](docs/reviews/bootstrap-acceptance.md)
+covers exact source `54cde8e317ed0ea98d88255b9f12cb9a1151229b` and permits a later
+delegated implementation increment. Product and release gates remain outstanding.
+Read [current state](docs/status.md), the
 [architecture](docs/architecture/README.md), and [development guide](docs/development.md)
 before taking a task.
 

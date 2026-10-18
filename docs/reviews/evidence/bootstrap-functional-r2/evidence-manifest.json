@@ -1,0 +1,43 @@
+{
+  "candidate": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+  "files": {
+    "boundary-evidence-assessment.json": {
+      "bytes": 13190,
+      "sha256": "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b"
+    },
+    "candidate-manifest.json": {
+      "bytes": 37845,
+      "sha256": "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9"
+    },
+    "ci-evidence.json": {
+      "bytes": 3672,
+      "sha256": "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4"
+    },
+    "ci-job-117744177812.log": {
+      "bytes": 26170,
+      "sha256": "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d"
+    },
+    "ci-run-39150907632.json": {
+      "bytes": 626,
+      "sha256": "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e"
+    },
+    "review-output-checks.json": {
+      "bytes": 1292,
+      "sha256": "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224"
+    },
+    "source-and-continuity.json": {
+      "bytes": 25691,
+      "sha256": "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896"
+    },
+    "test-evidence-assessment.json": {
+      "bytes": 6728,
+      "sha256": "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a"
+    }
+  },
+  "report": {
+    "bytes": 33953,
+    "path": "docs/reviews/bootstrap-functional-review-r2.md",
+    "sha256": "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11"
+  },
+  "scope": "Checksums of round-2 reviewer-created static/CI evidence and report; outside reviewed candidate source."
+}

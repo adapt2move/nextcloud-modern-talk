@@ -2,6 +2,8 @@
 
 [Current state](status.md) records what exists and what remains unverified. Product requirements are targets unless the feature inventory and reproducible evidence say otherwise.
 
+[Root PM accepted the exact bootstrap source](reviews/bootstrap-acceptance.md) at `54cde8e317ed0ea98d88255b9f12cb9a1151229b` for contracts/scaffolding only. This report/status publication preserves that source. All 140 product features remain Planned; native functionality, security, media and performance remain unverified.
+
 | Read | Purpose |
 | --- | --- |
 | [Product](product/README.md) | User outcomes, stable requirement IDs and acceptance criteria |
@@ -12,5 +14,6 @@
 | [Development](development.md) | Canonical maintenance/CI workflow and exact toolchain selection |
 | [Testing](testing/README.md) | Separately owned disposable-backend fixtures, evidence and native-test limits |
 | [Product review round 2](reviews/product-spec-review-r2.md) | Accepted specification evidence, with attributed quality/design reviews and mandatory bootstrap handoff |
+| [Bootstrap acceptance](reviews/bootstrap-acceptance.md) | PM decision, exact candidate, four independent round-2 reviews, closed findings, evidence limits and VM lifecycle observations |
 
 Documentation follows the [change and IST rules](../AGENTS.md). Accepted source/review history is retained; a later implementation or source update does not retroactively change earlier evidence.

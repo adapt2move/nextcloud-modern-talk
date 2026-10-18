@@ -2,9 +2,9 @@
 
 A planned native Nextcloud Talk client in Rust and GPUI, with macOS as the first platform. The goal is conversation, chat, files and calls in one desktop experience, compatible with Nextcloud 34 / Talk 24 and Nextcloud 35 / Talk 25 through capability, configuration and permission checks.
 
-**This repository is a specification and contract bootstrap, not a usable Talk client.** The Rust workspace has typed boundaries and unconfigured adapters. It has no GPUI renderer, authenticated network integration, OS vault, native media engine or application runtime. All 140 product features remain **Planned**. See the [current state and pending reviews](docs/status.md).
+**This repository is a reviewed specification and contract bootstrap, not a usable Talk client.** The Rust workspace has typed boundaries and unconfigured adapters. It has no GPUI renderer, authenticated network integration, OS vault, native media engine or application runtime. All 140 product features remain **Planned**. See the [current state](docs/status.md).
 
-Published as **work in progress**. All four independent bootstrap review disciplines required changes on the earlier candidate. A [consolidated remediation candidate](docs/reviews/bootstrap-remediation-r1.md) addresses those findings; independent recheck and PM acceptance remain pending. `G.BOOT` is **not accepted**. Public source availability is not a release or gate approval.
+Published as **work in progress**. The [PM acceptance record](docs/reviews/bootstrap-acceptance.md) accepts `G.BOOT` for exact source `54cde8e317ed0ea98d88255b9f12cb9a1151229b`, after four independent round-2 reports passed with no exceptions. This publication adds those reports, the decision and current-state prose; it does not implement product features. `G.PRODUCT` and `G.RELEASE` have not been reached. Native functionality, security, media interoperability and performance remain unverified.
 
 - [Product specifications](docs/product/README.md) and [feature inventory](docs/compatibility/feature-inventory.md)
 - [Design reference](docs/design/README.md) and [HTML design gallery](docs/design/prototypes/index.html) — illustrations, not native integration
