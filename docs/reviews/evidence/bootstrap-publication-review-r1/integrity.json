@@ -1,0 +1,1508 @@
+{
+  "schema": 1,
+  "reviewer": "independent final publication/evidence carry-forward reviewer round 1",
+  "observed_at_utc": "2026-10-18T18:47:10.159902+00:00",
+  "method": "Static Git blob/mode/archive/diff inspection and Python standard-library hashing/JSON only. No repository module imported or executed.",
+  "reviewed": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+  "accepted": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+  "author_handoff": {
+    "basename": "nextcloud-modern-talk-final-publication-r1.json",
+    "sha256": "f2b35ea870d5a6c8b40701c1bb5ad99d6426a04de6e86a0088971e8275248ee6",
+    "bytes": 37050
+  },
+  "initial_status": "",
+  "identities": {
+    "54cde8e317ed0ea98d88255b9f12cb9a1151229b": {
+      "tree": "ccde84f7a2ab850f5aaa2ff4fb0e4d76c7e3f115",
+      "source_tar_sha256": "d2c647058e4e8073939086ea0558aeafabb88a0e5fc04ad90cf003ff36d0a9af",
+      "files": 219
+    },
+    "36efc9586c13cd1b654d7170d829ee191a6e743b": {
+      "tree": "8e754b2e7ceed8c15718db013f518afa92bcd487",
+      "source_tar_sha256": "961a2eb2f1a0d1b462b0e5429e0407da753f59b817e8808671c8721d4858740f",
+      "files": 239
+    },
+    "833cf3910e9ffdb2a5b9bfcd271014a56344cd01": {
+      "tree": "7133305b726a1baaf8e32e7868b08e6390e515bd",
+      "source_tar_sha256": "07bd09a942b5f5a1e245b545a34bb6ce9ecf5aba6f03f6108bb55502432747f6",
+      "files": 245
+    }
+  },
+  "diff_command": "git diff --no-ext-diff --no-renames --full-index --binary BASE CANDIDATE",
+  "intervals": [
+    {
+      "base": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+      "candidate": "36efc9586c13cd1b654d7170d829ee191a6e743b",
+      "diff_sha256": "b45d89f833c4127d0112f77143b4e5ac28ad4abb003a06df4a1c9dc7e889936c",
+      "diff_bytes": 404862,
+      "paths": [
+        {
+          "status": "M",
+          "path": "AGENTS.md"
+        },
+        {
+          "status": "M",
+          "path": "CONTRIBUTING.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/architecture/README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/development.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-acceptance.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-architecture-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-functional-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-performance-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-security-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/static-review.json"
+        },
+        {
+          "status": "M",
+          "path": "docs/status.md"
+        }
+      ],
+      "path_count": 27,
+      "status_counts": {
+        "M": 7,
+        "A": 20
+      }
+    },
+    {
+      "base": "36efc9586c13cd1b654d7170d829ee191a6e743b",
+      "candidate": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+      "diff_sha256": "6aa06e71d8d93062d2872fd135f0dc19ebcb68d1f9e2e3486436217bc2810ee8",
+      "diff_bytes": 44959,
+      "paths": [
+        {
+          "status": "M",
+          "path": "docs/reviews/bootstrap-acceptance.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/lifecycle-recovery.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/provenance.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/provider-console-observation.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-before.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-verification.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/status-verification.json"
+        },
+        {
+          "status": "M",
+          "path": "docs/status.md"
+        }
+      ],
+      "path_count": 8,
+      "status_counts": {
+        "M": 2,
+        "A": 6
+      }
+    },
+    {
+      "base": "54cde8e317ed0ea98d88255b9f12cb9a1151229b",
+      "candidate": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+      "diff_sha256": "cda38db5d6a61d50bdc33fa3d00fe941b60fbab7e4cf116e87703e447a504e81",
+      "diff_bytes": 438632,
+      "paths": [
+        {
+          "status": "M",
+          "path": "AGENTS.md"
+        },
+        {
+          "status": "M",
+          "path": "CONTRIBUTING.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/architecture/README.md"
+        },
+        {
+          "status": "M",
+          "path": "docs/development.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-acceptance.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-architecture-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-functional-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-performance-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/bootstrap-security-review-r2.md"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/lifecycle-recovery.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/provenance.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/provider-console-observation.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-before.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-verification.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-publication-r1/status-verification.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json"
+        },
+        {
+          "status": "A",
+          "path": "docs/reviews/evidence/bootstrap-quality-r2/static-review.json"
+        },
+        {
+          "status": "M",
+          "path": "docs/status.md"
+        }
+      ],
+      "path_count": 33,
+      "status_counts": {
+        "M": 7,
+        "A": 26
+      }
+    }
+  ],
+  "changed_file_manifest": [
+    {
+      "status": "M",
+      "path": "AGENTS.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "3a57b115c9690a01d0b99f72b9059972a33ca71e",
+      "bytes": 4428,
+      "sha256": "4fccc3e9457c1c7d90198b0009ec4395c79af010f04459038cd3dddb489e099c",
+      "base_blob": "67b5787c2fea2ab2a6481211fc89acc3d7c57b61"
+    },
+    {
+      "status": "M",
+      "path": "CONTRIBUTING.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "4c3d467292bd9a65dd04dff2b529e3ec2b7b8521",
+      "bytes": 4120,
+      "sha256": "242da51cbe365aeb6c2af536d163dc1ce01eee56a738ecc0eb8c8b1745f3b7d1",
+      "base_blob": "72e5b79de91726fd10dcde54e53336112f56149a"
+    },
+    {
+      "status": "M",
+      "path": "README.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "3e2699ebabe0e2acdc41ad013a9299b87cab3c24",
+      "bytes": 2238,
+      "sha256": "12cce1c4fb9cd96d849f77555adf215ad3f9f70596875ef0019bd7d1d923b098",
+      "base_blob": "136ec329d31b807938f67d23b355568465e47da6"
+    },
+    {
+      "status": "M",
+      "path": "docs/README.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "dc02ddd846a34068602320756aa5543d5f6c07ad",
+      "bytes": 1896,
+      "sha256": "8d91ae7c2dc26cfa61246d251faee3384ffe31408b22e2bddeebef3f7b41bae4",
+      "base_blob": "0b80de7af91c84c99937424567f8f68524c05608"
+    },
+    {
+      "status": "M",
+      "path": "docs/architecture/README.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "25670407e3b47815837f510269b95c1bb55f7848",
+      "bytes": 6469,
+      "sha256": "4d6f9969284d07d668815b56e139fdfa004e7863f6605103f0c64a22251b61e7",
+      "base_blob": "7cbc711bdf0722b41a3dc9ad2b5e6f3e7f45d2e3"
+    },
+    {
+      "status": "M",
+      "path": "docs/development.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "6b50eac3dd8e381f894061a5439e1f610034b170",
+      "bytes": 8124,
+      "sha256": "0cb68d9c0484d9a3c5b4125d10c6af56374bea1fbf3c023d30b0b27df2e5da20",
+      "base_blob": "c4cfef7ed20226114d47b43ce7bc707c4dec7886"
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/bootstrap-acceptance.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "bd53b89ac8e6832d08e516bf8ccd21f723263210",
+      "bytes": 20597,
+      "sha256": "feaa35b024c613f68c68dd8a86873ec1c629663ad325cb6a2afde465e3ae9b2b",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/bootstrap-architecture-review-r2.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "974dbc1577e45cfcaed0856f0021a0627d317b50",
+      "bytes": 29448,
+      "sha256": "7e145a4df6bf597b625d57086ad9a181ece881932bf66c47ec46a4c6ef3453f4",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/bootstrap-functional-review-r2.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "6823f877aa15b94ced7d47f68977957d95ae0cc9",
+      "bytes": 33953,
+      "sha256": "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/bootstrap-performance-review-r2.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "83d46c6a1c13b538b66c2fc911cac562d4f626e1",
+      "bytes": 29914,
+      "sha256": "fbf9ff53048cc95558ca1d1dedd069953882b55991ddbfc5443c597b5b72038c",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/bootstrap-security-review-r2.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "cd82c4c40313f816c5a8b3617d1617361915ce92",
+      "bytes": 28568,
+      "sha256": "2e7f7a9cf0c39f1e5f01d23b9fa76630d701966c9c0cb79dfc77a4dca89e285c",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "c967a53f024616ac54cfb972df2651aac59305f1",
+      "bytes": 7439,
+      "sha256": "3d7ccbd901548613c06e43b84eb68a00b06af6bb70244fe8560f40258957e896",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "dabac63ad3d7ae35aff36563b5376b3c2b26a255",
+      "bytes": 7890,
+      "sha256": "9c340300aff37580d2f53ece27ee03342bcbe4215f2ec715845fce3cfd199c92",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "6e502055bd84caf08e49c2ae6f62187642e52754",
+      "bytes": 20765,
+      "sha256": "a91b46056ab542d7329b9ab8b2d8a8775c5895a00b8a341ae04a21c55c9e0cdc",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "786bcff9a64301f50fb9d6d9f06a3a92afa090b1",
+      "bytes": 13190,
+      "sha256": "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "f06108bf4aca64bd456d625b2aeaf87ce21a67c8",
+      "bytes": 37845,
+      "sha256": "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "2173d44ff40804da72c3410bf7dd145fe6dc4c44",
+      "bytes": 3672,
+      "sha256": "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "8c8ee951e4e81dfbaea1329bcb95f1c23d802ed6",
+      "bytes": 26170,
+      "sha256": "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "dd9394e440b38d7d3f799a3123bc72c906f6da19",
+      "bytes": 626,
+      "sha256": "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "f12ca04fb748f4910228f0091865623873845961",
+      "bytes": 1548,
+      "sha256": "7e749bcae09b34f5b39dbf2fc8fe0140b9c3f9ec18ea223a344efec6a952820f",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "81fd515a89a00bc6956e46f2dbf24347e3f9efb4",
+      "bytes": 1292,
+      "sha256": "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "dd1e4bbbe9bc9b7d92c1d5988a68be2ba50ab91d",
+      "bytes": 25691,
+      "sha256": "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "b1d175baf3c5960c1498bd0298e8c06fdb52a0b4",
+      "bytes": 6728,
+      "sha256": "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/lifecycle-recovery.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "9790e207d435cdcb92135ce324c9fba2323325bf",
+      "bytes": 11073,
+      "sha256": "397e1cc73435d458e1d2782a1c13a4192de2dd138e51b98293a5016b3b523c58",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/provenance.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "6c102e1b91a3430e809912532f9c053e089dae4b",
+      "bytes": 4793,
+      "sha256": "8062d1e0a5eea14c045b002328c8ba846ed7838ca757e4a83719b12805068f15",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/provider-console-observation.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "a3e9e7067020ec733a0d5a8173f6439caa0f1576",
+      "bytes": 985,
+      "sha256": "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-before.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "6d9b12812ed1eabddb2ede48336ce837a20d95f5",
+      "bytes": 3149,
+      "sha256": "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/stats-verification.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "11c7aeba4e7b7a9637910fdad326df59e477cfe5",
+      "bytes": 3149,
+      "sha256": "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-publication-r1/status-verification.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "794488e691c372821bc17fea079d91d628eac7de",
+      "bytes": 3934,
+      "sha256": "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "e6c10eb6740809cd1dd65f24040382e9998edae2",
+      "bytes": 5540,
+      "sha256": "aebee3f567a7a01650e139300d936508b6edf23e96ab9ed0588ee16354bab296",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "475f7f4932c0f40f9d46655b9f4b307a18fe84c6",
+      "bytes": 25334,
+      "sha256": "1e7c0c6234b33290a6b1a69c6554d5f1119f8bcfb1265b486b74a6bbaf8b34f4",
+      "base_blob": null
+    },
+    {
+      "status": "A",
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/static-review.json",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "8e2d65cd07e1c231d7e376869bfc31c772a2abb2",
+      "bytes": 30677,
+      "sha256": "c9fce643ad4deabbb317013cc8665dc8b2c940ed598d2cfe4997e1fd932e365e",
+      "base_blob": null
+    },
+    {
+      "status": "M",
+      "path": "docs/status.md",
+      "mode": "100644",
+      "kind": "blob",
+      "blob": "1e06384dd2cac3600a4e4152970b7e5aa9fdbe4a",
+      "bytes": 21444,
+      "sha256": "742c0419ec3f514dd613f9d559fcb89d1147a9e74ef715824a64febeb3405ebd",
+      "base_blob": "ae804cc520778ed159ced066fd03a140d9920d7f"
+    }
+  ],
+  "prior_63_review_evidence_paths": [
+    "docs/reviews/bootstrap-architecture-review-r1.md",
+    "docs/reviews/bootstrap-functional-review-r1.md",
+    "docs/reviews/bootstrap-integration-r1.md",
+    "docs/reviews/bootstrap-performance-review-r1.md",
+    "docs/reviews/bootstrap-remediation-r1.md",
+    "docs/reviews/bootstrap-security-review-r1.md",
+    "docs/reviews/design-remediation-r1.md",
+    "docs/reviews/design-spec-review-r2.md",
+    "docs/reviews/design-spec-review.md",
+    "docs/reviews/evidence/bootstrap-architecture-r1/static-evidence.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/backend-after.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/backend-before.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/backend-binding.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/backend-command.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/backend-report.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/baseline-continuity.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/bootstrap-checks.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/build-artifact.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/candidate-manifest.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/candidate-vs-c2.diff",
+    "docs/reviews/evidence/bootstrap-functional-r1/checker-fixtures.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/cleanup.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/docs-missing-file-recheck.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/evidence-manifest.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/final-transfer.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/finalize.py",
+    "docs/reviews/evidence/bootstrap-functional-r1/identity.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/lifecycle.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/local-final-identity.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/renderer-consumer.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/renderer-consumer.py",
+    "docs/reviews/evidence/bootstrap-functional-r1/run_backend.py",
+    "docs/reviews/evidence/bootstrap-functional-r1/source-after-checks-and-fixtures.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/source-before.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/source-final.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/supplement.py",
+    "docs/reviews/evidence/bootstrap-functional-r1/toolchain.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/trace-recheck.py",
+    "docs/reviews/evidence/bootstrap-functional-r1/traceability-final.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/traceability-recheck.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/traceability.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/transfer.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/unconfigured-probe.json",
+    "docs/reviews/evidence/bootstrap-functional-r1/unconfigured-probe.rs",
+    "docs/reviews/evidence/bootstrap-functional-r1/verify.py",
+    "docs/reviews/evidence/bootstrap-integration-r1.json",
+    "docs/reviews/evidence/bootstrap-quality-r1/static-review.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/allocation-arithmetic.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/boundary-fixtures.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-artifacts.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-boundary-fixtures.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/committed-checks.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/initial-failures.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/preliminary-checks.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/provenance.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/toolchain.json",
+    "docs/reviews/evidence/bootstrap-remediation-r1/unconfigured-probe.rs",
+    "docs/reviews/product-remediation-r1.md",
+    "docs/reviews/product-spec-review-r2.md",
+    "docs/reviews/product-spec-review.md",
+    "docs/reviews/quality-remediation-r1.md",
+    "docs/reviews/quality-spec-review-r2.md",
+    "docs/reviews/quality-spec-review.md"
+  ],
+  "round2_input_manifest": [
+    {
+      "path": "docs/reviews/bootstrap-architecture-review-r2.md",
+      "sha256": "7e145a4df6bf597b625d57086ad9a181ece881932bf66c47ec46a4c6ef3453f4",
+      "mode": "100644",
+      "bytes": 29448
+    },
+    {
+      "path": "docs/reviews/bootstrap-functional-review-r2.md",
+      "sha256": "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+      "mode": "100644",
+      "bytes": 33953
+    },
+    {
+      "path": "docs/reviews/bootstrap-performance-review-r2.md",
+      "sha256": "fbf9ff53048cc95558ca1d1dedd069953882b55991ddbfc5443c597b5b72038c",
+      "mode": "100644",
+      "bytes": 29914
+    },
+    {
+      "path": "docs/reviews/bootstrap-security-review-r2.md",
+      "sha256": "2e7f7a9cf0c39f1e5f01d23b9fa76630d701966c9c0cb79dfc77a4dca89e285c",
+      "mode": "100644",
+      "bytes": 28568
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json",
+      "sha256": "3d7ccbd901548613c06e43b84eb68a00b06af6bb70244fe8560f40258957e896",
+      "mode": "100644",
+      "bytes": 7439
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json",
+      "sha256": "9c340300aff37580d2f53ece27ee03342bcbe4215f2ec715845fce3cfd199c92",
+      "mode": "100644",
+      "bytes": 7890
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json",
+      "sha256": "a91b46056ab542d7329b9ab8b2d8a8775c5895a00b8a341ae04a21c55c9e0cdc",
+      "mode": "100644",
+      "bytes": 20765
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json",
+      "sha256": "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+      "mode": "100644",
+      "bytes": 13190
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json",
+      "sha256": "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+      "mode": "100644",
+      "bytes": 37845
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json",
+      "sha256": "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+      "mode": "100644",
+      "bytes": 3672
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log",
+      "sha256": "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+      "mode": "100644",
+      "bytes": 26170
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json",
+      "sha256": "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+      "mode": "100644",
+      "bytes": 626
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json",
+      "sha256": "7e749bcae09b34f5b39dbf2fc8fe0140b9c3f9ec18ea223a344efec6a952820f",
+      "mode": "100644",
+      "bytes": 1548
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json",
+      "sha256": "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+      "mode": "100644",
+      "bytes": 1292
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json",
+      "sha256": "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+      "mode": "100644",
+      "bytes": 25691
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json",
+      "sha256": "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+      "mode": "100644",
+      "bytes": 6728
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json",
+      "sha256": "aebee3f567a7a01650e139300d936508b6edf23e96ab9ed0588ee16354bab296",
+      "mode": "100644",
+      "bytes": 5540
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json",
+      "sha256": "1e7c0c6234b33290a6b1a69c6554d5f1119f8bcfb1265b486b74a6bbaf8b34f4",
+      "mode": "100644",
+      "bytes": 25334
+    },
+    {
+      "path": "docs/reviews/evidence/bootstrap-quality-r2/static-review.json",
+      "sha256": "c9fce643ad4deabbb317013cc8665dc8b2c940ed598d2cfe4997e1fd932e365e",
+      "mode": "100644",
+      "bytes": 30677
+    }
+  ],
+  "checks": [
+    {
+      "assertion": "review input HEAD",
+      "actual": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+      "expected": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+      "pass": true
+    },
+    {
+      "assertion": "review input tracked cleanliness",
+      "actual": "",
+      "expected": "",
+      "pass": true
+    },
+    {
+      "assertion": "accepted tree",
+      "actual": "ccde84f7a2ab850f5aaa2ff4fb0e4d76c7e3f115",
+      "expected": "ccde84f7a2ab850f5aaa2ff4fb0e4d76c7e3f115",
+      "pass": true
+    },
+    {
+      "assertion": "accepted archive",
+      "actual": "d2c647058e4e8073939086ea0558aeafabb88a0e5fc04ad90cf003ff36d0a9af",
+      "expected": "d2c647058e4e8073939086ea0558aeafabb88a0e5fc04ad90cf003ff36d0a9af",
+      "pass": true
+    },
+    {
+      "assertion": "publication tree",
+      "actual": "7133305b726a1baaf8e32e7868b08e6390e515bd",
+      "expected": "7133305b726a1baaf8e32e7868b08e6390e515bd",
+      "pass": true
+    },
+    {
+      "assertion": "publication archive",
+      "actual": "07bd09a942b5f5a1e245b545a34bb6ce9ecf5aba6f03f6108bb55502432747f6",
+      "expected": "07bd09a942b5f5a1e245b545a34bb6ce9ecf5aba6f03f6108bb55502432747f6",
+      "pass": true
+    },
+    {
+      "assertion": "publication file count",
+      "actual": 245,
+      "expected": 245,
+      "pass": true
+    },
+    {
+      "assertion": "full publication diff digest",
+      "actual": "cda38db5d6a61d50bdc33fa3d00fe941b60fbab7e4cf116e87703e447a504e81",
+      "expected": "cda38db5d6a61d50bdc33fa3d00fe941b60fbab7e4cf116e87703e447a504e81",
+      "pass": true
+    },
+    {
+      "assertion": "full publication diff paths",
+      "actual": 33,
+      "expected": 33,
+      "pass": true
+    },
+    {
+      "assertion": "full publication diff type counts",
+      "actual": {
+        "M": 7,
+        "A": 26
+      },
+      "expected": {
+        "M": 7,
+        "A": 26
+      },
+      "pass": true
+    },
+    {
+      "assertion": "only allowed existing paths changed",
+      "actual": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "docs/README.md",
+        "docs/architecture/README.md",
+        "docs/development.md",
+        "docs/status.md"
+      ],
+      "expected": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "docs/README.md",
+        "docs/architecture/README.md",
+        "docs/development.md",
+        "docs/status.md"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "handoff exact modified path list",
+      "actual": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "docs/README.md",
+        "docs/architecture/README.md",
+        "docs/development.md",
+        "docs/status.md"
+      ],
+      "expected": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "docs/README.md",
+        "docs/architecture/README.md",
+        "docs/development.md",
+        "docs/status.md"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "handoff exact added path list",
+      "actual": [
+        "docs/reviews/bootstrap-acceptance.md",
+        "docs/reviews/bootstrap-architecture-review-r2.md",
+        "docs/reviews/bootstrap-functional-review-r2.md",
+        "docs/reviews/bootstrap-performance-review-r2.md",
+        "docs/reviews/bootstrap-security-review-r2.md",
+        "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json",
+        "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json",
+        "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/lifecycle-recovery.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/provenance.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/provider-console-observation.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/stats-before.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/stats-verification.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/status-verification.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/static-review.json"
+      ],
+      "expected": [
+        "docs/reviews/bootstrap-acceptance.md",
+        "docs/reviews/bootstrap-architecture-review-r2.md",
+        "docs/reviews/bootstrap-functional-review-r2.md",
+        "docs/reviews/bootstrap-performance-review-r2.md",
+        "docs/reviews/bootstrap-security-review-r2.md",
+        "docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json",
+        "docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json",
+        "docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log",
+        "docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json",
+        "docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/lifecycle-recovery.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/provenance.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/provider-console-observation.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/stats-before.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/stats-verification.json",
+        "docs/reviews/evidence/bootstrap-publication-r1/status-verification.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json",
+        "docs/reviews/evidence/bootstrap-quality-r2/static-review.json"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "handoff exact deleted path list",
+      "actual": [],
+      "expected": [],
+      "pass": true
+    },
+    {
+      "assertion": "prior review/evidence count",
+      "actual": 63,
+      "expected": 63,
+      "pass": true
+    },
+    {
+      "assertion": "prior review/evidence changed",
+      "actual": [],
+      "expected": [],
+      "pass": true
+    },
+    {
+      "assertion": "unchanged accepted file count",
+      "actual": 212,
+      "expected": 212,
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/bootstrap-architecture-review-r2.md",
+      "actual": [
+        "7e145a4df6bf597b625d57086ad9a181ece881932bf66c47ec46a4c6ef3453f4",
+        "100644"
+      ],
+      "expected": [
+        "7e145a4df6bf597b625d57086ad9a181ece881932bf66c47ec46a4c6ef3453f4",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/bootstrap-functional-review-r2.md",
+      "actual": [
+        "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+        "100644"
+      ],
+      "expected": [
+        "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/bootstrap-performance-review-r2.md",
+      "actual": [
+        "fbf9ff53048cc95558ca1d1dedd069953882b55991ddbfc5443c597b5b72038c",
+        "100644"
+      ],
+      "expected": [
+        "fbf9ff53048cc95558ca1d1dedd069953882b55991ddbfc5443c597b5b72038c",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/bootstrap-security-review-r2.md",
+      "actual": [
+        "2e7f7a9cf0c39f1e5f01d23b9fa76630d701966c9c0cb79dfc77a4dca89e285c",
+        "100644"
+      ],
+      "expected": [
+        "2e7f7a9cf0c39f1e5f01d23b9fa76630d701966c9c0cb79dfc77a4dca89e285c",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-architecture-r2/ci-observation.json",
+      "actual": [
+        "3d7ccbd901548613c06e43b84eb68a00b06af6bb70244fe8560f40258957e896",
+        "100644"
+      ],
+      "expected": [
+        "3d7ccbd901548613c06e43b84eb68a00b06af6bb70244fe8560f40258957e896",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-architecture-r2/primary-source-checks.json",
+      "actual": [
+        "9c340300aff37580d2f53ece27ee03342bcbe4215f2ec715845fce3cfd199c92",
+        "100644"
+      ],
+      "expected": [
+        "9c340300aff37580d2f53ece27ee03342bcbe4215f2ec715845fce3cfd199c92",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-architecture-r2/static-evidence.json",
+      "actual": [
+        "a91b46056ab542d7329b9ab8b2d8a8775c5895a00b8a341ae04a21c55c9e0cdc",
+        "100644"
+      ],
+      "expected": [
+        "a91b46056ab542d7329b9ab8b2d8a8775c5895a00b8a341ae04a21c55c9e0cdc",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/boundary-evidence-assessment.json",
+      "actual": [
+        "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+        "100644"
+      ],
+      "expected": [
+        "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/candidate-manifest.json",
+      "actual": [
+        "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+        "100644"
+      ],
+      "expected": [
+        "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/ci-evidence.json",
+      "actual": [
+        "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+        "100644"
+      ],
+      "expected": [
+        "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/ci-job-117744177812.log",
+      "actual": [
+        "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+        "100644"
+      ],
+      "expected": [
+        "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/ci-run-39150907632.json",
+      "actual": [
+        "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+        "100644"
+      ],
+      "expected": [
+        "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/evidence-manifest.json",
+      "actual": [
+        "7e749bcae09b34f5b39dbf2fc8fe0140b9c3f9ec18ea223a344efec6a952820f",
+        "100644"
+      ],
+      "expected": [
+        "7e749bcae09b34f5b39dbf2fc8fe0140b9c3f9ec18ea223a344efec6a952820f",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/review-output-checks.json",
+      "actual": [
+        "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+        "100644"
+      ],
+      "expected": [
+        "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/source-and-continuity.json",
+      "actual": [
+        "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+        "100644"
+      ],
+      "expected": [
+        "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-functional-r2/test-evidence-assessment.json",
+      "actual": [
+        "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+        "100644"
+      ],
+      "expected": [
+        "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-quality-r2/ci-inspection.json",
+      "actual": [
+        "aebee3f567a7a01650e139300d936508b6edf23e96ab9ed0588ee16354bab296",
+        "100644"
+      ],
+      "expected": [
+        "aebee3f567a7a01650e139300d936508b6edf23e96ab9ed0588ee16354bab296",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-quality-r2/primary-sources.json",
+      "actual": [
+        "1e7c0c6234b33290a6b1a69c6554d5f1119f8bcfb1265b486b74a6bbaf8b34f4",
+        "100644"
+      ],
+      "expected": [
+        "1e7c0c6234b33290a6b1a69c6554d5f1119f8bcfb1265b486b74a6bbaf8b34f4",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 input docs/reviews/evidence/bootstrap-quality-r2/static-review.json",
+      "actual": [
+        "c9fce643ad4deabbb317013cc8665dc8b2c940ed598d2cfe4997e1fd932e365e",
+        "100644"
+      ],
+      "expected": [
+        "c9fce643ad4deabbb317013cc8665dc8b2c940ed598d2cfe4997e1fd932e365e",
+        "100644"
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "round2 report/evidence count",
+      "actual": 19,
+      "expected": 19,
+      "pass": true
+    },
+    {
+      "assertion": "all 219 accepted manifest rows",
+      "actual": {
+        "rows": 219,
+        "sha256": "2a01b9615b5a21e65648467165e72dad5d51e2d5456541273fbc7fe24424eaca"
+      },
+      "expected": {
+        "rows": 219,
+        "sha256": "2a01b9615b5a21e65648467165e72dad5d51e2d5456541273fbc7fe24424eaca"
+      },
+      "pass": true
+    },
+    {
+      "assertion": "all 216 author manifest rows",
+      "actual": {
+        "rows": 216,
+        "sha256": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc"
+      },
+      "expected": {
+        "rows": 216,
+        "sha256": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc"
+      },
+      "pass": true
+    },
+    {
+      "assertion": "author command count",
+      "actual": 10,
+      "expected": 10,
+      "pass": true
+    },
+    {
+      "assertion": "author commands exit zero and retain bound source",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "author final source digest",
+      "actual": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc",
+      "expected": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc",
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest boundary-evidence-assessment.json",
+      "actual": [
+        "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+        13190
+      ],
+      "expected": [
+        "7ed4fcb10550c5ce538120588265f32dfc85e41eadea451af0cd604e09b6ba6b",
+        13190
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest candidate-manifest.json",
+      "actual": [
+        "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+        37845
+      ],
+      "expected": [
+        "f66c0af21e0ca78b29ae5725e95e41c114a6dd0b2d35025e1fb12872e69c22c9",
+        37845
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest ci-evidence.json",
+      "actual": [
+        "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+        3672
+      ],
+      "expected": [
+        "c829b99096659a9e5b6892a99577c2e8e690c588f897c49aebe84e420cb698d4",
+        3672
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest ci-job-117744177812.log",
+      "actual": [
+        "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+        26170
+      ],
+      "expected": [
+        "d92ca08a47300fe98efed614073d4097b8c34b66a0dc4ced3665ab867a23b93d",
+        26170
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest ci-run-39150907632.json",
+      "actual": [
+        "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+        626
+      ],
+      "expected": [
+        "32b85cd39452a707ad07e58a2e0851bfe183f94256554d7a99bfbf35be6d4a7e",
+        626
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest review-output-checks.json",
+      "actual": [
+        "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+        1292
+      ],
+      "expected": [
+        "7ff0aecd7b45f653fc35ca4dfb4a70e3425f7c4a0d6bd635e5998f48157d7224",
+        1292
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest source-and-continuity.json",
+      "actual": [
+        "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+        25691
+      ],
+      "expected": [
+        "4d043f14660db2f036961361a1c50c6e8acfe8debd1cb3eb4397fbba9cdfa896",
+        25691
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional evidence internal manifest test-evidence-assessment.json",
+      "actual": [
+        "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+        6728
+      ],
+      "expected": [
+        "12fc408939196d0cc7114791136a6067f2bcf47aaa3d63b8f4c18ef7d4995d2a",
+        6728
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "functional report internal manifest",
+      "actual": [
+        "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+        33953
+      ],
+      "expected": [
+        "4bbd3a078f2b814604631a5a286a4709493f7ad42e10933a6f9f674144208b11",
+        33953
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "backend harness/support tests/lab/README.md",
+      "actual": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+      "expected": "52219b128c0396711ed106140f1eac11a8a3422056e5aff265dd5d3a6d28ee00",
+      "pass": true
+    },
+    {
+      "assertion": "backend harness/support tests/lab/cleanup.sh",
+      "actual": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+      "expected": "90dc99b45324e072ee3fb733b490e7f9d8bbc2b9621da84f38c7b574ab02e132",
+      "pass": true
+    },
+    {
+      "assertion": "backend harness/support tests/lab/lab.py",
+      "actual": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+      "expected": "ce5c9eaac74c701795587bbceb67bb885e2b93c74dca02d8004bddda0ca86678",
+      "pass": true
+    },
+    {
+      "assertion": "backend harness/support tests/lab/pins.json",
+      "actual": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+      "expected": "fc2bba4225c1eecab7b4faec51353f9170e5c249999920254a6413f939399016",
+      "pass": true
+    },
+    {
+      "assertion": "backend harness/support tests/lab/reprovision.sh",
+      "actual": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36",
+      "expected": "c826fe3a6d2193aa07ae00bd8daf06f13fb71e5b16e38bced7e97d8d4e4dbb36",
+      "pass": true
+    },
+    {
+      "assertion": "backend report digest",
+      "actual": "6874334d2fec5fc56ad1bf82ef48496746277c43c00d538bc1263dc26263603f",
+      "expected": "6874334d2fec5fc56ad1bf82ef48496746277c43c00d538bc1263dc26263603f",
+      "pass": true
+    },
+    {
+      "assertion": "unique feature count",
+      "actual": 140,
+      "expected": 140,
+      "pass": true
+    },
+    {
+      "assertion": "feature states",
+      "actual": {
+        "Planned": 140
+      },
+      "expected": {
+        "Planned": 140
+      },
+      "pass": true
+    },
+    {
+      "assertion": "Cargo.lock identity",
+      "actual": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8",
+      "expected": "97bc0a2b02ae77e013d45a47064b61b40dd6c6c6f495be5d245391cee8083cf8",
+      "pass": true
+    },
+    {
+      "assertion": "rust-toolchain.toml identity",
+      "actual": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1",
+      "expected": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1",
+      "pass": true
+    }
+  ],
+  "all_checks_pass": true,
+  "feature_rows": 140,
+  "feature_states": {
+    "Planned": 140
+  },
+  "source_execution_scope": "Author manifest binds diagnostic, 36 assertions and 22 boundary cases to d11; no reviewer rerun and no added CI test claim."
+}

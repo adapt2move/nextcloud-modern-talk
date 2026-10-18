@@ -1,0 +1,372 @@
+{
+  "schema": 1,
+  "reviewed": "833cf3910e9ffdb2a5b9bfcd271014a56344cd01",
+  "method": "Independent comparison of original local owner handoff and ten hashed records against the six published files. No fresh session command/browser/provider request or state mutation.",
+  "source_handoff_sha256": "834171b10e23c3d3e0b4de390609ffef9cb0a30258c2ca642d61ba9511a1bff9",
+  "selected_original_keys": [
+    "actions",
+    "all_parent_snapshots_reported_available",
+    "cost_estimates",
+    "current_error",
+    "first_terminal_observation",
+    "generated_at_utc",
+    "hibernation_result",
+    "latest_available_recovery_snapshot",
+    "latest_state_observation_utc",
+    "latest_stats_observation",
+    "lifecycle_complete",
+    "old_snapshot_discrepancy",
+    "owner",
+    "phase",
+    "preserved_required_snapshots",
+    "previously_blocked_hibernation_cleanup_complete",
+    "publication_sanitization",
+    "released_server_id",
+    "remaining_operational_obligations",
+    "result_statement",
+    "schema_version",
+    "scope",
+    "server_id",
+    "server_present",
+    "server_release_evidence",
+    "server_release_recorded_at",
+    "server_release_recorded_at_utc",
+    "server_type",
+    "session",
+    "session_key",
+    "verification"
+  ],
+  "omitted_original_keys": [
+    "evidence_directory",
+    "evidence_manifest",
+    "historical_errors",
+    "skills_read",
+    "supported_recovery_guidance"
+  ],
+  "added_publication_keys": [
+    "historical_observation",
+    "historical_supported_delete",
+    "publication_scope",
+    "published_evidence",
+    "source_provenance"
+  ],
+  "checks": [
+    {
+      "assertion": "source handoff hash/size",
+      "actual": [
+        "834171b10e23c3d3e0b4de390609ffef9cb0a30258c2ca642d61ba9511a1bff9",
+        11987
+      ],
+      "expected": [
+        "834171b10e23c3d3e0b4de390609ffef9cb0a30258c2ca642d61ba9511a1bff9",
+        11987
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "published original evidence manifest",
+      "actual": 10,
+      "expected": 10,
+      "pass": true
+    },
+    {
+      "assertion": "original record hibernate-help.json",
+      "actual": [
+        "fba8978778f87c33246e783337c0e1ae97fb188f72162f977486f970095cc71b",
+        1108
+      ],
+      "expected": [
+        "fba8978778f87c33246e783337c0e1ae97fb188f72162f977486f970095cc71b",
+        1108
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record provider-console-observation.json",
+      "actual": [
+        "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+        985
+      ],
+      "expected": [
+        "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+        985
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record snapshots-before.json",
+      "actual": [
+        "a3296c5adcd365078f78dc4ea8be723b9c9e7d507ee2a5d017a0b566a6182eb5",
+        1446
+      ],
+      "expected": [
+        "a3296c5adcd365078f78dc4ea8be723b9c9e7d507ee2a5d017a0b566a6182eb5",
+        1446
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record stats-before.json",
+      "actual": [
+        "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+        3149
+      ],
+      "expected": [
+        "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+        3149
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record stats-help.json",
+      "actual": [
+        "2ff87f379bd5ea9ead1dcc48f4c9f9ffc9917a2e737cab9bc3eec8dc3b7bc8d7",
+        1100
+      ],
+      "expected": [
+        "2ff87f379bd5ea9ead1dcc48f4c9f9ffc9917a2e737cab9bc3eec8dc3b7bc8d7",
+        1100
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record stats-verification.json",
+      "actual": [
+        "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+        3149
+      ],
+      "expected": [
+        "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+        3149
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record status-before.json",
+      "actual": [
+        "e937a8c674ecdd67e0d00872a706a77c99b7b42e6fc48513ee3d2c45b6fa25d0",
+        3978
+      ],
+      "expected": [
+        "e937a8c674ecdd67e0d00872a706a77c99b7b42e6fc48513ee3d2c45b6fa25d0",
+        3978
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record status-verification.json",
+      "actual": [
+        "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+        3934
+      ],
+      "expected": [
+        "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+        3934
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record supported-help.json",
+      "actual": [
+        "6acfafcc5a7ff6da5d44ebbeee6c572bcbb399a661ec2fdb1a7f65c4c0828291",
+        2246
+      ],
+      "expected": [
+        "6acfafcc5a7ff6da5d44ebbeee6c572bcbb399a661ec2fdb1a7f65c4c0828291",
+        2246
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "original record version.json",
+      "actual": [
+        "c02dcbf3e9ead3995c6dde4f92f7195fd5486b551757ec81f641b4c65f2dcb15",
+        414
+      ],
+      "expected": [
+        "c02dcbf3e9ead3995c6dde4f92f7195fd5486b551757ec81f641b4c65f2dcb15",
+        414
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "published manifest stats-before.json",
+      "actual": [
+        "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+        3149
+      ],
+      "expected": [
+        "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+        3149
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "byte identical supporting record stats-before.json",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "published manifest stats-verification.json",
+      "actual": [
+        "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+        3149
+      ],
+      "expected": [
+        "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+        3149
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "byte identical supporting record stats-verification.json",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "published manifest status-verification.json",
+      "actual": [
+        "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+        3934
+      ],
+      "expected": [
+        "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+        3934
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "byte identical supporting record status-verification.json",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "published manifest provider-console-observation.json",
+      "actual": [
+        "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+        985
+      ],
+      "expected": [
+        "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+        985
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "byte identical supporting record provider-console-observation.json",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "published manifest lifecycle-recovery.json",
+      "actual": [
+        "397e1cc73435d458e1d2782a1c13a4192de2dd138e51b98293a5016b3b523c58",
+        11073
+      ],
+      "expected": [
+        "397e1cc73435d458e1d2782a1c13a4192de2dd138e51b98293a5016b3b523c58",
+        11073
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "all shared extract fields equal original",
+      "actual": [],
+      "expected": [],
+      "pass": true
+    },
+    {
+      "assertion": "terminal phase",
+      "actual": "hibernated",
+      "expected": "hibernated",
+      "pass": true
+    },
+    {
+      "assertion": "no current server",
+      "actual": null,
+      "expected": null,
+      "pass": true
+    },
+    {
+      "assertion": "stable server runtime seconds",
+      "actual": 6078.31294986,
+      "expected": 6078.31294986,
+      "pass": true
+    },
+    {
+      "assertion": "runtime seconds",
+      "actual": 6078.31294986,
+      "expected": 6078.31294986,
+      "pass": true
+    },
+    {
+      "assertion": "current server hourly net",
+      "actual": 0,
+      "expected": 0,
+      "pass": true
+    },
+    {
+      "assertion": "all parent server usage ended",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "released server ended",
+      "actual": "2026-10-18T20:30:38.367048351+02:00",
+      "expected": "2026-10-18T20:30:38.367048351+02:00",
+      "pass": true
+    },
+    {
+      "assertion": "cost/runtime estimated_net",
+      "actual": 0.12862813896806435,
+      "expected": 0.12862813896806435,
+      "pass": true
+    },
+    {
+      "assertion": "cost/runtime snapshot_monthly_net",
+      "actual": 0.32676093096733094,
+      "expected": 0.32676093096733094,
+      "pass": true
+    },
+    {
+      "assertion": "cost/runtime duration_seconds",
+      "actual": 22499.805396959,
+      "expected": 22499.805396959,
+      "pass": true
+    },
+    {
+      "assertion": "retained latest plus required snapshots",
+      "actual": [
+        445145085,
+        445145409,
+        445171820
+      ],
+      "expected": [
+        445145085,
+        445145409,
+        445171820
+      ],
+      "pass": true
+    },
+    {
+      "assertion": "old snapshot still listed",
+      "actual": true,
+      "expected": true,
+      "pass": true
+    },
+    {
+      "assertion": "provider inventory not independently verified",
+      "actual": false,
+      "expected": false,
+      "pass": true
+    }
+  ],
+  "all_checks_pass": true,
+  "assessment": "Faithful selected-field extract and four byte-identical sanitized supporting records. Timestamped terminal hibernation is supported; initiating actor unknown. Old snapshot discrepancy and provider inventory/billing reconciliation remain open, owned by root PM; nonblocking to this publication and not a product exception.",
+  "operational_actions_by_this_reviewer": []
+}

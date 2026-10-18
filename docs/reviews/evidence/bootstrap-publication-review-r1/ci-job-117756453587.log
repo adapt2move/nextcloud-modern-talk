@@ -1,0 +1,334 @@
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0250570Z Current runner version: '2.337.0'
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0278534Z ##[group]Runner Image Provisioner
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0279517Z Hosted Compute Agent
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0280137Z Version: 20261012.601
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0280783Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0281684Z Build Date: 2026-10-12T17:48:21Z
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0282379Z Worker ID: {368e15ff-d02c-43ee-aa57-b62ed0d776cd}
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0283128Z Region: eastus
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0283695Z Cloud: Azure
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0284262Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0285850Z ##[group]Operating System
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0286499Z Ubuntu
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0287510Z 24.04.5
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0288071Z LTS
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0288592Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0289737Z ##[group]Runner Image
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0290367Z Image: ubuntu-24.04
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0290963Z Version: 20261012.334.1
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0292049Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0293949Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0294908Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0296080Z ##[group]GITHUB_TOKEN Permissions
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0298703Z Contents: read
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0299490Z Metadata: read
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0300053Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0302315Z Secret source: Actions
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0303407Z Cache mode: write
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0304386Z Prepare workflow directory
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0721623Z Prepare all required actions
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.0772175Z Getting action download info
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.2704009Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Documentation and Rust contracts (Linux)	Set up job	2026-10-18T18:38:15.4723174Z Complete job name: Documentation and Rust contracts (Linux)
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5692227Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5693364Z with:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5693830Z   persist-credentials: false
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5694419Z   repository: adapt2move/nextcloud-modern-talk
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5698848Z   token: ***
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5699295Z   ssh-strict: true
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5699740Z   ssh-user: git
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5700164Z   clean: true
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5700619Z   sparse-checkout-cone-mode: true
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5701137Z   fetch-depth: 1
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5701568Z   fetch-tags: false
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5702014Z   show-progress: true
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5702461Z   lfs: false
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5702882Z   submodules: false
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5703342Z   set-safe-directory: true
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5703852Z   allow-unsafe-pr-checkout: false
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5704653Z env:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5705087Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5705597Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.5706094Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6767063Z Syncing repository: adapt2move/nextcloud-modern-talk
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6770062Z ##[group]Getting Git version info
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6771465Z Working directory is '[GITHUB_WORKSPACE]'
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6773486Z [command]/usr/bin/git version
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6850891Z git version 2.55.0
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6878171Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6893227Z Temporarily overriding HOME='[RUNNER_TEMP]' before making global git config changes
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6895566Z Adding repository directory to the temporary git global config as a safe directory
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6902223Z [command]/usr/bin/git config --global --add safe.directory [GITHUB_WORKSPACE]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6962710Z Deleting the contents of '[GITHUB_WORKSPACE]'
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6965280Z ##[group]Determining repository object format
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6967642Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6968754Z ##[group]Initializing the repository
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.6973424Z [command]/usr/bin/git init [GITHUB_WORKSPACE]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7088720Z hint: Using 'master' as the name for the initial branch. This default branch name
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7090508Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7091578Z hint: to use in all of your new repositories, which will suppress this warning,
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7092721Z hint: call:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7093591Z hint:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7094659Z hint: 	git config --global init.defaultBranch <name>
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7095680Z hint:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7097180Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7098762Z hint: 'development'. The just-created branch can be renamed via this command:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7099809Z hint:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7100266Z hint: 	git branch -m <name>
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7100824Z hint:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7101488Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7107992Z Initialized empty Git repository in [GITHUB_WORKSPACE]/.git/
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7119858Z [command]/usr/bin/git remote add origin https://github.com/adapt2move/nextcloud-modern-talk
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7173125Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7173949Z ##[group]Disabling automatic garbage collection
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7177741Z [command]/usr/bin/git config --local gc.auto 0
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7214674Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7215689Z ##[group]Setting up auth
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7216570Z Removing SSH command configuration
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7221859Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7269340Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7656054Z Removing HTTP extra header
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7665532Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7708607Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7962108Z Removing includeIf entries pointing to credentials config files
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.7964226Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8011884Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8252112Z [command]/usr/bin/git config --file [RUNNER_TEMP] http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8295112Z [command]/usr/bin/git config --local includeIf.gitdir:[GITHUB_WORKSPACE]/.git.path [RUNNER_TEMP]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8331331Z [command]/usr/bin/git config --local includeIf.gitdir:[GITHUB_WORKSPACE]/.git/worktrees/*.path [RUNNER_TEMP]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8369612Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-816bad67-eef9-4e8a-837c-e064c4e9f000.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8407563Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-816bad67-eef9-4e8a-837c-e064c4e9f000.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8440749Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8441940Z ##[group]Fetching the repository
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:15.8447948Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +833cf3910e9ffdb2a5b9bfcd271014a56344cd01:refs/remotes/origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3004579Z From https://github.com/adapt2move/nextcloud-modern-talk
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3007316Z  * [new ref]         833cf3910e9ffdb2a5b9bfcd271014a56344cd01 -> origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3015243Z [command]/usr/bin/git branch --list --remote origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3050966Z   origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3061457Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3092139Z 833cf3910e9ffdb2a5b9bfcd271014a56344cd01
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3097498Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3098635Z ##[group]Determining the checkout info
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3103523Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3113230Z [command]/usr/bin/git sparse-checkout disable
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3163641Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3203016Z ##[group]Checking out the ref
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.3208358Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4060255Z Switched to a new branch 'main'
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4063825Z branch 'main' set up to track 'origin/main'.
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4077788Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4131404Z [command]/usr/bin/git log -1 --format=%H
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4164887Z 833cf3910e9ffdb2a5b9bfcd271014a56344cd01
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4174444Z ##[group]Removing auth
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4179329Z Removing SSH command configuration
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4180576Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4221997Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4468072Z Removing HTTP extra header
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4471976Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4512260Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4747273Z Removing includeIf entries pointing to credentials config files
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4750669Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4787667Z includeif.gitdir:[GITHUB_WORKSPACE]/.git.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4790782Z includeif.gitdir:[GITHUB_WORKSPACE]/.git/worktrees/*.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4792794Z includeif.gitdir:/github/workspace/.git.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4793979Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4798490Z [command]/usr/bin/git config --local --get-all includeif.gitdir:[GITHUB_WORKSPACE]/.git.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4827484Z [RUNNER_TEMP]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4839906Z [command]/usr/bin/git config --local --unset includeif.gitdir:[GITHUB_WORKSPACE]/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-816bad67\-eef9\-4e8a\-837c\-e064c4e9f000\.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4914622Z [command]/usr/bin/git config --local --get-all includeif.gitdir:[GITHUB_WORKSPACE]/.git/worktrees/*.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4947823Z [RUNNER_TEMP]
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4958737Z [command]/usr/bin/git config --local --unset includeif.gitdir:[GITHUB_WORKSPACE]/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-816bad67\-eef9\-4e8a\-837c\-e064c4e9f000\.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.4997293Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5059440Z /github/runner_temp/git-credentials-816bad67-eef9-4e8a-837c-e064c4e9f000.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5081929Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-816bad67\-eef9\-4e8a\-837c\-e064c4e9f000\.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5123291Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5151074Z /github/runner_temp/git-credentials-816bad67-eef9-4e8a-837c-e064c4e9f000.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5163916Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-816bad67\-eef9\-4e8a\-837c\-e064c4e9f000\.config
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5205725Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5439338Z Removing credentials config '[RUNNER_TEMP]'
+Documentation and Rust contracts (Linux)	Check out candidate	2026-10-18T18:38:16.5448000Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5683361Z ##[group]Run python3 --version
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5684249Z python3 --version
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5684981Z python3 tools/check_docs.py
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5685860Z python3 tools/check_architecture.py
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5944420Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5945380Z env:
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5946002Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5947087Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.5947960Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.6082260Z Python 3.12.3
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.9408581Z Documentation: 69 Markdown files, 953 local references, 0 non-document fragments unchecked, 0 errors.
+Documentation and Rust contracts (Linux)	Check documentation and architecture	2026-10-18T18:38:16.9896096Z architecture: reviewed bootstrap dependency and boundary rules hold
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0040702Z ##[group]Run python3 - <<'PY'
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0042159Z python3 - <<'PY'
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0043421Z import os
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0044560Z import re
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0045720Z import tomllib
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0047280Z from pathlib import Path
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0048615Z
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0050314Z config = tomllib.loads(Path("rust-toolchain.toml").read_text(encoding="utf-8"))
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0052502Z channel = config["toolchain"]["channel"]
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0054442Z if not re.fullmatch(r"\d+\.\d+\.\d+|nightly-\d{4}-\d{2}-\d{2}", channel):
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0057328Z     raise SystemExit("Pin an exact Rust release or dated nightly in rust-toolchain.toml")
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0059982Z with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0062026Z     output.write(f"RUSTUP_TOOLCHAIN={channel}\n")
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0063495Z PY
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0130644Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0131811Z env:
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0132740Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0133905Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Select the repository's pinned Rust toolchain	2026-10-18T18:38:17.0135051Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0754398Z ##[group]Run rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0758007Z rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0760230Z rustc --version --verbose
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0761362Z cargo --version
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0829235Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0830277Z env:
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0831104Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0832177Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0833249Z   RUSTUP_TOOLCHAIN: 1.99.1
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.0834240Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.1351605Z info: syncing channel updates for 1.99.1-x86_64-unknown-linux-gnu
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.2516124Z info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:17.2519195Z info: downloading 5 components
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5443724Z
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5519393Z   1.99.1-x86_64-unknown-linux-gnu installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5520085Z
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5692544Z rustc 1.99.1 (58cf8f9c3 2026-10-13)
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5693397Z binary: rustc
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5694043Z commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5694855Z commit-date: 2026-10-13
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5695534Z host: x86_64-unknown-linux-gnu
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5696183Z release: 1.99.1
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5697028Z LLVM version: 23.1.1
+Documentation and Rust contracts (Linux)	Install and identify the pinned toolchain	2026-10-18T18:38:25.5789869Z cargo 1.99.1 (5f94df478 2026-08-27)
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5842449Z ##[group]Run cargo fmt --all -- --check
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5842899Z cargo fmt --all -- --check
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5915705Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5916127Z env:
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5917106Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5917517Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5917946Z   RUSTUP_TOOLCHAIN: 1.99.1
+Documentation and Rust contracts (Linux)	Check formatting	2026-10-18T18:38:25.5918771Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6632358Z ##[group]Run cargo check --workspace --all-targets --locked
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6632932Z cargo check --workspace --all-targets --locked
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6704768Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6705157Z env:
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6705452Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6705824Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6706190Z   RUSTUP_TOOLCHAIN: 1.99.1
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.6706519Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.7280125Z     Checking talk-core v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-core)
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.8654057Z     Checking talk-adapters v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-adapters)
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.9052635Z     Checking talk-bootstrap v0.0.0 ([GITHUB_WORKSPACE]/apps/bootstrap)
+Documentation and Rust contracts (Linux)	Check workspace targets	2026-10-18T18:38:25.9664886Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9731677Z ##[group]Run cargo clippy --workspace --all-targets --locked -- -D warnings
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9732317Z cargo clippy --workspace --all-targets --locked -- -D warnings
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9799420Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9799723Z env:
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9799943Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9800221Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9800496Z   RUSTUP_TOOLCHAIN: 1.99.1
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:25.9800741Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:26.0516545Z     Checking talk-core v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-core)
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:26.1876563Z     Checking talk-adapters v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-adapters)
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:26.2305381Z     Checking talk-bootstrap v0.0.0 ([GITHUB_WORKSPACE]/apps/bootstrap)
+Documentation and Rust contracts (Linux)	Lint workspace targets	2026-10-18T18:38:26.3027256Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3092778Z ##[group]Run cargo test --workspace --locked
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3093171Z cargo test --workspace --locked
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3158617Z shell: /usr/bin/bash -e {0}
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3158921Z env:
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3159142Z   CARGO_TERM_COLOR: always
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3159418Z   PYTHONDONTWRITEBYTECODE: 1
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3159719Z   RUSTUP_TOOLCHAIN: 1.99.1
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3159979Z ##[endgroup]
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.3651347Z    Compiling talk-core v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-core)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.4969531Z    Compiling talk-adapters v0.0.0 ([GITHUB_WORKSPACE]/crates/talk-adapters)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.6739334Z    Compiling talk-bootstrap v0.0.0 ([GITHUB_WORKSPACE]/apps/bootstrap)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8618000Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8624942Z      Running unittests src/lib.rs (target/debug/deps/talk_adapters-17439e4c7eb0835a)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8638167Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8638486Z running 0 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8638706Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8639320Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8639925Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8642429Z      Running tests/unconfigured_identity.rs (target/debug/deps/unconfigured_identity-09369a0ae176e551)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8651111Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8651336Z running 2 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8653975Z test authenticated_and_post_cancellation_maintenance_paths_never_fake_success ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8655711Z test fresh_account_and_cold_restore_have_no_runtime_input_and_remain_unconfigured ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8656338Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8657068Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8658586Z      Running unittests src/main.rs (target/debug/deps/talk_bootstrap-fee721f6e93eb7c4)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8659232Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8665733Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8666245Z running 0 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8666473Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8667122Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8667708Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8668620Z      Running unittests src/lib.rs (target/debug/deps/talk_core-aa70fdd5f961a5cc)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8677962Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8678518Z running 0 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8678786Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8679391Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8680030Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8680628Z      Running tests/contracts.rs (target/debug/deps/contracts-19331bbc7533ded4)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8689835Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8690375Z running 7 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8693898Z test a_capability_alone_never_grants_permission_and_expiry_remains_denied ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8694967Z test abandonment_cleanup_never_deletes_a_retained_item_or_trusts_early_absence ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8695905Z test action_and_transport_errors_do_not_invalidate_the_account ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8697110Z test closed_account_rejects_late_work_without_cancelling_another_account ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8698079Z test lease_cannot_cross_accounts_calls_runtime_generations_or_sleep_epochs ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8698957Z test boundary_limits_count_utf8_bytes_and_refuse_page_overflow ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8699717Z test delayed_read_cannot_extend_lease_from_receipt_time ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8700165Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8700630Z test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8701208Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8701932Z      Running tests/identity_boundary.rs (target/debug/deps/identity_boundary-543984d1564e043d)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8708186Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8708757Z running 6 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8712562Z test explicit_retention_can_acknowledge_only_named_p_and_cancel_does_not_infer_it ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8713676Z test late_settlement_cleanup_and_plain_suppression_cannot_be_activation_receipts ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8714654Z test abandonment_rejects_a_mixed_account_or_wrong_previous_generation ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8715595Z test maintenance_is_bounded_after_runtime_closure_and_scoped_to_one_account ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8716513Z test receipt_cannot_pass_attempt_cancellation_deadline_or_changed_identity ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8717922Z test uncertain_n_session_only_needs_the_exact_committed_suppression_ack ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8718691Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8719139Z test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8719737Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8720522Z      Running tests/presentation_boundary.rs (target/debug/deps/presentation_boundary-bf8655c0850fb4bd)
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8726250Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8727589Z running 1 test
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8730311Z test bounded_snapshot_decisions_persistence_and_typed_intents_are_public ... ok
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8730863Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8731135Z    Doc-tests talk_adapters
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8731789Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8732365Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8863558Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8864179Z running 0 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8864396Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8864734Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8865202Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.8876290Z    Doc-tests talk_core
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.9279737Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.9280776Z running 0 tests
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.9281089Z
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.9281544Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Documentation and Rust contracts (Linux)	Run workspace and documentation tests	2026-10-18T18:38:26.9282149Z
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:26.9602679Z Post job cleanup.
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.0476101Z [command]/usr/bin/git version
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.0521643Z git version 2.55.0
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.0574619Z Temporarily overriding HOME='[RUNNER_TEMP]' before making global git config changes
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.0576007Z Adding repository directory to the temporary git global config as a safe directory
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.0579829Z [command]/usr/bin/git config --global --add safe.directory [GITHUB_WORKSPACE]
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1169305Z Removing SSH command configuration
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1170213Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1208286Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1507651Z Removing HTTP extra header
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1524709Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1556566Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1812240Z Removing includeIf entries pointing to credentials config files
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1819426Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Documentation and Rust contracts (Linux)	Post Check out candidate	2026-10-18T18:38:27.1858376Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Documentation and Rust contracts (Linux)	Complete job	2026-10-18T18:38:27.2718934Z Cleaning up orphan processes
