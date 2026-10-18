@@ -1,0 +1,120 @@
+{
+  "started_at_utc": "2026-10-18T18:32:30.424635+00:00",
+  "session_owner": "codex:01a14ef1-6795-71f1-9f33-b57ea5d5af0b",
+  "session_key": "4a1945b87344bd2e3ae46ed56094893e",
+  "command": [
+    "agent-dev-box",
+    "status",
+    "--session",
+    "codex:01a14ef1-6795-71f1-9f33-b57ea5d5af0b"
+  ],
+  "working_directory": "[PARENT_WORKSPACE]",
+  "sanitized": true,
+  "exit_code": 0,
+  "stdout": {
+    "version": 1,
+    "sessions": {
+      "4a1945b87344bd2e3ae46ed56094893e": {
+        "agent_generation": 1503,
+        "key": "4a1945b87344bd2e3ae46ed56094893e",
+        "provider": "codex",
+        "id": "01a14ef1-6795-71f1-9f33-b57ea5d5af0b",
+        "workspace": "[REDACTED_PRIVATE_PATH]",
+        "remote_dir": "[REDACTED_PRIVATE_PATH]",
+        "phase": "hibernated",
+        "server_type": "cpx22",
+        "location": "nbg1",
+        "snapshot_id": 445171820,
+        "project": {
+          "size": "small"
+        },
+        "created": "2026-10-18T14:16:47.510749407+02:00",
+        "agent_state": "idle",
+        "hook_seen": "2026-10-18T20:19:34.412250856+02:00",
+        "waiter_seen": "0001-01-01T00:00:00Z",
+        "last_activity": "2026-10-18T20:30:38.380411689+02:00",
+        "reminded_at": "0001-01-01T00:00:00Z",
+        "session_file": "[REDACTED_PRIVATE_PATH]",
+        "file_seen": true,
+        "missing_since": "0001-01-01T00:00:00Z"
+      }
+    },
+    "usage": {
+      "server:171054300": {
+        "kind": "server",
+        "id": 171054300,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T15:57:10Z",
+        "ended": "2026-10-18T18:17:20.822238904+02:00",
+        "type_id": 109,
+        "location": "nbg1",
+        "ipv4": true
+      },
+      "server:171057853": {
+        "kind": "server",
+        "id": 171057853,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T16:25:29Z",
+        "ended": "2026-10-18T18:36:16.044770681+02:00",
+        "type_id": 109,
+        "location": "nbg1",
+        "ipv4": true
+      },
+      "server:171062495": {
+        "kind": "server",
+        "id": 171062495,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T16:49:42Z",
+        "ended": "2026-10-18T19:00:51.078891924+02:00",
+        "type_id": 109,
+        "location": "nbg1",
+        "ipv4": true
+      },
+      "server:171065788": {
+        "kind": "server",
+        "id": 171065788,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T17:31:27Z",
+        "ended": "2026-10-18T20:30:38.367048351+02:00",
+        "type_id": 109,
+        "location": "nbg1",
+        "ipv4": true
+      },
+      "snapshot:445144924": {
+        "kind": "snapshot",
+        "id": 445144924,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T16:16:50Z",
+        "ended": "0001-01-01T00:00:00Z",
+        "size_gb": 5.426515579223633
+      },
+      "snapshot:445145085": {
+        "kind": "snapshot",
+        "id": 445145085,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T16:35:17Z",
+        "ended": "0001-01-01T00:00:00Z",
+        "size_gb": 5.583901882171631
+      },
+      "snapshot:445145409": {
+        "kind": "snapshot",
+        "id": 445145409,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T16:59:54Z",
+        "ended": "0001-01-01T00:00:00Z",
+        "size_gb": 5.888960361480713
+      },
+      "snapshot:445171820": {
+        "kind": "snapshot",
+        "id": 445171820,
+        "session": "4a1945b87344bd2e3ae46ed56094893e",
+        "created": "2026-10-18T18:25:36Z",
+        "ended": "0001-01-01T00:00:00Z",
+        "size_gb": 5.9510369300842285
+      }
+    },
+    "evidence_scope": "Parent session and parent-owned usage only; unrelated sessions, jobs, reminders and price table omitted."
+  },
+  "stderr": "",
+  "completed_at_utc": "2026-10-18T18:32:30.458721+00:00"
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-18T18:36:42.186344+00:00",
+  "publisher": "delegated final documentation/publication integrator",
+  "original_handoff": {
+    "artifact_basename": "nextcloud-modern-talk-hibernation-recovery-r1.json",
+    "sha256": "834171b10e23c3d3e0b4de390609ffef9cb0a30258c2ca642d61ba9511a1bff9",
+    "bytes": 11987,
+    "author": "delegated-sole-vm-lifecycle-owner-hibernation-recovery-r1",
+    "generated_at_utc": "2026-10-18T18:34:21.269868+00:00"
+  },
+  "original_evidence_manifest": [
+    {
+      "file": "hibernate-help.json",
+      "sha256": "fba8978778f87c33246e783337c0e1ae97fb188f72162f977486f970095cc71b",
+      "bytes": 1108
+    },
+    {
+      "file": "provider-console-observation.json",
+      "sha256": "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+      "bytes": 985
+    },
+    {
+      "file": "snapshots-before.json",
+      "sha256": "a3296c5adcd365078f78dc4ea8be723b9c9e7d507ee2a5d017a0b566a6182eb5",
+      "bytes": 1446
+    },
+    {
+      "file": "stats-before.json",
+      "sha256": "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+      "bytes": 3149
+    },
+    {
+      "file": "stats-help.json",
+      "sha256": "2ff87f379bd5ea9ead1dcc48f4c9f9ffc9917a2e737cab9bc3eec8dc3b7bc8d7",
+      "bytes": 1100
+    },
+    {
+      "file": "stats-verification.json",
+      "sha256": "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+      "bytes": 3149
+    },
+    {
+      "file": "status-before.json",
+      "sha256": "e937a8c674ecdd67e0d00872a706a77c99b7b42e6fc48513ee3d2c45b6fa25d0",
+      "bytes": 3978
+    },
+    {
+      "file": "status-verification.json",
+      "sha256": "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+      "bytes": 3934
+    },
+    {
+      "file": "supported-help.json",
+      "sha256": "6acfafcc5a7ff6da5d44ebbeee6c572bcbb399a661ec2fdb1a7f65c4c0828291",
+      "bytes": 2246
+    },
+    {
+      "file": "version.json",
+      "sha256": "c02dcbf3e9ead3995c6dde4f92f7195fd5486b551757ec81f641b4c65f2dcb15",
+      "bytes": 414
+    }
+  ],
+  "all_10_original_evidence_hashes_and_sizes_match": true,
+  "source_attribution": "Root PM confirmed inspection of the full handoff and fresh state/stats records and verification of all ten evidence hashes. Publisher rechecked source hashes solely for faithful integration; no new independent lifecycle or gate review is claimed.",
+  "selected_published_files": {
+    "stats-before.json": {
+      "sha256": "f09e5f1d2a6643a92517e688216c477bc8ba42f3dfc21fd8424fcc0e72934e2a",
+      "bytes": 3149,
+      "relationship": "Byte-identical copy of lifecycle-owner sanitized evidence; no publisher redaction or other alteration."
+    },
+    "stats-verification.json": {
+      "sha256": "aebb94c005cf974759f44f8bde91b9e005a8dc1e34fd3bc054729375a6ce022f",
+      "bytes": 3149,
+      "relationship": "Byte-identical copy of lifecycle-owner sanitized evidence; no publisher redaction or other alteration."
+    },
+    "status-verification.json": {
+      "sha256": "f7fe7e360b25cf44739fc5825b8947703ab28516a73c88f2f39a1d981615b22f",
+      "bytes": 3934,
+      "relationship": "Byte-identical copy of lifecycle-owner sanitized evidence; no publisher redaction or other alteration."
+    },
+    "provider-console-observation.json": {
+      "sha256": "c66bb3e18e952352d03ebf1fdb8792d9387b342e183ea14669d7e101aa9c694f",
+      "bytes": 985,
+      "relationship": "Byte-identical copy of lifecycle-owner sanitized evidence; no publisher redaction or other alteration."
+    },
+    "lifecycle-recovery.json": {
+      "sha256": "397e1cc73435d458e1d2782a1c13a4192de2dd138e51b98293a5016b3b523c58",
+      "bytes": 11073,
+      "relationship": "Explicit selected-field extract of the original handoff plus publication provenance and attributed earlier operational history; not an alteration of the source artifact."
+    }
+  },
+  "not_published": "The other six original CLI/help/inventory records remain with the external handoff; they are identified by basename/hash above and are not links to repository files. No source filesystem paths are published.",
+  "limits": [
+    "The parent was already hibernated at the first lifecycle-owner observation; initiating actor was not established and no retry/mutation was issued.",
+    "Provider inventory was not independently obtained because the console required login.",
+    "User-reported deletion of 445144924 is not reconciled with the tool inventory and is not independently confirmed; reported storage estimates include that entry.",
+    "Snapshot costs continue. Server rate zero is not zero total cost or a reconciled provider bill.",
+    "No product build, test, backend, native workload, credential access or lifecycle mutation was performed by the publication integrator."
+  ]
+}

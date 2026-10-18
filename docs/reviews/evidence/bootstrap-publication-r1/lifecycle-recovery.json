@@ -1,0 +1,214 @@
+{
+  "owner": "delegated-sole-vm-lifecycle-owner-hibernation-recovery-r1",
+  "generated_at_utc": "2026-10-18T18:34:21.269868+00:00",
+  "session": "codex:01a14ef1-6795-71f1-9f33-b57ea5d5af0b",
+  "session_key": "4a1945b87344bd2e3ae46ed56094893e",
+  "scope": "Existing parent session only; evidence-only local writes; no repository source/history changes or project workload.",
+  "lifecycle_complete": true,
+  "previously_blocked_hibernation_cleanup_complete": true,
+  "hibernation_result": "already_hibernated_verified_no_retry_needed",
+  "result_statement": "The previously blocked parent-session hibernation and retained-server cleanup are now complete, verified through fresh agent-dev-box stats and status. The old-snapshot inventory discrepancy remains separately open.",
+  "phase": "hibernated",
+  "server_present": false,
+  "server_id": null,
+  "released_server_id": 171065788,
+  "server_type": "cpx22",
+  "server_release_recorded_at": "2026-10-18T20:30:38.367048351+02:00",
+  "server_release_recorded_at_utc": "2026-10-18T18:30:38.367048+00:00",
+  "server_release_evidence": "status-verification.json: parent session has no server_id; usage for server:171065788 has a nonzero ended timestamp; all parent-owned server usage records are closed. stats-verification.json reports hourly_net=0 and stable server_seconds.",
+  "current_error": null,
+  "first_terminal_observation": "2026-10-18T20:30:40.542908348+02:00",
+  "latest_stats_observation": "2026-10-18T20:31:47.22594744+02:00",
+  "latest_state_observation_utc": "2026-10-18T18:32:30.458721+00:00",
+  "latest_available_recovery_snapshot": {
+    "id": 445171820,
+    "session": "4a1945b87344bd2e3ae46ed56094893e",
+    "last_used": "2026-10-18T20:25:36+02:00",
+    "status": "available",
+    "created": "2026-10-18T18:25:36Z",
+    "size_gb": 5.9510369300842285
+  },
+  "preserved_required_snapshots": [
+    {
+      "id": 445145085,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T18:49:41+02:00",
+      "status": "available",
+      "created": "2026-10-18T16:35:17Z",
+      "size_gb": 5.583901882171631
+    },
+    {
+      "id": 445145409,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T19:31:26+02:00",
+      "status": "available",
+      "created": "2026-10-18T16:59:54Z",
+      "size_gb": 5.888960361480713
+    }
+  ],
+  "all_parent_snapshots_reported_available": [
+    {
+      "id": 445144924,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T18:25:28+02:00",
+      "status": "available",
+      "created": "2026-10-18T16:16:50Z",
+      "size_gb": 5.426515579223633
+    },
+    {
+      "id": 445145085,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T18:49:41+02:00",
+      "status": "available",
+      "created": "2026-10-18T16:35:17Z",
+      "size_gb": 5.583901882171631
+    },
+    {
+      "id": 445145409,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T19:31:26+02:00",
+      "status": "available",
+      "created": "2026-10-18T16:59:54Z",
+      "size_gb": 5.888960361480713
+    },
+    {
+      "id": 445171820,
+      "session": "4a1945b87344bd2e3ae46ed56094893e",
+      "last_used": "2026-10-18T20:25:36+02:00",
+      "status": "available",
+      "created": "2026-10-18T18:25:36Z",
+      "size_gb": 5.9510369300842285
+    }
+  ],
+  "verification": {
+    "terminal_phase_hibernated": true,
+    "current_snapshot_available_and_owned": true,
+    "required_preserved_snapshots_available_and_owned": true,
+    "session_server_id_absent": true,
+    "retained_server_usage_closed": true,
+    "all_parent_server_usage_closed": true,
+    "current_server_hourly_net_zero": true,
+    "server_runtime_stable_between_stats_reads": true,
+    "runtime_before_seconds": 6078.31294986,
+    "runtime_after_seconds": 6078.31294986,
+    "before_as_of": "2026-10-18T20:30:40.542908348+02:00",
+    "after_as_of": "2026-10-18T20:31:47.22594744+02:00",
+    "provider_inventory_independently_checked": false,
+    "provider_inventory_limitation": "Hetzner Console redirected the existing browser profile to its login page. No authentication attempted; no credentials accessed."
+  },
+  "actions": {
+    "supported_retry_command": "agent-dev-box hibernate --session codex:01a14ef1-6795-71f1-9f33-b57ea5d5af0b",
+    "hibernate_mutation_issued_this_round": false,
+    "reason_no_retry": "Parent session was already hibernated at the first fresh state/stats observation, so a further lifecycle mutation was unnecessary.",
+    "attribution": "Successful terminal state observed and verified by this worker. The initiating actor for the already-completing hibernation was not established.",
+    "read_only_cli_calls": [
+      "version",
+      "--help",
+      "hibernate --help (explicit parent session)",
+      "stats --help (explicit parent session)",
+      "status (explicit parent session, scoped evidence)",
+      "stats --json (explicit parent session)",
+      "snapshots (explicit parent session, scoped evidence)"
+    ],
+    "help_exit_note": "Per-command --help exited 1 with agent-dev-box: flag: help requested; this is help output, not a hibernation failure or a mutation.",
+    "read_only_browser_calls": [
+      "Opened existing agent-dev-box dashboard and inspected its GET /api/view and refresh implementation",
+      "Opened Hetzner Console; observed login page; closed own browser tab"
+    ],
+    "additional_snapshots_deleted": [],
+    "new_environments_created": false,
+    "up_resume_or_remote_exec_used": false,
+    "project_builds_tests_or_services_run": false,
+    "repository_source_history_or_docs_changed": false,
+    "daemon_or_session_state_edited": false,
+    "manual_server_deletion_or_protection_bypass": false,
+    "credentials_extracted": false,
+    "subagents_spawned": false,
+    "other_sessions_or_base_images_mutated_by_worker": false
+  },
+  "old_snapshot_discrepancy": {
+    "snapshot_id": 445144924,
+    "user_report": "Alter Snapshot ist gelöscht",
+    "reported_provider_action": "User reported deleting old own snapshot 445144924 in Hetzner and preserving 445145409.",
+    "current_tool_status": "available",
+    "tool_still_lists_snapshot": true,
+    "tool_usage_end": "0001-01-01T00:00:00Z",
+    "provider_absence_independently_verified": false,
+    "assessment": "Reported provider deletion and current agent-dev-box inventory disagree. Stale tool inventory is possible but is not proven; no claim of independently verified provider absence is made.",
+    "deletion_reconciliation_complete": false,
+    "hibernation_blocked_by_discrepancy": false,
+    "no_additional_deletion_attempted": true,
+    "cost_impact": "Reported snapshot_monthly_net and cumulative estimates still include the tool-listed old snapshot; these values are reported unchanged and are not a reconciled provider bill."
+  },
+  "cost_estimates": {
+    "source": "agent-dev-box stats --session codex:01a14ef1-6795-71f1-9f33-b57ea5d5af0b --json",
+    "as_of": "2026-10-18T20:31:47.22594744+02:00",
+    "prices_as_of": "2026-10-18T20:19:50.25446733+02:00",
+    "currency": "EUR",
+    "vat": "0.000000",
+    "net_or_gross": "Net estimates; gross as reported is also preserved.",
+    "current_server_hourly_net": 0,
+    "current_server_hourly_net_unit": "EUR/hour",
+    "cumulative_estimated_net": 0.12862813896806435,
+    "cumulative_estimated_gross": 0.12862813896806435,
+    "snapshot_monthly_net": 0.32676093096733094,
+    "snapshot_monthly_net_unit": "EUR/month",
+    "vm_runtime_seconds": 6078.31294986,
+    "session_duration_seconds": 22499.805396959,
+    "scope": "Cumulative parent session, not incremental recovery-task billing; ongoing snapshot storage remains chargeable.",
+    "warnings": [],
+    "limitations": [
+      "Tool inventory still includes old snapshot 445144924 despite reported provider deletion; estimates may therefore include stale storage.",
+      "Estimates exclude shared base image, possible additional traffic and historic price changes.",
+      "No provider invoice or independent provider inventory was retrieved."
+    ]
+  },
+  "remaining_operational_obligations": [
+    {
+      "status": "open",
+      "obligation": "Reconcile reported deletion of snapshot 445144924 with agent-dev-box inventory using supported read-only provider observation or supported inventory refresh; no further snapshot deletion or state editing is authorized by this evidence.",
+      "blocks_hibernation_completion": false
+    },
+    {
+      "status": "ongoing",
+      "obligation": "Preserve available recovery snapshots 445171820, 445145409 and 445145085; retained snapshots continue to incur storage costs.",
+      "blocks_hibernation_completion": false
+    },
+    {
+      "status": "handoff",
+      "obligation": "Root independently assess and pass the sanitized evidence to the publication integrator; use the timestamped terminal state and retain the old-snapshot/cost caveat.",
+      "blocks_hibernation_completion": false
+    }
+  ],
+  "publication_sanitization": "IPs, private host/workspace paths and credential fields redacted; status and snapshot inventories filtered to parent ownership; unrelated jobs and session data omitted. CLI results, identifiers, timestamps and meaningful errors retained.",
+  "schema_version": 1,
+  "publication_scope": "Selected operational handoff fields, not a new lifecycle observation, initiating action, product test, independent gate review or gate acceptance.",
+  "source_provenance": {
+    "artifact_basename": "nextcloud-modern-talk-hibernation-recovery-r1.json",
+    "sha256": "834171b10e23c3d3e0b4de390609ffef9cb0a30258c2ca642d61ba9511a1bff9",
+    "generated_at_utc": "2026-10-18T18:34:21.269868+00:00",
+    "source_evidence_entries_verified": 10,
+    "publication_transform": "Selected fields copied verbatim; source history/evidence filesystem paths and unrelated help/skill metadata omitted. Original handoff is preserved outside the repository. Published CLI/browser evidence is already sanitized by its author and copied byte-for-byte.",
+    "manifest": "provenance.json"
+  },
+  "published_evidence": {
+    "stats-before.json": "stats-before.json",
+    "stats-verification.json": "stats-verification.json",
+    "status-verification.json": "status-verification.json",
+    "provider-console-observation.json": "provider-console-observation.json"
+  },
+  "historical_observation": {
+    "owner": "delegated final documentation/publication integrator",
+    "as_of_utc": "2026-10-18T18:19:50.192082391+00:00",
+    "phase": "snapshotting",
+    "server_id": 171065788,
+    "error": "image limit exceeded (resource_limit_exceeded, 760ea84f0b38f5aef9071e1856ea3c62)",
+    "scope": "Earlier read-only observation, superseded by the lifecycle-owner records above. No second publisher VM observation or lifecycle action."
+  },
+  "historical_supported_delete": {
+    "snapshot_id": 445144924,
+    "http_status": 400,
+    "error": "snapshot belongs to an active, unknown or unfinished session",
+    "scope": "Prior failed supported deletion, historical only; unchanged prior reports remain preserved."
+  }
+}
