@@ -1,0 +1,13 @@
+{
+  "source_commit": "d11d99131d63e5fded7de6e0a7f6c7fb8f473913",
+  "source_tree": "280feb50066965fa1eb995ecd77ad53baf7b0244",
+  "source_archive_sha256": "2ce839ff80315aa7adcbf8266cb799fec1f4b11bb8a3ee78f919f5fcb581eebd",
+  "input_content_manifest_sha256": "91d25314288c43caf996637fcbbb174fdf73755310c4b946a0486020cc3bf8fc",
+  "diagnostic_debug_binary_sha256": "cb8e2b261e573bf38904e605775160eedc4e860959dfbc41bbd26e8be9b101b4",
+  "reexecuted_unchanged_evidence_sha256": {
+    "allocation-arithmetic.json": "60850f9975dd022054bd465c700c822bb58328840c0fd4b600bd424661d931be",
+    "toolchain.json": "ead205ef2f380d2df920d9aed492867989420e16cdcf56edd1a50086e3129039",
+    "unconfigured-probe.rs": "3d496bbcfee832c82467c539c66699d0afd9a6b18d3a87b9385943342b9bf5ba"
+  },
+  "scope": "Exact clean source rerun. Continuation changes only author report, IST and new evidence; no source/checker/ADR/fixture/manifest/lock changes."
+}
