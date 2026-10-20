@@ -9,8 +9,7 @@ import re
 import shutil
 import stat
 import tempfile
-from urllib.parse import unquote, urlsplit
-
+import macos_layout
 from macos_runtime import inspect_bundle, run, sha
 
 APP_NAME = "NextCloud Modern Talk.app"
@@ -46,47 +45,25 @@ def file_inventory(root):
     return inventory
 
 
-def finder(mount, configure):
+def finder(mount):
     # argv is passed as data to osascript, never interpolated into AppleScript.
     # Finder touches only this temporary volume; no app is opened or executed.
-    common = '''
+    script = '''
 on run arguments
     set mountPath to item 1 of arguments
     set targetFolder to POSIX file mountPath as alias
     tell application "Finder"
         open targetFolder
         set targetWindow to container window of targetFolder
-'''
-    if configure:
-        body = '''
-        set current view of targetWindow to icon view
-        set toolbar visible of targetWindow to false
-        set statusbar visible of targetWindow to false
-        set bounds of targetWindow to {200, 100, 980, 580}
-        set viewOptions to icon view options of targetWindow
-        set arrangement of viewOptions to not arranged
-        set icon size of viewOptions to 112
-        set text size of viewOptions to 13
-        set background picture of viewOptions to file ".background:background.png" of targetFolder
-        set position of item "NextCloud Modern Talk.app" of targetFolder to {204, 235}
-        set position of item "Applications" of targetFolder to {576, 235}
-        update targetFolder without registering applications
-        delay 2
-'''
-    else:
-        body = '''
         set viewOptions to icon view options of targetWindow
         if current view of targetWindow is not icon view then error "DMG icon view missing"
         if icon size of viewOptions is not 112 then error "DMG icon size changed"
         if position of item "NextCloud Modern Talk.app" of targetFolder is not {204, 235} then error "DMG app position changed"
         if position of item "Applications" of targetFolder is not {576, 235} then error "DMG Applications position changed"
-        set backgroundFile to get background picture of viewOptions
-        set backgroundURL to get URL of backgroundFile
-'''
-    script = common + body + '''
         close targetWindow
     end tell
-''' + ("" if configure else "    return backgroundURL\n") + "end run\n"
+end run
+'''
     import subprocess
     result = subprocess.run(["osascript", "-", str(mount)], input=script, text=True,
                             capture_output=True, timeout=60)
@@ -100,27 +77,7 @@ on run arguments
                 line = script.count("\n", 0, start) + 1
                 source = script.splitlines()[line - 1].strip()[:240]
                 location = f" at script line {line}, characters {start}:{end}: {source}"
-        phase = "configuration" if configure else "read-only inspection"
-        raise ValueError(f"Finder disk-image layout failed during {phase}{location}: {details}")
-    if not configure:
-        # Ask Finder for the actual background file first, without asking its
-        # AppleEvent handler to coerce a compound property reference to alias.
-        # Bind the returned file URL to this mount, not merely a matching suffix.
-        background_url = result.stdout.strip()
-        try:
-            if len(background_url) > 8192:
-                raise ValueError("background URL exceeds its bound")
-            parsed = urlsplit(background_url)
-            if (parsed.scheme != "file" or parsed.netloc not in ("", "localhost")
-                    or parsed.query or parsed.fragment or not parsed.path.startswith("/")):
-                raise ValueError("background is not a local file URL")
-            actual = Path(unquote(parsed.path, errors="strict"))
-            expected = Path(mount) / ".background/background.png"
-            if not actual.samefile(expected):
-                raise ValueError("background belongs to a different file")
-        except (OSError, ValueError) as error:
-            raise ValueError("Finder background does not identify this disk image's background: "
-                             + repr(background_url[:512])) from error
+        raise ValueError(f"Finder disk-image layout failed during read-only inspection{location}: {details}")
 
 
 @contextmanager
@@ -187,6 +144,7 @@ def create(app, output):
     expected = file_inventory(app)
     with tempfile.TemporaryDirectory(prefix="nmt-dmg-") as temporary:
         temporary = Path(temporary)
+        layout_tools = macos_layout.prepare(temporary)
         contents = temporary / "contents"
         contents.mkdir()
         shutil.copytree(app, contents / APP_NAME)
@@ -201,10 +159,10 @@ def create(app, output):
         mount = temporary / "mount"
         mount.mkdir()
         with attach(image, mount, True):
-            finder(mount, True)
+            macos_layout.write(mount, layout_tools)
             run(["sync"])
             if not (mount / ".DS_Store").is_file():
-                raise ValueError("Finder did not persist the disk-image layout")
+                raise ValueError("Disk-image layout writer did not persist .DS_Store")
         run(["hdiutil", "convert", image, "-format", "UDZO", "-imagekey", "zlib-level=9",
              "-o", output], 180)
         run(["hdiutil", "verify", output], 180)
@@ -217,9 +175,13 @@ def create(app, output):
                 raise ValueError("Disk-image application differs from updater ZIP input")
             if sha(mount / ".background/background.png") != sha(app / "Contents/Resources" / BACKGROUND):
                 raise ValueError("Disk-image background differs from source-bound artwork")
-            finder(mount, False)
+            finder(mount)
+            # Inspect the persisted layout and its native background identity
+            # independently of Finder's view/position inspection.
+            layout_report = macos_layout.inspect(mount, layout_tools)
             objects = inspect_bundle(mount / APP_NAME)
             run(["codesign", "--verify", "--deep", "--strict", mount / APP_NAME])
     return {"format": "UDZO", "read_only": True, "applications_target": "/Applications",
             "layout": "Finder icon view, custom background, 112px icons",
+            "persisted_layout": layout_report,
             "native_objects": len(objects), "application_executed": False}

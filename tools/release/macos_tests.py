@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Linux structural/failure fixtures; no native executable is ever run."""
 import copy
+import base64
 import contextlib
 import hashlib
 import io
@@ -11,14 +12,17 @@ import plistlib
 import shutil
 import struct
 import subprocess
+import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
 
 import macos_runtime as runtime
 import macos_dmg as dmg
+import macos_layout as layout
 
 
 def command(kind, text):
@@ -304,7 +308,11 @@ class MacRuntimeTests(unittest.TestCase):
                     self.fail("Invalid mount must not be used")
             self.assertIn("/dev/disk27: SYNTHETIC detach failure", raised.exception.__notes__[0])
 
-    def test_finder_inspection_binds_its_reported_background_url_to_the_current_mount(self):
+    def layout_response(self):
+        return json.dumps({"background_alias": base64.b64encode(b"SYNTHETIC alias").decode(),
+                           "store_sha256": "1" * 64, "entries": 3}).encode()
+
+    def test_persisted_background_resolution_binds_the_alias_to_the_current_mount(self):
         mount = self.root / "physical mount Ü"
         background = mount / ".background/background.png"
         background.parent.mkdir(parents=True)
@@ -312,21 +320,24 @@ class MacRuntimeTests(unittest.TestCase):
         alias = self.root / "mount alias"
         alias.symlink_to(mount, target_is_directory=True)
         for url in (background.as_uri(), background.as_uri().replace("file:///", "file://localhost/", 1)):
-            result = subprocess.CompletedProcess([], 0, url + "\n", "")
-            with patch("subprocess.run", return_value=result) as run:
-                dmg.finder(alias, False)
+            reply = json.dumps({"url": url, "stale": True}).encode()
+            with patch.object(layout, "command", side_effect=[self.layout_response(), reply]) as run:
+                report = layout.inspect(alias, (self.root / "wheels", self.root / "resolver"))
+            self.assertTrue(report["alias_stale"])  # Remounting can stale a correctly resolved bookmark.
+            self.assertEqual(run.call_args_list[0].args[0][1:3], ["-I", "-S"])
+            self.assertEqual(run.call_args_list[0].args[1], 20)
+            self.assertEqual(run.call_args_list[1].args, (
+                [self.root / "resolver", alias], 30, b"SYNTHETIC alias", 16384))
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            dmg.finder(alias)
             script = run.call_args.kwargs["input"]
-            self.assertIn("set backgroundFile to get background picture of viewOptions", script)
-            self.assertIn("set backgroundURL to get URL of backgroundFile", script)
-            self.assertNotIn("background picture of viewOptions as alias", script)
+            self.assertNotIn("get background picture", script)
             for assertion in ("DMG icon view missing", "DMG icon size changed",
                               "DMG app position changed", "DMG Applications position changed"):
                 self.assertIn(assertion, script)
             self.assertEqual(run.call_args.args[0], ["osascript", "-", str(alias)])
-        with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
-            dmg.finder(alias, True)  # Configuration does not return an inspected URL.
 
-    def test_finder_background_existence_or_a_matching_suffix_is_not_sufficient(self):
+    def test_persisted_background_existence_or_a_matching_suffix_is_not_sufficient(self):
         mount = self.root / "mount"
         background = mount / ".background/background.png"
         background.parent.mkdir(parents=True)
@@ -337,31 +348,97 @@ class MacRuntimeTests(unittest.TestCase):
         for url in (wrong.as_uri(), "", "missing value", "https://invalid.test/background.png",
                     "file://remote.invalid" + str(background), background.as_uri() + "?ignored=true",
                     background.as_uri() + "#fragment", "file:///" + "a" * 8192):
-            with self.subTest(url=url[:80]), patch(
-                "subprocess.run", return_value=subprocess.CompletedProcess([], 0, url + "\n", "")
-            ):
+            reply = json.dumps({"url": url, "stale": False}).encode()
+            with self.subTest(url=url[:80]), patch.object(
+                layout, "command", side_effect=[self.layout_response(), reply]):
                 with self.assertRaisesRegex(ValueError, "does not identify this disk image") as raised:
-                    dmg.finder(mount, False)
+                    layout.inspect(mount, (self.root / "wheels", self.root / "resolver"))
                 self.assertLess(len(str(raised.exception)), 700)
+
+    def test_persisted_alias_failure_stops_inspection_and_reports_bounded_native_details(self):
+        for failure in (ValueError("SYNTHETIC rejected alias"),
+                        subprocess.TimeoutExpired("SYNTHETIC resolver", 30)):
+            with self.subTest(failure=failure), patch.object(
+                layout, "command", side_effect=[self.layout_response(), failure]) as run:
+                with self.assertRaises(type(failure)):
+                    layout.inspect(self.root, (self.root / "wheels", self.root / "resolver"))
+                self.assertEqual(run.call_count, 2)
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess(
+                [], 1, b"", b"SYNTHETIC " * 1000)):
+            with self.assertRaisesRegex(ValueError, "layout tool failed") as raised:
+                layout.command(["SYNTHETIC resolver"], 30, b"alias")
+            self.assertLess(len(str(raised.exception)), 2100)
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, b"12345", b"")):
+            with self.assertRaisesRegex(ValueError, "output limit"):
+                layout.command(["SYNTHETIC parser"], 20, limit=4)
+
+    def test_layout_child_timeout_kills_and_reaps_the_child(self):
+        pidfile = self.root / "child.pid"
+        script = ("import os, pathlib, sys, time; "
+                  "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            layout.command([sys.executable, "-I", "-S", "-c", script, pidfile], 0.5)
+        pid = int(pidfile.read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_dmg_delivery_requires_persisted_inspection_before_final_native_verification(self):
+        app = self.root / dmg.APP_NAME
+        background = app / "Contents/Resources" / dmg.BACKGROUND
+        background.parent.mkdir(parents=True)
+        background.write_bytes(b"SYNTHETIC background")
+        events = []
+
+        @contextlib.contextmanager
+        def attached(image, mount, writable):
+            if writable:
+                shutil.copytree(app, mount / dmg.APP_NAME)
+                (mount / "Applications").symlink_to("/Applications")
+                (mount / ".background").mkdir()
+                shutil.copyfile(background, mount / ".background/background.png")
+                (mount / ".DS_Store").write_bytes(b"SYNTHETIC parser input")
+            try:
+                yield "/dev/SYNTHETIC"
+            finally:
+                events.append(("detached", writable))
+
+        with patch.object(layout, "prepare", return_value=("wheels", "resolver")), \
+                patch.object(layout, "write") as write, \
+                patch.object(dmg, "attach", side_effect=attached), \
+                patch.object(dmg, "finder"), patch.object(dmg, "run") as run, \
+                patch.object(dmg.os, "statvfs", return_value=SimpleNamespace(f_flag=os.ST_RDONLY)), \
+                patch.object(dmg, "inspect_bundle", return_value=[]) as native_check:
+            with patch.object(layout, "inspect", side_effect=ValueError("SYNTHETIC wrong alias")):
+                with self.assertRaisesRegex(ValueError, "wrong alias"):
+                    dmg.create(app, self.root / "fixture.dmg")
+            self.assertEqual(events, [("detached", True), ("detached", False)])
+            write.assert_called_once()
+            native_check.assert_not_called()
+            self.assertFalse(any(call.args[0][0] == "codesign" for call in run.call_args_list))
+            with patch.object(layout, "inspect", return_value={"SYNTHETIC": "verified"}) as inspect:
+                report = dmg.create(app, self.root / "fixture.dmg")
+            self.assertEqual(report["persisted_layout"], {"SYNTHETIC": "verified"})
+            inspect.assert_called_once()
+            self.assertEqual(run.call_args.args[0][:4], ["codesign", "--verify", "--deep", "--strict"])
 
     def test_finder_native_error_identifies_the_actual_script_line_with_bounded_output(self):
         def failed(argv, **kwargs):
             script = kwargs["input"]
-            start = script.index("URL of backgroundFile")
+            start = script.index("current view")
             return subprocess.CompletedProcess(
                 argv, 1, "", f"{start}:{start + 3}: execution error: SYNTHETIC AppleEvent failure (-10000)\n"
             )
 
         with patch("subprocess.run", side_effect=failed):
             with self.assertRaisesRegex(ValueError, "read-only inspection at script line") as raised:
-                dmg.finder(self.root / "mount", False)
-            self.assertIn("set backgroundURL to get URL of backgroundFile", str(raised.exception))
+                dmg.finder(self.root / "mount")
+            self.assertIn("DMG icon view missing", str(raised.exception))
             self.assertIn("(-10000)", str(raised.exception))
         with patch("subprocess.run", return_value=subprocess.CompletedProcess(
             [], 1, "", "99999999:99999999: " + "SYNTHETIC " * 1000
         )):
             with self.assertRaises(ValueError) as raised:
-                dmg.finder(self.root / "mount", False)
+                dmg.finder(self.root / "mount")
             self.assertLess(len(str(raised.exception)), 2300)
 
 
