@@ -259,6 +259,8 @@ def build(root, output, target, version):
                   "apps/desktop/NOTICE.md": "licenses/desktop/NOTICE.md",
                   "apps/desktop/assets/fonts/GoogleSans-LICENSE.txt": "licenses/google-sans/GoogleSans-LICENSE.txt",
                   "apps/desktop/assets/fonts/GoogleSans-TRADEMARKS.txt": "licenses/google-sans/GoogleSans-TRADEMARKS.txt",
+                  "apps/desktop/assets/fonts/GoogleSansCode-LICENSE.txt": "licenses/google-sans-code/GoogleSansCode-LICENSE.txt",
+                  "apps/desktop/assets/fonts/GoogleSansCode-TRADEMARKS.txt": "licenses/google-sans-code/GoogleSansCode-TRADEMARKS.txt",
                   "apps/desktop/assets/GPUI-LICENSE-APACHE": "licenses/gpui/GPUI-LICENSE-APACHE"}
         for src, dest in copies.items():
             (stage / dest).parent.mkdir(parents=True, exist_ok=True)

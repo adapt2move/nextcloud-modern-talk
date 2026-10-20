@@ -2,9 +2,11 @@
 use std::time::{Duration, Instant};
 use talk_core::ui::presentation::{DeliveryState, MessageView};
 
-pub(super) const ENTRY: Duration = Duration::from_millis(140);
+pub(super) const ENTRY: Duration = Duration::from_millis(200);
 const FOLLOW: Duration = Duration::from_millis(75);
 const MAX_ENTRIES: usize = 100; // The snapshot's existing message-page bound.
+// A large append settles together instead of moving many rows at once.
+const BURST: usize = 3;
 
 struct Batch {
     ids: Vec<u128>,
@@ -86,22 +88,29 @@ impl Arrival {
             self.cancel();
             return;
         }
-        let ids: Vec<_> = rows
+        let appended: Vec<_> = rows
             .iter()
             .filter(|row| {
                 row.local_id > old_high_water
                     && row.delivery != DeliveryState::Pending
-                    && !row.metadata.system
                     && !previous.iter().any(|old| old.local_id == row.local_id)
             })
             .take(MAX_ENTRIES)
-            .map(|row| row.local_id)
             .collect();
-        if ids.is_empty() {
+        if appended.is_empty() {
             return;
         }
-        self.new_rows = self.new_rows.saturating_add(ids.len() as u64);
-        if !reduced {
+        self.new_rows = self.new_rows.saturating_add(appended.len() as u64);
+        // Baselines are excluded by ready/high-water above, not by an arbitrary
+        // time window that would also suppress a real send just after opening.
+        // System and bulk rows still follow; one's own accepted send keeps its
+        // feedback even when it shares a response with several other messages.
+        let ids: Vec<_> = appended
+            .iter()
+            .filter(|row| !row.metadata.system && (appended.len() <= BURST || row.own))
+            .map(|row| row.local_id)
+            .collect();
+        if !reduced && !ids.is_empty() {
             let waiting = at_bottom || self.follow.is_some();
             if let Some(batch) = self.entry.as_mut().filter(|batch| match batch.started {
                 None => waiting && self.follow.is_some(),
@@ -219,6 +228,46 @@ mod tests {
     }
 
     #[test]
+    fn bursts_and_system_rows_follow_without_entry_but_own_sends_still_enter() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let burst: Vec<_> = (11..=14).map(row).collect();
+        state.observe(&[row(10)], &burst, true, true, false, now);
+        assert!(
+            burst
+                .iter()
+                .all(|r| state.progress(r.local_id, now).is_none())
+        );
+        assert!(state.following());
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        let mut system = row(15);
+        system.metadata.system = true;
+        state.observe(
+            &[row(14)],
+            &[row(14), system],
+            true,
+            true,
+            false,
+            now + FOLLOW,
+        );
+        assert!(state.progress(15, now + FOLLOW).is_none());
+        assert!(state.following());
+        assert!(!state.animate_next_frame(now + FOLLOW));
+        assert!(!state.after_layout(now + FOLLOW, false));
+        assert!(state.after_layout(now + FOLLOW * 2, false));
+        let mut own = row(16);
+        own.own = true;
+        let mut batch = vec![own];
+        batch.extend((17..=20).map(row));
+        let sent = now + FOLLOW * 2;
+        state.observe(&[row(15)], &batch, true, true, false, sent);
+        assert_eq!(state.progress(16, sent), Some(0.));
+        assert!((17..=20).all(|id| state.progress(id, sent).is_none()));
+        assert!(state.following());
+    }
+
+    #[test]
     fn new_incoming_and_own_rows_enter_but_edits_history_and_replay_do_not() {
         let now = Instant::now();
         let mut state = baseline(now);
@@ -274,15 +323,9 @@ mod tests {
         assert!(!state.after_layout(now, false));
         assert!(state.after_layout(now + FOLLOW, false));
         let visible = now + FOLLOW;
-        assert_eq!(
-            state.progress(12, visible + Duration::from_millis(70)),
-            Some(0.5)
-        );
+        assert_eq!(state.progress(12, visible + ENTRY / 2), Some(0.5));
         // Re-querying a remounted row cannot restart or reverse its clock.
-        assert_eq!(
-            state.progress(12, visible + Duration::from_millis(70)),
-            Some(0.5)
-        );
+        assert_eq!(state.progress(12, visible + ENTRY / 2), Some(0.5));
         assert!(state.progress(12, visible + ENTRY).is_none());
     }
 
@@ -335,7 +378,7 @@ mod tests {
         let now = Instant::now();
         let mut state = baseline(now);
         state.observe(&[row(10)], &[row(10), row(11)], true, true, false, now);
-        // A slow first layout must not consume the visible 140 ms fade.
+        // A slow first layout must not consume the visible entry.
         let layout = now + Duration::from_millis(200);
         assert_eq!(state.progress(11, layout), Some(0.));
         assert!(!state.animate_next_frame(layout));
@@ -343,11 +386,8 @@ mod tests {
         let visible = layout + FOLLOW;
         assert!(state.after_layout(visible, false));
         assert_eq!(state.progress(11, visible), Some(0.));
-        assert_eq!(
-            state.progress(11, visible + Duration::from_millis(70)),
-            Some(0.5)
-        );
-        assert!(state.animate_next_frame(visible + Duration::from_millis(70)));
+        assert_eq!(state.progress(11, visible + ENTRY / 2), Some(0.5));
+        assert!(state.animate_next_frame(visible + ENTRY / 2));
         assert!(state.animate_next_frame(visible + ENTRY));
         assert!(state.progress(11, visible + ENTRY).is_none());
         assert!(!state.animate_next_frame(visible + ENTRY));

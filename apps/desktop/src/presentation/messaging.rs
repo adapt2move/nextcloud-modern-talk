@@ -1,5 +1,7 @@
 //! Stable, variable-height native history and deliberate message actions.
 mod arrival;
+mod history;
+mod menu;
 
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
@@ -23,17 +25,14 @@ pub(crate) enum Action {
     Silent,
     Pins,
     ShareUpload,
-    ChooseForward(u128, ConversationRef),
     ThreadReply(u128),
     Menu(u128),
+    MenuChoice(menu::Target, menu::Choice),
+    RetryHistory,
     Reply(u128),
     Edit(u128),
     CancelCompose,
     Command(MessageAction),
-    ConfirmDelete(u128),
-    Delete(u128),
-    Forward(u128),
-    ConfirmForward(u128, ConversationRef),
     Search,
     ToggleSearch,
     CloseSearch,
@@ -52,10 +51,8 @@ pub(super) struct MessageUi {
     pub editing: Option<u128>,
     pub(super) pending_edit: Option<RequestId>,
     request: u64,
-    menu: Option<u128>,
-    confirm_delete: Option<u128>,
-    forward: Option<u128>,
-    forward_destination: Option<ConversationRef>,
+    menu: menu::Menu,
+    history: Rc<RefCell<history::History>>,
     last_read: Option<(ConversationRef, u128)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
@@ -78,6 +75,7 @@ struct MessageGeometry {
     painted: Vec<(usize, u128, gpui::Bounds<gpui::Pixels>)>,
     anchor: Option<(u128, gpui::Pixels)>,
     header_inset: gpui::Pixels,
+    boundary_inset: gpui::Pixels,
 }
 
 fn preserved_row_offset(
@@ -122,10 +120,8 @@ impl MessageUi {
             editing: None,
             pending_edit: None,
             request: 0,
-            menu: None,
-            confirm_delete: None,
-            forward: None,
-            forward_destination: None,
+            menu: menu::Menu::new(cx),
+            history: Rc::new(RefCell::new(history::History::default())),
             last_read: None,
             last_located: None,
             time_target: None,
@@ -244,6 +240,7 @@ impl Desktop {
             .arrival
             .borrow_mut()
             .visibility(visible, self.reduced_motion);
+        self.message_ui.history.borrow_mut().visibility(visible);
     }
 
     pub(super) fn trace_message_motion(&self) {
@@ -263,6 +260,7 @@ impl Desktop {
         if self.message_ui.context != self.snapshot.selected {
             self.message_ui.arrival.borrow_mut().reset();
             *self.message_ui.geometry.borrow_mut() = MessageGeometry::default();
+            *self.message_ui.history.borrow_mut() = history::History::default();
         }
         // Explicit history/context loads establish a baseline, even when the
         // previously loaded conversation remains visible during the request.
@@ -273,11 +271,12 @@ impl Desktop {
                         .located
                         .is_none_or(|(request, _)| self.message_ui.last_located == Some(request))
             });
+        let at_bottom = self.timeline_at_bottom();
         self.message_ui.arrival.borrow_mut().observe(
             &self.message_ui.observed,
             rows,
             live,
-            self.timeline_at_bottom(),
+            at_bottom,
             self.reduced_motion,
             Instant::now(),
         );
@@ -290,10 +289,7 @@ impl Desktop {
             self.message_ui.context = self.snapshot.selected;
             self.message_ui.list.reset(rows.len());
             self.message_ui.observed = rows.to_vec();
-            self.message_ui.menu = None;
-            self.message_ui.forward = None;
-            self.message_ui.forward_destination = None;
-            self.message_ui.confirm_delete = None;
+            self.message_ui.menu.clear();
             self.message_ui.editing = None;
             self.message_ui.pending_edit = None;
             self.message_ui.time_target = None;
@@ -303,6 +299,29 @@ impl Desktop {
             self.message_ui.search.update(cx, |i, _| i.reset());
             self.message_ui.show_pins = false;
             self.message_ui.last_located = None;
+        } else if self.message_ui.observed != rows
+            && at_bottom
+            && !self.message_ui.arrival.borrow().following()
+            && !self
+                .message_ui
+                .observed
+                .first()
+                .zip(rows.first())
+                .is_some_and(|(previous, current)| current.local_id < previous.local_id)
+        {
+            // An edit, deletion or height change at the end keeps the reader
+            // there, including expiry of the first retained row. An older page
+            // instead preserves its visible anchor below. Whole-range splice
+            // preserves the list's bottom sentinel;
+            // only an admitted arrival pins the old view for its delayed follow.
+            self.message_ui
+                .list
+                .splice(0..self.message_ui.observed.len(), rows.len());
+            self.message_ui.list.scroll_to(ListOffset {
+                item_ix: rows.len(),
+                offset_in_item: px(0.),
+            });
+            self.message_ui.observed = rows.to_vec();
         } else if self.message_ui.observed != rows {
             let anchor = self.message_ui.list.logical_scroll_top();
             let (id, offset) = self
@@ -329,15 +348,25 @@ impl Desktop {
                     .is_some_and(|row| Some(row.local_id) == id);
                 self.message_ui.list.scroll_to(ListOffset {
                     item_ix: index,
-                    offset_in_item: preserved_row_offset(
-                        offset,
-                        was_first,
-                        index == 0,
-                        self.message_ui.geometry.borrow().header_inset,
-                    ),
+                    offset_in_item: preserved_row_offset(offset, was_first, index == 0, {
+                        let geometry = self.message_ui.geometry.borrow();
+                        geometry.header_inset + geometry.boundary_inset
+                    }),
                 });
             }
             self.message_ui.observed = rows.to_vec();
+        }
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+        {
+            self.message_ui.history.borrow_mut().reconcile(
+                self.snapshot.revision,
+                panel.history,
+                panel.older,
+            );
         }
         if let Some((request, id)) = self
             .snapshot
@@ -392,7 +421,10 @@ impl Desktop {
             }
         }
     }
-    pub(crate) fn observe_message_visibility(&mut self, window: &Window) {
+    pub(crate) fn observe_message_visibility(&mut self, window: &mut Window) {
+        if window.is_window_active() && self.request_older_history(false) {
+            window.refresh();
+        }
         let Some(context) = self.visible_message_conversation(window) else {
             return;
         };
@@ -469,6 +501,11 @@ impl Desktop {
         self.message_ui.show_search && self.message_ui.context == self.snapshot.selected
     }
     pub(super) fn trace_chat_ui(&self, window: &Window, cx: &Context<Self>) {
+        self.trace_message_menu(window);
+        println!(
+            "UI_HISTORY_PAGING visible_top_demand_pending_attempts_failed={:?}",
+            self.message_ui.history.borrow().diagnostic()
+        );
         println!(
             "UI_CHAT_HEADER inset={:?} list={:?} visible={:?}",
             self.message_ui.geometry.borrow().header_inset,
@@ -485,7 +522,7 @@ impl Desktop {
             self.snapshot
                 .selected
                 .and_then(|c| self.drafts.target(c).reply_to),
-            self.message_ui.menu,
+            self.message_ui.menu.message(),
             self.reduced_motion,
         );
     }
@@ -620,10 +657,6 @@ impl Desktop {
                     self.submit_message(MessageAction::ShareUpload { caption });
                 }
             }
-            Action::ChooseForward(message, destination) => {
-                self.message_ui.forward = Some(message);
-                self.message_ui.forward_destination = Some(destination);
-            }
             Action::ThreadReply(root) => {
                 if self.save_draft(cx)
                     && self.drafts.set_target(
@@ -641,27 +674,12 @@ impl Desktop {
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
-            Action::Menu(id) => {
-                if !self
-                    .snapshot
-                    .messages
-                    .as_slice()
-                    .iter()
-                    .any(|m| m.local_id == id && message_actions_allowed(m))
-                {
-                    return;
-                }
-                self.message_ui.menu = if self.message_ui.menu == Some(id) {
-                    None
-                } else {
-                    Some(id)
-                };
-                if self.message_ui.menu.is_some() {
-                    self.begin_surface_reveal(scoped_id("menu-reveal", context, id, 0));
-                }
-                self.message_ui.confirm_delete = None;
-                self.message_ui.forward = None;
-                self.message_ui.forward_destination = None;
+            Action::Menu(id) => self.toggle_message_menu(context, id, window, cx),
+            Action::MenuChoice(target, choice) => {
+                self.choose_message_menu(target, choice, window, cx)
+            }
+            Action::RetryHistory => {
+                self.request_older_history(true);
             }
             Action::Reply(id) => {
                 if self.save_draft(cx)
@@ -687,7 +705,7 @@ impl Desktop {
                     }
                     let value = self.drafts.text(context).to_owned();
                     self.composer.update(cx, |i, _| i.set_context_value(&value));
-                    self.message_ui.menu = None;
+                    self.message_ui.menu.clear();
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
@@ -701,7 +719,7 @@ impl Desktop {
                 {
                     let value = message.body.as_str().to_owned();
                     self.message_ui.editing = Some(id);
-                    self.message_ui.menu = None;
+                    self.message_ui.menu.clear();
                     self.composer.update(cx, |i, _| i.set_context_value(&value));
                     self.composer.focus_handle(cx).focus(window);
                 }
@@ -717,23 +735,6 @@ impl Desktop {
             }
             Action::Command(command) => {
                 self.submit_message(command);
-            }
-            Action::ConfirmDelete(id) => self.message_ui.confirm_delete = Some(id),
-            Action::Delete(id) => {
-                self.submit_message(MessageAction::Delete(id));
-                self.message_ui.confirm_delete = None;
-            }
-            Action::Forward(id) => {
-                self.message_ui.forward = Some(id);
-                self.message_ui.forward_destination = None;
-            }
-            Action::ConfirmForward(message, destination) => {
-                self.submit_message(MessageAction::Forward {
-                    message,
-                    destination,
-                });
-                self.message_ui.forward = None;
-                self.message_ui.forward_destination = None;
             }
             Action::Search => {
                 if self.conversation_search_open()
@@ -757,7 +758,7 @@ impl Desktop {
             Action::Schedule => self.message_ui.time_target = Some(None),
             Action::Remind(id) => {
                 self.message_ui.time_target = Some(Some(id));
-                self.message_ui.menu = None;
+                self.message_ui.menu.clear();
             }
             Action::SubmitTime => {
                 let timestamp = parse_time(self.message_ui.time_input.read(cx).content.as_str());
@@ -968,26 +969,6 @@ impl Desktop {
         if self.selected().is_none() {
             return body;
         }
-        if self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|p| p.older.is_some())
-        {
-            let older = self.button(
-                "load-older",
-                "Ältere Nachrichten laden",
-                ButtonStyle::Quiet,
-                true,
-                LocalAction::Message(Action::Command(MessageAction::Older)),
-                cx,
-            );
-            if let Some(top) = header.take() {
-                header = Some(top.child(older.bg(t.surface)));
-            } else {
-                body = body.child(older);
-            }
-        }
         match self.snapshot.content {
             ContentState::Loading => {
                 body = body.child(self.state_note(
@@ -1076,9 +1057,13 @@ impl Desktop {
     }
     fn message_history(&self, header_inset: gpui::Pixels, cx: &Context<Self>) -> Div {
         let previous = self.message_ui.geometry.borrow().header_inset;
-        if previous != header_inset {
+        let boundary_inset = self.sp(32.);
+        if previous != header_inset
+            || self.message_ui.geometry.borrow().boundary_inset != boundary_inset
+        {
             let mut anchor = self.message_ui.list.logical_scroll_top();
             self.message_ui.geometry.borrow_mut().header_inset = header_inset;
+            self.message_ui.geometry.borrow_mut().boundary_inset = boundary_inset;
             // The first real row owns the top clearance, so it scrolls away.
             // List padding in GPUI 0.2.2 is a fixed gutter and omits preceding
             // rows there; it also disagrees with bounds_for_item.
@@ -1092,6 +1077,9 @@ impl Desktop {
         }
         let layout_arrival = self.message_ui.arrival.clone();
         let wheel_arrival = self.message_ui.arrival.clone();
+        let wheel_history = self.message_ui.history.clone();
+        let keyboard_history = self.message_ui.history.clone();
+        let layout_history = self.message_ui.history.clone();
         let keyboard_arrival = self.message_ui.arrival.clone();
         let layout_list = self.message_ui.list.clone();
         let keyboard_list = self.message_ui.list.clone();
@@ -1108,6 +1096,7 @@ impl Desktop {
             .on_scroll_wheel(move |event, _, _| {
                 if event.delta.pixel_delta(px(20.)).y > px(0.) {
                     wheel_arrival.borrow_mut().manual_scroll();
+                    wheel_history.borrow_mut().upward();
                 }
             })
             .on_key_down(move |event, window, cx| {
@@ -1129,6 +1118,9 @@ impl Desktop {
                     }),
                     _ => return,
                 }
+                if matches!(event.keystroke.key.as_str(), "pageup" | "home") {
+                    keyboard_history.borrow_mut().upward();
+                }
                 keyboard_arrival.borrow_mut().manual_scroll();
                 cx.stop_propagation();
                 window.refresh();
@@ -1142,6 +1134,12 @@ impl Desktop {
                     .find(|(_, _, bounds)| bounds.bottom() > viewport.top())
                     .map(|(index, id, bounds)| (*index, *id, viewport.top() - bounds.top()));
                 geometry.anchor = painted_anchor.map(|(_, id, offset)| (id, offset));
+                layout_history.borrow_mut().layout(
+                    viewport.size.height > px(0.)
+                        && geometry.painted.iter().any(|(index, _, bounds)| {
+                            *index == 0 && bounds.top() >= viewport.top() - px(1.)
+                        }),
+                );
                 geometry.painted.clear();
                 drop(geometry);
                 let mut arrival = layout_arrival.borrow_mut();
@@ -1157,10 +1155,12 @@ impl Desktop {
                     )
                 {
                     arrival.manual_scroll();
+                    layout_history.borrow_mut().layout(false);
                 }
                 let now = Instant::now();
                 let followed = arrival.after_layout(now, reduced);
                 if followed {
+                    layout_history.borrow_mut().layout(false);
                     layout_list.scroll_to(ListOffset {
                         item_ix: layout_list.item_count(),
                         offset_in_item: px(0.),
@@ -1181,8 +1181,32 @@ impl Desktop {
                             .map(|m: &MessageView| {
                                 let geometry = this.message_ui.geometry.clone();
                                 let id = m.local_id;
-                                let row = this
-                                    .message_row(m, cx)
+                                let progress = this
+                                    .message_ui
+                                    .arrival
+                                    .borrow()
+                                    .progress(m.local_id, Instant::now())
+                                    .map(gpui::ease_out_quint());
+                                let mut bubble = this.message_row(m, cx);
+                                if let Some(progress) = progress {
+                                    // Paint-only rise: a relative offset inside the
+                                    // measured wrapper leaves row height, list
+                                    // measurement and the recorded anchor bounds intact.
+                                    // Own sends rise from the composer a little further.
+                                    let rise = this.sp(if m.own { 14. } else { 8. });
+                                    bubble = bubble
+                                        .relative()
+                                        .top(rise * (1. - progress))
+                                        .opacity(0.2 + 0.8 * progress);
+                                }
+                                let row = div()
+                                    .child(
+                                        div()
+                                            .when(index == 0, |d| {
+                                                d.child(this.history_boundary(cx))
+                                            })
+                                            .child(bubble),
+                                    )
                                     .when(index == 0, |d| d.pt(header_inset))
                                     .on_children_prepainted(move |bounds, _, _| {
                                         let mut geometry = geometry.borrow_mut();
@@ -1196,19 +1220,11 @@ impl Desktop {
                                             geometry.painted.push((index, id, bounds));
                                         }
                                     });
-                                let progress = this
-                                    .message_ui
-                                    .arrival
-                                    .borrow()
-                                    .progress(m.local_id, Instant::now());
-                                if let Some(progress) = progress {
+                                if progress.is_some() {
                                     let frames = this.motion_frame_counter();
                                     super::motion::count_frame(&frames);
-                                    row.opacity(0.6 + 0.4 * gpui::ease_out_quint()(progress))
-                                        .into_any_element()
-                                } else {
-                                    row.into_any_element()
                                 }
+                                row.into_any_element()
                             })
                             .unwrap_or_else(|| div().into_any_element())
                     }),
@@ -1254,7 +1270,7 @@ impl Desktop {
                     .child(
                         div()
                             .text_size(self.sp(13.))
-                            .font_weight(FontWeight::BOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .child(m.author.as_str().to_owned()),
                     )
                     .when(m.own, |d| d.child(self.hint(self.l("Du"))))
@@ -1356,172 +1372,6 @@ impl Desktop {
                 self.l("Lange Nachricht gekürzt angezeigt. Bearbeiten ist hier nicht verfügbar."),
             ));
         }
-        if self.message_ui.menu == Some(m.local_id) && !m.metadata.deleted {
-            let mut actions = div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .child(self.button(
-                    scoped_id("reply", context, m.local_id, 0),
-                    "Antworten",
-                    ButtonStyle::Quiet,
-                    Availability::when(
-                        self.can_reply_to(m),
-                        "Auf diese Nachricht kann nicht geantwortet werden.",
-                    ),
-                    LocalAction::MessageIn(context, Action::Reply(m.local_id)),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("react", context, m.local_id, 0),
-                    "👍",
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::React),
-                    LocalAction::MessageIn(
-                        context,
-                        Action::Command(MessageAction::React {
-                            message: m.local_id,
-                            emoji: Text::new("👍").expect("emoji"),
-                            add: true,
-                        }),
-                    ),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("edit", context, m.local_id, 0),
-                    "Bearbeiten",
-                    ButtonStyle::Quiet,
-                    Availability::when(
-                        m.metadata.edit == Decision::Allowed,
-                        "Diese Nachricht kann nicht bearbeitet werden.",
-                    ),
-                    LocalAction::MessageIn(context, Action::Edit(m.local_id)),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("delete", context, m.local_id, 0),
-                    "Löschen",
-                    ButtonStyle::Quiet,
-                    Availability::when(
-                        m.metadata.delete == Decision::Allowed,
-                        "Diese Nachricht kann nicht gelöscht werden.",
-                    ),
-                    LocalAction::MessageIn(context, Action::ConfirmDelete(m.local_id)),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("pin", context, m.local_id, 0),
-                    "Anheften",
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Pins),
-                    LocalAction::MessageIn(
-                        context,
-                        Action::Command(MessageAction::Pin(m.local_id)),
-                    ),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("remind", context, m.local_id, 0),
-                    "Später erinnern",
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Reminders),
-                    LocalAction::MessageIn(context, Action::Remind(m.local_id)),
-                    cx,
-                ))
-                .child(self.button(
-                    scoped_id("forward", context, m.local_id, 0),
-                    "Weiterleiten",
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Forward),
-                    LocalAction::MessageIn(context, Action::Forward(m.local_id)),
-                    cx,
-                ));
-            if m.metadata.replyable {
-                actions = actions.child(self.button(
-                    scoped_id("thread-open", context, m.local_id, 0),
-                    "Thread öffnen",
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Threads),
-                    LocalAction::Thread(context, m.metadata.thread.unwrap_or(m.local_id)),
-                    cx,
-                ));
-            }
-            if self.message_ui.confirm_delete == Some(m.local_id) {
-                actions =
-                    actions
-                        .child(self.hint(self.l(
-                            "Diese Nachricht für alle löschen? Geteilte Dateien bleiben erhalten.",
-                        )))
-                        .child(self.button(
-                            "confirm-message-delete",
-                            "Löschen bestätigen",
-                            ButtonStyle::Danger,
-                            true,
-                            LocalAction::MessageIn(context, Action::Delete(m.local_id)),
-                            cx,
-                        ));
-            }
-            content = content.child(
-                self.reveal_from_action(scoped_id("menu-reveal", context, m.local_id, 0), actions),
-            );
-            if self.message_ui.forward == Some(m.local_id) {
-                let mut destinations = div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .bg(t.subtle)
-                    .child(self.room_forward_hint(m));
-                for room in self
-                    .snapshot
-                    .conversations
-                    .as_slice()
-                    .iter()
-                    .filter(|r| {
-                        r.context != context
-                            && r.context.account == context.account
-                            && r.send == Decision::Allowed
-                    })
-                    .take(20)
-                {
-                    destinations = destinations.child(self.button(
-                        scoped_id("forward-to", room.context, m.local_id, 0),
-                        room.title.as_str().to_owned(),
-                        ButtonStyle::Secondary,
-                        true,
-                        LocalAction::MessageIn(
-                            context,
-                            Action::ChooseForward(m.local_id, room.context),
-                        ),
-                        cx,
-                    ));
-                }
-                if let Some(destination) = self.message_ui.forward_destination
-                    && let Some(room) = self
-                        .snapshot
-                        .conversations
-                        .as_slice()
-                        .iter()
-                        .find(|r| r.context == destination)
-                {
-                    destinations =
-                        destinations
-                            .child(self.hint(room.title.as_str()))
-                            .child(self.button(
-                                "confirm-forward",
-                                "An dieses Gespräch senden",
-                                ButtonStyle::Primary,
-                                true,
-                                LocalAction::MessageIn(
-                                    context,
-                                    Action::ConfirmForward(m.local_id, destination),
-                                ),
-                                cx,
-                            ));
-                }
-                content = content.child(destinations);
-            }
-        }
         div().child(
             div()
                 .id(scoped_id("message", context, m.local_id, 0))
@@ -1572,14 +1422,26 @@ impl Desktop {
                                 scoped_id("message-menu", context, m.local_id, 0),
                                 ("more", "Nachrichtenaktionen"),
                                 ButtonStyle::Quiet,
-                                Availability::when(
-                                    message_actions_allowed(m),
-                                    "Für diese Nachricht sind keine Aktionen verfügbar.",
-                                ),
+                                {
+                                    let available = Availability::when(
+                                        message_actions_allowed(m),
+                                        "Für diese Nachricht sind keine Aktionen verfügbar.",
+                                    );
+                                    if self.message_ui.menu.is_for(context, m.local_id) {
+                                        available.explained_elsewhere()
+                                    } else {
+                                        available
+                                    }
+                                },
                                 LocalAction::MessageIn(context, Action::Menu(m.local_id)),
                                 cx,
                             )
-                            .opacity(0.)
+                            .child(self.message_menu_anchor(context, m.local_id))
+                            .opacity(if self.message_ui.menu.is_for(context, m.local_id) {
+                                1.
+                            } else {
+                                0.
+                            })
                             .group_hover(action_group, |s| s.opacity(1.))
                             .focus(|s| s.opacity(1.)),
                         ),
@@ -1779,11 +1641,6 @@ impl Desktop {
         }
         body
     }
-    fn room_forward_hint(&self, m: &MessageView) -> Div {
-        div()
-            .child(self.hint(self.l("Weiterleiten als neue Nachricht. Ziel auswählen:")))
-            .child(self.hint(m.body.as_str()))
-    }
     fn rich_text(&self, text: &str) -> Div {
         let mut body = div().flex().flex_col().gap_1().line_height(self.sp(22.));
         let mut code = false;
@@ -1823,14 +1680,29 @@ impl Desktop {
                     .map(|id| scoped_id("compose-mode", context, 2, id))
             })
     }
-    pub(super) fn composer_context(&self, cx: &Context<Self>) -> Div {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(self.download_status(cx));
+    pub(super) fn composer_context(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        // The composer owns row spacing; absent context must not leave empty flex items.
+        let show_transfer = self
+            .snapshot
+            .content_panel
+            .transfer
+            .as_ref()
+            .is_some_and(|transfer| {
+                matches!(
+                    transfer.state,
+                    talk_core::ui::content::DownloadState::Transferring
+                        | talk_core::ui::content::DownloadState::Committing
+                        | talk_core::ui::content::DownloadState::Failed(_)
+                )
+            });
+        let mut rows: Vec<_> = show_transfer
+            .then(|| self.download_status(cx))
+            .flatten()
+            .into_iter()
+            .map(|status| status.into_any_element())
+            .collect();
         let Some(context) = self.snapshot.selected else {
-            return body;
+            return rows;
         };
         let target = self.drafts.target(context);
         if let Some(motion_id) = self.compose_motion_id(context) {
@@ -1841,7 +1713,7 @@ impl Desktop {
             } else {
                 "Antwort auf eine Nachricht"
             };
-            body = body.child(
+            rows.push(
                 self.reveal_from_action(
                     motion_id,
                     div()
@@ -1857,11 +1729,12 @@ impl Desktop {
                             LocalAction::Message(Action::CancelCompose),
                             cx,
                         )),
-                ),
+                )
+                .into_any_element(),
             );
         }
-        body = body.when(self.composer_active, |d| {
-            d.child(
+        if self.composer_active {
+            rows.push(
                 div()
                     .flex()
                     .flex_wrap()
@@ -1901,12 +1774,13 @@ impl Desktop {
                         self.message_available(MessageFeature::Reminders),
                         LocalAction::Message(Action::Command(MessageAction::Reminders)),
                         cx,
-                    )),
-            )
-        });
+                    ))
+                    .into_any_element(),
+            );
+        }
         if let Some(panel) = &self.snapshot.message_panel {
             if let Some(file) = &panel.uploaded {
-                body = body.child(
+                rows.push(
                     div()
                         .p_3()
                         .rounded_lg()
@@ -1930,11 +1804,9 @@ impl Desktop {
                             true,
                             LocalAction::Message(Action::Command(MessageAction::DismissUpload)),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
-            }
-            if panel.file_saved.is_some() {
-                body = body.child(self.hint(self.l("Datei gespeichert.")));
             }
             let show_mentions = self.composer_active
                 && self
@@ -1949,16 +1821,19 @@ impl Desktop {
                 .take(if show_mentions { 8 } else { 0 })
                 .enumerate()
             {
-                body = body.child(self.button(
-                    ("mention-choice", index),
-                    mention.label.as_str().to_owned(),
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::Message(Action::InsertMention(
-                        mention.identifier.as_str().to_owned(),
-                    )),
-                    cx,
-                ));
+                rows.push(
+                    self.button(
+                        ("mention-choice", index),
+                        mention.label.as_str().to_owned(),
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Message(Action::InsertMention(
+                            mention.identifier.as_str().to_owned(),
+                        )),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
             }
             for scheduled in panel
                 .scheduled
@@ -1966,7 +1841,7 @@ impl Desktop {
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
             {
-                body = body.child(
+                rows.push(
                     div()
                         .flex()
                         .items_center()
@@ -1981,7 +1856,8 @@ impl Desktop {
                                 scheduled.id,
                             ))),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
             }
             for reminder in panel
@@ -1990,7 +1866,7 @@ impl Desktop {
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
             {
-                body = body.child(
+                rows.push(
                     div()
                         .flex()
                         .items_center()
@@ -2006,27 +1882,34 @@ impl Desktop {
                                 timestamp: None,
                             })),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
             }
         }
         if self.message_ui.time_target.is_some() {
-            body = body
-                .child(self.hint(self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM")))
-                .child(self.message_ui.time_input.clone())
-                .child(self.button(
+            rows.extend([
+                self.hint(self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM"))
+                    .into_any_element(),
+                self.message_ui.time_input.clone().into_any_element(),
+                self.button(
                     "submit-message-time",
                     "Auf dem Server speichern",
                     ButtonStyle::Secondary,
                     true,
                     LocalAction::Message(Action::SubmitTime),
                     cx,
-                ))
-                .when(self.message_ui.time_error, |d| {
-                    d.child(self.hint(self.l("Datum und Zeitzonenversatz sind ungültig.")))
-                });
+                )
+                .into_any_element(),
+            ]);
+            if self.message_ui.time_error {
+                rows.push(
+                    self.hint(self.l("Datum und Zeitzonenversatz sind ungültig."))
+                        .into_any_element(),
+                );
+            }
         }
-        body
+        rows
     }
 }
 fn message_actions_allowed(message: &MessageView) -> bool {

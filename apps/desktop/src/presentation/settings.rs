@@ -124,57 +124,321 @@ fn miniature(t: Theme, w: f32) -> Div {
                 ),
         )
 }
+/// One modal layout for app and conversation settings: navigation rail with
+/// leading icons, a scrolling page and an optional status footer. The geometry
+/// is that of the app settings, which every settings-like dialog now shares.
+pub(super) struct DialogFrame {
+    pub id: &'static str,
+    pub close: (&'static str, &'static str),
+    pub region: super::navigation::Region,
+    /// Wide layout: the rail. Narrow layout: compact navigation above the page.
+    pub navigation: Div,
+    pub page: gpui::AnyElement,
+    pub footer: Option<Div>,
+}
+const DIALOG_WIDTH: f32 = 842.;
+const DIALOG_HEIGHT: f32 = 632.;
+const DIALOG_RAIL: f32 = 211.;
+const DIALOG_PADDING: f32 = 24.;
 impl Desktop {
+    pub(super) fn dialog_narrow(&self, window: &Window) -> bool {
+        window.viewport_size().width < px(900.) || self.scale >= 150
+    }
+    fn dialog_size(window: &Window) -> (f32, f32) {
+        (
+            (f32::from(window.viewport_size().width) - 48.).min(DIALOG_WIDTH),
+            (f32::from(window.viewport_size().height) - 74.).min(DIALOG_HEIGHT),
+        )
+    }
+    pub(super) fn dialog_frame(
+        &self,
+        frame: DialogFrame,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let narrow = self.dialog_narrow(window);
+        let (width, height) = Self::dialog_size(window);
+        let page = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .when(!narrow, |d| d.h_full())
+            .flex()
+            .flex_col()
+            .child(
+                self.scroll_area(frame.region)
+                    .flex_1()
+                    .min_h_0()
+                    .px(px(DIALOG_PADDING))
+                    .pt(px(20.))
+                    .pb(px(DIALOG_PADDING))
+                    .child(frame.page),
+            )
+            .when_some(frame.footer, |d, footer| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .px(px(DIALOG_PADDING))
+                        .py(px(10.))
+                        .border_t_1()
+                        .border_color(t.border)
+                        .child(footer),
+                )
+            });
+        div()
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(t.scrim)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id(frame.id)
+                    .relative()
+                    .occlude()
+                    .w(px(width))
+                    .h(px(height))
+                    .min_h_0()
+                    .rounded(px(13.))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(t.border)
+                    .shadow_xl()
+                    .bg(t.surface)
+                    .track_focus(&self.modal_focus)
+                    .tab_group()
+                    .flex()
+                    .when(narrow, |d| d.flex_col())
+                    .child(frame.navigation)
+                    .child(page)
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(8.))
+                            .right(px(8.))
+                            .child(self.icon_button(
+                                frame.close.0,
+                                ("x", frame.close.1),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::Close,
+                                cx,
+                            )),
+                    ),
+            )
+    }
+    /// Wide navigation. The header names the dialog and, where relevant, its context.
+    pub(super) fn dialog_rail(
+        &self,
+        header: impl IntoElement,
+        items: impl IntoIterator<Item = Stateful<Div>>,
+    ) -> Div {
+        div()
+            .flex_none()
+            .w(px(DIALOG_RAIL))
+            .h_full()
+            .flex()
+            .flex_col()
+            .p(px(16.))
+            // GPUI's overflow mask is rectangular. Each opaque child at the
+            // frame edge must draw the same inner corner as its parent.
+            .rounded_tl(px(12.))
+            .rounded_bl(px(12.))
+            .bg(self.theme.subtle)
+            .border_r_1()
+            .border_color(self.theme.border)
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .min_w_0()
+                    .px_2()
+                    .py_3()
+                    .mb_3()
+                    .child(header),
+            )
+            .children(items)
+    }
+    /// Narrow navigation sits above the page and leaves room for the close button.
+    pub(super) fn dialog_bar(&self, content: impl IntoElement) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .pr(px(48.))
+            .py_2()
+            .border_b_1()
+            .border_color(self.theme.border)
+            .child(content)
+    }
+    pub(super) fn dialog_title(&self, title: &str) -> Div {
+        div()
+            .text_size(self.sp(16.))
+            .font_weight(FontWeight::MEDIUM)
+            .child(self.l(title).to_owned())
+    }
+    /// Navigation entries: icon first, then label; selection is a quiet tint.
+    pub(super) fn dialog_nav_item(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        content: (&'static str, &'static str),
+        active: bool,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let (label, symbol) = content;
+        self.control(id, ButtonStyle::Quiet, true, action, cx)
+            .w_full()
+            .justify_start()
+            .min_h(px(37.))
+            .mb_1()
+            .bg(if active {
+                self.theme.selected
+            } else {
+                gpui::transparent_black()
+            })
+            .text_color(self.theme.text)
+            .font_weight(if active {
+                FontWeight::MEDIUM
+            } else {
+                FontWeight::NORMAL
+            })
+            .child(self.scaled_icon(symbol, 17., self.theme.muted))
+            .child(self.l(label).to_owned())
+    }
+    /// Every page starts with the same title scale; descriptions stay one quiet line.
+    pub(super) fn dialog_page_header(&self, title: &str, description: Option<&str>) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .pr(px(32.))
+            .child(
+                div()
+                    .text_size(self.sp(20.))
+                    .line_height(self.sp(28.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.l(title).to_owned()),
+            )
+            .when_some(description, |d, text| d.child(self.hint(self.l(text))))
+    }
+    /// A page is a column of groups separated by space, not by cards.
+    pub(super) fn dialog_page(&self) -> Div {
+        div().flex().flex_col().gap_6().w_full()
+    }
+    /// A group of related rows under a short label.
+    pub(super) fn dialog_section(&self, label: Option<&str>) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .when_some(label, |d, label| {
+                d.child(
+                    div()
+                        .text_size(self.sp(13.))
+                        .line_height(self.sp(18.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(self.l(label).to_owned()),
+                )
+            })
+    }
+    /// Label and explanation on the left, the single control on the right.
+    pub(super) fn dialog_row(
+        &self,
+        label: &str,
+        detail: Option<&str>,
+        control: impl IntoElement,
+    ) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .py(px(10.))
+            .border_b_1()
+            .border_color(self.theme.border)
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .text_size(self.sp(13.))
+                            .line_height(self.sp(18.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(self.l(label).to_owned()),
+                    )
+                    .when_some(detail, |d, detail| d.child(self.hint(self.l(detail)))),
+            )
+            .child(control)
+    }
+    /// Buttons keep their intrinsic width instead of stretching across the page.
+    pub(super) fn dialog_actions(&self) -> Div {
+        div().flex_none().flex().flex_wrap().items_center().gap_2()
+    }
+    /// Container for one exclusive choice; options keep their natural width.
+    pub(super) fn segmented(&self) -> Div {
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .p(px(2.))
+            .rounded(px(8.))
+            .bg(self.theme.subtle)
+    }
+    pub(super) fn segment(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        label: &'static str,
+        selected: bool,
+        availability: Availability,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let t = self.theme;
+        let enabled = availability.is_enabled();
+        self.button(id, label, ButtonStyle::Quiet, availability, action, cx)
+            .min_h(px(32.))
+            .py_0()
+            .px_3()
+            .text_size(self.sp(12.))
+            .when(selected, |d| {
+                d.bg(t.segment)
+                    .border_color(t.input_border)
+                    .font_weight(FontWeight::MEDIUM)
+                    .when(enabled, |d| d.text_color(t.text))
+            })
+    }
     pub fn settings_view(&self, window: &Window, cx: &Context<Self>) -> Div {
         let t = self.theme;
-        let narrow = window.viewport_size().width < px(900.) || self.scale >= 150;
-        let width = (f32::from(window.viewport_size().width) - 48.).min(842.);
-        let height = (f32::from(window.viewport_size().height) - 74.).min(632.);
-        let content_width = width - if narrow { 0. } else { 211. } - 48.;
+        let narrow = self.dialog_narrow(window);
+        let (width, _) = Self::dialog_size(window);
+        let content_width = width - if narrow { 0. } else { DIALOG_RAIL } - 2. * DIALOG_PADDING;
         let tab = if self.overlay == Some(Overlay::Accounts) {
             SettingsTab::Accounts
         } else {
             self.settings_tab
         };
         let appearance = tab == SettingsTab::Appearance;
-        let nav = div()
-            .flex_none()
-            .w(px(211.))
-            .h_full()
-            .p(px(16.))
-            .bg(t.subtle)
-            .border_r_1()
-            .border_color(t.border)
-            .child(
-                div()
-                    .px_2()
-                    .py_3()
-                    .mb_3()
-                    .text_size(self.sp(16.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l("Einstellungen")),
-            )
-            .children(
-                SettingsTab::ALL
-                    .into_iter()
-                    .map(|item| self.settings_nav(item, item == tab, cx)),
-            );
-        let mut content = div().flex().flex_col().gap(px(12.)).w_full();
+        let mut content = self.dialog_page();
         if appearance {
             content = content
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child(
-                            div()
-                                .text_size(self.sp(20.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(self.l("Darstellung")),
-                        )
-                        .child(self.hint(self.l("Ein Arbeitsplatz, der sich nach dir anfühlt."))),
-                )
+                .gap(px(12.))
+                .child(self.dialog_page_header(
+                    "Darstellung",
+                    Some("Ein Arbeitsplatz, der sich nach dir anfühlt."),
+                ))
                 .child(
                     div()
                         .flex()
@@ -328,24 +592,18 @@ impl Desktop {
                                         .child(self.l("So sehen deine Nachrichten aus.")),
                                 ),
                         ),
-                )
-;
+                );
         } else if tab == SettingsTab::Accounts {
-            content = content.child(
-                div()
-                    .text_size(self.sp(20.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l("Konten")),
-            );
+            content = content.child(self.dialog_page_header("Konten", None));
             let quick = self.preferences.active.quick_switcher;
-            content = content.child(self.setting_toggle("quick-switcher", "Schneller Kontowechsel",
+            let mut switcher = self.dialog_section(None).child(self.setting_toggle("quick-switcher", "Schneller Kontowechsel",
                 "Automatisch bei mehreren angemeldeten Konten. Die Auswahl bleibt hier in den Einstellungen.",
                 quick.effective(self.admitted_account_count()),
                 super::preferences::PreferenceEdit::QuickSwitcher(if quick.effective(self.admitted_account_count()) {
                     talk_core::preferences::QuickSwitcherPreference::Off
                 } else { talk_core::preferences::QuickSwitcherPreference::On }), cx));
             if quick != talk_core::preferences::QuickSwitcherPreference::Auto {
-                content = content.child(self.button(
+                switcher = switcher.child(self.dialog_actions().child(self.button(
                     "quick-switcher-auto",
                     "Automatisch auswählen",
                     ButtonStyle::Quiet,
@@ -354,34 +612,39 @@ impl Desktop {
                         talk_core::preferences::QuickSwitcherPreference::Auto,
                     )),
                     cx,
-                ));
+                )));
             }
+            content = content.child(switcher);
+            let mut accounts = self.dialog_section(None).gap_0();
             for a in self.snapshot.accounts.as_slice() {
-                content = content.child(
+                accounts = accounts.child(
                     div()
                         .flex()
                         .items_center()
                         .gap_3()
-                        .p_3()
-                        .rounded_lg()
-                        .border_1()
+                        .py_3()
+                        .border_b_1()
                         .border_color(t.border)
-                        .child(self.person_avatar(a.initials.as_str(), 36.))
+                        .child(if Some(a.scope) == self.snapshot.active_account {
+                            self.content_avatar(talk_core::ui::content::AssetTarget::SelfAvatar, a.initials.as_str(), 36.)
+                        } else {
+                            self.person_avatar(a.initials.as_str(), 36.)
+                        })
                         .child(
                             div()
                                 .min_w_0()
                                 .flex_1()
-                                .child(self.account_name(a))
+                                .child(div().font_weight(FontWeight::MEDIUM).child(self.account_name(a)))
                                 .child(self.hint(a.server_label.as_str()))
-                                .child(self.hint(self.l(match a.storage {
+                                .when(a.storage != talk_core::ui::presentation::StorageStatus::Saving, |d| d.child(self.hint(self.l(match a.storage {
                                     talk_core::ui::presentation::StorageStatus::NativeStored => "Anmeldung im sicheren Schlüsselspeicher gespeichert.",
                                     talk_core::ui::presentation::StorageStatus::PrivateFileStored => "Auf diesem Gerät gespeichert · unverschlüsselte private Datei.",
                                     talk_core::ui::presentation::StorageStatus::SessionOnly => "Nur für diese Sitzung angemeldet. Nach dem Beenden erneut anmelden.",
                                     talk_core::ui::presentation::StorageStatus::CleanupPending => "Die Bereinigung einer früheren Speicherung ist noch offen.",
                                     talk_core::ui::presentation::StorageStatus::RecoveryRequired => "Der Speicherzustand muss noch geklärt werden.",
-                                    talk_core::ui::presentation::StorageStatus::Saving => "Speichern läuft …",
+                                    talk_core::ui::presentation::StorageStatus::Saving => "",
                                     talk_core::ui::presentation::StorageStatus::NotSaved => "Deine Anmeldung ist nicht gespeichert.",
-                                })))
+                                }))))
                                 .child(self.hint(self.l(match a.connection {
                                     talk_core::ui::presentation::AccountConnectionState::Connected => "Verbunden",
                                     talk_core::ui::presentation::AccountConnectionState::Guest => "Gastzugang",
@@ -408,9 +671,11 @@ impl Desktop {
                                 cx,
                             ),
                         )
-                        .when(a.connection == talk_core::ui::presentation::AccountConnectionState::Connected, |d| d.child(self.icon_button(
-                            super::focus::account_id("logout-account", a.scope), ("x", "Abmelden"), ButtonStyle::Quiet,
-                            Availability::available(), LocalAction::Intent(talk_core::ui::presentation::UiIntent::Legacy(talk_core::ui::UserIntent::Logout(a.scope.account))), cx))),
+                        .child(self.icon_button(
+                            super::focus::account_id("remove-account", a.scope),
+                            ("trash-2", "Konto aus dieser App entfernen"), ButtonStyle::Quiet,
+                            Availability::when(!self.account_removal.busy(), "Bitte warte auf den laufenden Vorgang."),
+                            LocalAction::RemoveAccount(a.scope.account, Some(a.scope)), cx)),
                 );
             }
             for saved in self
@@ -430,9 +695,9 @@ impl Desktop {
                     SavedAccountPhase::RecoveryRequired => "Wiederherstellung erforderlich",
                     SavedAccountPhase::Active => "Verbunden",
                 };
-                content = content.child(div().flex().items_center().gap_3().p_3().rounded_lg().border_1().border_color(t.border)
+                accounts = accounts.child(div().flex().items_center().gap_3().py_3().border_b_1().border_color(t.border)
                     .child(div().flex_1().min_w_0()
-                        .child(saved.label.as_ref().map_or_else(|| self.l("Gespeichertes Konto").to_owned(), |s| s.as_str().to_owned()))
+                        .child(div().font_weight(FontWeight::MEDIUM).child(saved.label.as_ref().map_or_else(|| self.l("Gespeichertes Konto").to_owned(), |s| s.as_str().to_owned())))
                         .when_some(saved.server_label.as_ref(), |d, label| d.child(self.hint(label.as_str())))
                         .child(self.hint(self.l(status)))
                         .when(saved.failure.is_some(), |d| d.child(self.hint(self.l("Das Konto konnte nicht verbunden werden. Bitte erneut versuchen."))))
@@ -440,21 +705,27 @@ impl Desktop {
                         .when(saved.suppression_unconfirmed, |d| d.child(self.hint(self.l("Der gespeicherte Anmeldestatus muss wiederhergestellt werden.")))))
                     .child(self.button(gpui::SharedString::from(format!("restore-account-{}", saved.id.as_local())), "Verbinden", ButtonStyle::Secondary,
                         Availability::when(matches!(saved.phase, SavedAccountPhase::Dormant | SavedAccountPhase::ReauthenticationRequired),
-                            "Die Verbindung ist noch nicht bereit."), if saved.phase == SavedAccountPhase::ReauthenticationRequired { LocalAction::Reauthenticate(saved.id) } else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::RestoreAccount(saved.id)) }, cx)));
+                            "Die Verbindung ist noch nicht bereit."), if saved.phase == SavedAccountPhase::ReauthenticationRequired { LocalAction::Reauthenticate(saved.id) } else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::RestoreAccount(saved.id)) }, cx))
+                    .child(self.icon_button(gpui::SharedString::from(format!("remove-saved-account-{}", saved.id.as_local())),
+                        ("trash-2", "Konto aus dieser App entfernen"), ButtonStyle::Quiet,
+                        Availability::when(!self.account_removal.busy() && matches!(saved.phase, SavedAccountPhase::Dormant | SavedAccountPhase::ReauthenticationRequired | SavedAccountPhase::RecoveryRequired),
+                            "Bitte warte auf den laufenden Vorgang."), LocalAction::RemoveAccount(saved.id, None), cx)));
             }
-            content = content.child(self.button(
-                "add-account",
-                "Konto hinzufügen",
-                ButtonStyle::Secondary,
-                true,
-                LocalAction::AddAccount,
-                cx,
-            ));
             if self.snapshot.accounts.as_slice().is_empty()
                 && self.snapshot.saved_accounts.as_slice().is_empty()
             {
-                content = content.child(self.hint(self.l("Noch kein Konto verbunden.")));
+                accounts = accounts.child(self.hint(self.l("Noch kein Konto verbunden.")));
             }
+            content = content
+                .child(accounts.child(self.account_removal_feedback(cx)))
+                .child(self.dialog_actions().child(self.button(
+                    "add-account",
+                    "Konto hinzufügen",
+                    ButtonStyle::Secondary,
+                    true,
+                    LocalAction::AddAccount,
+                    cx,
+                )));
         }
         if !appearance && tab != SettingsTab::Accounts {
             content = self.settings_page(tab, cx);
@@ -478,75 +749,35 @@ impl Desktop {
         content = content.when(self.feedback.is_some_and(|f| f.context.is_none()), |d| {
             d.child(self.feedback_view(cx))
         });
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("settings-modal")
-                    .relative()
-                    .occlude()
-                    .w(px(width))
-                    .h(px(height))
-                    .min_h_0()
-                    .rounded(px(13.))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(t.border)
-                    .shadow_xl()
-                    .bg(t.surface)
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .flex()
-                    .when(narrow, |d| d.flex_col())
-                    .when(!narrow, |d| d.child(nav))
-                    .when(narrow, |d| {
-                        d.child(div().flex_none().flex().px_3().pr(px(48.)).py_2().child(
-                            self.button_with_leading_icon(
-                                "settings-menu",
-                                (self.l(tab.key()), "chevron-down"),
-                                ButtonStyle::Secondary,
-                                super::controls::Availability::available(),
-                                LocalAction::SettingsMenu,
-                                cx,
-                            ),
-                        ))
-                    })
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .h_full()
-                            .child(
-                                self.scroll_area(super::navigation::Region::Settings)
-                                    .size_full()
-                                    .px(px(24.))
-                                    .py(px(20.))
-                                    .child(self.reveal(("settings-page", tab as usize), content)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(8.))
-                            .right(px(8.))
-                            .child(self.icon_button(
-                                "close-settings",
-                                ("x", "Einstellungen schließen"),
-                                ButtonStyle::Quiet,
-                                Availability::available(),
-                                LocalAction::Close,
-                                cx,
-                            )),
-                    ),
+        let navigation = if narrow {
+            self.dialog_bar(self.button_with_leading_icon(
+                "settings-menu",
+                (self.l(tab.key()), "chevron-down"),
+                ButtonStyle::Secondary,
+                Availability::available(),
+                LocalAction::SettingsMenu,
+                cx,
+            ))
+        } else {
+            self.dialog_rail(
+                self.dialog_title("Einstellungen"),
+                SettingsTab::ALL
+                    .into_iter()
+                    .map(|item| self.settings_nav(item, item == tab, cx)),
             )
+        };
+        self.dialog_frame(
+            DialogFrame {
+                id: "settings-modal",
+                close: ("close-settings", "Einstellungen schließen"),
+                region: super::navigation::Region::Settings,
+                navigation,
+                page: self.reveal(("settings-page", tab as usize), content),
+                footer: None,
+            },
+            window,
+            cx,
+        )
     }
     fn settings_label(&self, text: &str) -> Div {
         div()
@@ -555,25 +786,13 @@ impl Desktop {
             .child(self.l(text).to_owned())
     }
     fn settings_nav(&self, tab: SettingsTab, active: bool, cx: &Context<Self>) -> Stateful<Div> {
-        self.control(
+        self.dialog_nav_item(
             ("settings-tab", tab as usize),
-            ButtonStyle::Quiet,
-            true,
+            (tab.key(), tab.icon()),
+            active,
             LocalAction::SettingsTab(tab),
             cx,
         )
-        .w_full()
-        .justify_start()
-        .min_h(px(37.))
-        .mb_1()
-        .bg(if active {
-            self.theme.selected
-        } else {
-            gpui::transparent_black()
-        })
-        .text_color(self.theme.text)
-        .child(self.scaled_icon(tab.icon(), 17., self.theme.muted))
-        .child(self.l(tab.key()))
     }
     fn choice(
         &self,

@@ -2,6 +2,24 @@ use super::*;
 use std::time::Instant;
 
 #[test]
+fn screen_helper_grant_does_not_claim_desktop_grant_before_restart() {
+    let value = mac_screen_observation(PermissionStatus::Granted, false);
+    assert_eq!(value.status, PermissionStatus::Unknown);
+    assert_eq!(value.guidance, PermissionGuidance::RestartRequired);
+    assert!(!value.can_request);
+    assert!(!value.allows_device_preview());
+    let denied_or_first = mac_screen_observation(PermissionStatus::Unknown, false);
+    assert_eq!(denied_or_first.status, PermissionStatus::Unknown);
+    assert_ne!(
+        denied_or_first.guidance,
+        PermissionGuidance::RestartRequired
+    );
+    let granted = mac_screen_observation(PermissionStatus::Granted, true);
+    assert_eq!(granted.status, PermissionStatus::Granted);
+    assert_ne!(granted.guidance, PermissionGuidance::RestartRequired);
+}
+
+#[test]
 fn permission_owner_starts_without_prompt_and_rejects_unchecked_requests() {
     let owner = PermissionRuntime::start().unwrap();
     let first = owner.snapshot();

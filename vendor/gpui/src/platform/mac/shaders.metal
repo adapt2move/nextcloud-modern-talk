@@ -1,4 +1,5 @@
-// Modified for NextCloud Modern Talk: current-frame GPU backdrop filtering.
+// Modified for NextCloud Modern Talk: current-frame GPU backdrop filtering and
+// stable sub-LSB gradient dithering on the BGRA8Unorm presentation target.
 #include <metal_stdlib>
 #include <simd/simd.h>
 
@@ -1322,6 +1323,17 @@ float4 fill_color(Background background,
           break;
         }
       }
+      // The presentation target has eight bits per channel. Subtle gradients,
+      // especially dark chrome, otherwise quantize into wide uniform bands.
+      // Screen-space noise is static (no frame/time input), zero-centered and
+      // smaller than one code value; solid colors and alpha remain unchanged.
+      uint2 pixel = uint2(floor(position));
+      uint noise = pixel.x * 1664525u + pixel.y * 1013904223u;
+      noise ^= noise >> 16;
+      noise *= 2246822519u;
+      noise ^= noise >> 13;
+      float dither = (float(noise & 65535u) / 65536.0 - 0.5) / 255.0;
+      color.rgb = clamp(color.rgb + dither, 0.0, 1.0);
       break;
     }
     case 2: {

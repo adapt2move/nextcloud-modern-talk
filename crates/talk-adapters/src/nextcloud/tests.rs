@@ -3,6 +3,8 @@ use super::*;
 mod alpha_tests;
 #[path = "content_tests.rs"]
 mod content_tests;
+#[path = "note_tests.rs"]
+mod note_tests;
 #[path = "notification_tests.rs"]
 mod notification_tests;
 #[path = "people_tests.rs"]
@@ -24,6 +26,7 @@ struct Reply {
     body: Vec<u8>,
     delay: Duration,
     chunked: bool,
+    echo_reference: bool,
 }
 impl Reply {
     fn data(value: Value) -> Self {
@@ -39,6 +42,7 @@ impl Reply {
             .unwrap(),
             delay: Duration::ZERO,
             chunked: false,
+            echo_reference: false,
         }
     }
 }
@@ -59,7 +63,7 @@ impl Server {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let observed = seen.clone();
         let job = tokio::spawn(async move {
-            for reply in replies {
+            for mut reply in replies {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut request = Vec::new();
                 loop {
@@ -81,6 +85,17 @@ impl Server {
                             break;
                         }
                     }
+                }
+                if reply.echo_reference {
+                    let raw = String::from_utf8_lossy(&request);
+                    let body = raw.split_once("\r\n\r\n").unwrap().1;
+                    let reference = body
+                        .split('&')
+                        .find_map(|field| field.strip_prefix("referenceId="))
+                        .unwrap();
+                    let mut response: Value = serde_json::from_slice(&reply.body).unwrap();
+                    response["ocs"]["data"]["referenceId"] = json!(reference);
+                    reply.body = serde_json::to_vec(&response).unwrap();
                 }
                 observed.lock().unwrap().push(request);
                 tokio::time::sleep(reply.delay).await;

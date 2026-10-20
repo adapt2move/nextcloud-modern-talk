@@ -486,6 +486,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Maximum file size:",
         "Tamaño máximo de archivo:",
     ),
+    ("Meeting", "Meeting", "Reunión"),
     ("Meeting beitreten", "Join meeting", "Unirse a la reunión"),
     ("Meeting starten", "Start meeting", "Iniciar reunión"),
     ("Meeting vorbereiten", "Prepare meeting", "Preparar reunión"),
@@ -585,6 +586,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Sperre aufheben", "Remove ban", "Quitar bloqueo"),
     ("Sperrliste laden", "Load bans", "Cargar bloqueos"),
     ("Später erinnern", "Remind later", "Recordar más tarde"),
+    (
+        "Standardrechte",
+        "Default permissions",
+        "Permisos predeterminados",
+    ),
     (
         "Suche im freigegebenen Verzeichnis und wähle eine Person aus.",
         "Search the authorized directory and select a person.",

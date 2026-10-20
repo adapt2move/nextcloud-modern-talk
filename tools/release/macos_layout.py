@@ -24,9 +24,12 @@ MAX_ALIAS = 64 * 1024
 MAX_ENTRIES = 256
 MAX_REPLY = 128 * 1024
 APP_NAME = "NextCloud Modern Talk.app"
+BACKGROUND = ".background/background.tiff"
 POSITIONS = {APP_NAME: (204, 235), "Applications": (576, 235)}
 WINDOW_OPTIONS = {
-    "WindowBounds": "{{120, 120}, {780, 480}}",
+    # Finder persists the outer frame, including its title bar. Reserve 64
+    # points for chrome above the 480-point artwork instead of clipping it.
+    "WindowBounds": "{{120, 120}, {780, 544}}",
     "SidebarWidth": 180,
     **dict.fromkeys(("ShowStatusBar", "ContainerShowSidebar", "PreviewPaneVisibility",
                      "ShowTabView", "ShowToolbar", "ShowPathbar", "ShowSidebar"), False),
@@ -109,7 +112,7 @@ def write_layout(mount):
     from ds_store import DSStore
     from mac_alias import Alias
     path = mount / ".DS_Store"
-    background = mount / ".background/background.png"
+    background = mount / BACKGROUND
     if os.statvfs(mount).f_flag & os.ST_RDONLY:
         raise ValueError("Cannot write the layout to a read-only mount")
     if (path.is_symlink() or (path.exists() and not path.is_file())
@@ -214,7 +217,7 @@ def inspect(mount, tools):
                 or url.query or url.fragment or not url.path.startswith("/")):
             raise ValueError("background is not a local file URL")
         actual = Path(unquote(url.path, errors="strict"))
-        expected = Path(mount) / ".background/background.png"
+        expected = Path(mount) / BACKGROUND
         if expected.is_symlink() or not actual.samefile(expected):
             raise ValueError("background belongs to a different file")
     except (OSError, ValueError) as error:
@@ -222,10 +225,11 @@ def inspect(mount, tools):
                          + repr(str(background_url)[:512])) from error
     # A stale bookmark can still resolve correctly after a volume is remounted;
     # physical identity, not the stale advisory flag or a stored path, decides.
-    return {"inspection": "DS_Store + CoreFoundation alias resolution",
+    return {"inspection": "DS_Store + CoreFoundation alias resolution + ImageIO",
             "store_sha256": parsed["store_sha256"], "entries": parsed["entries"],
             "alias_sha256": hashlib.sha256(alias).hexdigest(),
             "alias_stale": resolved["stale"],
+            "background_image": resolved["background_image"],
             "tools_lock_sha256": hashlib.sha256(LOCK.read_bytes()).hexdigest()}
 
 

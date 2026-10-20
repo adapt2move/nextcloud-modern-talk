@@ -181,8 +181,15 @@ pub(super) fn room(
             .get("remoteToken")
             .is_some_and(|v| v.as_str() != Some(""));
     let object = data.get("objectType").and_then(Value::as_str).unwrap_or("");
+    // Both pinned Talk releases create type 6 with objectType "note_to_self":
+    // lib/Room.php and lib/Service/NoteToSelfService.php at
+    // 0d736588dcfb42becf0e5688e0847e35d5b5efa2 / eed360d176edcb6888dad60965cb694e6bf62ae3.
+    // Recognizing that pair does not override any permission or restriction.
+    let note_object =
+        kind == RoomKind::NoteToSelf && object == "note_to_self" && caps.has("note-to-self");
     let unknown = !caps.supported()
         || kind == RoomKind::Unknown
+        || kind == RoomKind::NoteToSelf && !caps.has("note-to-self")
         || role == Role::Unknown
         || attributes.is_none()
         || attrs & !31 != 0
@@ -197,19 +204,20 @@ pub(super) fn room(
         || !matches!(read_only, Some(0 | 1))
         || !matches!(lobby, Some(0 | 1))
         || remote
-        || !matches!(
-            object,
-            "" | "file"
-                | "event"
-                | "room"
-                | "phone"
-                | "sample"
-                | "extended_conversation"
-                | "classified"
-                | "classified_persist"
-                | "external_call"
-                | "share:password"
-        );
+        || !(note_object
+            || matches!(
+                object,
+                "" | "file"
+                    | "event"
+                    | "room"
+                    | "phone"
+                    | "sample"
+                    | "extended_conversation"
+                    | "classified"
+                    | "classified_persist"
+                    | "external_call"
+                    | "share:password"
+            ));
     let mut actions = RoomActions {
         read_messages: Decision::Allowed,
         send_message: Decision::Allowed,

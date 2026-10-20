@@ -1,5 +1,6 @@
 //! Explicit development scenarios only. No server, credential or media operation occurs.
 mod content;
+mod dialog;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
@@ -36,11 +37,13 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content-progress",
     "chat-motion",
     "history",
+    "history-pagination",
     "history-busy",
     "history-pending",
     "history-uncertain",
     "settings",
     "details",
+    "details-ready",
     "participants",
     "files",
     "thread",
@@ -169,6 +172,11 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("details-ready") {
+        let mut state = snapshot(Some("chat"));
+        dialog::configure(&mut state);
+        return state;
+    }
     if matches!(scenario, Some("chat-content" | "chat-content-progress")) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
@@ -221,9 +229,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             account_label: text(""),
             native_store: NativeStoreState::Unknown,
             storage: StorageStatus::NotSaved,
+            storage_failure: None,
         },
         accounts: Page::empty(),
         saved_accounts: Page::empty(),
+        account_removal: None,
         active_account: None,
         conversations: Page::empty(),
         conversation_list: talk_core::ui::presentation::ConversationListState {
@@ -576,6 +586,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 false,
             )
         }));
+        if scenario == "history-pagination"
+            && let Some(context) = s.selected
+        {
+            let mut panel = talk_core::ui::messaging::MessagePanel::new(context);
+            panel.older = Some(101);
+            s.message_panel = Some(panel);
+        }
     }
     s
 }
@@ -812,11 +829,13 @@ pub struct DevelopmentPort {
     uncertain: bool,
     pending: bool,
     intents: u8,
+    chat_ux_send_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
     probe_step: u8,
     chat_ux: bool,
     chat_motion: bool,
+    history_pagination: bool,
     chat_content: bool,
 }
 impl DevelopmentPort {
@@ -840,6 +859,7 @@ impl DevelopmentPort {
             probe_step: 0,
             chat_ux: matches!(scenario, Some("chat-ux" | "chat-ux-call")),
             chat_motion: scenario == Some("chat-motion"),
+            history_pagination: scenario == Some("history-pagination"),
             chat_content: matches!(scenario, Some("chat-content" | "chat-content-progress")),
             snapshot: initial,
             dirty: true,
@@ -848,6 +868,7 @@ impl DevelopmentPort {
             uncertain: matches!(scenario, Some("uncertain" | "history-uncertain")),
             pending: matches!(scenario, Some("pending" | "history-pending")),
             intents: 0,
+            chat_ux_send_diagnostics: 0,
         }
     }
 }
@@ -858,7 +879,7 @@ impl NativeDesktopPort for DevelopmentPort {
         }
         // This sink consumes synchronously; a bounded counter is diagnostic, no intent backlog/log.
         self.intents = self.intents.saturating_add(1);
-        // At most 32 diagnostics in explicit development mode: only local IDs
+        // At most 32 generic admission diagnostics: only local IDs
         // and input lengths, never draft content, credentials or backend data.
         if self.intents <= 32 {
             // Explicit fixture-only observation of every port admission attempt.
@@ -892,17 +913,6 @@ impl NativeDesktopPort for DevelopmentPort {
                     body.as_str().len(),
                     body.as_str().split('\n').count()
                 ),
-                UiIntent::Message {
-                    context,
-                    action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
-                    ..
-                } if self.chat_ux => println!(
-                    "UI_CHAT_UX send room={} bytes={} reply={:?} thread={:?}",
-                    context.conversation.local,
-                    body.as_str().len(),
-                    target.reply_to,
-                    target.thread,
-                ),
                 UiIntent::Legacy(UserIntent::AcceptDirect { call, .. }) => {
                     println!("UI_INTENT accept-direct room={}", call.conversation.local)
                 }
@@ -924,6 +934,25 @@ impl NativeDesktopPort for DevelopmentPort {
                 _ => (),
             }
         }
+        // Content probes can exhaust the general quota before a user sends.
+        // Reserve four send diagnostics for the explicit chat interaction fixture.
+        if self.chat_ux
+            && self.chat_ux_send_diagnostics < 4
+            && let UiIntent::Message {
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
+                ..
+            } = &intent
+        {
+            self.chat_ux_send_diagnostics += 1;
+            println!(
+                "UI_CHAT_UX send room={} bytes={} reply={:?} thread={:?}",
+                context.conversation.local,
+                body.as_str().len(),
+                target.reply_to,
+                target.thread,
+            );
+        }
         match intent {
             UiIntent::Content {
                 account, action, ..
@@ -934,7 +963,7 @@ impl NativeDesktopPort for DevelopmentPort {
                 content::action(&mut self.snapshot, action)?;
             }
             UiIntent::Refresh(_) if self.chat_motion => {
-                self.probe_step = (self.probe_step + 1).min(10);
+                self.probe_step = (self.probe_step + 1).min(14);
                 let mut rows = self.snapshot.messages.as_slice().to_vec();
                 let step = self.probe_step;
                 match step {
@@ -983,6 +1012,32 @@ impl NativeDesktopPort for DevelopmentPort {
                             false,
                         ),
                     ),
+                    11 => {
+                        let mut event =
+                            message(37, "", "", "10:02", "Fictional call ended.", false);
+                        event.metadata.system = true;
+                        rows.push(event);
+                    }
+                    12 => {
+                        if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
+                            row.body = text(
+                                "Edited fictional message with a changed height.\n\
+                                 The reader is already at the bottom.\n\
+                                 The viewport must remain at the end.\n\
+                                 This is a presentation fixture, not a server write.",
+                            );
+                            row.metadata.edited = true;
+                        }
+                    }
+                    13 => {
+                        if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
+                            row.body = text("Fictional message removed.");
+                            row.metadata.deleted = true;
+                        }
+                    }
+                    14 if !rows.is_empty() => {
+                        rows.remove(0);
+                    }
                     _ => (),
                 }
                 self.snapshot.messages = page(rows);
@@ -1099,6 +1154,43 @@ impl NativeDesktopPort for DevelopmentPort {
                 {
                     self.snapshot.submission = None;
                 }
+            }
+            UiIntent::Message {
+                request,
+                context,
+                action: talk_core::ui::messaging::MessageAction::Older,
+            } if self.history_pagination => {
+                if Some(context) != self.snapshot.selected {
+                    return Err(SubmitError::StaleScope);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .filter(|panel| panel.context == context && panel.older == Some(101))
+                    .ok_or(SubmitError::StaleScope)?;
+                // One finite prepend through the real UI intent. This fixture
+                // proves viewport behavior only, never server pagination.
+                let mut rows: Vec<_> = (96..=100)
+                    .map(|id| {
+                        message(
+                            id,
+                            "Mara Fischer",
+                            "MF",
+                            "09:40",
+                            "Ältere fiktive Nachricht für die lokale Navigation.",
+                            false,
+                        )
+                    })
+                    .collect();
+                rows.extend_from_slice(self.snapshot.messages.as_slice());
+                self.snapshot.messages = page(rows);
+                panel.older = None;
+                panel.history = talk_core::ui::conversation::RemoteState::Idle;
+                println!(
+                    "UI_HISTORY_FIXTURE request={} prepended=5 rows=45 no_backend=true",
+                    request.0
+                );
             }
             UiIntent::Message {
                 request,
@@ -1225,6 +1317,19 @@ impl NativeDesktopPort for DevelopmentPort {
                     return Err(SubmitError::StaleScope);
                 }
                 self.snapshot.call = None;
+            }
+            UiIntent::Conversation {
+                context,
+                action: talk_core::ui::conversation::ConversationAction::Read,
+                ..
+            } if self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .is_some_and(|p| p.context == context) =>
+            {
+                // Only the explicit details-ready scenario supplies this panel.
+                // No server or write is simulated by this layout fixture.
             }
             _ => return Err(SubmitError::Unavailable(UnavailableReason::Unsupported)),
         }

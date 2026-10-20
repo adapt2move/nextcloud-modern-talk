@@ -314,16 +314,20 @@ class MacRuntimeTests(unittest.TestCase):
 
     def test_persisted_background_resolution_binds_the_alias_to_the_current_mount(self):
         mount = self.root / "physical mount Ü"
-        background = mount / ".background/background.png"
+        background = mount / ".background/background.tiff"
         background.parent.mkdir(parents=True)
         background.write_bytes(b"SYNTHETIC background")
         alias = self.root / "mount alias"
         alias.symlink_to(mount, target_is_directory=True)
+        image = {"format": "TIFF", "points": [780, 480],
+                 "representations": [{"pixels": [780, 480], "dpi": [72, 72]},
+                                     {"pixels": [1560, 960], "dpi": [144, 144]}]}
         for url in (background.as_uri(), background.as_uri().replace("file:///", "file://localhost/", 1)):
-            reply = json.dumps({"url": url, "stale": True}).encode()
+            reply = json.dumps({"url": url, "stale": True, "background_image": image}).encode()
             with patch.object(layout, "command", side_effect=[self.layout_response(), reply]) as run:
                 report = layout.inspect(alias, (self.root / "wheels", self.root / "resolver"))
             self.assertTrue(report["alias_stale"])  # Remounting can stale a correctly resolved bookmark.
+            self.assertEqual(report["background_image"], image)
             self.assertEqual(run.call_args_list[0].args[0][1:3], ["-I", "-S"])
             self.assertEqual(run.call_args_list[0].args[1], 20)
             self.assertEqual(run.call_args_list[1].args, (
@@ -339,13 +343,13 @@ class MacRuntimeTests(unittest.TestCase):
 
     def test_persisted_background_existence_or_a_matching_suffix_is_not_sufficient(self):
         mount = self.root / "mount"
-        background = mount / ".background/background.png"
+        background = mount / ".background/background.tiff"
         background.parent.mkdir(parents=True)
         background.write_bytes(b"SYNTHETIC background")
-        wrong = self.root / "another mount/.background/background.png"
+        wrong = self.root / "another mount/.background/background.tiff"
         wrong.parent.mkdir(parents=True)
         wrong.write_bytes(background.read_bytes())
-        for url in (wrong.as_uri(), "", "missing value", "https://invalid.test/background.png",
+        for url in (wrong.as_uri(), "", "missing value", "https://invalid.test/background.tiff",
                     "file://remote.invalid" + str(background), background.as_uri() + "?ignored=true",
                     background.as_uri() + "#fragment", "file:///" + "a" * 8192):
             reply = json.dumps({"url": url, "stale": False}).encode()
@@ -395,7 +399,7 @@ class MacRuntimeTests(unittest.TestCase):
                 shutil.copytree(app, mount / dmg.APP_NAME)
                 (mount / "Applications").symlink_to("/Applications")
                 (mount / ".background").mkdir()
-                shutil.copyfile(background, mount / ".background/background.png")
+                shutil.copyfile(background, mount / ".background/background.tiff")
                 (mount / ".DS_Store").write_bytes(b"SYNTHETIC parser input")
             try:
                 yield "/dev/SYNTHETIC"

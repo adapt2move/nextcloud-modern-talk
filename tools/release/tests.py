@@ -32,6 +32,7 @@ def fixture(path, target="x86_64-unknown-linux-gnu"):
         struct.pack_into("<I", header, 4, 0x0100000C)
     files = {"bin/talk-desktop": bytes(header), **{n: b"SYNTHETIC packaging test notice, not a project license" for n in REQUIRED_NOTICES}}
     files.update({"assets/fonts/GoogleSans-" + weight + ".ttf": b"SYNTHETIC font fixture" for weight in ("Regular", "Medium", "Bold")})
+    files["assets/fonts/GoogleSansCode-Variable.ttf"] = b"SYNTHETIC mono font fixture"
     files["source-manifest.json"] = json.dumps({"Cargo.lock": "1" * 64, "rust-toolchain.toml": "2" * 64}).encode()
     files["dependencies.json"] = json.dumps({"target": target, "lock_sha256": "1" * 64, "packages": [{"name": "synthetic-fixture", "license": "fixture-only", "features": [], "notices": [REQUIRED_NOTICES[0]]}]}).encode()
     for name, body in files.items():

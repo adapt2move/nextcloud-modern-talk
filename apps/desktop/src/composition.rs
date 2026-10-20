@@ -44,11 +44,13 @@ fn options() -> Result<Option<Options>, &'static str> {
         match arg.as_str() {
             "--licenses" => {
                 println!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("../../../LICENSE"),
                     include_str!("../NOTICE.md"),
                     include_str!("../assets/fonts/GoogleSans-LICENSE.txt"),
                     include_str!("../assets/fonts/GoogleSans-TRADEMARKS.txt"),
+                    include_str!("../assets/fonts/GoogleSansCode-LICENSE.txt"),
+                    include_str!("../assets/fonts/GoogleSansCode-TRADEMARKS.txt"),
                     include_str!("../assets/GPUI-LICENSE-APACHE"),
                     include_str!("../assets/icons/LUCIDE-LICENSE"),
                     include_str!("../assets/sounds/Apache-2.0.txt"),
@@ -193,6 +195,14 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     ]) {
         eprintln!("Bundled Google Sans unavailable; using native font fallback: {error}");
     }
+    if let Err(error) = cx
+        .text_system()
+        .add_fonts(vec![Cow::Borrowed(include_bytes!(
+            "../assets/fonts/GoogleSansCode-Variable.ttf"
+        ))])
+    {
+        eprintln!("Bundled Google Sans Code unavailable; using native font fallback: {error}");
+    }
     input::bind_keys(cx);
     let saved = services.preferences.snapshot();
     let hidden = talk_core::preferences::starts_hidden(&saved.active, options.autostart);
@@ -258,6 +268,13 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 let run=gpui::TextRun{len:sample.len(),font,color:gpui::rgb(0x26354b).into(),background_color:None,underline:None,strikethrough:None};
                 let line=window.text_system().shape_line(sample.into(),px(14.),&[run],None);
                 println!("NATIVE_FONT weight={weight:?} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(14.)),cx.text_system().descent(id,px(14.)),line.width);
+            }
+            let font=gpui::font("Google Sans Code");
+            let id=cx.text_system().resolve_font(&font);
+            for sample in ["1","2","3"] {
+                let run=gpui::TextRun{len:sample.len(),font:font.clone(),color:gpui::rgb(0x26354b).into(),background_color:None,underline:None,strikethrough:None};
+                let line=window.text_system().shape_line(sample.into(),px(12.),&[run],None);
+                println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
             cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx))

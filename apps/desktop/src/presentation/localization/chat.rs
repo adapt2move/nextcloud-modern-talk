@@ -6,6 +6,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Desfijar mensaje",
     ),
     (
+        "Anheften ist derzeit nicht verfügbar.",
+        "Pinning is currently unavailable.",
+        "Fijar mensajes no está disponible en este momento.",
+    ),
+    (
         "Aus Favoriten entfernen",
         "Remove from favorites",
         "Quitar de favoritos",
@@ -14,6 +19,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Beende zuerst die laufende Texteingabe.",
         "Finish composing the current text first.",
         "Termina primero la composición de texto actual.",
+    ),
+    (
+        "Beginn des Gesprächs",
+        "Beginning of conversation",
+        "Inicio de la conversación",
+    ),
+    (
+        "Das Zielgespräch ist nicht mehr verfügbar.",
+        "The destination conversation is no longer available.",
+        "La conversación de destino ya no está disponible.",
     ),
     (
         "Dateien und Medien",
@@ -41,6 +56,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo abrir el selector nativo de emojis.",
     ),
     ("Emoji auswählen", "Choose an emoji", "Elegir un emoji"),
+    (
+        "Erinnerungen sind derzeit nicht verfügbar.",
+        "Reminders are currently unavailable.",
+        "Los recordatorios no están disponibles en este momento.",
+    ),
     ("Favorit", "Favorite", "Favorito"),
     (
         "Favoriten sind für dieses Gespräch nicht verfügbar.",
@@ -78,6 +98,27 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Search this conversation",
         "Buscar en esta conversación",
     ),
+    ("Mit 👍 reagieren", "React with 👍", "Reaccionar con 👍"),
+    (
+        "Offline · Entwürfe werden nicht automatisch gesendet.",
+        "Offline · Drafts will not be sent automatically.",
+        "Sin conexión · Los borradores no se enviarán automáticamente.",
+    ),
+    (
+        "Reaktionen sind derzeit nicht verfügbar.",
+        "Reactions are currently unavailable.",
+        "Las reacciones no están disponibles en este momento.",
+    ),
+    (
+        "Threads sind derzeit nicht verfügbar.",
+        "Threads are currently unavailable.",
+        "Los hilos no están disponibles en este momento.",
+    ),
+    (
+        "Weiterleiten ist derzeit nicht verfügbar.",
+        "Forwarding is currently unavailable.",
+        "Reenviar no está disponible en este momento.",
+    ),
     (
         "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein.",
         "Choose an emoji, then paste it into the message with Ctrl+V.",
@@ -87,6 +128,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Zu Favoriten hinzufügen",
         "Add to favorites",
         "Añadir a favoritos",
+    ),
+    (
+        "Ältere Nachrichten erneut laden",
+        "Retry loading older messages",
+        "Volver a cargar mensajes anteriores",
+    ),
+    (
+        "Ältere Nachrichten werden geladen …",
+        "Loading older messages…",
+        "Cargando mensajes anteriores…",
     ),
     (
         "Öffne zuerst das Nachrichtenfeld.",

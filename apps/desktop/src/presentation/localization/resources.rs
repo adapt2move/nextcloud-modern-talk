@@ -135,11 +135,21 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Turning this off hides all typing indicators. You can still send messages.",
         "Al desactivarlo se ocultan todos los indicadores de escritura. Puedes seguir enviando mensajes.",
     ),
+    (
+        "Aus dieser App entfernen",
+        "Remove from this app",
+        "Eliminar de esta aplicación",
+    ),
     ("Ausgewählt", "Selected", "Seleccionado"),
     (
         "Ausgewähltes Gerät",
         "Selected device",
         "Dispositivo seleccionado",
+    ),
+    (
+        "Ausgewähltes Gerät nicht verfügbar",
+        "Selected device unavailable",
+        "Dispositivo seleccionado no disponible",
     ),
     (
         "Ausschneiden ist für diesen Entwurf nicht freigegeben.",
@@ -314,6 +324,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Reinicia la aplicación antes de cambiar más ajustes.",
     ),
     (
+        "Bitte starte die App neu, bevor du weitere Konten entfernst.",
+        "Restart the app before removing more accounts.",
+        "Reinicia la aplicación antes de eliminar más cuentas.",
+    ),
+    (
         "Bitte warte auf das Ergebnis. Dein Entwurf bleibt erhalten.",
         "Please wait for the result. Your draft is preserved.",
         "Espera el resultado. Se conserva el borrador.",
@@ -367,6 +382,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Control states · UI development",
         "Estados de controles · Desarrollo de interfaz",
     ),
+    (
+        "Damit andere dich hören.",
+        "So others can hear you.",
+        "Para que los demás te oigan.",
+    ),
+    (
+        "Damit andere dich sehen.",
+        "So others can see you.",
+        "Para que los demás te vean.",
+    ),
     ("Darstellung", "Appearance", "Apariencia"),
     (
         "Das Betriebssystem hat die Benachrichtigung abgelehnt.",
@@ -399,9 +424,19 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El directorio de conversaciones aún no está disponible en este cliente.",
     ),
     (
+        "Das Konto hat sich geändert. Bitte wähle es erneut aus.",
+        "The account has changed. Select it again.",
+        "La cuenta ha cambiado. Vuelve a seleccionarla.",
+    ),
+    (
         "Das Konto konnte nicht verbunden werden. Bitte erneut versuchen.",
         "Could not connect the account. Try again.",
         "No se pudo conectar la cuenta. Inténtalo de nuevo.",
+    ),
+    (
+        "Das Konto konnte nicht vollständig aus dieser App entfernt werden. Bitte erneut versuchen oder den Speicherstatus prüfen.",
+        "The account could not be fully removed from this app. Try again or check the credential storage status.",
+        "No se pudo eliminar por completo la cuenta de esta aplicación. Vuelve a intentarlo o revisa el estado de las credenciales guardadas.",
     ),
     (
         "Das ausgewählte Gerät wurde entfernt.",
@@ -590,6 +625,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El contenido compartido aún no está disponible aquí.",
     ),
     (
+        "Der laufende Anruf wird beendet.",
+        "The current call will end.",
+        "La llamada en curso finalizará.",
+    ),
+    (
         "Der sichere Schlüsselspeicher ist auf diesem Gerät nicht verfügbar.",
         "The secure credential store is unavailable on this device.",
         "El almacén seguro no está disponible en este dispositivo.",
@@ -643,6 +683,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Einstellungen konnten nicht gespeichert werden. Die bestätigten Werte sind wieder aktiv.",
         "Settings could not be saved. Confirmed settings have been restored.",
         "No se pudieron guardar los ajustes. Se han restaurado los valores confirmados.",
+    ),
+    (
+        "Die Entfernung ist noch nicht bestätigt. Bitte prüfe den Speicherstatus und versuche es erneut.",
+        "Removal is not confirmed yet. Check the credential storage status and try again.",
+        "La eliminación aún no está confirmada. Revisa el estado de las credenciales guardadas y vuelve a intentarlo.",
     ),
     (
         "Die Freigabe kann hier noch nicht einzeln beendet werden. Du kannst den Anruf verlassen.",
@@ -905,6 +950,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "You are waiting in the lobby",
         "Estás en la sala de espera",
     ),
+    (
+        "Du wirst in dieser App abgemeldet und die gespeicherte Anmeldung wird entfernt. Dein NextCloud-Konto und gespeicherte Downloads bleiben erhalten.",
+        "You will be signed out of this app and its saved sign-in will be removed. Your NextCloud account and saved downloads will remain.",
+        "Se cerrará tu sesión en esta aplicación y se eliminará el acceso guardado. Tu cuenta de NextCloud y las descargas guardadas se conservarán.",
+    ),
     ("Dunkel", "Dark", "Oscuro"),
     (
         "Durch die Benachrichtigungseinstellungen unterdrückt.",
@@ -1091,6 +1141,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Freigabe beenden", "Stop sharing", "Dejar de compartir"),
     ("Freigabe prüfen", "Check permission", "Comprobar permiso"),
     (
+        "Für Stimmen und Hinweistöne.",
+        "For voices and notification sounds.",
+        "Para voces y sonidos de aviso.",
+    ),
+    (
         "Für Vorträge mit vielen Zuhörenden.",
         "For talks with a large audience.",
         "Para charlas con muchos oyentes.",
@@ -1158,6 +1213,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Buscando dispositivos…",
     ),
     (
+        "Geräte werden für Meetings und Gespräche verwendet.",
+        "Devices are used for meetings and conversations.",
+        "Los dispositivos se usan para reuniones y conversaciones.",
+    ),
+    (
         "Geräteeinstellungen öffnen",
         "Open device settings",
         "Abrir ajustes de dispositivos",
@@ -1191,6 +1251,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Gespeichertes Gerät fehlt. Bitte Systemstandard oder ein anderes Gerät wählen.",
         "Saved device is missing. Choose the system default or another device.",
         "Falta el dispositivo guardado. Elige el predeterminado del sistema u otro dispositivo.",
+    ),
+    (
+        "Gespeichertes Gerät fehlt. Verwendet wird: {device}.",
+        "Saved device is unavailable. Using: {device}.",
+        "El dispositivo guardado no está disponible. Se usa: {device}.",
     ),
     ("Gespeichertes Konto", "Saved account", "Cuenta guardada"),
     ("Gespräch", "Conversation", "Conversación"),
@@ -1438,8 +1503,23 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Konten", "Accounts", "Cuentas"),
     ("Konto", "Account", "Cuenta"),
+    (
+        "Konto aus dieser App entfernen",
+        "Remove account from this app",
+        "Eliminar la cuenta de esta aplicación",
+    ),
+    (
+        "Konto aus dieser App entfernen?",
+        "Remove account from this app?",
+        "¿Eliminar la cuenta de esta aplicación?",
+    ),
     ("Konto hinzufügen", "Add account", "Añadir cuenta"),
     ("Konto unbekannt", "Unknown account", "Cuenta desconocida"),
+    (
+        "Kontoeinstellungen",
+        "Account settings",
+        "Ajustes de la cuenta",
+    ),
     (
         "Kontoeinstellungen neu laden",
         "Reload account settings",
@@ -1470,6 +1550,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Linux prüft den Gerätezugriff beim Starten von Mikrofon oder Kamera.",
         "Linux checks device access when the microphone or camera starts.",
         "Linux comprueba el acceso al dispositivo al iniciar el micrófono o la cámara.",
+    ),
+    (
+        "Lokale Entwürfe werden verworfen. Bereits gesendete Nachrichten können nicht zurückgerufen werden.",
+        "Local drafts will be discarded. Messages already sent cannot be recalled.",
+        "Se descartarán los borradores locales. Los mensajes ya enviados no se pueden retirar.",
     ),
     ("Lösen", "Unpin", "Desfijar"),
     (
@@ -1507,6 +1592,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Micrófono no disponible",
     ),
     ("Mikrofon testen", "Check microphone", "Probar micrófono"),
+    (
+        "Mikrofon-Eingangspegel",
+        "Microphone input level",
+        "Nivel de entrada del micrófono",
+    ),
     (
         "Mikrofonfreigabe erforderlich",
         "Microphone permission required",

@@ -47,12 +47,12 @@ class ImportStrings(unittest.TestCase):
     def setUp(self):
         self.guard['failures'].clear()
 
-    def native(self, source, core='', core_ui=''):
+    def native(self, source, core='', core_ui='', filename='fixture.rs'):
         with tempfile.TemporaryDirectory(prefix='architecture-strings-') as directory:
             root = Path(directory)
             native = root / 'apps/desktop/src/presentation'
             native.mkdir(parents=True)
-            (native / 'fixture.rs').write_text(source)
+            (native / filename).write_text(source)
             core_dir = root / 'crates/talk-core/src'
             core_dir.mkdir(parents=True)
             (core_dir / 'fixture.rs').write_text(core)
@@ -79,6 +79,22 @@ class ImportStrings(unittest.TestCase):
     def test_reported_settings_sentence(self):
         source = 'use gpui::div;\nconst COPY: &str = "Both will use GitHub Releases in the future.";'
         self.assertEqual(self.native(source), [])
+
+    def test_caret_timer_is_scoped_to_its_input_method(self):
+        source = ('impl Input { fn schedule_caret_blink(&mut self, window: &Window, '
+                  'cx: &mut Context<Self>) { let literal = "}"; '
+                  'self.task = Some(cx.spawn_in(window, async move |input, cx| { '
+                  'Timer::after(INTERVAL).await; })); } }')
+        self.assertEqual(self.native(source, filename='input.rs'), [])
+        for value, filename in [
+            (source, 'fixture.rs'),
+            (source + ' fn other() { cx.spawn_in(window, async {}); }', 'input.rs'),
+            (source.replace('Timer::after', 'cx.http_client(); Timer::after'), 'input.rs'),
+            (source.replace('cx.spawn_in', 'executor.spawn_in'), 'input.rs'),
+            (source + source, 'input.rs'),
+        ]:
+            with self.subTest(filename=filename, source=value):
+                self.assertTrue(self.native(value, filename=filename))
 
     def test_native_interaction_edges_stay_out_of_core_and_views(self):
         # Platform cfg is presentation metadata, not an OS API invocation.

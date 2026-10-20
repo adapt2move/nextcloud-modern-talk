@@ -25,6 +25,8 @@ pub enum PermissionGuidance {
     CheckFirst,
     SystemSettings,
     RestartAfterGrant,
+    /// A request helper observed a grant, but the desktop process still has none.
+    RestartRequired,
     SelectForEachShare,
     DeviceAccessCheckedAtOpen,
     HelperUnavailable,

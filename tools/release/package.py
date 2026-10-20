@@ -29,6 +29,8 @@ REQUIRED_NOTICES = (
     "licenses/project/LICENSE", "licenses/project/NOTICE.md", "licenses/desktop/NOTICE.md",
     "licenses/google-sans/GoogleSans-LICENSE.txt", "licenses/gpui/GPUI-LICENSE-APACHE",
     "licenses/google-sans/GoogleSans-TRADEMARKS.txt",
+    "licenses/google-sans-code/GoogleSansCode-LICENSE.txt",
+    "licenses/google-sans-code/GoogleSansCode-TRADEMARKS.txt",
 )
 
 
@@ -133,7 +135,9 @@ def validate(stage, allow_fixture=False):
             raise ValueError("Input size or checksum mismatch: " + name)
         if not (name.startswith(("licenses/", "assets/", macos_runtime.PREFIX)) or name in ("bin/talk-desktop", "bin/talk-native-helper", "source-manifest.json", "dependencies.json")):
             raise ValueError("Unexpected payload category: " + name)
-    for name in (*REQUIRED_NOTICES, "dependencies.json", "source-manifest.json", "assets/fonts/GoogleSans-Regular.ttf", "assets/fonts/GoogleSans-Medium.ttf", "assets/fonts/GoogleSans-Bold.ttf"):
+    for name in (*REQUIRED_NOTICES, "dependencies.json", "source-manifest.json",
+                 "assets/fonts/GoogleSans-Regular.ttf", "assets/fonts/GoogleSans-Medium.ttf",
+                 "assets/fonts/GoogleSans-Bold.ttf", "assets/fonts/GoogleSansCode-Variable.ttf"):
         if name not in files:
             raise ValueError("Required notice/provenance/asset missing: " + name)
     if files["source-manifest.json"] != source["manifest_sha256"]:
@@ -243,10 +247,11 @@ def assemble(stage, output, allow_fixture=False):
             dest.chmod(0o755 if name.startswith(("bin/", macos_runtime.PREFIX)) else 0o644)
             copied[name] = dest
         (resources / "INSTALL.txt").write_text(
-            "NextCloud Modern Talk development package. No product or platform acceptance.\n"
-            + ("Drag NextCloud Modern Talk to Applications. Its media runtime is included; no GStreamer installation is required. No Developer ID signature or notarization is supplied. Gatekeeper may block launch. Do not disable system protection.\n" if mac else
+            "NextCloud Modern Talk alpha\n"
+            + ("Drag NextCloud Modern Talk to Applications, eject the disk image, then open the installed app. Its media runtime is included; no GStreamer installation is required. The app is not Developer ID signed or notarized. If macOS cannot verify the developer, try opening the app once, then use System Settings > Privacy & Security > Open Anyway and confirm Open. On a German Mac: Systemeinstellungen > Datenschutz & Sicherheit > Dennoch öffnen. Do not disable Gatekeeper.\n" if mac else
                "Ubuntu 24.04 x86_64 candidate: install the matching .deb using sudo apt install ./FILE.deb; launch talk-desktop from the application menu. The tar archive needs the runtime libraries recorded in provenance.\n")
-            + "Media: " + ("Rust webrtc engine with GStreamer codecs; see release notes for supported server profiles.\n" if spec["media"]["enabled"] else "unavailable.\n")
+            + f"Installation: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/install.md\n"
+            + f"Known limitations: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/limitations.md\n"
         )
         if mac:
             plist = {"CFBundleName": "NextCloud Modern Talk", "CFBundleDisplayName": "NextCloud Modern Talk",

@@ -1,3 +1,4 @@
+mod account_removal;
 mod account_settings;
 mod call;
 mod content;
@@ -101,7 +102,16 @@ pub enum LocalAction {
     BeginLogin,
     AddAccount,
     Reauthenticate(talk_core::ui::AccountId),
+    RemoveAccount(
+        talk_core::ui::AccountId,
+        Option<talk_core::ui::AccountScope>,
+    ),
+    ConfirmAccountRemoval,
+    CancelAccountRemoval,
+    RetryAccountRemoval,
     FinishOnboarding,
+    OnboardingReady,
+    RetryOnboardingHandoff,
     PermissionSetup(talk_core::preferences::permissions::PermissionKind),
     Storage(StorageChoice),
     Intent(UiIntent),
@@ -232,6 +242,7 @@ pub struct Desktop {
     >,
     device_error: Option<talk_core::preferences::devices::DeviceError>,
     permission_ui: permissions::PermissionUi,
+    onboarding_ui: onboarding::OnboardingUi,
     device_stopping: Option<talk_core::preferences::devices::PreviewSession>,
     microphone_auto_attempted: bool,
     device_request: u64,
@@ -244,6 +255,7 @@ pub struct Desktop {
     camera_image: Option<gpui::ImageSource>,
     call_images: Vec<(CallScope, u128, std::time::Instant, gpui::ImageSource)>,
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
+    pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
     destination: SidebarDestination,
     collapsed_sections: [bool; 5],
@@ -268,6 +280,7 @@ pub struct Desktop {
     account_preferences: Option<talk_core::preferences::account::AccountPreferenceSnapshot>,
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
+    account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
     pub thread_parent: Option<(ConversationRef, u128)>,
@@ -425,6 +438,7 @@ impl Desktop {
             settings_request: preferences.revision.0,
             preferences,
             permission_ui: permissions::PermissionUi::new(settings_port.permission_snapshot()),
+            onboarding_ui: onboarding::OnboardingUi::new(),
             settings_port,
             preference_error: None,
             notification_state: talk_core::preferences::notifications::NotificationState::Idle,
@@ -442,6 +456,7 @@ impl Desktop {
             camera_image: None,
             call_images: Vec::with_capacity(16),
             device_picker: None,
+            pending_device_focus: None,
             settings_tab: if development {
                 preferences::SettingsTab::Appearance
             } else {
@@ -471,6 +486,7 @@ impl Desktop {
             account_preferences: None,
             account_preference_request: 0,
             account_preference_error: None,
+            account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
             thread_parent: None,
@@ -533,6 +549,7 @@ impl Desktop {
             cx.notify();
         }
         self.refresh_preferences(cx);
+        self.refresh_onboarding(cx);
         if let Some(result) = self.pending_ack
             && self
                 .port
@@ -575,17 +592,16 @@ impl Desktop {
         if let Some(result) = next.submission
             && self.drafts.complete(result)
         {
-            self.feedback = Some((match result.result {
-                Completion::ServerAccepted => Feedback::info(
-                    "Vom Server angenommen. Empfängerzustellung ist damit nicht bestätigt.",
-                ),
-                Completion::Failed(_) => {
-                    Feedback::error("Nicht gesendet. Dein Entwurf bleibt erhalten.")
-                }
-                Completion::Uncertain => Feedback::warning(
+            self.feedback = match result.result {
+                Completion::ServerAccepted => None,
+                Completion::Failed(_) => Some(Feedback::error(
+                    "Nicht gesendet. Dein Entwurf bleibt erhalten.",
+                )),
+                Completion::Uncertain => Some(Feedback::warning(
                     "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
-                ),
-            }).in_conversation(result.context));
+                )),
+            }
+            .map(|feedback| feedback.in_conversation(result.context));
             reset_draft = Some(result.context) == previous;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
             self.pending_ack = Some(result);
@@ -622,20 +638,17 @@ impl Desktop {
             self.pending_modal_focus = true;
         }
         self.drafts.retain_accounts(&next);
-        if next.login.phase != self.snapshot.login.phase || next.active_account != previous_account
-        {
-            self.permission_ui.setup_kind =
-                talk_core::preferences::permissions::PermissionKind::Microphone;
-        }
         if previous != next.selected || previous_account != next.active_account {
             self.retire_emoji_picker();
         }
+        self.refresh_account_removal(&next);
         self.snapshot = next;
         self.refresh_content_ui(cx);
         self.refresh_creation(cx);
         self.refresh_room_dialog(cx);
         self.refresh_message_ui(cx);
         if self.incoming_visible() {
+            self.account_removal.dismiss_confirmation();
             if self.emoji_picker_pending.is_some() || self.emoji_picker_context.is_some() {
                 self.retire_emoji_picker();
             }
@@ -761,6 +774,17 @@ impl Desktop {
         if self.update_restart_pending {
             return;
         }
+        if self.account_removal.confirming() {
+            match action {
+                LocalAction::Close | LocalAction::CancelAccountRemoval => {
+                    self.cancel_account_removal(window, cx);
+                }
+                LocalAction::ConfirmAccountRemoval => self.confirm_account_removal(window, cx),
+                _ => {}
+            }
+            cx.notify();
+            return;
+        }
         if self.projection_blocked
             && !matches!(
                 &action,
@@ -807,6 +831,11 @@ impl Desktop {
         let previous_feedback = self.feedback;
         let invoker = window.focused(cx);
         match action {
+            LocalAction::RemoveAccount(account, scope) => {
+                self.request_account_removal(account, scope, window, cx)
+            }
+            LocalAction::RetryAccountRemoval => self.retry_account_removal(window, cx),
+            LocalAction::ConfirmAccountRemoval | LocalAction::CancelAccountRemoval => {}
             LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
             LocalAction::FindPeople => {
@@ -888,7 +917,6 @@ impl Desktop {
                     self.open_room_dialog(overlay, cx);
                 }
                 self.pending_modal_focus = true;
-                self.keyboard_navigation = false;
                 if overlay == Overlay::Search {
                     self.directory_query = None;
                     self.search.focus_handle(cx).focus(window);
@@ -1031,7 +1059,6 @@ impl Desktop {
                 } else {
                     None
                 };
-                self.keyboard_navigation = false;
                 if let Some(focus) = target.filter(|f| self.root_focus.contains(f, window)) {
                     focus.focus(window);
                 } else {
@@ -1122,27 +1149,33 @@ impl Desktop {
                 }
             }
             LocalAction::FinishOnboarding => {
-                if self.snapshot.login.phase == talk_core::ui::presentation::LoginPhase::Ready
+                if (self.snapshot.login.phase == talk_core::ui::presentation::LoginPhase::Ready
+                    || self.onboarding_ui.resumed)
                     && self.snapshot.active_account.is_some()
                 {
-                    self.onboarding_open = false;
+                    self.finish_onboarding(cx);
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::OnboardingReady => {
+                if self.onboarding_open && self.snapshot.active_account.is_some() {
+                    self.onboarding_ui.ready = true;
+                    self.navigation.reset_onboarding();
+                }
+            }
+            LocalAction::RetryOnboardingHandoff => self.retry_onboarding_handoff(cx),
             LocalAction::PermissionSetup(kind) => {
                 if self.onboarding_open
                     && self.overlay.is_none()
                     && self.snapshot.login.phase == talk_core::ui::presentation::LoginPhase::Ready
                 {
-                    // Moving through the optional setup does not request or
-                    // grant permission. Existing in-flight work keeps its owner.
-                    self.permission_ui.setup_kind = kind;
-                    self.navigation.reset_onboarding();
+                    self.enter_onboarding_step(kind);
                     self.root_focus.focus(window);
                 }
             }
             LocalAction::Reauthenticate(account) => {
                 if self.save_draft(cx) && self.submit(UiIntent::Reauthenticate(account)) {
+                    self.reset_onboarding(cx);
                     self.server.update(cx, |input, _| input.reset());
                     self.onboarding_open = true;
                     self.overlay = None;
@@ -1151,6 +1184,7 @@ impl Desktop {
             }
             LocalAction::AddAccount => {
                 if self.save_draft(cx) && self.submit(UiIntent::NewLogin) {
+                    self.reset_onboarding(cx);
                     self.onboarding_open = true;
                     self.overlay = None;
                     self.server.focus_handle(cx).focus(window);
@@ -1197,7 +1231,6 @@ impl Desktop {
                         self.microphone_intent = true;
                         self.camera_intent = false;
                         self.prejoin_return_focus = Some(call);
-                        self.keyboard_navigation = false;
                         self.modal_focus.focus(window);
                         self.pending_modal_focus = true;
                     }
@@ -1244,6 +1277,8 @@ impl Desktop {
                 self.settings_navigation_open = !self.settings_navigation_open
             }
             LocalAction::SettingsTab(tab) => {
+                self.device_picker = None;
+                self.pending_device_focus = None;
                 self.settings_tab = tab;
                 self.overlay = Some(Overlay::Settings);
                 self.settings_navigation_open = false;
@@ -1272,17 +1307,16 @@ impl Desktop {
                 self.settings_tab = preferences::SettingsTab::Devices;
                 self.enter_device_page();
             }
-            LocalAction::ToggleDevicePicker(kind) => {
-                self.device_picker = if self.device_picker == Some(kind) {
-                    None
-                } else {
-                    Some(kind)
+            LocalAction::ToggleDevicePicker(kind) => self.toggle_device_picker(kind),
+            LocalAction::RefreshDevice(kind) => self.refresh_device_kind(kind),
+            LocalAction::Permission(kind, action) => {
+                if self.prepare_onboarding_permission(kind, action, cx) {
+                    self.permission_action(kind, action);
                 }
             }
-            LocalAction::RefreshDevice(kind) => self.refresh_device_kind(kind),
-            LocalAction::Permission(kind, action) => self.permission_action(kind, action),
             LocalAction::SelectDevice(kind, selection) => {
                 self.device_picker = None;
+                self.pending_device_focus = None;
                 if let Some(focus) = self
                     .control_focus
                     .current(&("device-picker", kind as usize).into())
@@ -1388,7 +1422,7 @@ impl Desktop {
             self.trace_chat_ui(window, cx);
             // Bounded fixture-only geometry/counts: no input content or server identifiers.
             println!(
-                "UI_LOCAL_STATE editor_chars={} editor_focused={} history_focused={} filter_chars={} search_chars={} overlay={:?} prejoin={} highlighted={:?}",
+                "UI_LOCAL_STATE editor_chars={} editor_focused={} history_focused={} filter_chars={} search_chars={} overlay={:?} prejoin={} highlighted={:?} keyboard_navigation={}",
                 self.composer.read(cx).content.len(),
                 self.composer.focus_handle(cx).is_focused(window),
                 self.navigation.history_focus().is_focused(window),
@@ -1396,7 +1430,8 @@ impl Desktop {
                 self.search.read(cx).content.len(),
                 self.overlay,
                 self.prejoin.is_some(),
-                self.highlighted_message.map(|(_, id)| id)
+                self.highlighted_message.map(|(_, id)| id),
+                self.keyboard_navigation
             );
             println!(
                 "UI_SETTINGS revision={} durable={} locale={:?} palette={:?} appearance={:?} density={:?} tab={:?} load={:?} save={:?} startup={:?} background={} quick_switcher={:?}",
@@ -1607,6 +1642,7 @@ impl Desktop {
         div()
             .text_size(self.sp(12.))
             .line_height(self.sp(18.))
+            .font_weight(FontWeight::NORMAL)
             .text_color(self.theme.muted)
             .child(text.to_owned())
     }
@@ -1618,6 +1654,7 @@ impl Render for Desktop {
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
+        self.prepare_message_menu(window, cx);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -1771,6 +1808,23 @@ impl Render for Desktop {
         if self.update_restart_pending {
             self.disable_update_inputs(cx);
         }
+        for input in [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.message_ui.search,
+            &self.message_ui.time_input,
+        ]
+        .into_iter()
+        .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
+        {
+            input.update(cx, |input, _| input.configure_caret(self.reduced_motion));
+        }
         // Text scaling is independent of spacing; scaling both exhausts small windows.
         window.set_rem_size(px(16.));
         self.background_inert = self.overlay.is_some() || incoming;
@@ -1825,7 +1879,7 @@ impl Render for Desktop {
         } else {
             self.shell(window, cx).into_any_element()
         };
-        self.background_inert = incoming;
+        self.background_inert = incoming || self.account_removal.confirming();
         let overlay = self
             .overlay
             .filter(|_| !self.update_restart_pending)
@@ -1836,7 +1890,11 @@ impl Render for Desktop {
                 )
             });
         self.background_inert = false;
+        let account_removal_dialog = (!incoming && !self.update_restart_pending)
+            .then(|| self.account_removal_dialog(window, cx))
+            .flatten();
         let incoming_card = incoming.then(|| self.incoming(cx));
+        let message_menu = self.message_menu_popup(window, cx);
         let reveal = self.navigation.reveal.clone();
         let view = div()
             .on_children_prepainted(cx.processor(move |this, _, window, cx| {
@@ -1846,12 +1904,15 @@ impl Render for Desktop {
                 reveal.finish();
                 this.control_focus.finish_frame(
                     window,
-                    if this.overlay.is_some() || this.prejoin.is_some() {
+                    if this.account_removal.confirming() {
+                        &this.account_removal.focus
+                    } else if this.overlay.is_some() || this.prejoin.is_some() {
                         &this.modal_focus
                     } else {
                         &this.root_focus
                     },
                 );
+                this.finish_message_menu_frame(window, cx);
                 if this.hover_hints.retire(|id| this.control_focus.live(id)) {
                     cx.notify();
                 }
@@ -1873,19 +1934,25 @@ impl Render for Desktop {
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()
-            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let composing = this.input_composing(cx);
                 if event.keystroke.key != "f7" {
                     this.hover_hints.cancel();
+                    if !composing {
+                        // Includes activation, menu Home/End and shortcuts that
+                        // open dialogs. Focus transfer preserves this modality.
+                        this.keyboard_navigation = true;
+                    }
                 }
-                if matches!(
-                    event.keystroke.key.as_str(),
-                    "tab" | "left" | "right" | "up" | "down"
-                ) {
-                    this.keyboard_navigation = true;
+                if !composing && this.message_menu_key(event, window, cx) {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
                 }
                 cx.notify();
             }))
             .on_key_down(cx.listener(Self::key))
+            .child(self.pointer_modality(cx))
             .child(
                 div()
                     .relative()
@@ -1893,7 +1960,9 @@ impl Render for Desktop {
                     .min_h_0()
                     .child(body)
                     .when_some(overlay, |d, overlay| d.child(overlay))
-                    .when_some(incoming_card, |d, card| d.child(card)),
+                    .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
+                    .when_some(incoming_card, |d, card| d.child(card))
+                    .when_some(message_menu, |d, menu| d.child(menu)),
             );
         if let Some(scope) = self.pending_prejoin_return.take()
             && self.overlay.is_none()
@@ -1922,9 +1991,25 @@ impl Render for Desktop {
                 window.refresh();
             });
         }
-        if self.pending_modal_focus && !incoming && !self.update_restart_pending {
+        if let Some(id) = self.pending_device_focus.take()
+            && self.devices_open()
+            && let Some(focus) = self.control_focus.current(&id)
+        {
+            focus.focus(window);
+            self.navigation.reveal.request();
+        }
+        if self.account_removal.focus_cancel && !incoming && !self.update_restart_pending {
+            self.account_removal.focus_cancel = false;
+            if let Some(focus) = self.control_focus.current(&"cancel-account-removal".into()) {
+                focus.focus(window);
+            }
+        }
+        if self.pending_modal_focus
+            && !self.account_removal.confirming()
+            && !incoming
+            && !self.update_restart_pending
+        {
             self.pending_modal_focus = false;
-            self.keyboard_navigation = false;
             let id: Option<gpui::ElementId> = match self.overlay {
                 Some(Overlay::Settings)
                     if self.settings_tab == preferences::SettingsTab::Appearance =>

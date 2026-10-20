@@ -1,14 +1,15 @@
 # Current implementation and limits
 
 The native client connects accounts, conversations, messages, files, settings,
-background activity and audio/video calls. [Alpha notes](alpha.md) describe the
-installable profile; the [feature inventory](compatibility/feature-inventory.md)
+background activity and audio/video calls. The [installation guide](install.md)
+and [known limitations](limitations.md) describe the installable profile; the [feature inventory](compatibility/feature-inventory.md)
 separates implemented paths from remaining parity work.
 
 ## Connected application paths
 
 - System-browser login uses NextCloud Login Flow v2. Accounts persist through
-  native storage or an explicitly selected unencrypted private-file fallback.
+  automatic native storage for a new sign-in or an explicitly selected
+  unencrypted private-file fallback after a storage failure.
   Restoration, logout suppression and cleanup share one account owner.
 - Compact grouped navigation includes a dedicated favorites group and active/archive views.
   Header actions open members and conversation settings; the title opens shared
@@ -16,6 +17,11 @@ separates implemented paths from remaining parity work.
   pins, reminders, schedules, room search and explicit file upload/share/download.
   The main search includes the local-user directory. Scoped user avatars, room
   avatars and emoji icons supplement names; the footer identifies the current user.
+- Recently opened chats retain a bounded, account-scoped history in session
+  memory. Switching back shows retained messages immediately and refreshes
+  incrementally; temporary network failures leave those messages readable.
+  Older pages load at the upper scroll boundary. Logout, confirmed access loss
+  and message expiry remove retained content.
 - Shared content includes bounded image and document thumbnails, enlarged image
   previews, explicit Cloud web handoff and byte-based download progress. Published
   polls support creation, voting, permitted results and closure from chat and
@@ -27,8 +33,9 @@ separates implemented paths from remaining parity work.
   or clear unread state, and unknown notification eligibility stays suppressed.
 - Local appearance, English/German/Spanish, startup, notifications and device
   settings persist with rollback and explicit Retry. Account privacy and
-  attachment settings use admitted protocol requests. Permission guidance and
-  device checks never implicitly join a call.
+  attachment settings use admitted protocol requests. Sequential permission setup
+  advances on observed grants and retains a bounded account-specific restart
+  handoff. Permission guidance and device checks never implicitly join a call.
 - The independent [nextcloud-talk-api](../crates/nextcloud-talk-api/README.md)
   crate owns HTTP/OCS, typed operations and signaling. Application policy and
   device lifetime remain separate from the Rust WebRTC engine and GStreamer

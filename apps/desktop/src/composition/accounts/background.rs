@@ -247,6 +247,7 @@ impl Accounts {
             .map(|a| a.scope)
             .collect();
         self.background.sync(&scopes, Instant::now());
+        self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
@@ -352,6 +353,26 @@ impl Accounts {
                 for room in removed {
                     self.cancel_room_work(room);
                 }
+                // A successful policy observation can revoke retained content
+                // even for an inactive room. A failed list has no such authority.
+                for room in list
+                    .rooms
+                    .as_slice()
+                    .iter()
+                    .filter(|room| room.actions.read_messages != Decision::Allowed)
+                {
+                    self.invalidate_history(
+                        ConversationRef {
+                            account: scope,
+                            conversation: room.id,
+                        },
+                        if room.actions.read_messages == Decision::Denied {
+                            ContentState::Denied
+                        } else {
+                            ContentState::Failed
+                        },
+                    );
+                }
                 if self.snapshot.active_account == Some(scope) {
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
@@ -402,6 +423,7 @@ impl Accounts {
         self.touch();
     }
     fn cancel_room_work(&mut self, context: ConversationRef) {
+        self.history.remove(context);
         self.notices.remove_room(context);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
@@ -763,6 +785,7 @@ mod tests {
         model.snapshot.active_account = Some(scope(1));
         model.apply_room_refresh(scope(1), rooms(vec![room(1)]));
         let context = model.snapshot.conversations.as_slice()[0].context;
+        model.history.open(context);
         model.snapshot.selected = Some(context);
         model.snapshot.message_panel = Some(talk_core::ui::messaging::MessagePanel::new(context));
         model.snapshot.message_panel.as_mut().unwrap().latest = Some(42);
@@ -789,6 +812,10 @@ mod tests {
             assert_eq!(model.snapshot.selected, Some(context));
             assert_eq!(model.snapshot.conversations.as_slice().len(), 2);
             assert!(!model.snapshot.conversation_list.complete);
+            assert!(
+                model.history.get(context).is_some(),
+                "failed lists cannot purge retained history"
+            );
             assert_eq!(
                 model.snapshot.message_panel.as_ref().unwrap().latest,
                 Some(42)
@@ -802,6 +829,10 @@ mod tests {
         assert!(model.snapshot.conversation_list.complete);
         assert!(model.snapshot.selected.is_none());
         assert!(model.snapshot.message_panel.is_none());
+        assert!(
+            model.history.get(context).is_none(),
+            "authoritative removal purges retained history"
+        );
     }
     #[test]
     fn inactive_conversation_refresh_updates_only_its_cache() {

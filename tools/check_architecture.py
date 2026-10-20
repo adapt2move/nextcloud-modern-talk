@@ -89,6 +89,36 @@ def without_imports(source: str) -> str:
     return ''.join(body)
 
 
+def allow_input_caret_timer(source: str) -> str:
+    """Scope one foreground visual timer without exempting its other calls.
+
+    The input owner retains/cancels the task and tests its focus/generation bounds.
+    This lexical exception is not a proof of those lifecycle properties.
+    """
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+schedule_caret_blink\s*\([^;{}]*\)\s*\{", code))
+    if not starts:
+        return source
+    require(len(starts) == 1, "native input must have one caret timer owner")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "native input caret timer method is not closed")
+    if depth:
+        return source
+    calls = list(re.finditer(r"\bcx\s*\.\s*spawn_in\s*\(", code[start:end - 1]))
+    require(len(calls) == 1, "native input caret timer must own one foreground task")
+    if len(calls) != 1:
+        return source
+    call = calls[0]
+    begin, finish = start + call.start(), start + call.end()
+    return source[:begin] + "cx.reviewed_input_caret_timer(" + source[finish:]
+
+
 # This is the reviewed transitive data vocabulary, not permission to reexport modules.
 UI_EXPORTS = {
     *(('crate', 'bounded', name) for name in ('LimitExceeded', 'Page', 'Text')),
@@ -429,12 +459,13 @@ def check() -> None:
         # admission and privacy gating belong to the reviewed input widget/producer.
         hidden_io = source
         if path == native / "presentation/input.rs":
+            hidden_io = allow_input_caret_timer(hidden_io)
             hidden_io = re.sub(r"\.(?:read_from_clipboard|write_to_clipboard)\s*\(", ".reviewed_input_clipboard(", hidden_io)
         if path == native / "presentation/conversation_dialog.rs":
             # Explicit user Copy guest-link action; sensitive/classified rooms refuse it.
             # Clipboard reads, arbitrary OS operations and other views stay forbidden.
             hidden_io = re.sub(r"\.write_to_clipboard\s*\(", ".reviewed_guest_link_copy(", hidden_io)
-        require(not re.search(r"\.(?:http_client|background_executor|spawn|read_to_end|open_url|read_from_clipboard|write_to_clipboard)\s*\(", hidden_io),
+        require(not re.search(r"\.(?:http_client|background_executor|spawn|spawn_in|read_to_end|open_url|read_from_clipboard|write_to_clipboard)\s*\(", hidden_io),
                 "native presentation cannot dispatch hidden I/O; submit an intent")
 
     presentation = without_comments((ROOT / "apps/bootstrap/src/presentation.rs").read_text(encoding="utf-8"))

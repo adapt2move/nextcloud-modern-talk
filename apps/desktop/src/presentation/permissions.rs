@@ -15,6 +15,7 @@ struct Pending {
     kind: PermissionKind,
     action: PermissionAction,
     entry: u64,
+    setup: Option<(talk_core::ui::AccountScope, u64)>,
 }
 pub(super) struct PermissionUi {
     pub snapshot: Result<PermissionSnapshot, PermissionError>,
@@ -23,7 +24,6 @@ pub(super) struct PermissionUi {
     checks: [bool; 3],
     entry: u64,
     pub microphone_ready: bool,
-    pub setup_kind: PermissionKind,
     error: Option<PermissionError>,
 }
 impl PermissionUi {
@@ -35,7 +35,6 @@ impl PermissionUi {
             checks: [false; 3],
             entry: 0,
             microphone_ready: false,
-            setup_kind: PermissionKind::Microphone,
             error: None,
         }
     }
@@ -267,6 +266,15 @@ fn permission_help(
         };
     }
     let note = match observation.guidance {
+        PermissionGuidance::RestartRequired
+            if macos
+                && observation.kind == PermissionKind::ScreenSharing
+                && observation.status == PermissionStatus::Unknown =>
+        {
+            Some(
+                "macOS hat die Freigabe bestätigt. Starte die App neu, damit dieser Prozess sie verwenden kann.",
+            )
+        }
         PermissionGuidance::RestartAfterGrant
             if macos
                 && observation.kind == PermissionKind::ScreenSharing
@@ -312,6 +320,15 @@ fn permission_error_key(error: PermissionError) -> &'static str {
 }
 
 impl Desktop {
+    pub(super) fn permission_operation_idle(&self) -> bool {
+        self.permission_ui.pending.is_none()
+            && self.permission_ui.error.is_none()
+            && self
+                .permission_ui
+                .snapshot
+                .as_ref()
+                .is_ok_and(|snapshot| snapshot.runtime == RuntimeState::Running)
+    }
     pub fn devices_open(&self) -> bool {
         self.overlay == Some(Overlay::Settings)
             && self.settings_tab == SettingsTab::Devices
@@ -387,6 +404,7 @@ impl Desktop {
                     kind,
                     action,
                     entry: self.permission_ui.entry,
+                    setup: self.onboarding_permission_owner(kind),
                 });
                 self.permission_ui.error = None;
                 if kind == PermissionKind::Microphone {
@@ -423,6 +441,9 @@ impl Desktop {
                 {
                     self.permission_ui.pending = None;
                     self.permission_ui.error = error;
+                    if let Some(owner) = pending.setup {
+                        self.onboarding_permission_completed(owner, kind, action, error.is_none());
+                    }
                     if error.is_none()
                         && kind == PermissionKind::Microphone
                         && pending.entry == self.permission_ui.entry
@@ -438,6 +459,92 @@ impl Desktop {
             cx.notify();
         }
         self.dispatch_permission_check();
+    }
+    /// Compact device feedback. A successful observation adds no success row or
+    /// repeated settings/recheck actions; a capture denial still remains visible.
+    pub(super) fn device_permission_notice(
+        &self,
+        kind: PermissionKind,
+        capture_denied: bool,
+        cx: &Context<Self>,
+    ) -> Option<Div> {
+        let observation = self.observation(kind);
+        let help = permission_help(observation, PermissionPlatform::current());
+        let failed = self.permission_ui.snapshot.is_err() || self.permission_ui.error.is_some();
+        let attention = capture_denied
+            || failed
+            || matches!(
+                observation.status,
+                PermissionStatus::Denied
+                    | PermissionStatus::Restricted
+                    | PermissionStatus::Unsupported
+                    | PermissionStatus::Unavailable
+            );
+        if observation.allows_device_preview() && !attention {
+            return None;
+        }
+        let feedback = self.permission_ui.feedback(kind);
+        let idle = self.permission_ui.pending.is_none()
+            && self
+                .permission_ui
+                .snapshot
+                .as_ref()
+                .is_ok_and(|s| s.runtime == RuntimeState::Running);
+        let availability = Availability::when(
+            idle,
+            feedback.unwrap_or("Die Zugriffsprüfung ist noch nicht bereit."),
+        );
+        let status = if capture_denied {
+            "Zugriff verweigert."
+        } else if failed {
+            feedback.unwrap_or("Die Zugriffsprüfung ist nicht verfügbar.")
+        } else {
+            help.status
+        };
+        let link = |id: &'static str, label: &'static str, action| {
+            self.button(
+                (id, index(kind)),
+                label,
+                ButtonStyle::Quiet,
+                availability,
+                LocalAction::Permission(kind, action),
+                cx,
+            )
+            .min_h(gpui::px(24.))
+            .px_1()
+            .py_0()
+            .text_size(self.sp(12.))
+            .text_color(self.theme.accent)
+        };
+        let mut notice = div().flex().items_center().flex_wrap().gap_2().child(
+            self.hint(self.l(status)).text_color(if attention {
+                self.theme.danger
+            } else {
+                self.theme.muted
+            }),
+        );
+        if let Some(label) = help.request_label {
+            notice = notice.child(link(
+                "device-permission-request",
+                label,
+                PermissionAction::Request,
+            ));
+        }
+        if attention && observation.can_open_settings {
+            notice = notice.child(link(
+                "device-permission-settings",
+                "Systemeinstellungen öffnen",
+                PermissionAction::OpenSystemSettings,
+            ));
+        }
+        if attention {
+            notice = notice.child(link(
+                "device-permission-check",
+                "Erneut prüfen",
+                PermissionAction::Check,
+            ));
+        }
+        Some(notice)
     }
     pub(super) fn permission_panel(&self, kind: PermissionKind, cx: &Context<Self>) -> Div {
         let observation = self.observation(kind);
@@ -584,6 +691,120 @@ impl Desktop {
             );
         }
         panel
+    }
+
+    pub(super) fn onboarding_permission_status(&self, kind: PermissionKind) -> &'static str {
+        permission_help(self.observation(kind), PermissionPlatform::current()).status
+    }
+
+    pub(super) fn onboarding_permission_panel(
+        &self,
+        kind: PermissionKind,
+        cx: &Context<Self>,
+    ) -> Div {
+        let observation = self.observation(kind);
+        let help = permission_help(observation, PermissionPlatform::current());
+        let (_, purpose) = permission_identity(kind);
+        let explanation = match (PermissionPlatform::current(), kind) {
+            (PermissionPlatform::MacOS, PermissionKind::ScreenSharing) => {
+                "macOS fragt nach der Bildschirmfreigabe. Falls es einen Neustart verlangt, geht es danach hier weiter."
+            }
+            (PermissionPlatform::MacOS, _) => {
+                "Bestätige die Anfrage von macOS, wenn sie erscheint. Nach der Freigabe geht es automatisch weiter."
+            }
+            (PermissionPlatform::Windows, PermissionKind::ScreenSharing) => {
+                "Unter Windows wird das Fenster oder der Bildschirm erst beim Start einer Freigabe ausgewählt."
+            }
+            (PermissionPlatform::Windows, _) => {
+                "Windows verwaltet den Gerätezugriff in „Datenschutz & Sicherheit“. Bereits erlaubter Zugriff wird automatisch erkannt."
+            }
+            (PermissionPlatform::Linux, PermissionKind::ScreenSharing) => {
+                "Unter Linux wählst du das Fenster oder den Bildschirm für jede Freigabe im Systemdialog aus."
+            }
+            (PermissionPlatform::Linux, _) => {
+                "Linux prüft den Gerätezugriff beim Starten von Mikrofon oder Kamera."
+            }
+            _ => {
+                "Prüfe die Zugriffsrechte in den Systemeinstellungen und wähle danach „Erneut prüfen“."
+            }
+        };
+        let idle = self.permission_ui.pending.is_none()
+            && self
+                .permission_ui
+                .snapshot
+                .as_ref()
+                .is_ok_and(|snapshot| snapshot.runtime == RuntimeState::Running);
+        let settings_ready =
+            kind != PermissionKind::ScreenSharing || self.onboarding_checkpoint_ready();
+        let mut panel = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(self.hint(self.l(purpose)))
+            .child(self.hint(self.l(explanation)))
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.l(help.status)),
+            );
+        if observation.status == PermissionStatus::Restricted
+            && let Some(explanation) = help.explanation
+        {
+            panel = panel.child(self.hint(self.l(explanation)));
+        }
+        if let Some(feedback) = self.permission_ui.feedback(kind) {
+            panel = panel.child(self.hint(self.l(feedback)));
+        }
+        if observation.guidance == PermissionGuidance::RestartRequired {
+            panel = panel.child(self.hint(self.l(
+                "macOS hat die Freigabe bestätigt. Starte die App neu, damit dieser Prozess sie verwenden kann.",
+            )));
+        }
+        // The interactive step itself authorizes one request. Recovery actions
+        // only inspect the current OS state or open its Settings page.
+        panel
+            .when(
+                observation.can_open_settings && observation.status != PermissionStatus::Granted,
+                |d| {
+                    d.child(
+                        self.button(
+                            ("onboarding-permission-settings", index(kind)),
+                            "Systemeinstellungen öffnen",
+                            ButtonStyle::Secondary,
+                            Availability::when(
+                                idle && settings_ready,
+                                "Einrichtungsfortschritt wird gespeichert …",
+                            ),
+                            LocalAction::Permission(kind, PermissionAction::OpenSystemSettings),
+                            cx,
+                        )
+                        .w_full(),
+                    )
+                },
+            )
+            .when(
+                !matches!(
+                    observation.status,
+                    PermissionStatus::Granted
+                        | PermissionStatus::NotRequired
+                        | PermissionStatus::PerSession
+                ),
+                |d| {
+                    d.child(
+                        self.button(
+                            ("onboarding-permission-check", index(kind)),
+                            "Erneut prüfen",
+                            ButtonStyle::Quiet,
+                            Availability::when(idle, "Zugriff wird geprüft …"),
+                            LocalAction::Permission(kind, PermissionAction::Check),
+                            cx,
+                        )
+                        .w_full(),
+                    )
+                },
+            )
     }
 }
 
@@ -775,6 +996,7 @@ mod tests {
             kind: PermissionKind::Camera,
             action: PermissionAction::OpenSystemSettings,
             entry: 1,
+            setup: None,
         });
         assert_eq!(
             ui.feedback(PermissionKind::Camera),

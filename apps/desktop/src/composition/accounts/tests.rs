@@ -1,6 +1,116 @@
 use super::*;
 use talk_core::preferences::account::{AccountPreferenceResult, AccountPreferences};
 
+fn pending_login() -> (Accounts, RequestId, AccountId, LoginAttemptId) {
+    let mut model = model();
+    let request = RequestId(17);
+    let account = AccountId::from_local(3);
+    let attempt = LoginAttemptId::from_local(23);
+    model.login = Some(Login {
+        request,
+        begin: ConnectionRequestId(1),
+        owner: Some((account, attempt)),
+        poll_at: Instant::now(),
+        automatic_save_attempted: false,
+        automatic_save_pending: None,
+        automatic_save_choice: talk_core::identity::StorageChoice::Native,
+        save_request: None,
+    });
+    model.snapshot.login.phase = LoginPhase::BrowserWaiting;
+    model.snapshot.login.attempt = Some(request);
+    model.snapshot.login.server_label = text("https://cloud.example.test");
+    (model, request, account, attempt)
+}
+
+#[test]
+fn authorized_login_schedules_one_native_save_before_showing_any_fallback() {
+    let (mut model, request, account, attempt) = pending_login();
+    let done = ConnectionCompletion {
+        cursor: ConnectionCursor::default(),
+        request: ConnectionRequestId(2),
+        account: Some(account),
+        attempt: Some(attempt),
+        captured_scope: None,
+        cancel_requested: false,
+        scope_is_current: false,
+        result: Ok(RuntimeReply::Authorized { account, attempt }),
+    };
+    model.complete(Purpose::Login(request, LoginWork::Poll), &done);
+    assert_eq!(model.snapshot.login.storage, StorageStatus::Saving);
+    assert_eq!(model.snapshot.login.storage_failure, None);
+    let deadline = model.login.as_ref().unwrap().automatic_save_pending;
+    assert!(deadline.is_some());
+    assert_eq!(
+        model.login.as_ref().unwrap().automatic_save_choice,
+        talk_core::identity::StorageChoice::Native
+    );
+    model.complete(Purpose::Login(request, LoginWork::Poll), &done);
+    assert_eq!(
+        model.login.as_ref().unwrap().automatic_save_pending,
+        deadline
+    );
+    assert_eq!(
+        model.snapshot.login.server_label.as_str(),
+        "https://cloud.example.test"
+    );
+    assert_eq!(
+        model.submit(UiIntent::ChooseStorage {
+            attempt: request,
+            choice: StorageChoice::PrivateFile
+        }),
+        Err(SubmitError::Busy)
+    );
+}
+
+#[test]
+fn only_current_save_failure_exposes_fallback_and_no_session_only_login() {
+    let (mut model, request, account, attempt) = pending_login();
+    model.login.as_mut().unwrap().automatic_save_attempted = true;
+    model.login.as_mut().unwrap().save_request = Some(ConnectionRequestId(9));
+    model.snapshot.login.phase = LoginPhase::ChooseStorage;
+    model.snapshot.login.storage = StorageStatus::Saving;
+    let mut done = ConnectionCompletion {
+        cursor: ConnectionCursor::default(),
+        request: ConnectionRequestId(9),
+        account: Some(account),
+        attempt: Some(LoginAttemptId::from_local(99)),
+        captured_scope: None,
+        cancel_requested: false,
+        scope_is_current: false,
+        result: Err(IdentityError::Storage {
+            backend: StorageBackend::MacKeychain,
+            failure: StorageFailure::AccessDenied,
+        }),
+    };
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.snapshot.login.storage, StorageStatus::Saving);
+    done.attempt = Some(attempt);
+    done.cancel_requested = true;
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.snapshot.login.storage, StorageStatus::Saving);
+    done.cancel_requested = false;
+    // A late browser error from this attempt cannot replace the saving state.
+    model.complete(Purpose::Login(request, LoginWork::Browser), &done);
+    assert_eq!(model.snapshot.login.storage, StorageStatus::Saving);
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.snapshot.login.storage, StorageStatus::NotSaved);
+    assert_eq!(model.snapshot.login.native_store, NativeStoreState::Denied);
+    assert_eq!(
+        model.snapshot.login.storage_failure,
+        Some(StorageSaveFailure::NativeDenied)
+    );
+    assert_eq!(
+        model.submit(UiIntent::ChooseStorage {
+            attempt: request,
+            choice: StorageChoice::SessionOnly
+        }),
+        Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    );
+    model.cancel_login();
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.snapshot.login.phase, LoginPhase::EnterServer);
+}
+
 #[test]
 fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
     use talk_core::preferences::updates::UpdateError;
@@ -59,6 +169,7 @@ pub(super) fn model() -> Accounts {
         next_request: 0,
         pending: Vec::new(),
         login: None,
+        removal: None,
         replace: None,
         snapshot: super::super::fixtures::snapshot(None),
         dirty: true,
@@ -71,6 +182,7 @@ pub(super) fn model() -> Accounts {
         message_search: None,
         notices: notifications::Notices::default(),
         background: background::Background::default(),
+        history: history::Cache::default(),
         picker: None,
         picker_open: false,
         message_poll_at: Instant::now(),

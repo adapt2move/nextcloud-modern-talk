@@ -22,18 +22,50 @@ pub(super) enum Work {
     Typing,
     Context(u128),
 }
+impl Work {
+    fn backward(self) -> bool {
+        matches!(self, Self::History | Self::Older | Self::Context(_))
+    }
+}
 impl Accounts {
-    pub(super) fn start_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+    pub(super) fn restore_messages(&mut self, context: ConversationRef) {
+        self.history.open(context);
+        self.history.expire(history::now_unix());
         self.snapshot.message_panel = Some(view::MessagePanel::new(context));
-        self.start_message(
-            RequestId(0),
-            context,
-            wire::MessagingCommand::History {
-                before: None,
-                thread: None,
-            },
-            Work::History,
-        )?;
+        self.project_history(context);
+    }
+    pub(super) fn start_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        self.restore_messages(context);
+        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
+            Some(id) => (
+                wire::MessagingCommand::Poll {
+                    after: message_id(context, id)?,
+                    thread: None,
+                },
+                Work::Poll,
+            ),
+            None => (
+                wire::MessagingCommand::History {
+                    before: None,
+                    thread: None,
+                },
+                Work::History,
+            ),
+        };
+        match self.start_message(RequestId(0), context, command, work) {
+            Ok(()) | Err(SubmitError::Busy) => (),
+            Err(error) => {
+                let reason = match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    _ => UnavailableReason::PolicyStale,
+                };
+                self.history.admission_failed(context, RequestId(0), reason);
+                self.project_history(context);
+                if !self.history.get(context).is_some_and(|h| h.loaded) {
+                    self.snapshot.content = ContentState::Failed;
+                }
+            }
+        }
         let _ = self.start_message(
             RequestId(0),
             context,
@@ -48,6 +80,56 @@ impl Accounts {
         self.message_poll_at = Instant::now() + Duration::from_secs(1);
         Ok(())
     }
+    pub(super) fn project_history(&mut self, context: ConversationRef) {
+        if self.snapshot.selected != Some(context) {
+            return;
+        }
+        if let Some(history) = self.history.get(context) {
+            let messages_changed = self.snapshot.messages != history.messages;
+            let content = if history.offline {
+                ContentState::Offline
+            } else {
+                ContentState::Ready
+            };
+            let changed = messages_changed
+                || (history.loaded || history.offline) && self.snapshot.content != content;
+            let now = history::now_unix();
+            let expired: Vec<_> = self
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .filter(|m| m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
+                .map(|m| m.local_id)
+                .collect();
+            if messages_changed {
+                self.snapshot.messages = history.messages.clone();
+            }
+            if let Some(panel) = self.snapshot.message_panel.as_mut() {
+                history.project(panel);
+                expire_related(panel, &expired, now);
+            }
+            if history.loaded || history.offline {
+                self.snapshot.content = content;
+            }
+            if changed {
+                self.touch();
+            }
+        }
+    }
+    pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
+        self.history.remove(context);
+        self.notices.remove_room(context);
+        if self.snapshot.selected == Some(context) {
+            self.clear_content_assets();
+            self.snapshot.messages = Page::empty();
+            self.snapshot.files = Page::empty();
+            self.snapshot.participants = Page::empty();
+            self.snapshot.message_panel = Some(view::MessagePanel::new(context));
+            self.snapshot.content = state;
+            self.touch();
+        }
+    }
     pub(super) fn start_message(
         &mut self,
         request: RequestId,
@@ -55,14 +137,18 @@ impl Accounts {
         command: wire::MessagingCommand,
         work: Work,
     ) -> Result<(), SubmitError> {
-        if self
-            .pending
-            .iter()
-            .any(|p| matches!(p.purpose, Purpose::Message(_, c, _, w) if c == context && w == work))
-        {
+        if self.pending.iter().any(|p| {
+            matches!(p.purpose, Purpose::Message(_, c, _, w)
+                if c == context && (w == work || w.backward() && work.backward()
+                    || work == Work::Poll && w == Work::History
+                        && !self.history.get(context).is_some_and(|h| h.loaded)))
+        }) {
             return Err(SubmitError::Busy);
         }
         let operation = self.operation(context)?;
+        if self.history.get(context).is_none() {
+            self.history.open(context);
+        }
         self.request(
             context.account,
             ProtocolRequest::Messaging {
@@ -72,6 +158,8 @@ impl Accounts {
             },
             Purpose::Message(request, context, operation, work),
         )?;
+        self.history
+            .admitted(context, operation, work, request, self.next_request);
         if let Some(panel) = self.snapshot.message_panel.as_mut() {
             match work {
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
@@ -96,32 +184,35 @@ impl Accounts {
             return;
         }
         self.message_poll_at = Instant::now() + Duration::from_secs(2);
+        self.history.expire(history::now_unix());
         let Some(context) = self.snapshot.selected else {
             return;
         };
-        if self.snapshot.content != ContentState::Ready {
+        self.project_history(context);
+        if self.snapshot.content == ContentState::Denied {
             return;
         }
-        let command = match self.snapshot.message_panel.as_ref().and_then(|p| p.latest) {
+        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
             Some(id) => match message_id(context, id) {
-                Ok(after) => wire::MessagingCommand::Poll {
-                    after,
-                    thread: None,
-                },
+                Ok(after) => (
+                    wire::MessagingCommand::Poll {
+                        after,
+                        thread: None,
+                    },
+                    Work::Poll,
+                ),
                 Err(_) => return,
             },
-            None => wire::MessagingCommand::History {
-                before: None,
-                thread: None,
-            },
+            None => (
+                wire::MessagingCommand::History {
+                    before: None,
+                    thread: None,
+                },
+                Work::History,
+            ),
         };
         self.message_poll_request = self.message_poll_request.saturating_add(1);
-        let _ = self.start_message(
-            RequestId(self.message_poll_request),
-            context,
-            command,
-            Work::Poll,
-        );
+        let _ = self.start_message(RequestId(self.message_poll_request), context, command, work);
     }
     pub(super) fn message_action(
         &mut self,
@@ -218,13 +309,15 @@ impl Accounts {
                 thread: Some(message_id(context, root)?),
             },
             V::Older => W::History {
-                before: self
-                    .snapshot
-                    .message_panel
-                    .as_ref()
-                    .and_then(|p| p.older)
-                    .map(|id| message_id(context, id))
-                    .transpose()?,
+                before: Some(
+                    self.snapshot
+                        .message_panel
+                        .as_ref()
+                        .filter(|p| p.context == context)
+                        .and_then(|p| p.older)
+                        .ok_or(SubmitError::StaleScope)
+                        .and_then(|id| message_id(context, id))?,
+                ),
                 thread: None,
             },
             V::Refresh => W::History {
@@ -332,18 +425,78 @@ impl Accounts {
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
-        if self.snapshot.selected != Some(context) || self.current(context.account).is_err() {
+        if self.current(context.account).is_err() {
+            self.history.remove(context);
             return;
         }
+        self.apply_message(request, context, operation, work, reply);
+    }
+    // Pure completion seam: production validates the account runtime immediately
+    // above; deterministic tests can exercise switching and response order here.
+    pub(super) fn apply_message(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        operation: OperationId,
+        work: Work,
+        reply: Result<RuntimeReply, IdentityError>,
+    ) {
+        let network_failure = matches!(
+            reply,
+            Err(IdentityError::Request(
+                ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
+            ))
+        );
+        let missing_room = matches!(work, Work::History | Work::Older | Work::Poll)
+            && matches!(reply, Err(IdentityError::Request(ErrorKind::NotFound)));
         let result = match reply {
             Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
                 conversation,
                 operation: returned,
                 result,
-            })) if conversation == context.conversation && returned == operation => Ok(result),
+            })) if conversation == context.conversation
+                && returned == operation
+                && canonical_scope(&result, context) =>
+            {
+                Ok(result)
+            }
+            Err(IdentityError::Request(ErrorKind::WrongScope | ErrorKind::Cancelled))
+                if work == Work::Send =>
+            {
+                Err(Completion::Uncertain)
+            }
             Err(error) => Err(completion_error(error)),
+            _ if work == Work::Send => Err(Completion::Uncertain),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
+        if !self
+            .history
+            .complete(context, operation, work, request, &result, network_failure)
+        {
+            if work == Work::Send {
+                self.settle_retained_send(request, context, operation, &result);
+            }
+            return;
+        }
+        if missing_room
+            || matches!(
+                work,
+                Work::History | Work::Older | Work::Poll | Work::Thread | Work::Context(_)
+            ) && result == Err(Completion::Failed(UnavailableReason::PermissionDenied))
+        {
+            self.invalidate_history(context, ContentState::Denied);
+            return;
+        }
+        // A switched-away room still receives its admitted canonical updates.
+        // Mutation receipts also settle without changing another room's panels.
+        if self.snapshot.selected != Some(context) {
+            if work == Work::Send {
+                self.settle_retained_send(request, context, operation, &result);
+            }
+            return;
+        }
+        self.history.expire(history::now_unix());
+        self.project_history(context);
         let changed: Vec<u128> = match &result {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
@@ -388,19 +541,11 @@ impl Accounts {
                     }
                     wire::MessagingResult::Messages {
                         messages,
-                        cursor,
-                        common_read,
+                        cursor: _,
+                        common_read: _,
                     } => {
                         if let Work::Context(id) = work {
-                            self.snapshot.messages =
-                                page(messages.as_slice().iter().map(message_view));
                             panel.located = Some((request, id));
-                            panel.older = self
-                                .snapshot
-                                .messages
-                                .as_slice()
-                                .first()
-                                .map(|m| m.local_id);
                         } else if work == Work::Pins {
                             panel.pinned_messages =
                                 page(messages.as_slice().iter().map(message_view));
@@ -409,35 +554,9 @@ impl Accounts {
                         } else if work == Work::Thread {
                             panel.thread_messages =
                                 page(messages.as_slice().iter().map(message_view));
-                        } else {
-                            let incoming = messages.as_slice().iter().map(message_view);
-                            self.snapshot.messages =
-                                merge(&self.snapshot.messages, incoming, work == Work::Older);
-                            if matches!(work, Work::History | Work::Older) {
-                                panel.older = cursor.map(|m| u128::from(m.sequence));
-                                panel.history = RemoteState::Idle;
-                            }
-                            panel.latest = if work == Work::Poll {
-                                cursor.map(|id| u128::from(id.sequence)).or(panel.latest)
-                            } else {
-                                self.snapshot
-                                    .messages
-                                    .as_slice()
-                                    .last()
-                                    .map(|m| m.local_id)
-                                    .or(panel.latest)
-                            };
-                            panel.common_read = common_read.map(|m| u128::from(m.sequence));
-                            self.snapshot.content = ContentState::Ready;
                         }
                     }
-                    wire::MessagingResult::Message(message) => {
-                        self.snapshot.messages = merge(
-                            &self.snapshot.messages,
-                            std::iter::once(message_view(&message)),
-                            false,
-                        );
-                    }
+                    wire::MessagingResult::Message(_) => (),
                     wire::MessagingResult::Send(receipt) if receipt.operation == operation => {
                         completion = match receipt.state {
                             SendState::ServerAccepted(_) => Completion::ServerAccepted,
@@ -579,25 +698,15 @@ impl Accounts {
             });
         }
         reconcile_related(panel, &self.snapshot.messages, &changed);
-        if matches!(
-            work,
-            Work::History | Work::Older | Work::Poll | Work::Thread
-        ) && completion == Completion::Failed(UnavailableReason::PermissionDenied)
+        if work == Work::History
+            && completion != Completion::ServerAccepted
+            && !self.history.get(context).is_some_and(|h| h.loaded)
         {
-            self.snapshot.messages = Page::empty();
-            self.snapshot.files = Page::empty();
-            self.snapshot.participants = Page::empty();
-            self.snapshot.content = ContentState::Denied;
-            panel.search = Page::empty();
-            panel.mentions = Page::empty();
-            panel.thread_messages = Page::empty();
-            panel.pinned_messages = Page::empty();
-            panel.shared_files = Page::empty();
-            panel.uploaded = None;
-            panel.reminders = Page::empty();
-            self.notices.remove_room(context);
-        } else if work == Work::History && completion != Completion::ServerAccepted {
-            self.snapshot.content = ContentState::Failed;
+            self.snapshot.content = if network_failure {
+                ContentState::Offline
+            } else {
+                ContentState::Failed
+            };
         }
         if self
             .snapshot
@@ -641,6 +750,111 @@ impl Accounts {
         }
         self.touch();
     }
+    fn settle_retained_send(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        operation: OperationId,
+        result: &Result<wire::MessagingResult, Completion>,
+    ) {
+        if !self
+            .unresolved
+            .iter()
+            .any(|u| u.context == context && u.operation == operation)
+        {
+            return;
+        }
+        let completion = match result {
+            Ok(wire::MessagingResult::Send(receipt)) if receipt.operation == operation => {
+                match receipt.state {
+                    SendState::ServerAccepted(_) => Completion::ServerAccepted,
+                    SendState::Rejected => Completion::Failed(UnavailableReason::PermissionDenied),
+                    SendState::Uncertain => Completion::Uncertain,
+                }
+            }
+            Err(error) => *error,
+            _ => Completion::Uncertain,
+        };
+        if completion != Completion::Uncertain {
+            self.unresolved.retain(|u| u.operation != operation);
+        }
+        self.snapshot.submission = Some(SubmissionResult {
+            request,
+            context,
+            result: completion,
+        });
+        self.touch();
+    }
+}
+fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> bool {
+    let message = |m: &wire::MessageDetails| {
+        m.message.id.conversation == context.conversation
+            && m.parent
+                .as_ref()
+                .is_none_or(|p| p.id.conversation == context.conversation)
+            && m.thread
+                .is_none_or(|id| id.conversation == context.conversation)
+    };
+    match result {
+        wire::MessagingResult::Messages {
+            messages,
+            cursor,
+            common_read,
+        } => {
+            messages.as_slice().iter().all(message)
+                && cursor.is_none_or(|id| id.conversation == context.conversation)
+                && common_read.is_none_or(|id| id.conversation == context.conversation)
+        }
+        wire::MessagingResult::Message(value) => message(value),
+        wire::MessagingResult::Send(protocol::SendReceipt {
+            state: SendState::ServerAccepted(id),
+            ..
+        }) => id.conversation == context.conversation,
+        _ => true,
+    }
+}
+fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
+    let mut expired = expired.to_vec();
+    for messages in [
+        &panel.thread_messages,
+        &panel.pinned_messages,
+        &panel.shared_files,
+    ] {
+        expired.extend(
+            messages
+                .as_slice()
+                .iter()
+                .filter(|m| m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
+                .map(|m| m.local_id),
+        );
+    }
+    if expired.is_empty() {
+        return;
+    }
+    let retain = |message: &MessageView| {
+        if expired.contains(&message.local_id) {
+            return None;
+        }
+        let mut message = message.clone();
+        if let Some(parent) = message.metadata.parent.as_mut()
+            && expired.contains(&parent.id)
+        {
+            parent.unavailable = true;
+            parent.text = text("");
+        }
+        Some(message)
+    };
+    panel.thread_messages = page(panel.thread_messages.as_slice().iter().filter_map(retain));
+    panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().filter_map(retain));
+    panel.shared_files = page(panel.shared_files.as_slice().iter().filter_map(retain));
+    panel.search = page(
+        panel
+            .search
+            .as_slice()
+            .iter()
+            .filter(|hit| !expired.contains(&hit.id))
+            .cloned(),
+    );
 }
 /// Canonical edits/tombstones invalidate every retained excerpt in this room.
 fn reconcile_related(
@@ -724,7 +938,7 @@ fn message_id(context: ConversationRef, id: u128) -> Result<protocol::MessageId,
         sequence: u64::try_from(id).map_err(|_| SubmitError::StaleScope)?,
     })
 }
-fn message_view(m: &wire::MessageDetails) -> MessageView {
+pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
     let deleted = m.message.kind == protocol::MessageKind::Deleted;
     let (body, truncated) = rich_body(m);
     MessageView {
@@ -801,7 +1015,7 @@ fn rich_body(message: &wire::MessageDetails) -> (Text<4096>, bool) {
     (text(&output), truncated)
 }
 /// Stable identity merges updates/deletions and bounds loaded history independently of virtualization.
-fn merge(
+pub(super) fn merge(
     existing: &Page<MessageView, 100>,
     incoming: impl Iterator<Item = MessageView>,
     older: bool,

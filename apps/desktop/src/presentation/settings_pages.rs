@@ -19,30 +19,18 @@ impl Desktop {
         edit: PreferenceEdit,
         cx: &Context<Self>,
     ) -> Div {
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .py_3()
-            .border_b_1()
-            .border_color(self.theme.border)
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .child(self.settings_heading(label))
-                    .child(self.hint(self.l(description))),
-            )
-            .child(self.switch(
+        self.dialog_row(
+            label,
+            Some(description),
+            self.switch(
                 id,
                 label,
                 Some(on),
                 self.settings_availability(),
                 LocalAction::Preference(edit),
                 cx,
-            ))
+            ),
+        )
     }
     fn settings_heading(&self, key: &str) -> Div {
         div()
@@ -52,23 +40,23 @@ impl Desktop {
     }
     pub(super) fn settings_page(&self, tab: SettingsTab, cx: &Context<Self>) -> Div {
         let p = &self.preferences.active;
-        let mut page = div().flex().flex_col().gap_3().w_full().child(
-            div()
-                .text_size(self.sp(20.))
-                .font_weight(FontWeight::MEDIUM)
-                .child(self.l(tab.key())),
-        );
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .w_full()
+            .child(self.dialog_page_header(tab.key(), None));
         match tab {
             SettingsTab::General => {
-                page=page.child(self.settings_heading(self.l("Sprache")))
-                    .child(self.hint(self.l("Sprache für diese App auf diesem Computer. Inhalte werden nicht übersetzt.")))
-                    .child(div().flex().flex_wrap().gap_2().children([
-                        (LocalePreference::System,self.l("Systemsprache")),(LocalePreference::English,"English"),
-                        (LocalePreference::German,"Deutsch"),(LocalePreference::Spanish,"Español"),
-                    ].into_iter().enumerate().map(|(i,(value,label))| self.button(("locale",i),label,
-                        if p.locale==value {ButtonStyle::Primary} else {ButtonStyle::Secondary},
-                        self.settings_availability(),
-                        LocalAction::Preference(PreferenceEdit::Locale(value)),cx))))
+                page=page.child(self.dialog_section(Some("Sprache"))
+                        .child(self.hint(self.l("Sprache für diese App auf diesem Computer. Inhalte werden nicht übersetzt.")))
+                        .child(div().flex().child(self.segmented().children([
+                            (LocalePreference::System,"Systemsprache"),(LocalePreference::English,"English"),
+                            (LocalePreference::German,"Deutsch"),(LocalePreference::Spanish,"Español"),
+                        ].into_iter().enumerate().map(|(i,(value,label))| self.segment(("locale",i),label,
+                            p.locale==value,
+                            self.settings_availability(),
+                            LocalAction::Preference(PreferenceEdit::Locale(value)),cx))))))
                     .child(self.setting_toggle("launch-login","Beim Anmelden starten","Talk zusammen mit deinem Betriebssystem starten.",p.launch_at_login,PreferenceEdit::LaunchAtLogin(!p.launch_at_login),cx))
                     .child(self.setting_toggle("start-background","Im Hintergrund starten","Gilt nur beim automatischen Start. Ein normaler Start öffnet das Fenster.",p.start_in_background,PreferenceEdit::StartInBackground(!p.start_in_background),cx));
                 match self.preferences.startup.state {
@@ -77,20 +65,16 @@ impl Desktop {
                             .child(self.hint(
                                 self.l("Der automatische Start konnte nicht eingerichtet werden."),
                             ))
-                            .child(self.button(
+                            .child(self.dialog_actions().child(self.button(
                                 "retry-startup",
                                 self.l("Erneut versuchen"),
                                 ButtonStyle::Secondary,
                                 true,
                                 LocalAction::RetryPreferences(true),
                                 cx,
-                            ))
+                            )))
                     }
-                    EffectState::Pending => {
-                        page =
-                            page.child(self.hint(self.l("Automatischer Start wird eingerichtet …")))
-                    }
-                    EffectState::Applied | EffectState::Unknown => {}
+                    EffectState::Pending | EffectState::Applied | EffectState::Unknown => {}
                 }
             }
             SettingsTab::Notifications => {
@@ -226,11 +210,11 @@ impl Desktop {
                     );
                 page=page.child(self.hint(&self.lf("Installierte Version: {version}",&[("version",self.updates.current_version.as_str())])))
                     .child(self.hint(self.l("Updates werden automatisch für den gewählten Kanal geprüft und heruntergeladen. Du entscheidest, wann installiert und neu gestartet wird.")))
-                    .child(div().flex().flex_wrap().gap_2().children([(UpdateChannel::Stable,"Stable"),(UpdateChannel::Prerelease,"Vorabversionen")].into_iter().enumerate().map(|(i,(channel,label))|
-                        self.button(("update-channel",i),label,if p.update_channel==channel {ButtonStyle::Primary}else{ButtonStyle::Secondary},
+                    .child(self.dialog_actions().child(self.segmented().children([(UpdateChannel::Stable,"Stable"),(UpdateChannel::Prerelease,"Vorabversionen")].into_iter().enumerate().map(|(i,(channel,label))|
+                        self.segment(("update-channel",i),label,p.update_channel==channel,
                             if installing { Availability::when(false,"Das Update wird installiert …") } else { self.settings_availability() },
                             LocalAction::Preference(PreferenceEdit::UpdateChannel(channel)),cx))))
-                    .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,Availability::when(!checking,"Eine Updateaktion läuft bereits."),LocalAction::CheckUpdates,cx));
+                        .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,Availability::when(!checking,"Eine Updateaktion läuft bereits."),LocalAction::CheckUpdates,cx)));
                 let (status, state_key) = match &self.updates.state {
                     UpdateState::Idle => ("Noch nicht geprüft.", 0usize),
                     UpdateState::Checking => ("Updates werden geprüft …", 1),
@@ -285,7 +269,7 @@ impl Desktop {
                     )));
                 }
                 if matches!(self.updates.state, UpdateState::Ready(_)) {
-                    page = page.child(self.button(
+                    page = page.child(self.dialog_actions().child(self.button(
                         "settings-install-update",
                         "Update installieren und neu starten",
                         ButtonStyle::Primary,
@@ -295,7 +279,7 @@ impl Desktop {
                         ),
                         LocalAction::InstallUpdate(self.updates.generation),
                         cx,
-                    ));
+                    )));
                 }
             }
             // Replaced by the typed provider pages as their scoped handles arrive.
@@ -320,7 +304,7 @@ impl Desktop {
             preference_error_key(error)
         } else {
             match self.preferences.save {
-                SaveState::Pending { .. } => "Wird gespeichert …",
+                SaveState::Pending { .. } => return div(),
                 SaveState::Failed { error, .. } => preference_error_key(error),
                 SaveState::Idle => match self.preferences.load {
                     LoadState::Loading => "Einstellungen werden geladen …",
@@ -341,14 +325,14 @@ impl Desktop {
                 ..
             }
         ) {
-            content = content.child(self.button(
+            content = content.child(self.dialog_actions().child(self.button(
                 "retry-preferences",
                 self.l("Erneut versuchen"),
                 ButtonStyle::Secondary,
                 true,
                 LocalAction::RetryPreferences(false),
                 cx,
-            ));
+            )));
         }
         content
     }

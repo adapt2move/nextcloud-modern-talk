@@ -9,7 +9,8 @@ use std::{
 };
 use talk_core::preferences::{
     Appearance, DisplayScale, LoadState, LocalPreferences, LocalePreference, NotificationDelivery,
-    Palette, PreferenceError, QuickSwitcherPreference, SidebarDensity, UpdateChannel,
+    OnboardingResume, Palette, PreferenceError, QuickSwitcherPreference, SidebarDensity,
+    UpdateChannel,
     devices::{DeviceId, DeviceSelection},
 };
 
@@ -92,7 +93,7 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 pub(super) fn encode(values: &LocalPreferences) -> String {
     let mut encoded = format!(
-        "nextcloud-modern-talk-preferences 5\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
+        "nextcloud-modern-talk-preferences 6\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
         match values.palette {
             Palette::Blue => "blue",
             Palette::Sage => "sage",
@@ -136,6 +137,17 @@ pub(super) fn encode(values: &LocalPreferences) -> String {
         UpdateChannel::Stable => "update_channel=stable\n",
         UpdateChannel::Prerelease => "update_channel=prerelease\n",
     });
+    if let Some(resume) = &values.onboarding_resume {
+        use std::fmt::Write;
+        let _ = writeln!(
+            encoded,
+            "onboarding_resume={}:{}",
+            resume.expires_at_unix_seconds,
+            resume.account.as_str()
+        );
+    } else {
+        encoded.push_str("onboarding_resume=none\n");
+    }
     navigation::encode(&values.navigation, &mut encoded);
     encoded
 }
@@ -205,6 +217,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         Some("nextcloud-modern-talk-preferences 3") => 3,
         Some("nextcloud-modern-talk-preferences 4") => 4,
         Some("nextcloud-modern-talk-preferences 5") => 5,
+        Some("nextcloud-modern-talk-preferences 6") => 6,
         Some(header) if header.starts_with("nextcloud-modern-talk-preferences ") => {
             return Err(PreferenceError::UnsupportedVersion);
         }
@@ -335,13 +348,37 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
                 };
                 20
             }
-            "update_channel" if version == 5 => {
+            "update_channel" if version >= 5 => {
                 result.update_channel = match value {
                     "stable" => UpdateChannel::Stable,
                     "prerelease" => UpdateChannel::Prerelease,
                     _ => return Err(PreferenceError::InvalidData),
                 };
                 21
+            }
+            "onboarding_resume" if version >= 6 => {
+                result.onboarding_resume = if value == "none" {
+                    None
+                } else {
+                    let (expires, account) =
+                        value.split_once(':').ok_or(PreferenceError::InvalidData)?;
+                    if expires.is_empty()
+                        || expires.len() > 20
+                        || !expires.bytes().all(|b| b.is_ascii_digit())
+                    {
+                        return Err(PreferenceError::InvalidData);
+                    }
+                    Some(OnboardingResume {
+                        expires_at_unix_seconds: expires
+                            .parse()
+                            .map_err(|_| PreferenceError::InvalidData)?,
+                        account: talk_core::preferences::navigation::NavigationAccountKey::new(
+                            account,
+                        )
+                        .map_err(|_| PreferenceError::InvalidData)?,
+                    })
+                };
+                22
             }
             _ => return Err(PreferenceError::InvalidData),
         };
@@ -355,7 +392,8 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         2 => 0xfff,
         3 => 0xffe7f,
         4 => 0x1ffe7f,
-        _ => 0x3ffe7f,
+        5 => 0x3ffe7f,
+        _ => 0x7ffe7f,
     };
     if seen != required {
         return Err(PreferenceError::InvalidData);
@@ -368,10 +406,11 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         result.notifications.incoming_calls = legacy;
         result.notifications.calendar = NotificationDelivery::OFF;
     }
-    // Migration is decoded in memory; the next explicit save atomically writes v5.
+    // Existing login=false remains explicit. Older formats have no setup handoff.
+    // Migration is decoded in memory; the next explicit save atomically writes v6.
     Ok((
         result,
-        if version < 5 {
+        if version < 6 {
             LoadState::Migrated
         } else {
             LoadState::Loaded

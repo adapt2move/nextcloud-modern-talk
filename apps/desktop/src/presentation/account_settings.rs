@@ -2,7 +2,7 @@
 use super::controls::Availability;
 use super::preferences::SettingsTab;
 use super::{ButtonStyle, Desktop, LocalAction};
-use gpui::{Context, Div, Focusable, div, prelude::*};
+use gpui::{Context, Div, Focusable, FontWeight, div, prelude::*};
 use talk_core::preferences::{
     RequestId,
     account::{
@@ -91,24 +91,23 @@ impl Desktop {
         self.refresh_account_preferences(cx);
     }
     pub(super) fn account_settings_page(&self, tab: SettingsTab, cx: &Context<Self>) -> Div {
-        let mut page = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(self.title(self.l(tab.key())))
-            .child(
-                self.hint(self.l("Diese Einstellungen gehören zum ausgewählten NextCloud-Konto.")),
-            );
+        let mut page = self
+            .dialog_page()
+            .child(self.dialog_page_header(tab.key(), None));
         if tab == SettingsTab::Privacy {
-            page = page.child(div().child(self.title(self.l("Bildschirmfreigabe"))).child(
+            page = page.child(self.dialog_section(Some("Bildschirmfreigabe")).child(
                 self.permission_panel(
                     talk_core::preferences::permissions::PermissionKind::ScreenSharing,
                     cx,
                 ),
             ));
         }
+        // Account-owned values are grouped under the account they belong to.
+        let mut section = self.dialog_section(Some("Kontoeinstellungen")).child(
+            self.hint(self.l("Diese Einstellungen gehören zum ausgewählten NextCloud-Konto.")),
+        );
         let Some(scope) = self.snapshot.active_account else {
-            return page.child(self.hint(self.l("Noch kein Konto verbunden.")));
+            return page.child(section.child(self.hint(self.l("Noch kein Konto verbunden."))));
         };
         if let Some(account) = self
             .snapshot
@@ -117,9 +116,18 @@ impl Desktop {
             .iter()
             .find(|a| a.scope == scope)
         {
-            page = page.child(
+            section = section.child(
                 div()
-                    .child(self.account_name(account))
+                    .flex()
+                    .flex_wrap()
+                    .gap_x_2()
+                    .items_baseline()
+                    .text_size(self.sp(13.))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(self.account_name(account)),
+                    )
                     .child(self.hint(account.server_label.as_str())),
             );
         }
@@ -135,7 +143,7 @@ impl Desktop {
                 "Für dieses Konto besteht keine aktive Serververbindung."
             }
             AccountPreferenceState::Loading { .. } => "Kontoeinstellungen werden geladen …",
-            AccountPreferenceState::Saving { .. } => "Kontoeinstellungen werden gespeichert …",
+            AccountPreferenceState::Saving { .. } => "Bitte warte auf den laufenden Vorgang.",
             AccountPreferenceState::Failed { error, .. } => account_error_key(error),
             AccountPreferenceState::Ready => "Diese Einstellung wird vom Server nicht angeboten.",
         };
@@ -156,54 +164,45 @@ impl Desktop {
                     false,
                 ),
             ] {
-                page = page.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .justify_between()
-                        .py_3()
-                        .border_b_1()
-                        .border_color(self.theme.border)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(self.l(label))
-                                .child(self.hint(self.l(description))),
-                        )
-                        .child(self.switch(
-                            id,
-                            label,
-                            value,
-                            Availability::when(ready && value.is_some(), reason),
-                            LocalAction::AccountPreference(if read {
-                                AccountPreferenceChange::SendReadReceipts(value != Some(true))
-                            } else {
-                                AccountPreferenceChange::ShareTypingStatus(value != Some(true))
-                            }),
-                            cx,
-                        )),
-                );
+                section = section.child(self.dialog_row(
+                    label,
+                    Some(description),
+                    self.switch(
+                        id,
+                        label,
+                        value,
+                        Availability::when(ready && value.is_some(), reason),
+                        LocalAction::AccountPreference(if read {
+                            AccountPreferenceChange::SendReadReceipts(value != Some(true))
+                        } else {
+                            AccountPreferenceChange::ShareTypingStatus(value != Some(true))
+                        }),
+                        cx,
+                    ),
+                ));
             }
         } else {
-            page=page.child(self.hint(self.l("Ordner in NextCloud für geteilte Dokumente. Kein Downloadordner auf diesem Computer.")))
+            section=section.child(self.hint(self.l("Ordner in NextCloud für geteilte Dokumente. Kein Downloadordner auf diesem Computer.")))
                 .child(div().relative().rounded_lg().p_3().border_1().border_color(self.theme.input_border)
                     .child(self.field_ring(self.upload_folder.focus_handle(cx),8.)).child(self.upload_folder.clone()))
-                .child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,Availability::when(ready&&values.and_then(|v|v.attachment_folder.as_ref()).is_some(),reason),LocalAction::SaveUploadFolder,cx));
+                .child(self.dialog_actions().child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,Availability::when(ready&&values.and_then(|v|v.attachment_folder.as_ref()).is_some(),reason),LocalAction::SaveUploadFolder,cx)));
             if values.is_some_and(|v| v.conversation_subfolders == Some(true)) {
-                page = page.child(
+                section = section.child(
                     self.hint(self.l("Der Server legt darunter Unterordner für Gespräche an.")),
                 );
             }
         }
-        if !ready {
-            page = page.child(self.hint(self.l(reason)));
+        let feedback = self
+            .account_preference_error
+            .map(account_error_key)
+            .or_else(|| {
+                (!ready && !matches!(state, AccountPreferenceState::Saving { .. }))
+                    .then_some(reason)
+            });
+        if let Some(feedback) = feedback {
+            section = section.child(self.hint(self.l(feedback)));
         }
-        if let Some(error) = self.account_preference_error {
-            page = page.child(self.hint(self.l(account_error_key(error))));
-        }
-        page.child(self.button(
+        page.child(section.child(self.dialog_actions().child(self.button(
             "reload-account-settings",
             self.l("Kontoeinstellungen neu laden"),
             ButtonStyle::Secondary,
@@ -218,7 +217,7 @@ impl Desktop {
             ),
             LocalAction::ReloadAccountPreferences,
             cx,
-        ))
+        ))))
     }
 }
 fn account_error_key(error: AccountPreferenceError) -> &'static str {

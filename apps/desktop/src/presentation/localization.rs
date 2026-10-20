@@ -3,6 +3,7 @@
 mod chat;
 mod content;
 mod conversation;
+mod onboarding;
 mod resources;
 mod updates;
 use super::Desktop;
@@ -18,6 +19,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         conversation::MESSAGES,
         resources::MESSAGES,
         updates::MESSAGES,
+        onboarding::MESSAGES,
     ] {
         if let Ok(index) = catalog.binary_search_by_key(&key, |row| row.0) {
             return if locale == Locale::Spanish {
@@ -76,6 +78,7 @@ mod tests {
             chat::MESSAGES,
             content::MESSAGES,
             updates::MESSAGES,
+            onboarding::MESSAGES,
         ] {
             let mut last = "";
             for &(key, en, es) in catalog {

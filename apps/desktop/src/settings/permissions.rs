@@ -20,6 +20,7 @@ struct State {
     pending: Option<PermissionIntent>,
     last_request: RequestId,
     change: u64,
+    screen_requested: bool,
 }
 struct Shared {
     state: Mutex<State>,
@@ -52,6 +53,7 @@ impl PermissionRuntime {
                 pending: None,
                 last_request: RequestId(0),
                 change: 1,
+                screen_requested: false,
             }),
             wake: Condvar::new(),
         });
@@ -89,6 +91,14 @@ impl PermissionRuntime {
                 && !observation.can_open_settings)
         {
             return Err(PermissionError::Unsupported);
+        }
+        if intent.kind == PermissionKind::ScreenSharing
+            && intent.action == PermissionAction::Request
+        {
+            if state.screen_requested {
+                return Err(PermissionError::Unsupported);
+            }
+            state.screen_requested = true;
         }
         state.last_request = intent.request;
         state.pending = Some(intent);
@@ -152,7 +162,16 @@ fn run(shared: Arc<Shared>) {
         }
         match result {
             Ok(value) => {
-                if let Some(value) = value {
+                if let Some(mut value) = value {
+                    if value.kind == PermissionKind::ScreenSharing {
+                        let previous = state.snapshot.screen_sharing;
+                        value.can_request &= !state.screen_requested;
+                        if value.status == PermissionStatus::Unknown
+                            && previous.guidance == PermissionGuidance::RestartRequired
+                        {
+                            value.guidance = PermissionGuidance::RestartRequired;
+                        }
+                    }
                     *observation(&mut state.snapshot, intent.kind) = value;
                 }
                 state.snapshot.operation = PermissionOperation::Finished {
@@ -243,12 +262,13 @@ fn platform(
         )?;
         let status = helper_status(&output)?;
         #[cfg(target_os = "macos")]
-        let status = if kind == PermissionKind::ScreenSharing {
+        if kind == PermissionKind::ScreenSharing {
             // A successful prompt in the helper does not grant this process access.
-            screen_status(core_graphics::access::ScreenCaptureAccess.preflight())
-        } else {
-            status
-        };
+            return Ok(Some(mac_screen_observation(
+                status,
+                core_graphics::access::ScreenCaptureAccess.preflight(),
+            )));
+        }
         return Ok(Some(mac_observation(kind, status)));
     }
     if intent.action == PermissionAction::Request {
@@ -287,6 +307,22 @@ fn platform(
         can_request: false,
         can_open_settings: cfg!(windows) && kind != PermissionKind::ScreenSharing,
     }))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn mac_screen_observation(
+    helper: PermissionStatus,
+    desktop_granted: bool,
+) -> PermissionObservation {
+    let mut observation = mac_observation(
+        PermissionKind::ScreenSharing,
+        screen_status(desktop_granted),
+    );
+    if helper == PermissionStatus::Granted && !desktop_granted {
+        observation.guidance = PermissionGuidance::RestartRequired;
+        observation.can_request = false;
+    }
+    observation
 }
 
 #[cfg(any(target_os = "macos", test))]

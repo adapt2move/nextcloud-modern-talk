@@ -160,7 +160,24 @@ impl NotificationPreferences {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// A single optional setup handoff, never permission or account authority.
+/// The short expiry also prevents a much later launch from reopening old setup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OnboardingResume {
+    pub account: navigation::NavigationAccountKey,
+    pub expires_at_unix_seconds: u64,
+}
+impl OnboardingResume {
+    pub const LIFETIME_SECONDS: u64 = 24 * 60 * 60;
+
+    pub fn is_current(&self, now_unix_seconds: u64) -> bool {
+        self.expires_at_unix_seconds
+            .checked_sub(now_unix_seconds)
+            .is_some_and(|remaining| remaining <= Self::LIFETIME_SECONDS)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalPreferences {
     pub update_channel: UpdateChannel,
     pub quick_switcher: QuickSwitcherPreference,
@@ -174,6 +191,26 @@ pub struct LocalPreferences {
     pub start_in_background: bool,
     pub notifications: NotificationPreferences,
     pub devices: DevicePreferences,
+    pub onboarding_resume: Option<OnboardingResume>,
+}
+impl Default for LocalPreferences {
+    fn default() -> Self {
+        Self {
+            update_channel: UpdateChannel::default(),
+            quick_switcher: QuickSwitcherPreference::default(),
+            navigation: NavigationPreferences::default(),
+            palette: Palette::default(),
+            appearance: Appearance::default(),
+            scale: DisplayScale::default(),
+            sidebar_density: SidebarDensity::default(),
+            locale: LocalePreference::default(),
+            launch_at_login: true,
+            start_in_background: false,
+            notifications: NotificationPreferences::default(),
+            devices: DevicePreferences::default(),
+            onboarding_resume: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]

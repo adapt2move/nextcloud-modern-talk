@@ -18,6 +18,14 @@ under SIL Open Font License 1.1. Preserve the
 [release provenance](apps/desktop/assets/fonts/googlesans-provenance.json).
 The fonts retain their separate license.
 
+Onboarding step numerals use Google Sans Code v7.001 Regular (400), from the
+unmodified Roman variable font in the [official release](https://github.com/googlefonts/googlesans-code/releases/tag/v7.001),
+pinned to commit `f9e36cea20d34ecc9b61c09609fe02e1438364fc`. The fixed-width `MONO`
+axis remains at its upstream default of 1. Preserve its separate
+[SIL OFL-1.1 license](apps/desktop/assets/fonts/GoogleSansCode-LICENSE.txt),
+[trademark guidance](apps/desktop/assets/fonts/GoogleSansCode-TRADEMARKS.txt) and
+[font provenance](apps/desktop/assets/fonts/googlesanscode-provenance.json).
+
 The patched GPUI 0.2.2 dependency remains Apache-2.0. Its
 [upstream license](vendor/gpui/LICENSE-APACHE) and
 [original source and patch inventory](vendor/gpui/UPSTREAM.json) accompany the

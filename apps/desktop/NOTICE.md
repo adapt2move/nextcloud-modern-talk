@@ -23,6 +23,14 @@ Preserve [the OFL notice](assets/fonts/GoogleSans-LICENSE.txt),
 are not relicensed under EUPL. No development-machine font installation is needed.
 Historical design mockups retain their separately attributed Manrope fonts.
 
+Onboarding step numerals use the unmodified Google Sans Code v7.001 Roman
+variable font at Regular (400), with its fixed-width `MONO` axis at the default
+of 1. This font is separately licensed under SIL OFL-1.1; preserve
+[its full license](assets/fonts/GoogleSansCode-LICENSE.txt),
+[trademark guidance](assets/fonts/GoogleSansCode-TRADEMARKS.txt) and
+[exact release provenance](assets/fonts/googlesanscode-provenance.json).
+The body font remains Google Sans.
+
 The patched GPUI 0.2.2 renderer remains Apache-2.0. Its original license,
 published archive identity and modified-file inventory are retained in
 [the vendored source](../../vendor/gpui/UPSTREAM.json). Distribution notices

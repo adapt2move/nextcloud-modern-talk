@@ -2,7 +2,10 @@
 use super::controls::Availability;
 use super::preferences::SettingsTab;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
-use gpui::{Context, Div, FontWeight, ImageSource, div, img, prelude::*, px};
+use gpui::{
+    Context, Div, ElementId, FontWeight, ImageSource, KeyDownEvent, Window, div, img, prelude::*,
+    px,
+};
 use talk_core::preferences::{
     RequestId,
     devices::{
@@ -204,37 +207,227 @@ impl Desktop {
             })
         }))
     }
+    fn device_option_ids(&self, kind: DeviceKind) -> Vec<ElementId> {
+        let mut ids = vec![("device-default", kind as usize).into()];
+        if let Ok(snapshot) = &self.devices {
+            ids.extend(
+                snapshot
+                    .devices
+                    .as_slice()
+                    .iter()
+                    .filter(|d| d.kind == kind)
+                    .map(|d| device_option_id(kind, &d.id)),
+            );
+        }
+        ids
+    }
+    pub(super) fn toggle_device_picker(&mut self, kind: DeviceKind) {
+        if self.device_picker == Some(kind) {
+            self.device_picker = None;
+            self.pending_device_focus = Some(("device-picker", kind as usize).into());
+        } else {
+            self.device_picker = Some(kind);
+            let chosen = match kind {
+                DeviceKind::Microphone => &self.preferences.active.devices.microphone,
+                DeviceKind::Speaker => &self.preferences.active.devices.speaker,
+                DeviceKind::Camera => &self.preferences.active.devices.camera,
+            };
+            let id = match chosen {
+                DeviceSelection::SystemDefault => ("device-default", kind as usize).into(),
+                DeviceSelection::Specific(id) => device_option_id(kind, id),
+            };
+            self.pending_device_focus = Some(if self.device_option_ids(kind).contains(&id) {
+                id
+            } else {
+                ("device-default", kind as usize).into()
+            });
+        }
+    }
+    fn device_picker_key(
+        &mut self,
+        kind: DeviceKind,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        if self.device_picker != Some(kind) {
+            if matches!(key, "down" | "up") {
+                self.toggle_device_picker(kind);
+                cx.stop_propagation();
+                cx.notify();
+            }
+            return;
+        }
+        if key == "escape" {
+            self.toggle_device_picker(kind);
+        } else if matches!(key, "down" | "up" | "home" | "end") {
+            let ids = self.device_option_ids(kind);
+            let current = ids.iter().position(|id| {
+                self.control_focus
+                    .current(id)
+                    .is_some_and(|f| f.is_focused(window))
+            });
+            if let Some(index) = option_destination(current, ids.len(), key) {
+                self.pending_device_focus = ids.get(index).cloned();
+            }
+        } else {
+            return;
+        }
+        self.keyboard_navigation = true;
+        self.hover_hints.cancel();
+        cx.stop_propagation();
+        cx.notify();
+    }
+    fn device_selector(
+        &self,
+        kind: DeviceKind,
+        chosen: &DeviceSelection,
+        label: String,
+        speaker: Option<Availability>,
+        cx: &Context<Self>,
+    ) -> Div {
+        let expanded = self.device_picker == Some(kind);
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                self.select_control(
+                    ("device-picker", kind as usize),
+                    label,
+                    expanded,
+                    self.settings_availability(),
+                    LocalAction::ToggleDevicePicker(kind),
+                    cx,
+                )
+                .flex_1(),
+            )
+            .child(self.icon_button(
+                ("refresh-device", kind as usize),
+                ("refresh", "Geräte aktualisieren"),
+                ButtonStyle::Quiet,
+                Availability::available(),
+                LocalAction::RefreshDevice(kind),
+                cx,
+            ));
+        if let Some(availability) = speaker {
+            row = row.child(self.icon_button(
+                "speaker-test",
+                ("play", "Klingelton abspielen"),
+                ButtonStyle::Secondary,
+                availability,
+                LocalAction::StartDevice(DeviceKind::Speaker),
+                cx,
+            ));
+        }
+        let mut selector = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(row)
+            .on_key_down(cx.listener(move |this, event, window, cx| {
+                this.device_picker_key(kind, event, window, cx)
+            }));
+        if expanded {
+            let option = |id: ElementId, label: String, selection: DeviceSelection| {
+                let selected = *chosen == selection;
+                self.control(
+                    id,
+                    ButtonStyle::Secondary,
+                    self.settings_availability(),
+                    LocalAction::SelectDevice(kind, selection),
+                    cx,
+                )
+                .justify_between()
+                .border_0()
+                .bg(if selected {
+                    self.theme.selected
+                } else {
+                    self.theme.surface
+                })
+                .child(div().min_w_0().flex_1().text_ellipsis().child(label))
+                .child(div().w(px(16.)).when(selected, |d| {
+                    d.child(self.scaled_icon("check", 16., self.theme.accent))
+                }))
+            };
+            let mut choices = div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(self.theme.input_border)
+                .bg(self.theme.surface)
+                .child(option(
+                    ("device-default", kind as usize).into(),
+                    self.l("Systemstandard").to_owned(),
+                    DeviceSelection::SystemDefault,
+                ));
+            if let Ok(snapshot) = &self.devices {
+                for device in snapshot
+                    .devices
+                    .as_slice()
+                    .iter()
+                    .filter(|d| d.kind == kind)
+                {
+                    choices = choices.child(option(
+                        device_option_id(kind, &device.id),
+                        device.label.as_str().to_owned(),
+                        DeviceSelection::Specific(device.id.clone()),
+                    ));
+                }
+            }
+            selector = selector.child(choices);
+        }
+        selector
+    }
     pub(super) fn device_page(&self, cx: &Context<Self>) -> Div {
         let mut page = div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(self.title(self.l("Geräte")))
-            .child(self.hint(self.l("Der Mikrofonpegel wird hier nach Freigabe automatisch gemessen. Kamera und Klingelton starten auf deinen Wunsch.")));
+            .gap_5()
+            .child(self.dialog_page_header(
+                "Geräte",
+                Some("Geräte werden für Meetings und Gespräche verwendet."),
+            ));
         let snapshot = match &self.devices {
             Ok(snapshot) => snapshot,
-            Err(error) => return page.child(self.hint(self.l(device_error_key(*error)))),
+            Err(error) => {
+                return page.child(
+                    self.hint(self.l(device_error_key(*error)))
+                        .text_color(self.theme.danger),
+                );
+            }
         };
         for kind in [
             DeviceKind::Microphone,
             DeviceKind::Speaker,
             DeviceKind::Camera,
         ] {
-            let (title, chosen, state, preview) = match kind {
+            let (title, purpose, chosen, state, preview) = match kind {
                 DeviceKind::Microphone => (
                     "Mikrofon",
+                    "Damit andere dich hören.",
                     &self.preferences.active.devices.microphone,
                     &snapshot.microphone,
                     snapshot.microphone_preview,
                 ),
                 DeviceKind::Speaker => (
                     "Lautsprecher",
+                    "Für Stimmen und Hinweistöne.",
                     &self.preferences.active.devices.speaker,
                     &snapshot.speaker,
                     snapshot.speaker_test,
                 ),
                 DeviceKind::Camera => (
                     "Kamera",
+                    "Damit andere dich sehen.",
                     &self.preferences.active.devices.camera,
                     &snapshot.camera,
                     snapshot.camera_preview,
@@ -244,124 +437,46 @@ impl Desktop {
                 .flex_none()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .pb_4()
-                .border_b_1()
-                .border_color(self.theme.border)
-                .child(div().font_weight(FontWeight::MEDIUM).child(self.l(title)));
+                .gap_3()
+                .when(kind != DeviceKind::Camera, |d| {
+                    d.pb_5().border_b_1().border_color(self.theme.border)
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(div().font_weight(FontWeight::MEDIUM).child(self.l(title)))
+                        .child(self.hint(self.l(purpose))),
+                );
+            let effective = match state {
+                SelectionState::Selected(id)
+                | SelectionState::DefaultFallback {
+                    effective: Some(id),
+                    ..
+                } => snapshot
+                    .devices
+                    .as_slice()
+                    .iter()
+                    .find(|d| d.kind == kind && d.id == *id)
+                    .map(|d| d.label.as_str()),
+                _ => None,
+            };
             let selected_label = match chosen {
-                DeviceSelection::SystemDefault => self.l("Systemstandard"),
+                DeviceSelection::SystemDefault => effective.map_or_else(
+                    || self.l("Systemstandard").to_owned(),
+                    |name| format!("{} ({name})", self.l("Systemstandard")),
+                ),
                 DeviceSelection::Specific(id) => snapshot
                     .devices
                     .as_slice()
                     .iter()
-                    .find(|d| d.id == *id)
-                    .map_or(self.l("Ausgewähltes Gerät"), |d| d.label.as_str()),
+                    .find(|d| d.kind == kind && d.id == *id)
+                    .map_or_else(
+                        || self.l("Ausgewähltes Gerät nicht verfügbar").to_owned(),
+                        |d| d.label.as_str().to_owned(),
+                    ),
             };
-            section = section.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        self.button(
-                            ("device-picker", kind as usize),
-                            "",
-                            ButtonStyle::Secondary,
-                            true,
-                            LocalAction::ToggleDevicePicker(kind),
-                            cx,
-                        )
-                        .flex_1()
-                        .min_w_0()
-                        .justify_between()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_ellipsis()
-                                .child(selected_label.to_owned()),
-                        )
-                        .child(self.scaled_icon(
-                            "chevron-down",
-                            16.,
-                            self.theme.muted,
-                        )),
-                    )
-                    .child(self.icon_button(
-                        ("refresh-device", kind as usize),
-                        ("refresh", "Geräte aktualisieren"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::RefreshDevice(kind),
-                        cx,
-                    )),
-            );
-
-            if self.device_picker == Some(kind) {
-                let mut choices = div()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_2()
-                    .rounded_lg()
-                    .bg(self.theme.subtle)
-                    .child(self.button(
-                        ("device-default", kind as usize),
-                        self.l("Systemstandard"),
-                        if *chosen == DeviceSelection::SystemDefault {
-                            ButtonStyle::Primary
-                        } else {
-                            ButtonStyle::Secondary
-                        },
-                        true,
-                        LocalAction::SelectDevice(kind, DeviceSelection::SystemDefault),
-                        cx,
-                    ));
-                for device in snapshot
-                    .devices
-                    .as_slice()
-                    .iter()
-                    .filter(|d| d.kind == kind)
-                {
-                    let selection = DeviceSelection::Specific(device.id.clone());
-                    // Provider labels are data, never localization catalog keys.
-                    choices = choices.child(
-                        self.control(
-                            gpui::SharedString::from(format!(
-                                "device-{:?}-{}",
-                                kind,
-                                device.id.as_str()
-                            )),
-                            if *chosen == selection {
-                                ButtonStyle::Primary
-                            } else {
-                                ButtonStyle::Secondary
-                            },
-                            true,
-                            LocalAction::SelectDevice(kind, selection),
-                            cx,
-                        )
-                        .justify_start()
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_ellipsis()
-                                .child(device.label.as_str().to_owned()),
-                        ),
-                    );
-                }
-                section = section.child(choices);
-            }
-            let effective=match state {
-                SelectionState::Selected(id)=>snapshot.devices.as_slice().iter().find(|d|d.id==*id).map(|d|d.label.as_str()).unwrap_or(self.l("Ausgewähltes Gerät")),
-                SelectionState::Unknown=>self.l("Geräte werden ermittelt …"),
-                SelectionState::DefaultFallback{effective:Some(_),..}=>self.l("Systemstandard wird verwendet, weil das gespeicherte Gerät fehlt."),
-                SelectionState::DefaultFallback{effective:None,..}=>self.l("Gespeichertes Gerät fehlt. Bitte Systemstandard oder ein anderes Gerät wählen."),
-                SelectionState::Unavailable(error)=>self.l(device_error_key(*error)),
-            };
-            section = section.child(self.hint(effective));
             let active = matches!(
                 preview,
                 PreviewState::Starting { .. } | PreviewState::Live { .. }
@@ -373,118 +488,127 @@ impl Desktop {
                         effective: Some(_),
                         ..
                     }
-            ) && !matches!(preview, PreviewState::Stopping { .. });
-            if kind != DeviceKind::Speaker {
-                section = section.child(self.permission_panel(
-                    if kind == DeviceKind::Microphone {
-                        talk_core::preferences::permissions::PermissionKind::Microphone
-                    } else {
-                        talk_core::preferences::permissions::PermissionKind::Camera
-                    },
-                    cx,
-                ));
-            }
-            if kind != DeviceKind::Microphone {
-                let camera_allowed = kind != DeviceKind::Camera
-                    || self
-                        .observation(talk_core::preferences::permissions::PermissionKind::Camera)
-                        .allows_device_preview();
-                section = section.child(self.button(
-                    ("device-check", kind as usize),
-                    if kind == DeviceKind::Speaker {
-                        "Klingelton abspielen"
-                    } else if active {
-                        "Kameravorschau beenden"
-                    } else {
-                        "Kameravorschau starten"
-                    },
-                    ButtonStyle::Secondary,
-                    Availability::when(
-                        self.device_stopping.is_none()
-                            && (if kind == DeviceKind::Camera && active {
-                                true
-                            } else {
-                                available && !active && camera_allowed
-                            }),
-                        if active && kind == DeviceKind::Speaker {
-                            "Klingelton wird einmal abgespielt …"
-                        } else if active {
-                            "Test aktiv"
-                        } else if self.device_stopping.is_some()
-                            || matches!(preview, PreviewState::Stopping { .. })
-                        {
-                            "Gerät wird beendet …"
-                        } else {
-                            "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt."
-                        },
-                    ),
-                    if kind == DeviceKind::Camera && active {
-                        LocalAction::StopDevice(kind)
-                    } else {
-                        LocalAction::StartDevice(kind)
-                    },
-                    cx,
-                ));
-            }
-            match preview {
-                PreviewState::Starting { .. } => {
-                    section = section.child(self.hint(self.l("Gerät wird gestartet …")))
-                }
-                PreviewState::Stopping { .. } => {
-                    section = section.child(self.hint(self.l("Gerät wird beendet …")))
-                }
-                PreviewState::Failed { error, .. } => {
-                    section = section.child(self.hint(self.l(device_error_key(error))))
-                }
-                PreviewState::Live { .. } => {
-                    section = section.child(self.hint(self.l(if kind == DeviceKind::Speaker {
-                        "Klingelton wird einmal abgespielt …"
-                    } else {
-                        "Test aktiv"
-                    })))
-                }
-                PreviewState::Stopped => {}
-            }
-            if kind != DeviceKind::Camera {
-                let level = if kind == DeviceKind::Microphone {
-                    snapshot.microphone_level
+            );
+            let stopping =
+                self.device_stopping.is_some() || matches!(preview, PreviewState::Stopping { .. });
+            let check_availability = Availability::when(
+                available && !active && !stopping,
+                if active {
+                    "Klingelton wird einmal abgespielt …"
+                } else if stopping {
+                    "Gerät wird beendet …"
                 } else {
-                    snapshot.speaker_level
-                };
-                section = section.child(self.level_meter(level));
-                if kind == DeviceKind::Microphone && level.is_none() {
-                    section =
-                        section.child(self.hint(self.l("Noch kein Eingangssignal gemessen.")));
-                }
+                    "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt."
+                },
+            );
+            section = section.child(self.device_selector(
+                kind,
+                chosen,
+                selected_label,
+                (kind == DeviceKind::Speaker).then_some(check_availability),
+                cx,
+            ));
+            let state_hint = match state {
+                SelectionState::Unknown => Some(self.l("Geräte werden ermittelt …").to_owned()),
+                SelectionState::DefaultFallback { effective: Some(_), .. } => Some(self.lf("Gespeichertes Gerät fehlt. Verwendet wird: {device}.", &[("device", effective.unwrap_or(self.l("Systemstandard")))])),
+                SelectionState::DefaultFallback { effective: None, .. } => Some(self.l("Gespeichertes Gerät fehlt. Bitte Systemstandard oder ein anderes Gerät wählen.").to_owned()),
+                SelectionState::Unavailable(error) => Some(self.l(device_error_key(*error)).to_owned()),
+                SelectionState::Selected(_) => None,
+            };
+            if let Some(message) = state_hint {
+                section = section.child(self.hint(&message));
             }
-            if kind == DeviceKind::Camera {
-                if *chosen == DeviceSelection::SystemDefault {
+            let denied = matches!(
+                preview,
+                PreviewState::Failed {
+                    error: DeviceError::PermissionDenied,
+                    ..
+                }
+            );
+            if kind != DeviceKind::Speaker {
+                let permission = if kind == DeviceKind::Microphone {
+                    talk_core::preferences::permissions::PermissionKind::Microphone
+                } else {
+                    talk_core::preferences::permissions::PermissionKind::Camera
+                };
+                if let Some(notice) = self.device_permission_notice(permission, denied, cx) {
+                    section = section.child(notice);
+                }
+                if kind == DeviceKind::Microphone
+                    && self.observation(permission).allows_device_preview()
+                    && !denied
+                {
                     section = section.child(
-                        self.hint(self.l("Bei Kameras wird das erste verfügbare Gerät verwendet.")),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(self.hint(self.l("Mikrofon-Eingangspegel")))
+                            .child(self.level_meter(snapshot.microphone_level)),
                     );
                 }
+            }
+            if let PreviewState::Failed { error, .. } = preview
+                && error != DeviceError::PermissionDenied
+            {
                 section = section.child(
-                    div()
-                        .w_full()
-                        .h(px(180.))
-                        .rounded_lg()
-                        .overflow_hidden()
-                        .bg(self.theme.stage)
-                        .when_some(self.camera_image.clone(), |d, image| {
-                            d.child(img(image).size_full().object_fit(gpui::ObjectFit::Contain))
-                        })
-                        .when(self.camera_image.is_none(), |d| {
-                            d.flex()
-                                .items_center()
-                                .justify_center()
-                                .child(self.hint(self.l("Keine Kameravorschau aktiv.")))
-                        }),
+                    self.hint(self.l(device_error_key(error)))
+                        .text_color(self.theme.danger),
                 );
+            }
+            if kind == DeviceKind::Camera {
+                let permitted = self
+                    .observation(talk_core::preferences::permissions::PermissionKind::Camera)
+                    .allows_device_preview();
+                let mut preview_box = div()
+                    .relative()
+                    .w_full()
+                    .flex_none()
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .bg(self.theme.stage);
+                // The frame owns the 16:9 allocation; the image contains its real
+                // aspect ratio within it and never contributes an intrinsic height.
+                preview_box.style().aspect_ratio = Some(16. / 9.);
+                if let Some(image) = self.camera_image.clone() {
+                    preview_box = preview_box.child(
+                        img(image)
+                            .absolute()
+                            .inset_0()
+                            .size_full()
+                            .rounded_lg()
+                            .object_fit(gpui::ObjectFit::Contain),
+                    );
+                }
+                if active {
+                    preview_box = preview_box.child(div().absolute().top_2().right_2().child(
+                        self.icon_button(
+                            "camera-stop",
+                            ("square", "Kameravorschau beenden"),
+                            ButtonStyle::Stage,
+                            Availability::when(!stopping, "Gerät wird beendet …"),
+                            LocalAction::StopDevice(DeviceKind::Camera),
+                            cx,
+                        ),
+                    ));
+                } else {
+                    preview_box = preview_box.child(div().absolute().inset_0().flex().items_center().justify_center().p_4()
+                        .child(self.button_with_leading_icon(
+                            "camera-start", (self.l("Kameravorschau starten"), "video"), ButtonStyle::Stage,
+                            Availability::when(available && permitted && !stopping,
+                                if stopping { "Gerät wird beendet …" } else { "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt." }),
+                            LocalAction::StartDevice(DeviceKind::Camera), cx,
+                        )));
+                }
+                section = section.child(preview_box);
             }
             page = page.child(section);
         }
         if let Some(error) = self.device_error {
-            page = page.child(self.hint(self.l(device_error_key(error))));
+            page = page.child(
+                self.hint(self.l(device_error_key(error)))
+                    .text_color(self.theme.danger),
+            );
         }
         page
     }
@@ -500,5 +624,39 @@ pub(super) fn device_error_key(error: DeviceError) -> &'static str {
         DeviceError::Stale => "Die Geräteauswahl hat sich geändert. Bitte erneut versuchen.",
         DeviceError::InvalidSelection => "Bitte wähle ein verfügbares Gerät.",
         DeviceError::CaptureFailed => "Der Gerätetest ist fehlgeschlagen.",
+    }
+}
+
+fn device_option_id(kind: DeviceKind, id: &talk_core::preferences::devices::DeviceId) -> ElementId {
+    gpui::SharedString::from(format!("device-{:?}-{}", kind, id.as_str())).into()
+}
+
+fn option_destination(current: Option<usize>, count: usize, key: &str) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    match key {
+        "home" => Some(0),
+        "end" => Some(count - 1),
+        "down" => Some(current.map_or(0, |i| (i + 1) % count)),
+        "up" => Some(current.map_or(count - 1, |i| (i + count - 1) % count)),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn picker_navigation_is_bounded_and_wraps_without_committing_a_selection() {
+        assert_eq!(option_destination(None, 0, "down"), None);
+        assert_eq!(option_destination(None, 3, "down"), Some(0));
+        assert_eq!(option_destination(None, 3, "up"), Some(2));
+        assert_eq!(option_destination(Some(2), 3, "down"), Some(0));
+        assert_eq!(option_destination(Some(0), 3, "up"), Some(2));
+        assert_eq!(option_destination(Some(1), 3, "home"), Some(0));
+        assert_eq!(option_destination(Some(1), 3, "end"), Some(2));
+        assert_eq!(option_destination(Some(1), 3, "enter"), None);
+        assert_eq!(option_destination(Some(0), 1, "up"), Some(0));
     }
 }

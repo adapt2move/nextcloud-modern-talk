@@ -32,12 +32,26 @@ pub(super) fn decode(job: &ImageJob) -> Option<(Arc<gpui::RenderImage>, usize)> 
     }
     let image = image::DynamicImage::from_decoder(decoder).ok()?;
     use talk_core::ui::content::AssetTarget;
+    // Match the avatar's square Cover viewport before upload. GPUI rounds the
+    // image bounds, not the rectangular parent overflow mask; a non-square
+    // source would otherwise put its rounded corners outside the visible crop.
+    // Center cropping preserves aspect ratio and the existing Cover framing.
+    let image = if !matches!(
+        &job.target,
+        AssetTarget::Image(_) | AssetTarget::Thumbnail(_)
+    ) && width != height
+    {
+        let side = width.min(height);
+        image.crop_imm((width - side) / 2, (height - side) / 2, side, side)
+    } else {
+        image
+    };
     let (max_width, max_height) = match &job.target {
         AssetTarget::Image(_) => (1600, 1200),
         AssetTarget::Thumbnail(_) => (400, 300),
         _ => (128, 128),
     };
-    let image = if width > max_width || height > max_height {
+    let image = if image.width() > max_width || image.height() > max_height {
         image.thumbnail(max_width, max_height)
     } else {
         image
@@ -89,6 +103,26 @@ mod tests {
         assert_eq!(image.as_bytes(0), Some([80, 40, 20, 128].as_slice()));
         assert_eq!(count, 4);
         assert_eq!(image.frame_count(), 1);
+    }
+
+    #[test]
+    fn avatar_crop_preserves_square_pixels_and_centers_portrait_and_landscape_sources() {
+        for (width, height, expected) in [(4, 2, vec![1u8, 2, 5, 6]), (2, 4, vec![2u8, 3, 4, 5])] {
+            let pixels: Vec<_> = (0..8u8).flat_map(|value| [value, 40, 80, 255]).collect();
+            let (avatar, count) = decode(&job(png(width, height, &pixels))).unwrap();
+            assert_eq!(avatar.size(0).width.0, 2);
+            assert_eq!(avatar.size(0).height.0, 2);
+            assert_eq!(count, 16);
+            let actual: Vec<_> = avatar
+                .as_bytes(0)
+                .unwrap()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[2])
+                .collect();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]

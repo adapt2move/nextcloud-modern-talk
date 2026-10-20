@@ -2,6 +2,7 @@
 // Run only by the native release builder; never part of the shipped runtime.
 import AppKit
 import CoreText
+import ImageIO
 
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else { fatalError("Expected output directory and Google Sans font") }
@@ -46,16 +47,26 @@ func mark(_ x: CGFloat, _ y: CGFloat, _ size: CGFloat, _ ink: NSColor, _ clear: 
     rounded(NSRect(x: 82, y: 12, width: 15, height: 18), 2, ink)
     NSGraphicsContext.restoreGraphicsState()
 }
-func png(_ name: String, _ width: Int, _ height: Int, _ draw: () -> Void) throws {
-    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+func bitmap(_ width: Int, _ height: Int, _ scale: Int = 1,
+            _ draw: () -> Void) -> NSBitmapImageRep {
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                 pixelsWide: width * scale, pixelsHigh: height * scale,
                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                  isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
                                  bitsPerPixel: 0)!
+    // AppKit scales this context from points to pixels using the point size.
+    // Do not scale the context again or enlarge an already rasterized 1x image.
+    // https://developer.apple.com/library/archive/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/CapturingScreenContents/CapturingScreenContents.html
+    bitmap.size = NSSize(width: CGFloat(width), height: CGFloat(height))
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     draw()
     NSGraphicsContext.restoreGraphicsState()
-    try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent(name))
+    return bitmap
+}
+func png(_ name: String, _ width: Int, _ height: Int, _ draw: () -> Void) throws {
+    let rendered = bitmap(width, height, 1, draw)
+    try rendered.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent(name))
 }
 try png("icon.png", 1024, 1024) {
     NSColor.clear.setFill()
@@ -72,7 +83,7 @@ try png("icon.png", 1024, 1024) {
                                   xRadius: 170, yRadius: 170), angle: -75)
     mark(238, 221, 550, .white, color(0x3379E4))
 }
-try png("background.png", 780, 480) {
+func drawBackground() {
     color(0xF6F7FA).setFill()
     NSRect(x: 0, y: 0, width: 780, height: 480).fill()
     rounded(NSRect(x: 30, y: 30, width: 720, height: 420), 22, .white)
@@ -83,16 +94,51 @@ try png("background.png", 780, 480) {
     rounded(NSRect(x: 130, y: 161, width: 148, height: 148), 30, color(0xF2F5FB))
     rounded(NSRect(x: 502, y: 161, width: 148, height: 148), 30, color(0xF2F5FB))
     let arrow = NSBezierPath()
-    arrow.move(to: NSPoint(x: 353, y: 239))
-    arrow.line(to: NSPoint(x: 427, y: 239))
-    arrow.move(to: NSPoint(x: 416, y: 250))
-    arrow.line(to: NSPoint(x: 427, y: 239))
-    arrow.line(to: NSPoint(x: 416, y: 228))
-    arrow.lineWidth = 2
+    arrow.move(to: NSPoint(x: 320, y: 239))
+    arrow.curve(to: NSPoint(x: 396, y: 257),
+                controlPoint1: NSPoint(x: 347, y: 215),
+                controlPoint2: NSPoint(x: 377, y: 218))
+    arrow.curve(to: NSPoint(x: 391, y: 283),
+                controlPoint1: NSPoint(x: 424, y: 291),
+                controlPoint2: NSPoint(x: 365, y: 307))
+    arrow.curve(to: NSPoint(x: 458, y: 241),
+                controlPoint1: NSPoint(x: 413, y: 257),
+                controlPoint2: NSPoint(x: 423, y: 225))
+    arrow.move(to: NSPoint(x: 443, y: 250))
+    arrow.line(to: NSPoint(x: 458, y: 241))
+    arrow.line(to: NSPoint(x: 444, y: 230))
+    arrow.lineWidth = 2.5
     arrow.lineCapStyle = .round
     arrow.lineJoinStyle = .round
-    color(0x9AA9C0).setStroke()
+    color(0x7D9CC7).setStroke()
     arrow.stroke()
-    text("Drag the app into Applications to install.", 214, 83, 15, 0x44536B)
-    text("macOS · Apple Silicon", 315, 53, 11, 0x8C97A7)
+    text("Drag the app into Applications to install.", 214, 105, 15, 0x44536B)
+    text("macOS · Apple Silicon", 315, 77, 11, 0x8C97A7)
+}
+// Both representations describe the same 780×480-point canvas. AppKit's TIFF
+// writer omits the resolution tags for a 72-dpi representation. Write explicit
+// ImageIO properties so the on-disk size is verifiable for both 1x and 2x.
+let backgroundURL = output.appendingPathComponent("background.tiff")
+guard let destination = CGImageDestinationCreateWithURL(
+    backgroundURL as CFURL, "public.tiff" as CFString, 2, nil
+) else { fatalError("Could not create DMG background TIFF") }
+for scale in [1, 2] {
+    guard let pixels = bitmap(780, 480, scale, drawBackground).cgImage else {
+        fatalError("Could not render DMG background at scale \(scale)")
+    }
+    let dpi = 72 * scale
+    let properties: [String: Any] = [
+        kCGImagePropertyDPIWidth as String: dpi,
+        kCGImagePropertyDPIHeight as String: dpi,
+        kCGImagePropertyTIFFDictionary as String: [
+            kCGImagePropertyTIFFXResolution as String: dpi,
+            kCGImagePropertyTIFFYResolution as String: dpi,
+            kCGImagePropertyTIFFResolutionUnit as String: 2, // inches
+            kCGImagePropertyTIFFCompression as String: 5 // lossless LZW
+        ]
+    ]
+    CGImageDestinationAddImage(destination, pixels, properties as CFDictionary)
+}
+guard CGImageDestinationFinalize(destination) else {
+    fatalError("Could not finalize DMG background TIFF")
 }

@@ -19,6 +19,12 @@ pub use runtime::{
     RuntimeConfig, RuntimeReply, StoredItemStatus, StoredState,
 };
 
+/// Safe presentation of the selected HTTPS destination before browser handoff.
+/// This is only a label; Login Flow still validates and binds its own full origin.
+pub fn selected_server_origin(input: &str) -> Result<talk_core::bounded::Text<512>, IdentityError> {
+    login::Origin::parse(input, false)?.display_origin()
+}
+
 use talk_core::identity::{
     AttemptCommand, AttemptReport, IdentityStatus, MaintenanceCommand, MaintenanceContext,
     MaintenanceReport, PendingAttemptContext, RecoveryContext, RestoredIdentity,

@@ -53,6 +53,11 @@ impl Origin {
         }
         ServerOrigin::https(&self.text).map_err(Into::into)
     }
+    pub(super) fn display_origin(&self) -> Result<talk_core::bounded::Text<512>> {
+        let url = Url::parse(&self.text).map_err(|_| ErrorKind::Malformed)?;
+        talk_core::bounded::Text::new(&url.origin().ascii_serialization())
+            .map_err(|_| ErrorKind::TooLarge.into())
+    }
     /// Non-authoritative chooser label: no scheme, base path, user or grant route.
     pub fn label(&self) -> Option<talk_core::bounded::Text<128>> {
         let url = Url::parse(&self.text).ok()?;
@@ -98,6 +103,36 @@ impl Origin {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[test]
+fn selected_origin_label_normalizes_host_and_never_exposes_a_login_route() {
+    for (input, expected) in [
+        ("Cloud.Example.test/nextcloud", "https://cloud.example.test"),
+        (
+            "https://Cloud.Example.test:443/nextcloud/",
+            "https://cloud.example.test",
+        ),
+        (
+            "https://cloud.example.test:8443/index.php/login/v2/flow/private",
+            "https://cloud.example.test:8443",
+        ),
+    ] {
+        assert_eq!(
+            super::selected_server_origin(input).unwrap().as_str(),
+            expected
+        );
+    }
+    for input in [
+        "https://user:password@cloud.example.test",
+        "https://cloud.example.test/?token=private",
+        "https://cloud.example.test/#private",
+        "http://cloud.example.test",
+    ] {
+        assert!(super::selected_server_origin(input).is_err());
+    }
+}
+
 pub(super) struct Grant {
     pub origin: Origin,
     pub user: Zeroizing<String>,

@@ -92,8 +92,13 @@ impl HoverHints {
 // A matured pointer hover owns the one visible control hint. While it is
 // pending, or after exit/cancellation, the actual keyboard focus may explain
 // itself again. This affects hints only; it never transfers keyboard focus.
-fn hint_visible(hover_owner: Option<&ElementId>, id: &ElementId, focused: bool) -> bool {
-    hover_owner.map_or(focused, |owner| owner == id)
+fn hint_visible(
+    hover_owner: Option<&ElementId>,
+    id: &ElementId,
+    focused: bool,
+    keyboard_hint: bool,
+) -> bool {
+    hover_owner.map_or(focused && keyboard_hint, |owner| owner == id)
 }
 
 pub fn icon(name: &'static str, size: f32, color: Hsla) -> gpui::Svg {
@@ -138,6 +143,10 @@ impl Availability {
             hover_hint: false,
             switch_value: None,
         }
+    }
+    /// Composite controls keep a selected marker without restyling unavailable text.
+    pub fn is_enabled(self) -> bool {
+        self.enabled
     }
     pub fn labelled(mut self) -> Self {
         self.visible_label = true;
@@ -216,6 +225,28 @@ fn icon_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hsla {
     }
 }
 
+fn switch_colors(t: super::Theme, enabled: bool, value: Option<bool>) -> (Hsla, Hsla) {
+    match (enabled, value) {
+        (true, Some(true)) => (t.accent, t.on_accent),
+        (true, _) => (t.muted, t.surface),
+        (false, _) => (t.subtle, t.disabled_fg),
+    }
+}
+
+fn switch_hover(t: super::Theme, value: bool) -> Hsla {
+    let track = switch_colors(t, true, Some(value)).0;
+    Hsla {
+        // Keep the track opaque and distinct from its thumb in both states.
+        // A generic secondary-button wash would paint over an unchecked track.
+        l: if t.dark && !value {
+            (track.l + 0.04).min(1.)
+        } else {
+            (track.l - 0.04).max(0.)
+        },
+        ..track
+    }
+}
+
 // Standalone input fallback. Composite fields use Desktop::field_ring so their
 // whole container owns focus and scroll revelation.
 pub(super) fn focus_ring(
@@ -228,6 +259,7 @@ pub(super) fn focus_ring(
         theme,
         radius - 1.,
         5.,
+        true,
         super::navigation::Reveal::default(),
     )
 }
@@ -239,6 +271,7 @@ fn native_focus_ring(
     theme: super::Theme,
     radius: f32,
     dilation: f32,
+    visible: bool,
     reveal: super::navigation::Reveal,
 ) -> impl IntoElement {
     let prepaint_handle = handle.clone();
@@ -252,7 +285,7 @@ fn native_focus_ring(
             }
         },
         move |bounds, _, window, _| {
-            if handle.as_ref().is_some_and(|h| h.is_focused(window)) {
+            if visible && handle.as_ref().is_some_and(|h| h.is_focused(window)) {
                 window.paint_quad(gpui::quad(
                     bounds.dilate(px(dilation)),
                     px(radius + dilation),
@@ -274,7 +307,7 @@ pub(super) struct ReasonTip {
     line_height: gpui::Pixels,
     handle: Option<FocusHandle>,
     hover_owner: Option<ElementId>,
-    keyboard_name: bool,
+    keyboard_hint: bool,
     id: ElementId,
     anchors: super::navigation::HintGeometry,
     below_control: bool,
@@ -288,8 +321,8 @@ impl gpui::RenderOnce for ReasonTip {
         let visible = hint_visible(
             self.hover_owner.as_ref(),
             &self.id,
-            self.handle.as_ref().is_some_and(|h| h.is_focused(window))
-                && (self.keyboard_name || !self.label.is_empty()),
+            self.handle.as_ref().is_some_and(|h| h.is_focused(window)),
+            self.keyboard_hint,
         );
         let limit = (px(310.) * (self.text_size / px(12.)).sqrt())
             .min(window.viewport_size().width - px(16.));
@@ -448,6 +481,30 @@ impl gpui::Element for MeasuredHint {
     }
 }
 impl Desktop {
+    /// Observe pointer modality once per frame, before children paint. A root
+    /// hitbox listener misses occluding popups; this observer must neither take
+    /// focus nor consume the editor's selection/IME or a control's click event.
+    pub(super) fn pointer_modality(&self, cx: &Context<Self>) -> impl IntoElement {
+        let pointer_down = cx.listener(|this, _: &gpui::MouseDownEvent, _, cx| {
+            if this.keyboard_navigation {
+                this.keyboard_navigation = false;
+                cx.notify();
+            }
+        });
+        gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
+                    if phase == gpui::DispatchPhase::Capture {
+                        pointer_down(event, window, cx);
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
+    }
+
     fn control_theme(&self, id: &ElementId) -> super::Theme {
         // Header controls use the same opaque Windows fallback as their host.
         // Keep this on the shared control path so icon, disabled and focus
@@ -515,7 +572,7 @@ impl Desktop {
                     line_height: self.sp(16.),
                     handle: row_focus,
                     hover_owner: self.hover_hints.displayed_owner().cloned(),
-                    keyboard_name: self.keyboard_navigation,
+                    keyboard_hint: self.keyboard_navigation,
                     id,
                     anchors: self.navigation.hints.clone(),
                     below_control: false,
@@ -540,7 +597,15 @@ impl Desktop {
         self.control_focus.get(id.into(), cx)
     }
     pub(super) fn field_ring(&self, handle: FocusHandle, radius: f32) -> impl IntoElement {
-        self.control_ring(Some(handle), radius - 1., 5.)
+        // Editable fields retain their caret/focus feedback for both modalities.
+        native_focus_ring(
+            Some(handle),
+            self.theme,
+            radius - 1.,
+            5.,
+            true,
+            self.navigation.reveal.clone(),
+        )
     }
     /// Reveal the complete explanatory region when its child action is focused.
     /// Place last in a relative container so its bounds replace the child's ring
@@ -562,20 +627,6 @@ impl Desktop {
         )
         .absolute()
         .inset_0()
-    }
-    pub(super) fn control_ring(
-        &self,
-        handle: Option<FocusHandle>,
-        radius: f32,
-        dilation: f32,
-    ) -> impl IntoElement {
-        native_focus_ring(
-            handle,
-            self.theme,
-            radius,
-            dilation,
-            self.navigation.reveal.clone(),
-        )
     }
     pub(super) fn control(
         &self,
@@ -625,7 +676,9 @@ impl Desktop {
             LocalAction::Open(overlay) => self.overlay == Some(overlay),
             _ => false,
         };
-        let hover_bg = if matches!(style, ButtonStyle::Primary | ButtonStyle::StageDanger) {
+        let hover_bg = if let Some(value) = availability.switch_value {
+            switch_hover(t, value)
+        } else if matches!(style, ButtonStyle::Primary | ButtonStyle::StageDanger) {
             Hsla {
                 l: (bg.l - 0.04).max(0.),
                 ..bg
@@ -661,7 +714,20 @@ impl Desktop {
             .rounded(px(corner_radius))
             .text_size(self.sp(13.))
             .line_height(self.sp(20.))
-            .font_weight(FontWeight::MEDIUM)
+            // Room titles set their own weight; unread badges inherit this emphasis.
+            .font_weight(
+                if selected
+                    || room_row
+                    || matches!(
+                        style,
+                        ButtonStyle::Primary | ButtonStyle::Danger | ButtonStyle::StageDanger
+                    )
+                {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::NORMAL
+                },
+            )
             .bg(bg)
             .text_color(fg)
             .border_1()
@@ -698,6 +764,7 @@ impl Desktop {
                 },
                 corner_radius - border_width,
                 border_width + 4.,
+                self.keyboard_navigation,
                 self.navigation.reveal.clone(),
             ))
             .when(
@@ -723,6 +790,15 @@ impl Desktop {
                     }))
                 },
             )
+            .when(!self.background_inert, |b| {
+                b.on_key_down(|event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        // Native on_click activates enabled controls once on key-up.
+                        // Disabled controls expose hints but cannot submit a parent form.
+                        cx.stop_propagation();
+                    }
+                })
+            })
             .when(enabled && !self.background_inert, |b| {
                 b.cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -740,26 +816,12 @@ impl Desktop {
                             });
                         }
                     }))
-                    .on_key_down(|event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            // GPUI invokes on_click once on native key-up. Only
-                            // stop the parent form's key-down path here.
-                            cx.stop_propagation();
-                        }
-                    })
             })
             .when(!enabled && !self.background_inert, |b| {
                 b.on_mouse_down(gpui::MouseButton::Left, |_, window, cx| {
                     // Hover explains; a disabled click never steals the draft caret.
                     window.prevent_default();
                     cx.stop_propagation();
-                })
-                .on_key_down(|e: &KeyDownEvent, _, cx| {
-                    // Focus exposes an explanation, never an action (including a
-                    // bubbled Enter that might otherwise submit a parent form).
-                    if matches!(e.keystroke.key.as_str(), "enter" | "space") {
-                        cx.stop_propagation();
-                    }
                 })
             })
     }
@@ -770,12 +832,14 @@ impl Desktop {
         action_name: Option<&'static str>,
         cx: &Context<Self>,
     ) -> ReasonTip {
+        let label = self.l(availability.reason.or(availability.help).unwrap_or(""));
         ReasonTip {
             text_size: self.sp(12.),
             line_height: self.sp(16.),
             handle: self.control_focus(id.clone(), cx),
             hover_owner: self.hover_hints.displayed_owner().cloned(),
-            keyboard_name: self.keyboard_navigation && !availability.visible_label,
+            keyboard_hint: self.keyboard_navigation
+                && (!availability.visible_label || !label.is_empty()),
             id,
             anchors: self.navigation.hints.clone(),
             // Composer callers attach this element to the actual card top;
@@ -783,9 +847,7 @@ impl Desktop {
             below_control: availability.below_control,
             beside_control: availability.beside_control,
             action_name: action_name.map(|name| self.l(name)),
-            label: self
-                .l(availability.reason.or(availability.help).unwrap_or(""))
-                .into(),
+            label: label.into(),
             theme: self.theme,
         }
     }
@@ -830,11 +892,7 @@ impl Desktop {
         availability.switch_value = value;
         let enabled = availability.enabled && self.control_focus(id.clone(), cx).is_some();
         let t = self.theme;
-        let (track, thumb) = match (enabled, value) {
-            (true, Some(true)) => (t.accent, t.on_accent),
-            (true, _) => (t.input_border, t.surface),
-            (false, _) => (t.subtle, t.disabled_fg),
-        };
+        let (track, thumb) = switch_colors(t, enabled, value);
         let height = self.sp(26.).min(px(34.));
         let width = height * 1.77;
         let thumb_size = height - px(8.);
@@ -893,6 +951,36 @@ impl Desktop {
         .when(!self.background_inert, |d| {
             d.child(self.reason_tip(id, hint, Some(label), cx))
         })
+    }
+    /// Native select trigger. The owning bounded picker supplies its option
+    /// focus/navigation; labels may contain provider data and are not translated here.
+    pub(super) fn select_control(
+        &self,
+        id: impl Into<ElementId>,
+        label: String,
+        expanded: bool,
+        availability: impl Into<Availability>,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        self.control(id, ButtonStyle::Secondary, availability, action, cx)
+            .min_w_0()
+            .justify_between()
+            .border_color(if expanded {
+                self.theme.focus
+            } else {
+                self.theme.input_border
+            })
+            .child(div().flex_1().min_w_0().text_ellipsis().child(label))
+            .child(self.scaled_icon(
+                if expanded {
+                    "chevron-up"
+                } else {
+                    "chevron-down"
+                },
+                16.,
+                self.theme.muted,
+            ))
     }
     pub(super) fn option_row(
         &self,
@@ -1127,38 +1215,60 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
     #[test]
+    fn switch_hover_keeps_both_tracks_distinct_from_the_thumb() {
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let theme = Theme::resolve(palette, appearance, gpui::WindowAppearance::Light);
+                for value in [false, true] {
+                    let (track, thumb) = switch_colors(theme, true, Some(value));
+                    assert!(contrast(track, thumb) >= 3.);
+                    assert!(contrast(switch_hover(theme, value), thumb) >= 3.);
+                    assert_ne!(switch_hover(theme, value), theme.hover);
+                }
+            }
+        }
+    }
+    #[test]
     fn focus_and_hover_share_one_visible_hint_and_restore_after_retirement() {
         let mut hints = HoverHints::default();
         let now = Instant::now();
         let call = ElementId::from("call");
         let details = ElementId::from("details");
         let unrelated = ElementId::from("unrelated");
-        let visible = |h: &HoverHints, focus: Option<&ElementId>| {
+        let visible = |h: &HoverHints, focus: Option<&ElementId>, keyboard: bool| {
             [&call, &details, &unrelated]
                 .into_iter()
-                .filter(|id| hint_visible(h.displayed_owner(), id, focus == Some(id)))
+                .filter(|id| hint_visible(h.displayed_owner(), id, focus == Some(id), keyboard))
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        assert_eq!(visible(&hints, Some(&call)), vec![call.clone()]);
+        assert!(visible(&hints, Some(&call), false).is_empty());
+        assert_eq!(visible(&hints, Some(&call), true), vec![call.clone()]);
         let epoch = hints.epoch();
         hints.enter(epoch, details.clone(), now);
         assert!(hints.request_frame(now + Duration::from_millis(499)));
-        assert_eq!(visible(&hints, Some(&call)), vec![call.clone()]);
+        assert!(visible(&hints, Some(&call), false).is_empty());
+        assert_eq!(visible(&hints, Some(&call), true), vec![call.clone()]);
         assert!(!hints.request_frame(now + Duration::from_millis(500)));
-        for focus in [None, Some(&call), Some(&details), Some(&unrelated)] {
-            assert_eq!(visible(&hints, focus), vec![details.clone()]);
+        for keyboard in [false, true] {
+            for focus in [None, Some(&call), Some(&details), Some(&unrelated)] {
+                assert_eq!(visible(&hints, focus, keyboard), vec![details.clone()]);
+            }
         }
         hints.exit(epoch, &details);
-        assert_eq!(visible(&hints, Some(&call)), vec![call.clone()]);
-        assert!(visible(&hints, None).is_empty());
+        // Pointer focus stays quiet after hover ends; Tab can reveal the same
+        // retained focus again without rebuilding or transferring its handle.
+        assert!(visible(&hints, Some(&call), false).is_empty());
+        assert_eq!(visible(&hints, Some(&call), true), vec![call.clone()]);
+        assert!(visible(&hints, None, true).is_empty());
         hints.enter(epoch, details.clone(), now);
         hints.request_frame(now + Duration::from_millis(500));
         assert!(hints.retire(|id| id != &details));
         // An old view/account callback cannot take ownership again.
         hints.enter(epoch, details.clone(), now);
-        assert_eq!(visible(&hints, Some(&call)), vec![call.clone()]);
-        assert!(visible(&hints, None).is_empty());
+        assert!(visible(&hints, Some(&call), false).is_empty());
+        assert_eq!(visible(&hints, Some(&call), true), vec![call.clone()]);
+        assert!(visible(&hints, None, true).is_empty());
     }
 
     #[test]

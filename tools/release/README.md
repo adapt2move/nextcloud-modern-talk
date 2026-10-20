@@ -5,7 +5,7 @@ Build from a clean committed checkout using the repository toolchain and lockfil
 ```sh
 python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
 python3 tools/release/build.py --target x86_64-unknown-linux-gnu \
-  --version 0.0.3 --output /absolute/new/package-directory
+  --version 0.0.4 --output /absolute/new/package-directory
 ```
 
 Use `aarch64-apple-darwin` on Apple Silicon. Prepare native prerequisites as described in [CI](../../docs/ci.md). Output belongs outside the checkout. The builder records source/toolchain/dependency identities and collects license notices. The assembler checks the closed file inventory, executable architecture and checksums, then writes Linux `.deb`/`.tar.gz` or a self-contained macOS app ZIP and styled DMG, plus source and provenance.
@@ -27,6 +27,12 @@ Python 3.11+ and `dpkg-deb` are needed for the Linux packaging fixtures. These t
 ## Publication
 
 The [manual workflow](../../.github/workflows/release.yml) binds an existing version tag to its exact mainline commit. Its publisher uses the official `gh` CLI. Packages are verified before a draft is created, then uploaded and downloaded to verify the served bytes before publication. Failures leave a draft; inspect it before a manual retry. Do not overwrite an existing release or move a published tag.
+
+The release body comes from [the current changelog](../../docs/changelog.md).
+Describe only changes since the previous release, followed by version-bound
+links to [installation](../../docs/install.md) and
+[known limitations](../../docs/limitations.md). Keep setup instructions,
+full feature inventories and outstanding work on those separate pages.
 
 [actions.json](actions.json) contains action pins. [package-policy.json](package-policy.json) records the composition included by the package. Keep this policy aligned with the actual shipping source; it is not a substitute for runtime tests. [candidate.py](candidate.py) checks local tag/commit/origin identity. Evidence and intermediate reports stay outside contributor documentation.
 

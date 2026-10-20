@@ -112,14 +112,30 @@ pub enum LoginPhase {
     Failed(LoginFailure),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageSaveFailure {
+    NativeUnavailable,
+    NativeLocked,
+    NativeDenied,
+    NativeCorrupt,
+    NativeTemporarilyUnavailable,
+    Cancelled,
+    Conflict,
+    Failed,
+    LocalDenied,
+    LocalCorrupt,
+    LocalUnavailable,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoginView {
     pub phase: LoginPhase,
     pub attempt: Option<RequestId>,
-    pub server_label: Text<128>,
+    pub server_label: Text<512>,
     pub account_label: Text<128>,
     pub native_store: NativeStoreState,
     pub storage: StorageStatus,
+    pub storage_failure: Option<StorageSaveFailure>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -174,6 +190,7 @@ pub enum SavedAccountPhase {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SavedAccountView {
     pub id: AccountId,
+    pub navigation_key: NavigationAccountKey,
     pub label: Option<Text<128>>,
     pub server_label: Option<Text<128>>,
     pub phase: SavedAccountPhase,
@@ -422,6 +439,13 @@ pub struct ConversationMutationResult {
     pub result: Completion,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountRemovalResult {
+    pub request: RequestId,
+    pub account: AccountId,
+    pub result: Completion,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSnapshot {
     pub content_panel: super::content::ContentPanel,
@@ -431,6 +455,8 @@ pub struct PresentationSnapshot {
     pub accounts: Page<AccountView, 8>,
     /// Durable records have no live scope until the account owner admits one.
     pub saved_accounts: Page<SavedAccountView, 8>,
+    /// Correlated local removal/cleanup outcome, retained until acknowledged.
+    pub account_removal: Option<AccountRemovalResult>,
     pub active_account: Option<AccountScope>,
     pub conversations: Page<ConversationView, 100>,
     pub conversation_list: ConversationListState,
@@ -504,6 +530,17 @@ pub enum UiIntent {
     ReloadConversations(AccountScope),
     NewLogin,
     RestoreAccount(AccountId),
+    /// Remove this app's admitted account or dormant saved record. A live
+    /// account requires its exact current scope; None never targets a live scope.
+    RemoveAccount {
+        request: RequestId,
+        account: AccountId,
+        scope: Option<AccountScope>,
+    },
+    AcknowledgeAccountRemoval {
+        request: RequestId,
+        account: AccountId,
+    },
     Reauthenticate(AccountId),
     BeginLogin {
         request: RequestId,

@@ -436,6 +436,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
                     u8::from(banners)
                 );
                 let mut expected = values.clone();
+                expected.launch_at_login = false;
                 if version == 2 {
                     legacy.push_str(
                         "microphone=default\nspeaker=default\ncamera=id:63616d6572612d32\n",
@@ -455,7 +456,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
                     (expected.clone(), LoadState::Migrated)
                 );
                 let v3 = storage::encode(&expected);
-                assert!(v3.starts_with("nextcloud-modern-talk-preferences 5\n"));
+                assert!(v3.starts_with("nextcloud-modern-talk-preferences 6\n"));
                 assert_eq!(
                     storage::decode(v3.as_bytes()).unwrap(),
                     (expected, LoadState::Loaded)
@@ -468,7 +469,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
     assert!(storage::decode(v3.replace("calendar_sounds=0\n", "").as_bytes()).is_err());
     assert!(storage::decode(format!("{v3}sounds=0\n").as_bytes()).is_err());
     assert_eq!(
-        storage::decode(v3.replace("preferences 5", "preferences 99").as_bytes()),
+        storage::decode(v3.replace("preferences 6", "preferences 99").as_bytes()),
         Err(PreferenceError::UnsupportedVersion)
     );
     assert_eq!(
@@ -503,7 +504,12 @@ fn real_registration_add_remove_and_effect_failure_does_not_undo_disk_commit() {
     let text = fs::read_to_string(&registration).unwrap();
     assert!(text.contains("--autostart"));
     assert_eq!(
-        effect.apply(&LocalPreferences::default()).registered,
+        effect
+            .apply(&LocalPreferences {
+                launch_at_login: false,
+                ..LocalPreferences::default()
+            })
+            .registered,
         Some(false)
     );
     assert!(!registration.exists());
@@ -726,9 +732,10 @@ fn schema_three_migrates_without_activating_quick_switch_or_losing_choices() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 5", "preferences 3")
+        .replace("preferences 6", "preferences 3")
         .replace("quick_switcher=auto\n", "")
-        .replace("update_channel=stable\n", "");
+        .replace("update_channel=stable\n", "")
+        .replace("onboarding_resume=none\n", "");
     let (migrated, state) = storage::decode(old.as_bytes()).unwrap();
     assert_eq!(state, LoadState::Migrated);
     assert_eq!(migrated, values);
@@ -744,8 +751,9 @@ fn update_channel_persists_and_migrates_without_changing_other_preferences() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 5", "preferences 4")
-        .replace("update_channel=stable\n", "");
+        .replace("preferences 6", "preferences 4")
+        .replace("update_channel=stable\n", "")
+        .replace("onboarding_resume=none\n", "");
     assert_eq!(
         storage::decode(old.as_bytes()).unwrap(),
         (values.clone(), LoadState::Migrated)
@@ -765,4 +773,58 @@ fn update_channel_persists_and_migrates_without_changing_other_preferences() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn restart_handoff_is_durable_bounded_and_old_autostart_false_is_preserved() {
+    use talk_core::preferences::{OnboardingResume, navigation::NavigationAccountKey};
+    let dir = Directory::new();
+    let path = dir.0.join("preferences");
+    let account = NavigationAccountKey::new(
+        "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+    )
+    .unwrap();
+    let marker = OnboardingResume {
+        account,
+        expires_at_unix_seconds: 100_000,
+    };
+    assert!(marker.is_current(100_000));
+    assert!(!marker.is_current(100_001));
+    assert!(!marker.is_current(0));
+    let mut values = LocalPreferences {
+        launch_at_login: false,
+        onboarding_resume: Some(marker.clone()),
+        ..LocalPreferences::default()
+    };
+    assert!(LocalPreferences::default().launch_at_login);
+    let mut store = storage::FileStore(path);
+    store.save(&values).unwrap();
+    assert_eq!(store.load().unwrap().0, values);
+    values.onboarding_resume = None;
+    store.save(&values).unwrap();
+    assert_eq!(store.load().unwrap().0.onboarding_resume, None);
+    assert!(!store.load().unwrap().0.launch_at_login);
+    let previous = storage::encode(&values)
+        .replace("preferences 6", "preferences 5")
+        .replace("onboarding_resume=none\n", "");
+    let (restored, state) = storage::decode(previous.as_bytes()).unwrap();
+    assert_eq!(state, LoadState::Migrated);
+    assert_eq!(restored, values);
+    for invalid in [
+        "none\nonboarding_resume=none",
+        "12:not-a-key",
+        "-1:a1:bad:bad",
+    ] {
+        assert!(
+            storage::decode(
+                storage::encode(&values)
+                    .replace(
+                        "onboarding_resume=none",
+                        &format!("onboarding_resume={invalid}")
+                    )
+                    .as_bytes()
+            )
+            .is_err()
+        );
+    }
 }

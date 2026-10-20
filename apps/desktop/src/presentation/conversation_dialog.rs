@@ -70,7 +70,6 @@ pub(super) struct RoomUi {
     loaded: bool,
     pub request: u64,
     confirmation: Option<ConversationAction>,
-    feedback: Option<RequestId>,
     csv_open: bool,
     pub name: Entity<TextInput>,
     pub description: Entity<TextInput>,
@@ -104,7 +103,6 @@ impl RoomUi {
             loaded: false,
             request: 0,
             confirmation: None,
-            feedback: None,
             csv_open: false,
             name,
             description,
@@ -206,7 +204,6 @@ impl Desktop {
             return;
         };
         self.room_ui.request = next;
-        self.room_ui.feedback = (!action.reads()).then_some(RequestId(next));
         self.submit(UiIntent::Conversation {
             request: RequestId(next),
             context,
@@ -214,7 +211,6 @@ impl Desktop {
         });
     }
     fn dismiss_room_feedback(&mut self) {
-        self.room_ui.feedback = None;
         if let Some(panel) = &self.snapshot.conversation_panel
             && let Some(result) = panel.result
         {
@@ -330,16 +326,10 @@ impl Desktop {
     }
     fn room_heading(&self, label: &str) -> Div {
         div()
-            .text_size(self.sp(14.))
-            .font_weight(FontWeight::MEDIUM)
+            .text_size(self.sp(13.))
+            .line_height(self.sp(18.))
+            .font_weight(FontWeight::SEMIBOLD)
             .child(self.l(label).to_owned())
-    }
-    fn room_row(&self, label: &str, detail: &str) -> Div {
-        div()
-            .min_w_0()
-            .flex_1()
-            .child(self.room_heading(label))
-            .child(self.hint(self.l(detail)))
     }
     #[allow(
         clippy::too_many_arguments,
@@ -355,23 +345,18 @@ impl Desktop {
         command: ConversationAction,
         cx: &Context<Self>,
     ) -> Div {
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap_4()
-            .py_3()
-            .border_b_1()
-            .border_color(self.theme.border)
-            .child(self.room_row(label, detail))
-            .child(self.switch(
+        self.dialog_row(
+            label,
+            Some(detail),
+            self.switch(
                 id,
                 label,
                 on,
                 self.room_available(setting),
                 LocalAction::Room(Action::Command(command)),
                 cx,
-            ))
+            ),
+        )
     }
     fn room_button(
         &self,
@@ -390,297 +375,288 @@ impl Desktop {
             cx,
         )
     }
+    /// A labelled text field with its optional commit action on the same line.
+    fn room_field(
+        &self,
+        label: &'static str,
+        input: &Entity<TextInput>,
+        action: Option<gpui::Stateful<Div>>,
+        cx: &Context<Self>,
+    ) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_size(self.sp(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.l(label).to_owned()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .child(self.room_input(input, cx))
+                    .when_some(action, |d, action| d.child(action.flex_none())),
+            )
+    }
+    /// Remote state belongs to the dialog, not to one tab: it is the footer.
+    fn room_status(&self, cx: &Context<Self>) -> Option<Div> {
+        let panel = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.room_ui.context)?;
+        let key = match panel.state {
+            // The controls still follow confirmed/pending authority, but routine
+            // saves do not add a status bar or shift the settings page.
+            RemoteState::Idle | RemoteState::Saving(_) => return None,
+            RemoteState::Loading(_) => "Gesprächsdaten werden geladen …",
+            RemoteState::Uncertain(_) => "Ergebnis unklar. Vor erneutem Ändern neu laden.",
+            RemoteState::Failed(_, reason) => match reason {
+                talk_core::ui::UnavailableReason::PermissionDenied => {
+                    "Du hast dafür keine Berechtigung."
+                }
+                talk_core::ui::UnavailableReason::Unsupported => {
+                    "Der Server unterstützt diese Funktion nicht."
+                }
+                talk_core::ui::UnavailableReason::Unconfigured => {
+                    "In diesem Client noch nicht verfügbar."
+                }
+                _ => "Die Anfrage ist fehlgeschlagen. Der bestätigte Stand bleibt erhalten.",
+            },
+        };
+        let problem = matches!(
+            panel.state,
+            RemoteState::Failed(..) | RemoteState::Uncertain(_)
+        );
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .min_h(px(36.))
+                .child(
+                    self.hint(self.l(key))
+                        .flex_1()
+                        .min_w_0()
+                        .when(matches!(panel.state, RemoteState::Failed(..)), |d| {
+                            d.text_color(self.theme.danger)
+                        }),
+                )
+                .when(problem, |d| {
+                    d.child(self.button(
+                        "room-reload",
+                        "Erneut laden",
+                        ButtonStyle::Secondary,
+                        true,
+                        LocalAction::Room(Action::Command(ConversationAction::Read)),
+                        cx,
+                    ))
+                }),
+        )
+    }
     pub(super) fn conversation_dialog(&self, window: &Window, cx: &Context<Self>) -> Div {
-        let t = self.theme;
         let members = self.overlay == Some(Overlay::Participants);
-        let narrow = window.viewport_size().width < px(820.) || self.scale >= 150;
+        let narrow = self.dialog_narrow(window);
         let title = if members {
             "Mitglieder"
         } else {
             "Gesprächseinstellungen"
         };
         let row = self.selected();
-        let heading = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_6()
-            .py_4()
-            .border_b_1()
-            .border_color(t.border)
-            .when_some(row, |d, r| d.child(self.conversation_avatar(r)))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .child(
-                        div()
-                            .text_size(self.sp(20.))
-                            .font_weight(FontWeight::BOLD)
-                            .child(self.l(title)),
-                    )
-                    .when_some(row, |d, r| d.child(self.hint(r.title.as_str()))),
-            )
-            .child(self.icon_button(
-                "close-overlay",
-                ("x", "Schließen"),
-                ButtonStyle::Quiet,
-                Availability::available(),
-                LocalAction::Close,
-                cx,
-            ));
-        let mut tabs = div()
-            .flex_none()
-            .flex()
-            .gap_1()
-            .p_3()
-            .when(!narrow && !members, |d| {
-                d.flex_col().w(px(210.)).border_r_1().border_color(t.border)
-            })
-            .when(narrow || members, |d| {
-                d.flex_wrap().border_b_1().border_color(t.border)
-            });
+        let mut items = Vec::with_capacity(Tab::ALL.len());
         if members {
             for (bots, label, icon) in [(false, "Personen", "users"), (true, "Bots", "grid")] {
-                tabs = tabs.child(self.button_with_icon(
+                items.push(self.dialog_nav_item(
                     if bots {
                         "room-bots-tab"
                     } else {
                         "room-people-tab"
                     },
                     (label, icon),
-                    if self.room_ui.bots == bots {
-                        ButtonStyle::Primary
-                    } else {
-                        ButtonStyle::Quiet
-                    },
-                    Availability::available(),
+                    self.room_ui.bots == bots,
                     LocalAction::Room(Action::People(bots)),
                     cx,
                 ));
             }
         } else {
             for (i, tab) in Tab::ALL.into_iter().enumerate() {
-                tabs = tabs.child(
-                    self.button_with_icon(
-                        ("room-tab", i),
-                        (tab.label(), tab.icon()),
-                        if self.room_ui.tab == tab {
-                            ButtonStyle::Primary
-                        } else {
-                            ButtonStyle::Quiet
-                        },
-                        Availability::available(),
-                        LocalAction::Room(Action::Tab(tab)),
-                        cx,
-                    )
-                    .justify_start(),
-                );
+                items.push(self.dialog_nav_item(
+                    ("room-tab", i),
+                    (tab.label(), tab.icon()),
+                    self.room_ui.tab == tab,
+                    LocalAction::Room(Action::Tab(tab)),
+                    cx,
+                ));
             }
         }
-        let body = if self.room_ui.confirmation.is_some() {
-            self.room_confirmation(cx)
-        } else if members {
-            self.members_page(cx)
-        } else {
-            self.room_settings_page(cx)
-        };
-        let status = self
-            .snapshot
-            .conversation_panel
-            .as_ref()
-            .filter(|p| Some(p.context) == self.room_ui.context)
-            .map(|p| p.state);
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(body)
-            .when(
-                self.snapshot.conversation_panel.as_ref().is_some_and(|p| {
-                    p.result.as_ref().is_some_and(|r| {
-                        self.room_ui.feedback == Some(r.request)
-                            && r.completion
-                                == talk_core::ui::presentation::Completion::ServerAccepted
-                    }) && p.state == RemoteState::Idle
-                }),
-                |d| d.child(self.hint(self.l("Änderung vom Server bestätigt."))),
-            )
-            .when_some(status, |d, state| {
-                let key = match state {
-                    RemoteState::Idle => None,
-                    RemoteState::Loading(_) => Some("Gesprächsdaten werden geladen …"),
-                    RemoteState::Saving(_) => Some("Änderung wird geprüft …"),
-                    RemoteState::Uncertain(_) => {
-                        Some("Ergebnis unklar. Vor erneutem Ändern neu laden.")
-                    }
-                    RemoteState::Failed(_, reason) => Some(match reason {
-                        talk_core::ui::UnavailableReason::PermissionDenied => {
-                            "Du hast dafür keine Berechtigung."
-                        }
-                        talk_core::ui::UnavailableReason::Unsupported => {
-                            "Der Server unterstützt diese Funktion nicht."
-                        }
-                        talk_core::ui::UnavailableReason::Unconfigured => {
-                            "In diesem Client noch nicht verfügbar."
-                        }
-                        _ => {
-                            "Die Anfrage ist fehlgeschlagen. Der bestätigte Stand bleibt erhalten."
-                        }
-                    }),
-                };
-                d.when_some(key, |d, key| {
-                    d.child(
-                        div()
-                            .p_3()
-                            .rounded_lg()
-                            .bg(t.subtle)
-                            .child(self.hint(self.l(key))),
-                    )
-                })
-                .when(
-                    matches!(state, RemoteState::Failed(..) | RemoteState::Uncertain(_)),
-                    |d| {
-                        d.child(self.button(
-                            "room-reload",
-                            "Erneut laden",
-                            ButtonStyle::Secondary,
-                            true,
-                            LocalAction::Room(Action::Command(ConversationAction::Read)),
-                            cx,
-                        ))
-                    },
-                )
-            });
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_5()
-            .child(
+        // Five or fewer destinations stay visible in the narrow bar instead of
+        // moving behind a menu, so no focus target disappears on selection.
+        let navigation = if narrow {
+            self.dialog_bar(
                 div()
-                    .w_full()
-                    .max_w(px(920.))
-                    .h(px(
-                        (f32::from(window.viewport_size().height) - 48.).min(700.)
-                    ))
-                    .max_h_full()
-                    .min_h_0()
                     .flex()
-                    .flex_col()
-                    .bg(t.surface)
-                    .rounded(px(14.))
-                    .border_1()
-                    .border_color(t.border)
-                    .shadow_lg()
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .occlude()
-                    .child(heading)
+                    .flex_wrap()
+                    .gap_1()
+                    .children(items.into_iter().map(|item| item.w_auto().mb(px(0.)))),
+            )
+        } else {
+            let header = match row {
+                Some(r) => div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(self.conversation_avatar(r))
                     .child(
                         div()
+                            .min_w_0()
                             .flex_1()
-                            .min_h_0()
                             .flex()
-                            .when(narrow || members, |d| d.flex_col())
-                            .child(tabs)
+                            .flex_col()
                             .child(
-                                self.scroll_area(super::navigation::Region::Overlay)
-                                    .flex_1()
+                                div()
+                                    .w_full()
                                     .min_w_0()
-                                    .min_h_0()
-                                    .p_6()
-                                    .child(body),
-                            ),
+                                    .text_size(self.sp(14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    // Unlike nowrap truncation, this remeasures
+                                    // text when GPUI resolves the flex width.
+                                    .line_clamp(1)
+                                    .text_ellipsis()
+                                    .child(r.title.as_str().to_owned()),
+                            )
+                            .child(self.hint(self.l("Gespräch"))),
                     ),
+                None => self.dialog_title(title),
+            };
+            self.dialog_rail(header, items)
+        };
+        let (key, page) = if self.room_ui.confirmation.is_some() {
+            (20, self.room_confirmation(cx))
+        } else if members {
+            (
+                10 + usize::from(self.room_ui.bots),
+                self.members_page(narrow, cx),
             )
+        } else {
+            (
+                self.room_ui.tab as usize,
+                self.room_settings_page(narrow, cx),
+            )
+        };
+        self.dialog_frame(
+            super::settings::DialogFrame {
+                id: "conversation-dialog",
+                close: ("close-overlay", "Schließen"),
+                region: super::navigation::Region::Overlay,
+                navigation,
+                page: self.reveal(("room-page", key), page),
+                footer: self.room_status(cx),
+            },
+            window,
+            cx,
+        )
     }
-    fn room_settings_page(&self, cx: &Context<Self>) -> Div {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(self.room_heading(self.room_ui.tab.label()));
+    /// Page title; in the narrow layout the rail is gone, so the conversation name moves here.
+    fn room_page_header(&self, label: &'static str, narrow: bool) -> Div {
+        self.dialog_page_header(label, None).when(narrow, |d| {
+            d.when_some(self.selected(), |d, r| d.child(self.hint(r.title.as_str())))
+        })
+    }
+    fn room_settings_page(&self, narrow: bool, cx: &Context<Self>) -> Div {
+        let t = self.theme;
+        let mut page = self
+            .dialog_page()
+            .child(self.room_page_header(self.room_ui.tab.label(), narrow));
         let Some(panel) = self
             .snapshot
             .conversation_panel
             .as_ref()
             .filter(|p| Some(p.context) == self.room_ui.context)
         else {
-            return body.child(self.hint(self.l("Gesprächsdaten werden geladen …")));
+            return page.child(self.hint(self.l("Gesprächsdaten werden geladen …")));
         };
         let Some(d) = panel.details.as_ref() else {
-            return body;
+            return page;
         };
         let Some(row) = self.selected() else {
-            return body;
+            return page;
+        };
+        // Destructive server actions close every page that offers them, set apart.
+        let danger = || {
+            self.dialog_section(None)
+                .pt_4()
+                .border_t_1()
+                .border_color(t.border)
         };
         match self.room_ui.tab {
             Tab::General => {
-                body = body.child(self.create_poll_button("room-create-poll", cx));
+                let mut about = self.dialog_section(Some("Gespräch"));
                 if matches!(
                     row.kind,
                     ConversationKind::Direct | ConversationKind::NoteToSelf
                 ) {
-                    body =
-                        body.child(self.hint(self.l("Der Name stammt aus dem Profil der Person.")));
+                    about = about
+                        .child(self.hint(self.l("Der Name stammt aus dem Profil der Person.")));
                 } else {
-                    body = body
-                        .child(self.room_heading("Name"))
-                        .child(self.room_input(&self.room_ui.name, cx))
-                        .when(
-                            self.room_ui.name.read(cx).content.as_str() != d.name.as_str(),
-                            |b| {
-                                b.child(self.button(
+                    let name_changed =
+                        self.room_ui.name.read(cx).content.as_str() != d.name.as_str();
+                    let description_changed = self.room_ui.description.read(cx).content.as_str()
+                        != d.description.as_ref().map_or("", |v| v.as_str());
+                    about = about
+                        .gap_3()
+                        .child(self.room_field(
+                            "Name",
+                            &self.room_ui.name,
+                            name_changed.then(|| {
+                                self.button(
                                     "room-save-name",
                                     "Name speichern",
                                     ButtonStyle::Primary,
                                     self.room_available(RoomSetting::Metadata),
                                     LocalAction::Room(Action::SaveName),
                                     cx,
-                                ))
-                            },
-                        )
-                        .child(self.room_heading("Beschreibung"))
-                        .child(self.room_input(&self.room_ui.description, cx))
-                        .when(
-                            self.room_ui.description.read(cx).content.as_str()
-                                != d.description.as_ref().map_or("", |v| v.as_str()),
-                            |b| {
-                                b.child(self.button(
+                                )
+                            }),
+                            cx,
+                        ))
+                        .child(self.room_field(
+                            "Beschreibung",
+                            &self.room_ui.description,
+                            description_changed.then(|| {
+                                self.button(
                                     "room-save-description",
                                     "Beschreibung speichern",
                                     ButtonStyle::Primary,
                                     self.room_available(RoomSetting::Metadata),
                                     LocalAction::Room(Action::SaveDescription),
                                     cx,
-                                ))
-                            },
-                        )
-                        .child(self.room_heading("Avatar"))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .child(self.room_input(&self.room_ui.avatar, cx))
-                                .child(self.button(
-                                    "room-avatar",
-                                    "Emoji als Avatar setzen",
-                                    ButtonStyle::Secondary,
-                                    self.room_available(RoomSetting::Avatar),
-                                    LocalAction::Room(Action::Avatar),
-                                    cx,
-                                )),
-                        );
+                                )
+                            }),
+                            cx,
+                        ))
+                        .child(self.room_field(
+                            "Avatar",
+                            &self.room_ui.avatar,
+                            Some(self.button(
+                                "room-avatar",
+                                "Emoji als Avatar setzen",
+                                ButtonStyle::Secondary,
+                                self.room_available(RoomSetting::Avatar),
+                                LocalAction::Room(Action::Avatar),
+                                cx,
+                            )),
+                            cx,
+                        ));
                 }
-                body = body
-                    .child(self.room_toggle(
+                page = page
+                    .child(about.child(self.room_toggle(
                         "room-read-only",
                         "Schreibgeschützt",
                         "Nachrichten bleiben lesbar. Schreiben folgt der Serverberechtigung.",
@@ -688,214 +664,242 @@ impl Desktop {
                         RoomSetting::ReadOnly,
                         ConversationAction::SetReadOnly(d.read_only != Some(true)),
                         cx,
-                    ))
+                    )))
                     .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(self.button(
-                                "room-archive",
-                                if row.archived == Some(true) {
-                                    "Aus Archiv holen"
-                                } else {
-                                    "Archivieren"
-                                },
-                                ButtonStyle::Secondary,
-                                Availability::when(
-                                    row.archive == Decision::Allowed,
-                                    "Du hast dafür keine Berechtigung.",
-                                ),
-                                LocalAction::Archive(row.context, row.archived != Some(true)),
-                                cx,
-                            ))
-                            .child(self.button(
-                                "room-unread",
-                                "Als ungelesen markieren",
-                                ButtonStyle::Quiet,
-                                Availability::when(
-                                    self.snapshot.content == super::ContentState::Ready,
-                                    "Die Verbindung ist derzeit nicht bereit.",
-                                ),
-                                LocalAction::MessageIn(
-                                    row.context,
-                                    super::messaging::Action::Command(
-                                        talk_core::ui::messaging::MessageAction::MarkUnread,
-                                    ),
-                                ),
-                                cx,
-                            ))
-                            .child(self.button(
-                                "room-local-groups",
-                                "Zu Gruppe hinzufügen …",
-                                ButtonStyle::Quiet,
-                                true,
-                                LocalAction::Open(Overlay::Organize),
-                                cx,
-                            )),
+                        self.dialog_section(None)
+                            .child(
+                                self.dialog_actions()
+                                    .child(self.button(
+                                        "room-archive",
+                                        if row.archived == Some(true) {
+                                            "Aus Archiv holen"
+                                        } else {
+                                            "Archivieren"
+                                        },
+                                        ButtonStyle::Secondary,
+                                        Availability::when(
+                                            row.archive == Decision::Allowed,
+                                            "Du hast dafür keine Berechtigung.",
+                                        ),
+                                        LocalAction::Archive(
+                                            row.context,
+                                            row.archived != Some(true),
+                                        ),
+                                        cx,
+                                    ))
+                                    .child(self.button(
+                                        "room-unread",
+                                        "Als ungelesen markieren",
+                                        ButtonStyle::Secondary,
+                                        Availability::when(
+                                            self.snapshot.content == super::ContentState::Ready,
+                                            "Die Verbindung ist derzeit nicht bereit.",
+                                        ),
+                                        LocalAction::MessageIn(
+                                            row.context,
+                                            super::messaging::Action::Command(
+                                                talk_core::ui::messaging::MessageAction::MarkUnread,
+                                            ),
+                                        ),
+                                        cx,
+                                    ))
+                                    .child(self.button(
+                                        "room-local-groups",
+                                        "Zu Gruppe hinzufügen …",
+                                        ButtonStyle::Secondary,
+                                        true,
+                                        LocalAction::Open(Overlay::Organize),
+                                        cx,
+                                    ))
+                                    .child(self.create_poll_button("room-create-poll", cx)),
+                            )
+                            .child(
+                                self.hint(self.l("Archivieren betrifft nur deine Gesprächsliste.")),
+                            ),
                     )
-                    .child(self.hint(self.l("Archivieren betrifft nur deine Gesprächsliste.")))
-                    .child(self.button(
-                        "room-leave",
-                        "Gespräch verlassen",
-                        ButtonStyle::Secondary,
-                        Availability::when(
-                            d.leave == Decision::Allowed,
-                            "Du hast dafür keine Berechtigung.",
+                    .child(
+                        danger().child(
+                            self.dialog_actions()
+                                .child(self.button(
+                                    "room-leave",
+                                    "Gespräch verlassen",
+                                    ButtonStyle::Secondary,
+                                    Availability::when(
+                                        d.leave == Decision::Allowed,
+                                        "Du hast dafür keine Berechtigung.",
+                                    ),
+                                    LocalAction::Room(Action::Confirm(ConversationAction::Leave)),
+                                    cx,
+                                ))
+                                .child(self.button(
+                                    "room-delete",
+                                    "Gespräch für alle löschen",
+                                    ButtonStyle::Danger,
+                                    self.room_available(RoomSetting::Delete),
+                                    LocalAction::Room(Action::Confirm(ConversationAction::Delete)),
+                                    cx,
+                                )),
                         ),
-                        LocalAction::Room(Action::Confirm(ConversationAction::Leave)),
-                        cx,
-                    ))
-                    .child(self.button(
-                        "room-delete",
-                        "Gespräch für alle löschen",
-                        ButtonStyle::Danger,
-                        self.room_available(RoomSetting::Delete),
-                        LocalAction::Room(Action::Confirm(ConversationAction::Delete)),
-                        cx,
-                    ));
+                    );
             }
             Tab::Notifications => {
-                body=body.child(self.room_toggle("room-important","Wichtig","NextCloud-Ruhemodus kann übersteuert werden. Der Fokusmodus des Betriebssystems gilt weiter.",d.important,RoomSetting::Important,ConversationAction::SetImportant(d.important!=Some(true)),cx))
-                    .child(self.room_heading("Nachrichten"));
-                let levels = [
-                    (conversation::NotificationLevel::Default, "Serverstandard"),
-                    (conversation::NotificationLevel::Always, "Alle Nachrichten"),
-                    (conversation::NotificationLevel::Mention, "Nur Erwähnungen"),
-                    (conversation::NotificationLevel::Never, "Keine Nachrichten"),
-                ];
-                if let Some(level) = d.notifications {
-                    let label = levels
-                        .iter()
-                        .find(|(value, _)| *value == level)
-                        .map_or("Unbekannt", |(_, label)| *label);
-                    body = body.child(
-                        self.hint(&self.lf("Aktuell: {value}", &[("value", self.l(label))])),
-                    );
-                }
+                let mut messages = self.dialog_section(Some("Nachrichten"));
                 if !d.availability(RoomSetting::Notifications).enabled() {
-                    body = body.child(
+                    messages = messages.child(
                         self.hint(self.l(unavailable(d.availability(RoomSetting::Notifications)))),
                     );
                 }
-                for (i, (value, label)) in levels.into_iter().enumerate() {
-                    body = body.child(self.button(
-                        ("room-notifications", i),
-                        label,
-                        if d.notifications == Some(value) {
-                            ButtonStyle::Primary
-                        } else {
-                            ButtonStyle::Secondary
-                        },
-                        self.room_available(RoomSetting::Notifications),
-                        LocalAction::Room(Action::Command(ConversationAction::SetNotifications(
-                            value,
-                        ))),
-                        cx,
-                    ));
-                }
-                body = body
-                    .child(self.room_toggle(
-                        "room-calls",
-                        "Anrufbenachrichtigungen",
-                        "Anrufhinweise unabhängig von Nachrichten einstellen.",
-                        d.call_notifications,
-                        RoomSetting::Notifications,
-                        ConversationAction::SetCallNotifications(
-                            d.call_notifications != Some(true),
+                messages = messages.child(
+                    div().flex().child(
+                        self.segmented().children(
+                            [
+                                (conversation::NotificationLevel::Default, "Serverstandard"),
+                                (conversation::NotificationLevel::Always, "Alle Nachrichten"),
+                                (conversation::NotificationLevel::Mention, "Nur Erwähnungen"),
+                                (conversation::NotificationLevel::Never, "Keine Nachrichten"),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, (value, label))| {
+                                self.segment(
+                                    ("room-notifications", i),
+                                    label,
+                                    d.notifications == Some(value),
+                                    self.room_available(RoomSetting::Notifications),
+                                    LocalAction::Room(Action::Command(
+                                        ConversationAction::SetNotifications(value),
+                                    )),
+                                    cx,
+                                )
+                            }),
                         ),
-                        cx,
-                    ))
-                    .child(
-                        self.hint(
-                            self.l("Banner und Töne stellst du in den App-Einstellungen ein."),
+                    ),
+                );
+                page = page.child(messages).child(
+                    self.dialog_section(None)
+                        .gap_0()
+                        .child(self.room_toggle(
+                            "room-important",
+                            "Wichtig",
+                            "NextCloud-Ruhemodus kann übersteuert werden. Der Fokusmodus des Betriebssystems gilt weiter.",
+                            d.important,
+                            RoomSetting::Important,
+                            ConversationAction::SetImportant(d.important != Some(true)),
+                            cx,
+                        ))
+                        .child(self.room_toggle(
+                            "room-calls",
+                            "Anrufbenachrichtigungen",
+                            "Anrufhinweise unabhängig von Nachrichten einstellen.",
+                            d.call_notifications,
+                            RoomSetting::Notifications,
+                            ConversationAction::SetCallNotifications(
+                                d.call_notifications != Some(true),
+                            ),
+                            cx,
+                        ))
+                        .child(
+                            self.hint(
+                                self.l("Banner und Töne stellst du in den App-Einstellungen ein."),
+                            )
+                            .pt_2(),
                         ),
-                    );
+                );
             }
             Tab::Privacy => {
-                body = body
-                    .child(self.room_toggle(
-                        "room-sensitive",
-                        "Vertrauliche Vorschau",
-                        "Inhalte aus Navigation, Suche und Benachrichtigungen ausblenden.",
-                        Some(d.sensitive || d.classified),
-                        RoomSetting::Sensitive,
-                        ConversationAction::SetSensitive(!d.sensitive),
-                        cx,
-                    ))
-                    .when(d.classified, |b| {
-                        b.child(self.hint(self.l(
-                            "Für klassifizierte Gespräche ist diese Einstellung verpflichtend.",
-                        )))
-                    })
-                    .child(self.room_heading("Nachrichten automatisch löschen"));
-                if let Some(seconds) = d.message_expiration {
-                    let label = match seconds {
-                        0 => self.l("Nie").to_owned(),
-                        86400 => self.l("Nach einem Tag").to_owned(),
-                        604800 => self.l("Nach einer Woche").to_owned(),
-                        2592000 => self.l("Nach 30 Tagen").to_owned(),
-                        _ => self.lf(
-                            "Nach {seconds} Sekunden",
-                            &[("seconds", &seconds.to_string())],
-                        ),
-                    };
-                    body =
-                        body.child(self.hint(&self.lf("Aktuell: {value}", &[("value", &label)])));
-                }
-                if !d.availability(RoomSetting::Expiration).enabled() {
-                    body = body.child(
-                        self.hint(self.l(unavailable(d.availability(RoomSetting::Expiration)))),
-                    );
-                }
-                for (i, (seconds, label)) in [
+                let presets = [
                     (0, "Nie"),
                     (86400, "Nach einem Tag"),
                     (604800, "Nach einer Woche"),
                     (2592000, "Nach 30 Tagen"),
-                ]
-                .into_iter()
-                .enumerate()
+                ];
+                let mut expiry = self.dialog_section(Some("Nachrichten automatisch löschen"));
+                // A server value outside the presets is still shown, never guessed.
+                if let Some(seconds) = d
+                    .message_expiration
+                    .filter(|s| presets.iter().all(|(preset, _)| preset != s))
                 {
-                    body = body.child(self.button(
-                        ("room-expiry", i),
-                        label,
-                        if d.message_expiration == Some(seconds) {
-                            ButtonStyle::Primary
-                        } else {
-                            ButtonStyle::Secondary
-                        },
-                        self.room_available(RoomSetting::Expiration),
-                        LocalAction::Room(Action::Command(ConversationAction::SetExpiration(
-                            seconds,
-                        ))),
-                        cx,
-                    ));
+                    expiry = expiry.child(self.hint(&self.lf(
+                        "Aktuell: {value}",
+                        &[(
+                            "value",
+                            &self.lf(
+                                "Nach {seconds} Sekunden",
+                                &[("seconds", &seconds.to_string())],
+                            ),
+                        )],
+                    )));
                 }
-                body =
-                    body.child(self.hint(self.l(
+                if !d.availability(RoomSetting::Expiration).enabled() {
+                    expiry = expiry.child(
+                        self.hint(self.l(unavailable(d.availability(RoomSetting::Expiration)))),
+                    );
+                }
+                expiry = expiry
+                    .child(
+                        div().flex().child(
+                            self.segmented()
+                                .children(presets.into_iter().enumerate().map(
+                                    |(i, (seconds, label))| {
+                                        self.segment(
+                                            ("room-expiry", i),
+                                            label,
+                                            d.message_expiration == Some(seconds),
+                                            self.room_available(RoomSetting::Expiration),
+                                            LocalAction::Room(Action::Command(
+                                                ConversationAction::SetExpiration(seconds),
+                                            )),
+                                            cx,
+                                        )
+                                    },
+                                )),
+                        ),
+                    )
+                    .child(self.hint(self.l(
                         "Aufbewahrung und gesicherte Gespräche können das Löschen verhindern.",
-                    )))
-                    .child(self.button(
+                    )));
+                page = page
+                    .child(
+                        self.dialog_section(Some("Sichtbarkeit"))
+                            .child(self.room_toggle(
+                                "room-sensitive",
+                                "Vertrauliche Vorschau",
+                                "Inhalte aus Navigation, Suche und Benachrichtigungen ausblenden.",
+                                Some(d.sensitive || d.classified),
+                                RoomSetting::Sensitive,
+                                ConversationAction::SetSensitive(!d.sensitive),
+                                cx,
+                            ))
+                            .when(d.classified, |b| {
+                                b.child(self.hint(self.l(
+                                    "Für klassifizierte Gespräche ist diese Einstellung verpflichtend.",
+                                )))
+                            }),
+                    )
+                    .child(expiry)
+                    .child(danger().child(self.dialog_actions().child(self.button(
                         "room-clear",
                         "Chatverlauf für alle leeren",
                         ButtonStyle::Danger,
                         self.room_available(RoomSetting::ClearHistory),
                         LocalAction::Room(Action::Confirm(ConversationAction::ClearHistory)),
                         cx,
-                    ));
+                    ))));
             }
             Tab::Permissions => {
-                body=body.child(self.hint(self.l("Serverrechte für Beitritt, Start und Medien. Gerätefreigaben des Betriebssystems sind davon unabhängig.")))
-                    .child(self.hint(self.l("Änderungen an Standardrechten setzen individuelle Ausnahmen zurück.")));
                 let defaults =
                     permission_defaults(d.default_permissions, d.server_default_permissions);
+                let mut rights = self
+                    .dialog_section(Some("Standardrechte"))
+                    .child(self.hint(self.l("Serverrechte für Beitritt, Start und Medien. Gerätefreigaben des Betriebssystems sind davon unabhängig.")))
+                    .child(self.hint(self.l("Änderungen an Standardrechten setzen individuelle Ausnahmen zurück.")));
                 if defaults.is_none() {
-                    body=body.child(self.hint(self.l("Die Standardrechte des Servers sind nicht bekannt. Neu laden, bevor du Rechte änderst.")));
+                    rights = rights.child(self.hint(self.l("Die Standardrechte des Servers sind nicht bekannt. Neu laden, bevor du Rechte änderst.")));
                 } else if d.default_permissions == Some(0) {
-                    body = body
+                    rights = rights
                         .child(self.hint(self.l("Aktuell gelten die Standardrechte des Servers.")));
                 }
+                let mut rows = div().flex().flex_col();
                 for (i, (bit, label)) in [
                     (4, "Meeting beitreten"),
                     (2, "Meeting starten"),
@@ -916,43 +920,49 @@ impl Desktop {
                     } else {
                         self.room_available(RoomSetting::Permissions)
                     };
-                    body = body.child(
+                    rows = rows.child(self.dialog_row(
+                        label,
+                        None,
+                        self.switch(
+                            ("room-permission", i),
+                            label,
+                            on,
+                            available,
+                            LocalAction::Room(Action::Confirm(
+                                ConversationAction::SetDefaultPermissions(changed.unwrap_or(0)),
+                            )),
+                            cx,
+                        ),
+                    ));
+                }
+                let mut bans = self.dialog_section(None).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(self.room_heading("Gesperrte Personen"))
+                        .child(self.room_button(
+                            "room-load-bans",
+                            "Neu laden",
+                            RoomSetting::Bans,
+                            ConversationAction::Bans,
+                            cx,
+                        )),
+                );
+                for ban in panel.bans.as_slice() {
+                    bans = bans.child(
                         div()
                             .flex()
                             .items_center()
                             .gap_3()
                             .py_2()
-                            .child(self.room_row(label, "Gilt als Standard für Teilnehmende."))
-                            .child(self.switch(
-                                ("room-permission", i),
-                                label,
-                                on,
-                                available,
-                                LocalAction::Room(Action::Confirm(
-                                    ConversationAction::SetDefaultPermissions(changed.unwrap_or(0)),
-                                )),
-                                cx,
-                            )),
-                    );
-                }
-                body = body
-                    .child(self.room_heading("Gesperrte Personen"))
-                    .child(self.room_button(
-                        "room-load-bans",
-                        "Neu laden",
-                        RoomSetting::Bans,
-                        ConversationAction::Bans,
-                        cx,
-                    ));
-                for ban in panel.bans.as_slice() {
-                    body = body.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
+                            .border_b_1()
+                            .border_color(t.border)
                             .child(
                                 div()
                                     .flex_1()
+                                    .min_w_0()
                                     .child(ban.name.as_str().to_owned())
                                     .child(self.hint(ban.note.as_str())),
                             )
@@ -969,93 +979,116 @@ impl Desktop {
                     );
                 }
                 if panel.bans_loaded && panel.bans.as_slice().is_empty() {
-                    body = body.child(self.hint(self.l("Keine gesperrten Personen.")));
+                    bans = bans.child(self.hint(self.l("Keine gesperrten Personen.")));
                 }
+                page = page.child(rights.child(rows)).child(bans);
             }
             Tab::Meeting => {
-                body = body
-                    .child(self.button(
-                        "room-manage-roles",
-                        "Mitglieder und Rollen",
-                        ButtonStyle::Secondary,
-                        self.room_available(RoomSetting::Members),
-                        LocalAction::Open(Overlay::Participants),
-                        cx,
-                    ))
-                    .child(self.room_toggle(
-                        "room-lobby",
-                        "Warteraum",
-                        "Gäste warten auf die Freigabe durch die Moderation.",
-                        d.lobby,
-                        RoomSetting::Lobby,
-                        ConversationAction::SetLobby(d.lobby != Some(true)),
-                        cx,
-                    ))
-                    .child(self.room_toggle(
-                        "room-guest-access",
-                        "Gastzugang",
-                        "Öffentlicher Zugang ist unabhängig von der Auffindbarkeit.",
-                        d.guest_access,
-                        RoomSetting::GuestAccess,
-                        ConversationAction::SetGuestAccess(d.guest_access != Some(true)),
-                        cx,
-                    ))
-                    .child(self.button(
-                        "room-guest-link",
-                        "Gästelink anzeigen",
-                        ButtonStyle::Secondary,
-                        Availability::when(
-                            d.guest_access == Some(true),
-                            "Gastzugang ist nicht aktiviert.",
-                        ),
-                        LocalAction::Room(Action::Command(ConversationAction::GuestLink)),
-                        cx,
-                    ))
-                    .when_some(panel.guest_link.as_ref(), |body, link| {
-                        body.child(self.hint(link.as_str())).child(self.button(
-                            "copy-guest-link",
-                            "Gästelink kopieren",
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                !d.classified && !d.sensitive,
-                                "Weitergeben ist durch die Gesprächsrichtlinie gesperrt.",
-                            ),
-                            LocalAction::Room(Action::CopyGuestLink),
-                            cx,
-                        ))
-                    })
-                    .child(self.room_heading("Passwort für Gäste"))
-                    .child(self.hint(self.l(if d.has_password == Some(true) {
-                        "Ein Passwort ist eingerichtet."
-                    } else {
-                        "Kein bestätigtes Gastpasswort."
-                    })))
-                    .child(self.room_input(&self.room_ui.password, cx))
-                    .child(self.button(
-                        "room-set-password",
-                        "Passwort setzen",
-                        ButtonStyle::Secondary,
-                        self.room_available(RoomSetting::Password),
-                        LocalAction::Room(Action::Password),
-                        cx,
-                    ))
-                    .child(self.room_heading("Gruppenräume"))
-                    .child(self.hint(self.l(
-                        "Gruppenräume teilen das Meeting auf. Sie sind keine Verzeichnisgruppen.",
-                    )))
-                    .child(self.room_button(
-                        "room-breakouts",
-                        "Zwei Gruppenräume vorbereiten",
-                        RoomSetting::Breakouts,
-                        ConversationAction::ConfigureBreakouts {
-                            amount: 2,
-                            automatic: true,
-                        },
-                        cx,
-                    ));
+                page = page
+                    .child(
+                        self.dialog_section(Some("Mitglieder"))
+                            .child(self.room_toggle(
+                                "room-lobby",
+                                "Warteraum",
+                                "Gäste warten auf die Freigabe durch die Moderation.",
+                                d.lobby,
+                                RoomSetting::Lobby,
+                                ConversationAction::SetLobby(d.lobby != Some(true)),
+                                cx,
+                            ))
+                            .child(self.dialog_actions().child(self.button_with_leading_icon(
+                                "room-manage-roles",
+                                ("Mitglieder und Rollen", "users"),
+                                ButtonStyle::Secondary,
+                                self.room_available(RoomSetting::Members),
+                                LocalAction::Open(Overlay::Participants),
+                                cx,
+                            ))),
+                    )
+                    .child(
+                        self.dialog_section(Some("Gäste"))
+                            .child(self.room_toggle(
+                                "room-guest-access",
+                                "Gastzugang",
+                                "Öffentlicher Zugang ist unabhängig von der Auffindbarkeit.",
+                                d.guest_access,
+                                RoomSetting::GuestAccess,
+                                ConversationAction::SetGuestAccess(d.guest_access != Some(true)),
+                                cx,
+                            ))
+                            .child(
+                                self.dialog_actions()
+                                    .child(self.button_with_leading_icon(
+                                        "room-guest-link",
+                                        ("Gästelink anzeigen", "link"),
+                                        ButtonStyle::Secondary,
+                                        Availability::when(
+                                            d.guest_access == Some(true),
+                                            "Gastzugang ist nicht aktiviert.",
+                                        ),
+                                        LocalAction::Room(Action::Command(
+                                            ConversationAction::GuestLink,
+                                        )),
+                                        cx,
+                                    ))
+                                    .when(panel.guest_link.is_some(), |d2| {
+                                        d2.child(self.button_with_leading_icon(
+                                            "copy-guest-link",
+                                            ("Gästelink kopieren", "copy"),
+                                            ButtonStyle::Quiet,
+                                            Availability::when(
+                                                !d.classified && !d.sensitive,
+                                                "Weitergeben ist durch die Gesprächsrichtlinie gesperrt.",
+                                            ),
+                                            LocalAction::Room(Action::CopyGuestLink),
+                                            cx,
+                                        ))
+                                    }),
+                            )
+                            .when_some(panel.guest_link.as_ref(), |b, link| {
+                                b.child(self.hint(link.as_str()))
+                            })
+                            .child(
+                                self.room_field(
+                                    "Passwort für Gäste",
+                                    &self.room_ui.password,
+                                    Some(self.button(
+                                        "room-set-password",
+                                        "Passwort setzen",
+                                        ButtonStyle::Secondary,
+                                        self.room_available(RoomSetting::Password),
+                                        LocalAction::Room(Action::Password),
+                                        cx,
+                                    )),
+                                    cx,
+                                )
+                                .pt_2(),
+                            )
+                            .child(self.hint(self.l(if d.has_password == Some(true) {
+                                "Ein Passwort ist eingerichtet."
+                            } else {
+                                "Kein bestätigtes Gastpasswort."
+                            }))),
+                    )
+                    .child(
+                        self.dialog_section(Some("Gruppenräume"))
+                            .child(self.hint(self.l(
+                                "Gruppenräume teilen das Meeting auf. Sie sind keine Verzeichnisgruppen.",
+                            )))
+                            .child(self.dialog_actions().child(self.room_button(
+                                "room-breakouts",
+                                "Zwei Gruppenräume vorbereiten",
+                                RoomSetting::Breakouts,
+                                ConversationAction::ConfigureBreakouts {
+                                    amount: 2,
+                                    automatic: true,
+                                },
+                                cx,
+                            ))),
+                    );
             }
         }
-        body
+        page
     }
     fn room_input(&self, input: &Entity<TextInput>, cx: &Context<Self>) -> Div {
         let entity = input.clone();
@@ -1063,13 +1096,14 @@ impl Desktop {
             .flex_1()
             .min_w_0()
             .relative()
-            .min_h(px(42.))
+            // Same height as the adjacent buttons on a field's action line.
+            .min_h(px(36.))
             .rounded(px(8.))
             .border_1()
             .border_color(self.theme.input_border)
             .bg(self.theme.subtle)
             .px_3()
-            .py_2()
+            .py(px(7.))
             .child(self.field_ring(input.focus_handle(cx), 8.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
@@ -1079,8 +1113,15 @@ impl Desktop {
             )
             .child(input.clone())
     }
-    fn members_page(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_3();
+    fn members_page(&self, narrow: bool, cx: &Context<Self>) -> Div {
+        let mut body = div().flex().flex_col().gap_3().child(self.room_page_header(
+            if self.room_ui.bots {
+                "Bots"
+            } else {
+                "Personen"
+            },
+            narrow,
+        ));
         let Some(panel) = self
             .snapshot
             .conversation_panel
@@ -1091,17 +1132,20 @@ impl Desktop {
         };
         if self.room_ui.bots {
             body=body.child(self.hint(self.l("Verfügbare Bots für dieses Gespräch. Registrierung und Zugangsdaten verwaltet die Administration.")))
-                .child(self.room_button("reload-room-bots","Bots laden",RoomSetting::Bots,ConversationAction::Bots,cx));
+                .child(self.dialog_actions().child(self.room_button("reload-room-bots","Bots laden",RoomSetting::Bots,ConversationAction::Bots,cx)));
             for bot in panel.bots.as_slice() {
                 body = body.child(
                     div()
                         .flex()
                         .items_center()
                         .gap_3()
-                        .py_3()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(self.theme.border)
                         .child(
                             div()
                                 .flex_1()
+                                .min_w_0()
                                 .child(bot.name.as_str().to_owned())
                                 .child(self.hint(bot.description.as_str())),
                         )
@@ -1139,7 +1183,7 @@ impl Desktop {
                         cx,
                     )),
             )
-            .child(self.room_heading("Im Gespräch"));
+            .child(self.room_heading("Im Gespräch").pt_3());
         let query = self.room_ui.search.read(cx).content.to_lowercase();
         let mut matching = 0;
         for member in panel
@@ -1162,7 +1206,7 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .py_3()
+                    .py_2()
                     .border_b_1()
                     .border_color(self.theme.border)
                     .child(self.content_avatar(
@@ -1217,16 +1261,16 @@ impl Desktop {
             body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
         }
         if !panel.members_loaded {
-            body = body.child(self.room_button(
+            body = body.child(self.dialog_actions().child(self.room_button(
                 "room-load-members",
                 "Mitglieder laden",
                 RoomSetting::Members,
                 ConversationAction::Members,
                 cx,
-            ));
+            )));
         }
         body = body
-            .child(self.room_heading("Verzeichnis · Einladungsvorschau"))
+            .child(self.room_heading("Verzeichnis · Einladungsvorschau").pt_3())
             .child(
                 self.hint(self.l("Suchergebnisse werden erst nach deiner Bestätigung eingeladen.")),
             );
@@ -1272,14 +1316,14 @@ impl Desktop {
                     self.l("Maximal 100 Adressen und 64 KiB. Einfügen erstellt nur eine Vorschau."),
                 ))
                 .child(self.room_input(&self.room_ui.csv, cx))
-                .child(self.button(
+                .child(self.dialog_actions().child(self.button(
                     "room-csv-preview",
                     "Importvorschau erstellen",
                     ButtonStyle::Secondary,
                     self.room_available(RoomSetting::Invite),
                     LocalAction::Room(Action::CsvPreview),
                     cx,
-                ))
+                )))
                 .child(self.hint(&self.lf(
                     "{duplicates} doppelte und {invalid} ungültige Zeilen.",
                     &[
@@ -1405,8 +1449,8 @@ impl Desktop {
         div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(self.room_heading(verb))
+            .gap_3()
+            .child(self.dialog_page_header(verb, None))
             .when_some(self.selected(), |d, row| {
                 d.child(
                     div()
@@ -1422,9 +1466,8 @@ impl Desktop {
             })
             .child(self.hint(self.l(key)))
             .child(
-                div()
-                    .flex()
-                    .gap_3()
+                self.dialog_actions()
+                    .pt_2()
                     .child(self.button(
                         "room-cancel-confirm",
                         "Abbrechen",

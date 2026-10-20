@@ -1,3 +1,7 @@
+mod flow;
+mod state;
+pub(super) use state::OnboardingUi;
+
 use super::controls::{Availability, icon};
 use super::{ButtonStyle, Desktop, LocalAction};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
@@ -12,7 +16,12 @@ impl Desktop {
         let narrow = window.viewport_size().width < px(960.) || self.scale >= 150;
         let sheet_height =
             f32::from(window.viewport_size().height) - 26. - 24. - if narrow { 69. } else { 0. };
-        let step = match login.phase {
+        let phase = if self.onboarding_ui.resumed {
+            LoginPhase::Ready
+        } else {
+            login.phase
+        };
+        let step = match phase {
             LoginPhase::EnterServer | LoginPhase::Validating => 1,
             LoginPhase::Ready => 3,
             _ => 2,
@@ -24,7 +33,7 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_4();
-        match login.phase {
+        match phase {
             LoginPhase::EnterServer | LoginPhase::Validating => {
                 card = card
                     .child(
@@ -156,30 +165,27 @@ impl Desktop {
                         | StorageStatus::CleanupPending
                         | StorageStatus::RecoveryRequired
                 );
-                card=card.child(self.onboarding_symbol("lock",false)).child(self.title(self.l("Deine Anmeldung speichern.")))
-                    .child(self.hint(self.l(match login.native_store {NativeStoreState::Locked=>"Der sichere Schlüsselspeicher ist gesperrt.",NativeStoreState::Denied=>"Der Zugriff auf den sicheren Schlüsselspeicher wurde abgelehnt.",NativeStoreState::Missing=>"Der sichere Schlüsselspeicher ist auf diesem Gerät nicht verfügbar.",_=>"Wähle, wie du dich auf diesem Gerät anmelden möchtest."})))
-                    .child(self.storage_option("native-store","Sicherer Schlüsselspeicher","Die empfohlene Ablage deines Betriebssystems.",StorageChoice::NativeStore,!pending && matches!(login.native_store,NativeStoreState::Available|NativeStoreState::Unknown),cx))
-                    .child(self.storage_option("private-file","Auf diesem Gerät speichern","Dauerhaft in einer unverschlüsselten privaten Datei. Nur dein Betriebssystem-Benutzer erhält Zugriff.",StorageChoice::PrivateFile,!pending,cx));
+                card = card
+                    .child(self.onboarding_symbol("lock", false))
+                    .child(self.title(self.l(if pending {
+                        "Deine Anmeldung wird gespeichert …"
+                    } else {
+                        "Sicheres Speichern nicht möglich."
+                    })))
+                    .child(self.server_chip(login.server_label.as_str()));
                 if pending {
-                    card=card.child(div().p_3().rounded_lg().bg(if login.storage==StorageStatus::Saving {t.subtle}else{t.warning_bg}).text_color(if login.storage==StorageStatus::Saving {t.muted}else{t.warning}).child(self.l(match login.storage {
-                    StorageStatus::Saving=>"Deine Anmeldung wird gespeichert …",
-                    StorageStatus::CleanupPending=>"Eine frühere Speicherung wird noch bereinigt. Bitte warte.",
-                    _=>"Der Speicherzustand muss geklärt werden. Wähle bis dahin keine neue Ablage.",
-                })));
-                }
-                if matches!(
-                    login.native_store,
-                    NativeStoreState::Locked | NativeStoreState::Denied
-                ) && !pending
-                {
-                    card = card.child(self.button(
-                        "retry-native",
-                        "Erneut versuchen",
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::Storage(StorageChoice::NativeStore),
-                        cx,
-                    ));
+                    card = card.child(self.hint(self.l(match login.storage {
+                        StorageStatus::Saving => "Deine Anmeldung wird dauerhaft auf diesem Gerät gespeichert.",
+                        StorageStatus::CleanupPending => "Eine frühere Speicherung wird noch bereinigt. Bitte warte.",
+                        _ => "Der Speicherzustand muss geklärt werden. Wähle bis dahin keine neue Ablage.",
+                    })));
+                } else {
+                    card = card.child(self.hint(self.l(storage_failure_key(login.storage_failure, login.native_store))))
+                        .child(self.button("retry-native", "Sicheres Speichern erneut versuchen", ButtonStyle::Primary,
+                            true, LocalAction::Storage(StorageChoice::NativeStore), cx))
+                        .child(self.storage_option("private-file", "Auf diesem Gerät speichern",
+                            "Dauerhaft in einer unverschlüsselten privaten Datei. Nur dein Betriebssystem-Benutzer erhält Zugriff.",
+                            StorageChoice::PrivateFile, true, cx));
                 }
                 if let Some(attempt) = login.attempt {
                     card = card.child(self.button(
@@ -194,69 +200,102 @@ impl Desktop {
             }
             LoginPhase::Ready => {
                 use talk_core::preferences::permissions::PermissionKind;
-                let kind = self.permission_ui.setup_kind;
-                let (step, title, previous, next) = match kind {
-                    PermissionKind::Microphone => {
-                        (1, "Mikrofon", None, Some(PermissionKind::Camera))
-                    }
-                    PermissionKind::Camera => (
-                        2,
-                        "Kamera",
-                        Some(PermissionKind::Microphone),
-                        Some(PermissionKind::ScreenSharing),
-                    ),
-                    PermissionKind::ScreenSharing => {
-                        (3, "Bildschirmfreigabe", Some(PermissionKind::Camera), None)
-                    }
-                };
-                let (symbol, _) = super::permissions::permission_identity(kind);
                 let connected = self.snapshot.active_account.is_some();
-                card = card
-                    .child(self.hint(&self.lf("Berechtigungen · {step} von 3", &[("step", &step.to_string())])))
-                    .child(div().w_full().flex().gap_2().children((1..=3).map(|position| {
-                        div().flex_1().h(px(3.)).rounded_full().bg(if position <= step { t.accent } else { t.border })
-                    })))
-                    .child(div().mt_4().flex().items_center().gap_3()
-                        .child(div().flex_shrink_0().child(self.scaled_icon(symbol, 28., t.focus)))
-                        .child(div().min_w_0().flex_1().child(self.title(self.l(title)))))
-                    .child(self.permission_panel(kind, cx))
-                    .child(self.button(
-                        "permission-setup-next",
-                        if next.is_some() { "Weiter" } else { "Zu deinen Gesprächen" },
-                        ButtonStyle::Primary,
-                        Availability::when(connected, "Deine Gespräche sind noch nicht bereit."),
-                        next.map_or(LocalAction::FinishOnboarding, LocalAction::PermissionSetup),
-                        cx,
-                    ).w_full().mt_4())
-                    .when_some(previous, |d, previous| d.child(self.button(
-                        "permission-setup-back", "Zurück", ButtonStyle::Quiet, true,
-                        LocalAction::PermissionSetup(previous), cx,
-                    ).w_full()))
-                    .when(next.is_some(), |d| d.child(self.button(
-                        "permission-setup-skip", "Später einrichten", ButtonStyle::Quiet,
-                        Availability::when(connected, "Deine Gespräche sind noch nicht bereit."),
-                        LocalAction::FinishOnboarding, cx,
-                    ).w_full()))
-                    .child(self.hint(self.l("Du kannst ohne diese Freigaben chatten und sie später in den Einstellungen ändern.")))
-                    .child(self.hint(self.l(match login.storage {
-                        StorageStatus::NativeStored => {
-                            "Anmeldung im sicheren Schlüsselspeicher gespeichert."
+                if self.onboarding_ui.ready {
+                    card = card.child(self.onboarding_symbol("check", false))
+                        .child(self.title(self.l("Bereit für deine Gespräche.")))
+                        .child(self.hint(self.l("Dein Konto ist verbunden. Optionale Freigaben kannst du jederzeit in den Einstellungen ändern.")));
+                    for (kind, title) in [
+                        (PermissionKind::Microphone, "Mikrofon"),
+                        (PermissionKind::Camera, "Kamera"),
+                        (PermissionKind::ScreenSharing, "Bildschirmfreigabe"),
+                    ] {
+                        card = card.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_size(self.sp(12.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(self.l(title)),
+                                )
+                                .child(self.hint(self.l(self.onboarding_permission_status(kind)))),
+                        );
+                    }
+                    card = card.child(
+                        self.button(
+                            "onboarding-done",
+                            "Zu deinen Gesprächen",
+                            ButtonStyle::Primary,
+                            Availability::when(
+                                connected
+                                    && !matches!(
+                                        self.preferences.save,
+                                        talk_core::preferences::SaveState::Pending { .. }
+                                    ),
+                                "Einrichtungsfortschritt wird gespeichert …",
+                            ),
+                            LocalAction::FinishOnboarding,
+                            cx,
+                        )
+                        .w_full(),
+                    );
+                } else {
+                    let kind = self.onboarding_ui.kind;
+                    let (step, title, previous, next) = match kind {
+                        PermissionKind::Microphone => {
+                            (1, "Mikrofon", None, Some(PermissionKind::Camera))
                         }
-                        StorageStatus::PrivateFileStored => {
-                            "Auf diesem Gerät gespeichert · unverschlüsselte private Datei."
+                        PermissionKind::Camera => (
+                            2,
+                            "Kamera",
+                            Some(PermissionKind::Microphone),
+                            Some(PermissionKind::ScreenSharing),
+                        ),
+                        PermissionKind::ScreenSharing => {
+                            (3, "Bildschirmfreigabe", Some(PermissionKind::Camera), None)
                         }
-                        StorageStatus::SessionOnly => {
-                            "Nur für diese Sitzung angemeldet. Nach dem Beenden erneut anmelden."
-                        }
-                        StorageStatus::CleanupPending => {
-                            "Die Bereinigung einer früheren Speicherung ist noch offen."
-                        }
-                        StorageStatus::RecoveryRequired => {
-                            "Der Speicherzustand muss noch geklärt werden."
-                        }
-                        StorageStatus::Saving => "Speichern läuft …",
-                        StorageStatus::NotSaved => "Deine Anmeldung ist nicht gespeichert.",
-                    })));
+                    };
+                    let (symbol, _) = super::permissions::permission_identity(kind);
+                    card = card.child(self.hint(&self.lf("Berechtigungen · {step} von 3", &[("step", &step.to_string())])))
+                        .child(div().w_full().flex().gap_2().children((1..=3).map(|position| {
+                            div().flex_1().h(px(3.)).rounded_full().bg(if position <= step { t.accent } else { t.border })
+                        })))
+                        .child(div().mt_4().flex().items_center().gap_3()
+                            .child(div().flex_shrink_0().child(self.scaled_icon(symbol, 28., t.focus)))
+                            .child(div().min_w_0().flex_1().child(self.title(self.l(title)))))
+                        .child(self.onboarding_permission_panel(kind, cx))
+                        .child(self.button("permission-setup-next", if matches!(self.observation(kind).status,
+                            talk_core::preferences::permissions::PermissionStatus::NotRequired
+                                | talk_core::preferences::permissions::PermissionStatus::PerSession) {
+                            "Weiter"
+                        } else { "Weiter ohne Freigabe" }, ButtonStyle::Secondary,
+                            Availability::when(connected, "Deine Gespräche sind noch nicht bereit."),
+                            next.map_or(LocalAction::OnboardingReady, LocalAction::PermissionSetup), cx).w_full().mt_4())
+                        .when_some(previous, |d, previous| d.child(self.button("permission-setup-back", "Zurück", ButtonStyle::Quiet,
+                            true, LocalAction::PermissionSetup(previous), cx).w_full()))
+                        .child(self.button("permission-setup-skip", "Später einrichten", ButtonStyle::Quiet,
+                            Availability::when(connected, "Deine Gespräche sind noch nicht bereit."), LocalAction::OnboardingReady, cx).w_full())
+                        .child(self.hint(self.l("Du kannst ohne diese Freigaben chatten und sie später in den Einstellungen ändern.")));
+                }
+                if self.onboarding_ui.clearing
+                    || (cfg!(target_os = "macos")
+                        && self.onboarding_ui.kind == PermissionKind::ScreenSharing
+                        && !self.onboarding_checkpoint_ready())
+                {
+                    let failed = self.preference_error.is_some()
+                        || matches!(
+                            self.preferences.save,
+                            talk_core::preferences::SaveState::Failed { .. }
+                        );
+                    card = card.child(self.hint(self.l(if failed {
+                        "Der Einrichtungsfortschritt konnte nicht gespeichert werden. Bitte erneut versuchen."
+                    } else { "Einrichtungsfortschritt wird gespeichert …" })))
+                        .when(failed, |d| d.child(self.button("onboarding-retry-handoff", "Erneut versuchen", ButtonStyle::Secondary,
+                            true, LocalAction::RetryOnboardingHandoff, cx)));
+                }
             }
             LoginPhase::Failed(reason) => {
                 let (title, detail) = match reason {
@@ -400,7 +439,7 @@ was ihr miteinander besprecht.")),
                                 })
                                 .child(
                                     div()
-                                        .size(px(24.))
+                                        .size(self.sp(26.))
                                         .flex_none()
                                         .rounded_full()
                                         .border_1()
@@ -429,7 +468,18 @@ was ihr miteinander besprecht.")),
                                                 t.sidebar_secondary,
                                             ))
                                         })
-                                        .when(!done, |d| d.child((i + 1).to_string())),
+                                        .when(!done, |d| {
+                                            d.child(
+                                                div()
+                                                    .font_family("Google Sans Code")
+                                                    .font_weight(FontWeight::NORMAL)
+                                                    .text_size(self.sp(12.))
+                                                    .line_height(self.sp(16.))
+                                                    .h(self.sp(16.))
+                                                    .text_center()
+                                                    .child((i + 1).to_string()),
+                                            )
+                                        }),
                                 )
                                 .child(self.l(label))
                         }),
@@ -535,7 +585,7 @@ was ihr miteinander besprecht.")),
             .text_color(self.theme.muted)
             .text_size(self.sp(12.))
             .child(self.scaled_icon("lock", 14., self.theme.muted))
-            .child(div().min_w_0().child(label.to_owned()))
+            .child(div().min_w_0().whitespace_normal().child(label.to_owned()))
     }
     fn storage_option(
         &self,
@@ -561,5 +611,57 @@ was ihr miteinander besprecht.")),
             LocalAction::Storage(choice),
             cx,
         )
+    }
+}
+
+fn storage_failure_key(
+    failure: Option<talk_core::ui::presentation::StorageSaveFailure>,
+    native: NativeStoreState,
+) -> &'static str {
+    use talk_core::ui::presentation::StorageSaveFailure;
+    match failure {
+        Some(StorageSaveFailure::LocalDenied) => {
+            "Der Zugriff auf den lokalen Speicher wurde verweigert. Prüfe die Dateirechte und versuche es erneut."
+        }
+        Some(StorageSaveFailure::LocalCorrupt) => {
+            "Der lokale Speicher ist beschädigt oder unsicher. Repariere ihn, bevor du die Anmeldung speicherst."
+        }
+        Some(StorageSaveFailure::LocalUnavailable) => {
+            "Der lokale Speicher ist nicht verfügbar. Prüfe den Speicherort und versuche es erneut."
+        }
+        Some(StorageSaveFailure::NativeLocked) => "Der sichere Schlüsselspeicher ist gesperrt.",
+        Some(StorageSaveFailure::NativeDenied) => {
+            "Der Zugriff auf den sicheren Schlüsselspeicher wurde abgelehnt."
+        }
+        Some(StorageSaveFailure::NativeUnavailable) => {
+            "Der sichere Schlüsselspeicher ist auf diesem Gerät nicht verfügbar."
+        }
+        Some(StorageSaveFailure::NativeCorrupt) => {
+            "Der Schlüsselspeicher meldet beschädigte Daten. Bitte repariere ihn oder wähle die private Datei."
+        }
+        Some(StorageSaveFailure::NativeTemporarilyUnavailable) => {
+            "Der Schlüsselspeicher ist vorübergehend nicht erreichbar. Bitte erneut versuchen oder die private Datei wählen."
+        }
+        Some(StorageSaveFailure::Cancelled) => {
+            "Das sichere Speichern wurde abgebrochen. Bitte erneut versuchen oder die private Datei wählen."
+        }
+        Some(StorageSaveFailure::Conflict) => {
+            "Der Speicherzustand hat sich geändert. Bitte erneut versuchen."
+        }
+        Some(StorageSaveFailure::Failed) => {
+            "Die Anmeldung konnte nicht sicher gespeichert werden. Bitte erneut versuchen oder die private Datei wählen."
+        }
+        None => match native {
+            NativeStoreState::Locked => "Der sichere Schlüsselspeicher ist gesperrt.",
+            NativeStoreState::Denied => {
+                "Der Zugriff auf den sicheren Schlüsselspeicher wurde abgelehnt."
+            }
+            NativeStoreState::Missing => {
+                "Der sichere Schlüsselspeicher ist auf diesem Gerät nicht verfügbar."
+            }
+            _ => {
+                "Die Anmeldung konnte nicht sicher gespeichert werden. Bitte erneut versuchen oder die private Datei wählen."
+            }
+        },
     }
 }

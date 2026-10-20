@@ -101,11 +101,24 @@ impl Accounts {
             return;
         }
         let mut reload = false;
+        let mut invalidate_history = None;
+        let mut reload_messages = false;
         let mut load_members = false;
         let completion = match result {
             Ok(result) => {
                 match result {
                     wire::ConversationResult::Details(details) => {
+                        if details.conversation.actions.read_messages != Decision::Allowed {
+                            invalidate_history = Some(
+                                if details.conversation.actions.read_messages == Decision::Denied {
+                                    ContentState::Denied
+                                } else {
+                                    ContentState::Failed
+                                },
+                            );
+                        } else if self.snapshot.content == ContentState::Denied {
+                            reload_messages = true;
+                        }
                         let mut row = conversation(&details.conversation, context.account);
                         row.participants = details
                             .participant_count
@@ -191,6 +204,7 @@ impl Accounts {
                         panel.bans_loaded = true;
                     }
                     wire::ConversationResult::Deleted | wire::ConversationResult::Left => {
+                        invalidate_history = Some(ContentState::Denied);
                         self.load_rooms = Some(context.account);
                         self.snapshot.messages = Page::empty();
                         self.snapshot.files = Page::empty();
@@ -202,6 +216,8 @@ impl Accounts {
                         panel.bans = Page::empty();
                     }
                     wire::ConversationResult::HistoryCleared => {
+                        invalidate_history = Some(ContentState::Loading);
+                        reload_messages = true;
                         self.snapshot.messages = Page::empty();
                         reload = true;
                     }
@@ -272,6 +288,12 @@ impl Accounts {
                 request,
                 completion,
             });
+        }
+        if let Some(state) = invalidate_history {
+            self.invalidate_history(context, state);
+        }
+        if reload_messages {
+            let _ = self.start_messages(context);
         }
         if reload {
             let _ = self.room_action(request, context, view::ConversationAction::Read);

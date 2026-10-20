@@ -139,6 +139,14 @@ impl Drafts {
             !draft.text.as_str().is_empty() || draft.pending.is_some() || draft.uncertain
         })
     }
+    /// Removing one account must explain only the drafts and unresolved sends
+    /// that will actually be retired with that account.
+    pub fn has_unsent_for_account(&self, account: talk_core::ui::AccountId) -> bool {
+        self.entries.iter().any(|draft| {
+            draft.context.account.account == account
+                && (!draft.text.as_str().is_empty() || draft.pending.is_some() || draft.uncertain)
+        })
+    }
     pub fn save(&mut self, context: ConversationRef, text: &str) -> Result<(), SubmitError> {
         if !context.is_consistent() {
             return Err(SubmitError::StaleScope);
@@ -401,6 +409,23 @@ mod tests {
         fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
             None
         }
+    }
+    #[test]
+    fn removal_warning_is_scoped_to_the_account_that_owns_the_draft() {
+        let mut drafts = Drafts::default();
+        let first = context(1);
+        let mut other = context(2);
+        other.account.account = AccountId::from_local(2);
+        other.conversation.account = other.account.account;
+        drafts
+            .save(first, "Only this account loses this draft")
+            .unwrap();
+        assert!(drafts.has_unsent_for_account(first.account.account));
+        assert!(!drafts.has_unsent_for_account(other.account.account));
+        drafts.save(other, "Separate account").unwrap();
+        drafts.save(first, "").unwrap();
+        assert!(!drafts.has_unsent_for_account(first.account.account));
+        assert!(drafts.has_unsent_for_account(other.account.account));
     }
     #[test]
     fn restart_guard_covers_other_rooms_targets_and_unresolved_empty_drafts() {

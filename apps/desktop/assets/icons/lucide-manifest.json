@@ -95,6 +95,13 @@
       "transformation": "none"
     },
     {
+      "asset": "chevron-up.svg",
+      "upstream_path": "icons/chevron-up.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-up.svg",
+      "sha256": "d09f13fcbef3c493ead7e4663b5ee91804fec38d5edb5e7cc3acfbd547641cf4",
+      "transformation": "none"
+    },
+    {
       "asset": "clock.svg",
       "upstream_path": "icons/clock.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/clock.svg",
@@ -291,6 +298,13 @@
       "transformation": "none"
     },
     {
+      "asset": "play.svg",
+      "upstream_path": "icons/play.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/play.svg",
+      "sha256": "e646902a5a8ba055ce573c6f51d10bb6eb9d230e7d6e84a9e6c81f599778ffc1",
+      "transformation": "none"
+    },
+    {
       "asset": "plus.svg",
       "upstream_path": "icons/plus.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/plus.svg",
@@ -361,6 +375,13 @@
       "transformation": "none"
     },
     {
+      "asset": "square.svg",
+      "upstream_path": "icons/square.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square.svg",
+      "sha256": "bd979354f0ab184b95cecf03eedefe40c2dc65830ac6d7e60017b2b25a354acb",
+      "transformation": "none"
+    },
+    {
       "asset": "star-filled.svg",
       "upstream_path": "icons/star.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/star.svg",
@@ -386,6 +407,13 @@
       "upstream_path": "icons/thumbs-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/thumbs-up.svg",
       "sha256": "f66a57d3b8491f866e7da9375c04b9b7627a4ed898fbfe1a0a331dc12b16fbd8",
+      "transformation": "none"
+    },
+    {
+      "asset": "trash-2.svg",
+      "upstream_path": "icons/trash-2.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/trash-2.svg",
+      "sha256": "e63698acf757d3043fcb4a9ea6ffceff9dd84708707eafc879c86b34a6ff2786",
       "transformation": "none"
     },
     {

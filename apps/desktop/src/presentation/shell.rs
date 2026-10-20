@@ -176,7 +176,9 @@ impl Desktop {
         let t = self.theme;
         let Some(row) = self.selected() else {
             return div()
+                .relative()
                 .size_full()
+                .rounded(px(13.))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -186,7 +188,8 @@ impl Desktop {
                 .child(self.l("Wähle ein Gespräch."))
                 .when(self.local_feedback_visible(), |d| {
                     d.child(self.feedback_view(cx))
-                });
+                })
+                .child(t.inset_card_edge(13.));
         };
         let kind = match row.kind {
             ConversationKind::Direct => "Persönliches Gespräch",
@@ -371,14 +374,16 @@ impl Desktop {
                     )
                 },
             )
-            .child(self.icon_button(
-                "call",
-                (call_icon, call_name),
-                ButtonStyle::Quiet,
-                call_availability.explained_elsewhere(),
-                LocalAction::Call,
-                cx,
-            ))
+            .when(row.kind != ConversationKind::NoteToSelf, |d| {
+                d.child(self.icon_button(
+                    "call",
+                    (call_icon, call_name),
+                    ButtonStyle::Quiet,
+                    call_availability.explained_elsewhere(),
+                    LocalAction::Call,
+                    cx,
+                ))
+            })
             .child(self.icon_button(
                 "room-info",
                 ("settings", "Gesprächseinstellungen"),
@@ -394,21 +399,53 @@ impl Desktop {
             .flex_none()
             .when(cfg!(target_os = "windows"), |d| d.bg(gpui::rgb(0xffffff)))
             .child(header)
-            .when(self.snapshot.content == ContentState::Offline, |d| {
-                d.child(div().px_6().pt_5().child(
-                    div().p_3().rounded_md().bg(t.warning_bg).text_color(t.warning)
-                        .child(self.l("Offline · Letzter geladener Stand. Entwürfe werden nicht automatisch gesendet.")),
-                ))
-            })
             .when(!self.background_inert, |d| {
-                d.child(self.reason_tip("call".into(), call_availability.below_control(), Some(call_name), cx))
-                    .child(self.reason_tip("room-info".into(), Availability::available().below_control(), Some("Gesprächseinstellungen"), cx))
-                    .child(self.reason_tip("conversation-title".into(), Availability::available().below_control(), Some("Geteilte Inhalte"), cx))
-                    .child(self.reason_tip("favorite-conversation".into(), favorite_availability.below_control(), Some(favorite_name), cx))
-                    .child(self.reason_tip("history-search".into(), search_availability.below_control(), Some("Im Gespräch suchen"), cx))
-                    .when(!matches!(row.kind, ConversationKind::Direct | ConversationKind::NoteToSelf), |d| {
-                        d.child(self.reason_tip("room-members".into(), Availability::available().below_control(), Some("Mitglieder"), cx))
-                    })
+                d.when(row.kind != ConversationKind::NoteToSelf, |d| {
+                    d.child(self.reason_tip(
+                        "call".into(),
+                        call_availability.below_control(),
+                        Some(call_name),
+                        cx,
+                    ))
+                })
+                .child(self.reason_tip(
+                    "room-info".into(),
+                    Availability::available().below_control(),
+                    Some("Gesprächseinstellungen"),
+                    cx,
+                ))
+                .child(self.reason_tip(
+                    "conversation-title".into(),
+                    Availability::available().below_control(),
+                    Some("Geteilte Inhalte"),
+                    cx,
+                ))
+                .child(self.reason_tip(
+                    "favorite-conversation".into(),
+                    favorite_availability.below_control(),
+                    Some(favorite_name),
+                    cx,
+                ))
+                .child(self.reason_tip(
+                    "history-search".into(),
+                    search_availability.below_control(),
+                    Some("Im Gespräch suchen"),
+                    cx,
+                ))
+                .when(
+                    !matches!(
+                        row.kind,
+                        ConversationKind::Direct | ConversationKind::NoteToSelf
+                    ),
+                    |d| {
+                        d.child(self.reason_tip(
+                            "room-members".into(),
+                            Availability::available().below_control(),
+                            Some("Mitglieder"),
+                            cx,
+                        ))
+                    },
+                )
             });
         let header = div()
             .flex()
@@ -442,6 +479,7 @@ impl Desktop {
             .child(timeline.tab_group().tab_index(0))
             .child(composer.tab_group().tab_index(1));
         div()
+            .relative()
             .size_full()
             .rounded(px(13.))
             .overflow_hidden()
@@ -456,6 +494,7 @@ impl Desktop {
                         panel.size_full()
                     }),
             )
+            .child(t.inset_card_edge(12.))
     }
     pub(super) fn composer_view(
         &self,
@@ -488,8 +527,8 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.composer_context(cx))
-            .child(self.composer_more_menu(cx))
+            .children(self.composer_context(cx))
+            .children(self.composer_more_menu(cx))
             .child(
                 div()
                     .min_h(px(96.))
@@ -572,42 +611,18 @@ impl Desktop {
                                         cx,
                                     )),
                             )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .when(self.composer_active || !ready || pending, |d| {
-                                        d.child(self.hint(self.l(
-                                            if self.drafts.uncertain(row.context) {
-                                                "Status unklar"
-                                            } else if pending {
-                                                "Ergebnis ausstehend"
-                                            } else if !ready {
-                                                "Senden nicht verfügbar"
-                                            } else if compact {
-                                                "Enter senden"
-                                            } else {
-                                                "Enter senden · ⇧ Enter neue Zeile"
-                                            },
-                                        )))
-                                    })
-                                    .child(self.icon_button(
-                                        "send",
-                                        ("arrow-up", "Senden"),
-                                        ButtonStyle::Primary,
-                                        send_availability,
-                                        LocalAction::Send,
-                                        cx,
-                                    )),
-                            ),
+                            .child(div().flex().items_center().gap_3().child(self.icon_button(
+                                "send",
+                                ("arrow-up", "Senden"),
+                                ButtonStyle::Primary,
+                                send_availability,
+                                LocalAction::Send,
+                                cx,
+                            ))),
                     ),
             )
-            .when(!self.composer.read(cx).content.is_empty(), |d| {
-                d.child(self.hint(self.l("Entwürfe bleiben nur in dieser Sitzung erhalten.")))
-            })
-            .when(row.draft_clipboard != Decision::Allowed, |d| {
-                d.child(self.hint(self.l("Zwischenablage für diesen Entwurf nicht freigegeben.")))
+            .when(self.snapshot.content == ContentState::Offline, |d| {
+                d.child(self.hint(self.l("Offline · Entwürfe werden nicht automatisch gesendet.")))
             })
             .when(self.composer.read(cx).rejected, |d| {
                 d.child(

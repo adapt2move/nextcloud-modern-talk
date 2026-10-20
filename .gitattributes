@@ -1,0 +1,3 @@
+# Preserve the exact upstream notice bytes, including original trailing spaces.
+apps/desktop/assets/fonts/GoogleSansCode-LICENSE.txt -whitespace
+apps/desktop/assets/fonts/GoogleSansCode-TRADEMARKS.txt -whitespace

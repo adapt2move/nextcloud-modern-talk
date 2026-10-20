@@ -1,0 +1,45 @@
+{
+  "family": "Google Sans Code",
+  "version": "7.001",
+  "source_commit": "f9e36cea20d34ecc9b61c09609fe02e1438364fc",
+  "release_url": "https://github.com/googlefonts/googlesans-code/releases/tag/v7.001",
+  "archive_url": "https://github.com/googlefonts/googlesans-code/releases/download/v7.001/GoogleSansCode-v7.001.zip",
+  "archive_sha256": "eebba2a438882396e8530cad6d6cb80182b0afb6e9e0ad07b7340359a53ba2e9",
+  "license": "OFL-1.1",
+  "usage": "Only the unmodified Roman variable asset is bundled. Onboarding numerals use Regular (400), with the upstream fixed-width MONO default of 1. The body remains Google Sans.",
+  "font_axes": {
+    "wght": {
+      "min": 300,
+      "default": 400,
+      "max": 800
+    },
+    "MONO": {
+      "min": 0,
+      "default": 1,
+      "max": 1
+    }
+  },
+  "files": [
+    {
+      "file": "GoogleSansCode-Variable.ttf",
+      "source": "https://github.com/googlefonts/googlesans-code/releases/download/v7.001/GoogleSansCode-v7.001.zip",
+      "archive_path": "GoogleSansCode[MONO,wght].ttf",
+      "sha256": "74642762fae66d5883077794a763e1086394b8cb72f2623e456e06359dc5c64b",
+      "bytes": 268264
+    },
+    {
+      "file": "GoogleSansCode-LICENSE.txt",
+      "source": "https://github.com/googlefonts/googlesans-code/releases/download/v7.001/GoogleSansCode-v7.001.zip",
+      "archive_path": "OFL.txt",
+      "sha256": "ff8f4fbc4f1a71c7d4c6481c48dc2b21c43f8dc15872536667fee45c15d20928",
+      "bytes": 4396
+    },
+    {
+      "file": "GoogleSansCode-TRADEMARKS.txt",
+      "source": "https://raw.githubusercontent.com/googlefonts/googlesans-code/f9e36cea20d34ecc9b61c09609fe02e1438364fc/TRADEMARKS.md",
+      "archive_path": null,
+      "sha256": "d9c627c968837b4a148195153271ca69e98d4bc750b041e0d98ba7b376b1cf50",
+      "bytes": 1478
+    }
+  ]
+}

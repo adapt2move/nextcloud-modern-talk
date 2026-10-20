@@ -5,8 +5,10 @@ pub(super) mod content;
 mod conversations;
 mod creation;
 pub(super) mod files;
+mod history;
 mod messaging;
 mod notifications;
+mod removal;
 mod update;
 use std::{
     cell::RefCell,
@@ -34,8 +36,8 @@ use talk_core::ui::presentation::{
     ConversationKind, ConversationListState, ConversationMutationResult, ConversationOrganization,
     ConversationRef, ConversationView, FeatureSupport, LoginFailure, LoginPhase, NativeDesktopPort,
     NativeStoreState, OrganizationResult, Presence, PresentationSnapshot, RequestId,
-    SavedAccountPhase, SavedAccountView, StorageChoice, StorageStatus, SubmissionResult, TagEdit,
-    TagKind, TagRef, TagView, UiIntent,
+    SavedAccountPhase, SavedAccountView, StorageChoice, StorageSaveFailure, StorageStatus,
+    SubmissionResult, TagEdit, TagKind, TagRef, TagView, UiIntent,
 };
 use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIntent};
 
@@ -51,8 +53,9 @@ enum Purpose {
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
-    Login(RequestId),
+    Login(RequestId, LoginWork),
     Restore(AccountId),
+    Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
     Mutation(RequestId, ConversationRef),
     Send(RequestId, ConversationRef, OperationId),
@@ -63,11 +66,22 @@ struct Pending {
     id: ConnectionRequestId,
     purpose: Purpose,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LoginWork {
+    Begin,
+    Poll,
+    Browser,
+    Save,
+}
 struct Login {
     request: RequestId,
     begin: ConnectionRequestId,
     owner: Option<(AccountId, LoginAttemptId)>,
     poll_at: Instant,
+    automatic_save_attempted: bool,
+    automatic_save_pending: Option<Instant>,
+    automatic_save_choice: talk_core::identity::StorageChoice,
+    save_request: Option<ConnectionRequestId>,
 }
 #[derive(Clone, Copy)]
 struct Unresolved {
@@ -88,6 +102,7 @@ pub struct Accounts {
     next_request: u64,
     pending: Vec<Pending>,
     login: Option<Login>,
+    removal: Option<removal::Removal>,
     replace: Option<AccountId>,
     snapshot: PresentationSnapshot,
     dirty: bool,
@@ -100,6 +115,7 @@ pub struct Accounts {
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
     background: background::Background,
+    history: history::Cache,
     picker: Option<files::Picker>,
     picker_open: bool,
     message_poll_at: Instant,
@@ -123,6 +139,7 @@ impl Accounts {
             next_request: 0,
             pending: Vec::new(),
             login: None,
+            removal: None,
             replace: None,
             snapshot,
             dirty: true,
@@ -135,6 +152,7 @@ impl Accounts {
             message_search: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
+            history: history::Cache::default(),
             picker: None,
             picker_open: false,
             message_poll_at: Instant::now(),
@@ -142,6 +160,7 @@ impl Accounts {
         }))
     }
     pub fn shutdown(&mut self) {
+        self.history = history::Cache::default();
         self.call_actions.clear();
         if let Ok(connection) = &mut self.connection {
             connection.shutdown();
@@ -246,6 +265,7 @@ impl Accounts {
         let saved = page(state.accounts.as_slice().iter().map(|a| {
             SavedAccountView {
                 id: a.summary.account,
+                navigation_key: a.summary.navigation_key.clone(),
                 label: a.summary.account_label.clone(),
                 server_label: a.summary.server_label.clone(),
                 phase: match a.state {
@@ -287,6 +307,7 @@ impl Accounts {
             self.select(None);
         }
         self.sync_background();
+        self.tick_removal(state);
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
@@ -327,6 +348,23 @@ impl Accounts {
                 }
             }
         }
+        if let Some((request, deadline, choice)) = self.login.as_ref().and_then(|login| {
+            login
+                .automatic_save_pending
+                .map(|deadline| (login.request, deadline, login.automatic_save_choice))
+        }) {
+            match self.save_login(request, choice) {
+                Err(IdentityError::Request(ErrorKind::Busy)) if Instant::now() < deadline => {}
+                result => {
+                    if let Some(login) = &mut self.login {
+                        login.automatic_save_pending = None;
+                    }
+                    if let Err(error) = result {
+                        self.login_failed(error);
+                    }
+                }
+            }
+        }
         self.tick_content();
         self.tick_background();
         self.tick_calls();
@@ -344,7 +382,7 @@ impl Accounts {
                 && !self
                     .pending
                     .iter()
-                    .any(|p| matches!(p.purpose, Purpose::Login(r) if r == l.request)))
+                    .any(|p| matches!(p.purpose, Purpose::Login(r, _) if r == l.request)))
             .then_some((l.request, l.owner))
             .and_then(|(r, o)| o.map(|(a, t)| (r, a, t)))
         });
@@ -354,7 +392,7 @@ impl Accounts {
             }
             if let Err(error) = self.admit(
                 RuntimeCommand::Poll { account, attempt },
-                Purpose::Login(request),
+                Purpose::Login(request, LoginWork::Poll),
             ) && error != IdentityError::Request(ErrorKind::Busy)
             {
                 self.login_failed(error);
@@ -363,15 +401,18 @@ impl Accounts {
     }
     fn login_failed(&mut self, error: IdentityError) {
         match error {
-            IdentityError::Storage { failure, .. } => {
-                self.snapshot.login.native_store = match failure {
-                    StorageFailure::Locked => NativeStoreState::Locked,
-                    StorageFailure::AccessDenied => NativeStoreState::Denied,
-                    StorageFailure::Missing
-                    | StorageFailure::Unsupported
-                    | StorageFailure::Unavailable => NativeStoreState::Missing,
-                    _ => NativeStoreState::Unknown,
-                };
+            IdentityError::Storage { backend, failure } => {
+                self.snapshot.login.storage_failure = Some(storage_save_failure(backend, failure));
+                if backend != StorageBackend::PrivateFile {
+                    self.snapshot.login.native_store = match failure {
+                        StorageFailure::Locked => NativeStoreState::Locked,
+                        StorageFailure::AccessDenied => NativeStoreState::Denied,
+                        StorageFailure::Missing
+                        | StorageFailure::Unsupported
+                        | StorageFailure::Unavailable => NativeStoreState::Missing,
+                        _ => NativeStoreState::Unknown,
+                    };
+                }
                 self.snapshot.login.phase = LoginPhase::ChooseStorage;
                 self.snapshot.login.storage = StorageStatus::NotSaved;
             }
@@ -382,6 +423,33 @@ impl Accounts {
             _ => self.snapshot.login.phase = LoginPhase::Failed(login_error(error)),
         }
         self.touch();
+    }
+    fn save_login(
+        &mut self,
+        request: RequestId,
+        choice: talk_core::identity::StorageChoice,
+    ) -> Result<(), IdentityError> {
+        let (account, attempt) = self
+            .login
+            .as_ref()
+            .filter(|login| login.request == request)
+            .and_then(|login| login.owner)
+            .ok_or(ErrorKind::WrongScope)?;
+        let id = self.admit(
+            RuntimeCommand::Save {
+                account,
+                attempt,
+                choice,
+            },
+            Purpose::Login(request, LoginWork::Save),
+        )?;
+        if let Some(login) = &mut self.login {
+            login.save_request = Some(id);
+        }
+        self.snapshot.login.phase = LoginPhase::ChooseStorage;
+        self.snapshot.login.storage = StorageStatus::Saving;
+        self.snapshot.login.storage_failure = None;
+        Ok(())
     }
     fn complete(&mut self, purpose: Purpose, done: &ConnectionCompletion) {
         // A stale/cancelled reply can settle retained work but cannot repopulate a new runtime.
@@ -406,18 +474,42 @@ impl Accounts {
                 // A mailbox drain changes scheduling only, not the visible snapshot.
                 return self.complete_live_events(scope, result);
             }
-            Purpose::Login(request) => {
-                if self.login.as_ref().is_none_or(|l| l.request != request) { return; }
+            Purpose::Login(request, work) => {
+                let Some(login) = self.login.as_ref().filter(|l| l.request == request) else { return; };
+                let current_work = match work {
+                    LoginWork::Begin => done.request == login.begin && self.snapshot.login.phase == LoginPhase::Validating,
+                    LoginWork::Poll | LoginWork::Browser => self.snapshot.login.phase == LoginPhase::BrowserWaiting && !login.automatic_save_attempted,
+                    LoginWork::Save => login.save_request == Some(done.request) && self.snapshot.login.storage == StorageStatus::Saving,
+                };
+                if !current_work || done.cancel_requested
+                    || (done.captured_scope.is_some() && !done.scope_is_current)
+                    || login.owner.is_some_and(|(account, attempt)| {
+                        done.account != Some(account) || done.attempt != Some(attempt)
+                    })
+                { return; }
                 match result {
                     Ok(RuntimeReply::Begun { account, attempt } | RuntimeReply::Pending { account, attempt }) => {
+                        if self.login.as_ref().is_some_and(|l| l.automatic_save_attempted) { return; }
                         if let Some(login) = &mut self.login { login.owner = Some((account, attempt)); login.poll_at = Instant::now() + Duration::from_secs(1); }
                         self.snapshot.login.phase = LoginPhase::BrowserWaiting;
                     }
-                    Ok(RuntimeReply::Authorized { account, attempt }) => { if let Some(l) = &mut self.login { l.owner = Some((account, attempt)); } self.snapshot.login.phase = LoginPhase::ChooseStorage; }
+                    Ok(RuntimeReply::Authorized { account, attempt }) => {
+                        let Some(login) = &mut self.login else { return; };
+                        if login.automatic_save_attempted || login.owner != Some((account, attempt)) { return; }
+                        // Exactly one automatic storage attempt. The identity owner still
+                        // commits intent, reconciles uncertainty and authorizes activation.
+                        login.automatic_save_attempted = true;
+                        login.automatic_save_pending = Some(Instant::now() + Duration::from_secs(5));
+                        self.snapshot.login.phase = LoginPhase::ChooseStorage;
+                        self.snapshot.login.storage = StorageStatus::Saving;
+                    }
                     Ok(RuntimeReply::Active { summary, .. }) => {
+                        if self.login.as_ref().and_then(|l| l.owner).is_none_or(|(account, _)| account != summary.account)
+                            || !done.scope_is_current { return; }
                         self.snapshot.login.phase = LoginPhase::Ready; self.snapshot.login.storage = storage(&summary);
+                        self.snapshot.login.storage_failure = None;
                         self.snapshot.login.account_label = summary.account_label.clone().unwrap_or_else(|| text(""));
-                        self.snapshot.login.server_label = summary.server_label.clone().unwrap_or_else(|| text(""));
+                        // Keep the normalized destination selected before browser handoff.
                         if let Some(scope) = summary.scope { self.select(Some(scope)); }
                     }
                     Ok(RuntimeReply::BrowserOpened { .. }) => (),
@@ -432,6 +524,7 @@ impl Accounts {
                     _ => (),
                 }
             }
+            Purpose::Removal(request, account, step) => self.complete_removal(request, account, step, result),
             Purpose::Rooms(scope) => self.complete_rooms(scope, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
@@ -565,29 +658,55 @@ impl Accounts {
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
         self.current(context.account)?;
-        let row = self
-            .snapshot
-            .conversations
-            .as_slice()
-            .iter()
-            .find(|r| r.context == context)
-            .ok_or(SubmitError::StaleScope)?;
-        if self.snapshot.active_account != Some(context.account) || row.send == Decision::Stale {
-            return Err(SubmitError::StaleScope);
+        if !self.select_conversation(context)? {
+            return Ok(());
         }
-        self.clear_content();
-        self.snapshot.selected = Some(context);
         self.start_messages(context)?;
         self.snapshot.content_panel.context = Some(context);
         let _ = self.start_poll(RequestId(0), protocol::content::PollCommand::Capabilities);
         self.touch();
         Ok(())
     }
+    /// Navigation restores a previously authorized read projection. Send policy
+    /// is not a read gate; the protocol owner revalidates every mutation.
+    fn select_conversation(&mut self, context: ConversationRef) -> Result<bool, SubmitError> {
+        self.snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .ok_or(SubmitError::StaleScope)?;
+        if self.snapshot.active_account != Some(context.account) {
+            return Err(SubmitError::StaleScope);
+        }
+        if self.snapshot.selected == Some(context) {
+            return Ok(false);
+        }
+        self.clear_content();
+        self.snapshot.selected = Some(context);
+        self.restore_messages(context);
+        self.touch();
+        Ok(true)
+    }
     fn submit(&mut self, intent: UiIntent) -> Result<(), SubmitError> {
         if let Some(result) = self.submit_call(&intent) {
             return result;
         }
         match intent {
+            UiIntent::RemoveAccount {
+                request,
+                account,
+                scope,
+            } => self.remove_account(request, account, scope)?,
+            UiIntent::AcknowledgeAccountRemoval { request, account } => {
+                if self
+                    .snapshot
+                    .account_removal
+                    .is_some_and(|result| result.request == request && result.account == account)
+                {
+                    self.snapshot.account_removal = None;
+                }
+            }
             UiIntent::Content {
                 request,
                 account,
@@ -723,13 +842,16 @@ impl Accounts {
                 if self.login.is_some() {
                     self.cancel_login();
                 }
+                let selected_origin =
+                    talk_adapters::identity::selected_server_origin(server.as_str())
+                        .map_err(submit_error)?;
                 let id = self
                     .admit(
                         RuntimeCommand::Begin {
                             server: text(server.as_str()),
                             replace: self.replace,
                         },
-                        Purpose::Login(request),
+                        Purpose::Login(request, LoginWork::Begin),
                     )
                     .map_err(submit_error)?;
                 self.login = Some(Login {
@@ -737,9 +859,25 @@ impl Accounts {
                     begin: id,
                     owner: None,
                     poll_at: Instant::now(),
+                    automatic_save_attempted: false,
+                    automatic_save_pending: None,
+                    save_request: None,
+                    // Reauthorization preserves a deliberately committed file choice.
+                    // Native-store recovery alone must not silently migrate it.
+                    automatic_save_choice: if self.replace.is_some_and(|account| {
+                        self.snapshot.saved_accounts.as_slice().iter().any(|saved| {
+                            saved.id == account && saved.storage == StorageStatus::PrivateFileStored
+                        })
+                    }) {
+                        talk_core::identity::StorageChoice::PrivateFile
+                    } else {
+                        talk_core::identity::StorageChoice::Native
+                    },
                 });
                 self.snapshot.login.phase = LoginPhase::Validating;
                 self.snapshot.login.attempt = Some(request);
+                self.snapshot.login.server_label = selected_origin;
+                self.snapshot.login.storage_failure = None;
             }
             UiIntent::CancelLogin(request) => {
                 if self.login.as_ref().is_some_and(|l| l.request == request) {
@@ -757,7 +895,7 @@ impl Accounts {
                     .ok_or(SubmitError::StaleScope)?;
                 self.admit(
                     RuntimeCommand::ReopenBrowser { account, attempt },
-                    Purpose::Login(request),
+                    Purpose::Login(request, LoginWork::Browser),
                 )
                 .map_err(submit_error)?;
             }
@@ -765,27 +903,24 @@ impl Accounts {
                 attempt: request,
                 choice,
             } => {
-                let (account, attempt) = self
-                    .login
-                    .as_ref()
-                    .filter(|l| l.request == request)
-                    .and_then(|l| l.owner)
-                    .ok_or(SubmitError::StaleScope)?;
+                if self.snapshot.login.phase != LoginPhase::ChooseStorage
+                    || matches!(
+                        self.snapshot.login.storage,
+                        StorageStatus::Saving
+                            | StorageStatus::RecoveryRequired
+                            | StorageStatus::CleanupPending
+                    )
+                {
+                    return Err(SubmitError::Busy);
+                }
                 let choice = match choice {
                     StorageChoice::NativeStore => talk_core::identity::StorageChoice::Native,
                     StorageChoice::PrivateFile => talk_core::identity::StorageChoice::PrivateFile,
-                    StorageChoice::SessionOnly => talk_core::identity::StorageChoice::SessionOnly,
+                    StorageChoice::SessionOnly => {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
                 };
-                self.admit(
-                    RuntimeCommand::Save {
-                        account,
-                        attempt,
-                        choice,
-                    },
-                    Purpose::Login(request),
-                )
-                .map_err(submit_error)?;
-                self.snapshot.login.storage = StorageStatus::Saving;
+                self.save_login(request, choice).map_err(submit_error)?;
             }
             UiIntent::RestoreAccount(account) => {
                 self.admit(
@@ -902,6 +1037,7 @@ impl Accounts {
                     .logout(account)
                     .map_err(submit_error)?;
                 self.preferences.retain(|p| p.scope.account != account);
+                self.history.remove_account(account);
                 if self
                     .snapshot
                     .active_account
@@ -1189,3 +1325,25 @@ fn tag_view(tag: &protocol::ConversationTag) -> TagView {
 
 #[cfg(test)]
 mod tests;
+
+fn storage_save_failure(backend: StorageBackend, failure: StorageFailure) -> StorageSaveFailure {
+    if backend == StorageBackend::PrivateFile {
+        return match failure {
+            StorageFailure::AccessDenied => StorageSaveFailure::LocalDenied,
+            StorageFailure::Corrupt => StorageSaveFailure::LocalCorrupt,
+            _ => StorageSaveFailure::LocalUnavailable,
+        };
+    }
+    match failure {
+        StorageFailure::Locked => StorageSaveFailure::NativeLocked,
+        StorageFailure::AccessDenied => StorageSaveFailure::NativeDenied,
+        StorageFailure::Missing | StorageFailure::Unsupported | StorageFailure::Unavailable => {
+            StorageSaveFailure::NativeUnavailable
+        }
+        StorageFailure::Corrupt => StorageSaveFailure::NativeCorrupt,
+        StorageFailure::TemporarilyUnavailable => StorageSaveFailure::NativeTemporarilyUnavailable,
+        StorageFailure::Cancelled => StorageSaveFailure::Cancelled,
+        StorageFailure::Conflict => StorageSaveFailure::Conflict,
+        StorageFailure::Other => StorageSaveFailure::Failed,
+    }
+}

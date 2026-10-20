@@ -1,4 +1,4 @@
-use gpui::{Hsla, WindowAppearance, rgb};
+use gpui::{Hsla, WindowAppearance, prelude::*, rgb};
 
 pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
@@ -19,6 +19,8 @@ pub struct Theme {
     pub subtle: Hsla,
     pub text: Hsla,
     pub muted: Hsla,
+    /// Input prompts have their own readable, softer role; entered text stays `text`.
+    pub placeholder: Hsla,
     pub accent: Hsla,
     pub on_accent: Hsla,
     pub selected: Hsla,
@@ -74,6 +76,53 @@ impl Theme {
             gpui::linear_color_stop(self.chrome_end, 1.),
         )
     }
+
+    /// A shallow inset edge, painted inside the card after its contents. Three
+    /// one-pixel strokes replace a blurred offscreen shadow. GPUI's style painter
+    /// clips borders to edge strips, avoiding full-card transparent overdraw.
+    pub fn inset_card_edge(self, radius: f32) -> impl gpui::IntoElement {
+        gpui::canvas(
+            |_, _, _| {},
+            move |bounds, _, window, cx| {
+                let shadow: Hsla = if self.dark {
+                    gpui::black()
+                } else {
+                    color(0x31465f)
+                };
+                for (inset, opacity) in [0.14, 0.07, 0.025].into_iter().enumerate() {
+                    let inset = gpui::px(inset as f32);
+                    gpui::Style {
+                        corner_radii: gpui::Corners::all((gpui::px(radius) - inset).into()),
+                        border_widths: gpui::Edges {
+                            top: gpui::px(1.).into(),
+                            left: gpui::px(1.).into(),
+                            right: gpui::px(0.).into(),
+                            bottom: gpui::px(0.).into(),
+                        },
+                        border_color: Some(
+                            shadow.opacity(opacity * if self.dark { 2. } else { 1. }),
+                        ),
+                        ..Default::default()
+                    }
+                    .paint(bounds.dilate(-inset), window, cx, |_, _| {});
+                }
+                gpui::Style {
+                    corner_radii: gpui::Corners::all(gpui::px(radius).into()),
+                    border_widths: gpui::Edges {
+                        top: gpui::px(0.).into(),
+                        left: gpui::px(0.).into(),
+                        right: gpui::px(1.).into(),
+                        bottom: gpui::px(1.).into(),
+                    },
+                    border_color: Some(gpui::white().opacity(if self.dark { 0.045 } else { 0.55 })),
+                    ..Default::default()
+                }
+                .paint(bounds, window, cx, |_, _| {});
+            },
+        )
+        .absolute()
+        .inset_0()
+    }
     pub fn avatar(self, seed: usize) -> (Hsla, Hsla) {
         let (bg, fg) = if self.dark {
             [
@@ -111,7 +160,7 @@ impl Theme {
         let sage = palette == Palette::Sage;
         let values = match (dark, sage) {
             (false, false) => [
-                0xe3edfb, 0xe3edfb, 0xffffff, 0xf6f8fc, 0x26354b, 0x596b85, 0x356fc1, 0xffffff,
+                0xeef4fd, 0xeef4fd, 0xffffff, 0xf6f8fc, 0x26354b, 0x596b85, 0x356fc1, 0xffffff,
                 0xcbdbf3, 0x315e98, 0xe0e7f0, 0x70819c, 0x9e3e32, 0xfff0ec, 0x795300, 0xfff4d6,
                 0x286343, 0x1c293b, 0x2c3d55, 0xeaf0f8, 0xc0ccdd, 0xd7e5f5, 0x356fc1, 0x4a5b73,
             ],
@@ -153,6 +202,12 @@ impl Theme {
             subtle: color(values[3]),
             text: color(values[4]),
             muted: color(values[5]),
+            placeholder: color(match (dark, sage) {
+                (false, false) => 0x657285,
+                (false, true) => 0x6b736a,
+                (true, false) => 0x8b9bb0,
+                (true, true) => 0x8e9d94,
+            }),
             accent: color(values[6]),
             on_accent: color(values[7]),
             selected: color(values[8]),
@@ -195,6 +250,19 @@ mod tests {
         let a = luminance(a);
         let b = luminance(b);
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+    #[test]
+    fn input_prompts_are_softer_than_secondary_text_but_readable_on_input_surfaces() {
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let t = Theme::resolve(palette, appearance, WindowAppearance::Light);
+                for background in [t.surface, t.subtle] {
+                    assert!(contrast(t.placeholder, background) >= 4.5);
+                    assert!(contrast(t.placeholder, background) < contrast(t.muted, background));
+                    assert!(contrast(t.placeholder, background) < contrast(t.text, background));
+                }
+            }
+        }
     }
     #[test]
     fn translucent_header_keeps_text_and_focus_readable_over_extreme_content() {
