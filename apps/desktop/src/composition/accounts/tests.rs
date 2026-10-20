@@ -166,6 +166,7 @@ pub(super) fn model() -> Accounts {
         call_actions: std::sync::Arc::new(calls::CallActions::new()),
         connection: Err(IdentityError::WorkerUnavailable),
         cursor: ConnectionCursor::default(),
+        diagnostic_connection: None,
         next_request: 0,
         pending: Vec::new(),
         login: None,

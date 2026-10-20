@@ -22,6 +22,8 @@
   connection failures; show the offline state during server maintenance and
   recover without stale requests overwriting it. Fix access to Note to self and
   hide its call control.
+- Add rotating local chat-event logs for connection changes, history requests
+  and send outcomes, without message contents or credentials.
 - Center setup step numbers with Google Sans Code and show the selected server
   during browser sign-in.
 - Render the macOS disk-image background sharply on Retina displays, keep the

@@ -81,3 +81,27 @@ bundle layout. macOS v0.0.3 and later support complete bundle updates.
 
 Windows is compile-checked only; no Windows installer is supplied. See
 [known limitations](limitations.md) for platform and feature coverage.
+
+## Local diagnostics
+
+The app keeps a small local event log to help diagnose chat and backend failures.
+It records timestamps, app version, connection changes, history requests and send
+outcomes. Process-local request numbers connect an operation to its result.
+Message text, account and conversation names, server addresses, credentials and
+raw backend responses are excluded. Nothing is uploaded automatically.
+
+| Platform | Log directory |
+| --- | --- |
+| macOS | `~/Library/Logs/NextCloud Modern Talk/` |
+| Linux | `$XDG_STATE_HOME/nextcloud-modern-talk/logs/`, or `~/.local/state/nextcloud-modern-talk/logs/` when unset |
+| Windows | `%LOCALAPPDATA%\NextCloud Modern Talk\Logs\` |
+
+The current file is `diagnostics.jsonl`; `diagnostics.1.jsonl` and
+`diagnostics.2.jsonl` contain earlier events. Each is limited to 2 MiB. Files
+rotate when full or when a new app process starts. If reporting a bug, include
+the approximate time and review the relevant files before attaching them. You
+can delete them while the app is closed.
+
+Logging uses a bounded background writer. If storage is unavailable or another
+app process owns the log, chat continues without a new file. Diagnostic events
+may be dropped under heavy load; the next successful write records the count.

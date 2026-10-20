@@ -23,6 +23,17 @@ pub(super) enum Work {
     Context(u128),
 }
 impl Work {
+    pub(super) fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
+        Some(match self {
+            Self::History => DiagnosticOperation::History,
+            Self::Older => DiagnosticOperation::Older,
+            Self::Context(_) => DiagnosticOperation::Context,
+            Self::Thread => DiagnosticOperation::Thread,
+            Self::Poll => DiagnosticOperation::Poll,
+            Self::Send => DiagnosticOperation::Send,
+            _ => return None,
+        })
+    }
     fn backward(self) -> bool {
         matches!(self, Self::History | Self::Older | Self::Context(_))
     }
@@ -419,17 +430,57 @@ impl Accounts {
     }
     pub(super) fn complete_message(
         &mut self,
-        request: RequestId,
+        (request, diagnostic_request): (RequestId, u64),
         context: ConversationRef,
         operation: OperationId,
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
+        let event = diagnostic_result(diagnostic_request, context, operation, work, &reply);
         if self.current(context.account).is_err() {
+            if let Some(mut event) = event {
+                event.outcome = DiagnosticOutcome::Ignored;
+                event.error = Some(ErrorKind::WrongScope);
+                diagnostics::record(event);
+            }
             self.history.remove(context);
             return;
         }
+        let idle_history = work == Work::History
+            && self
+                .history
+                .get(context)
+                .is_some_and(|h| h.loaded && h.latest.is_none());
+        let before = self.history.get(context).map(|h| h.offline);
         self.apply_message(request, context, operation, work, reply);
+        let after = self.history.get(context).map(|h| h.offline);
+        if let Some(event) = event {
+            // Empty successful polls and repeated offline failures are silent.
+            let repeat_offline = before == Some(true)
+                && after == Some(true)
+                && matches!(
+                    event.error,
+                    Some(ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable)
+                );
+            if work != Work::Poll && !idle_history
+                || event.count > 0
+                || event.error.is_some() && !repeat_offline
+            {
+                diagnostics::record(event);
+            }
+            if let Some(offline) = after
+                && (offline && before != Some(true) || !offline && before == Some(true))
+            {
+                diagnostics::record(Diagnostic {
+                    outcome: if offline {
+                        DiagnosticOutcome::Offline
+                    } else {
+                        DiagnosticOutcome::Recovered
+                    },
+                    ..event
+                });
+            }
+        }
     }
     // Pure completion seam: production validates the account runtime immediately
     // above; deterministic tests can exercise switching and response order here.
@@ -786,6 +837,74 @@ impl Accounts {
         self.touch();
     }
 }
+
+// Only scalar facts from a scope-validated reply cross into diagnostics. A
+// received history page is not a claim that an obsolete cache ticket was applied.
+fn diagnostic_result(
+    request: u64,
+    context: ConversationRef,
+    operation: OperationId,
+    work: Work,
+    reply: &Result<RuntimeReply, IdentityError>,
+) -> Option<Diagnostic> {
+    let mut event = Diagnostic::new(work.diagnostic_operation()?, DiagnosticOutcome::Received);
+    event.request = request;
+    match reply {
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation,
+            operation: returned,
+            result,
+        })) if *conversation == context.conversation
+            && *returned == operation
+            && canonical_scope(result, context) =>
+        {
+            match result {
+                wire::MessagingResult::Messages { messages, .. } if work != Work::Send => {
+                    event.count = messages.as_slice().len() as u64
+                }
+                wire::MessagingResult::Send(receipt)
+                    if work == Work::Send && receipt.operation == operation =>
+                {
+                    event.outcome = match receipt.state {
+                        SendState::ServerAccepted(_) => DiagnosticOutcome::Accepted,
+                        SendState::Rejected => DiagnosticOutcome::Rejected,
+                        SendState::Uncertain => DiagnosticOutcome::Uncertain,
+                    };
+                }
+                _ => {
+                    event.outcome = if work == Work::Send {
+                        DiagnosticOutcome::Uncertain
+                    } else {
+                        DiagnosticOutcome::Failed
+                    };
+                    event.error = Some(ErrorKind::Malformed);
+                }
+            }
+        }
+        Err(error) => {
+            event.error = Some(diagnostic_error(*error));
+            event.outcome = if work == Work::Send
+                && matches!(
+                    event.error,
+                    Some(ErrorKind::Uncertain | ErrorKind::Cancelled | ErrorKind::WrongScope)
+                ) {
+                DiagnosticOutcome::Uncertain
+            } else {
+                DiagnosticOutcome::Failed
+            };
+        }
+        _ => {
+            event.outcome = if work == Work::Send {
+                DiagnosticOutcome::Uncertain
+            } else {
+                DiagnosticOutcome::Failed
+            };
+            event.error = Some(ErrorKind::Malformed);
+        }
+    }
+    Some(event)
+}
+
 fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> bool {
     let message = |m: &wire::MessageDetails| {
         m.message.id.conversation == context.conversation
@@ -1094,6 +1213,78 @@ mod tests {
             reply_count: 0,
             metadata: Default::default(),
         }
+    }
+    #[test]
+    fn diagnostic_reply_projection_excludes_content_and_keeps_only_local_correlation() {
+        let context = super::super::super::fixtures::context(1);
+        let operation = OperationId::from_local(99);
+        let message = wire::MessageDetails {
+            message: protocol::Message {
+                id: protocol::MessageId {
+                    conversation: context.conversation,
+                    sequence: 42,
+                },
+                author: text("Synthetic Private Name"),
+                text: text(
+                    "draft secret, person@example.test, https://private.example.test/room-token, Bearer synthetic-secret",
+                ),
+                kind: protocol::MessageKind::Comment,
+                timestamp: 1,
+                expires_at: None,
+                edited_at: None,
+                own_operation: None,
+            },
+            notify: Decision::Denied,
+            own: false,
+            replyable: Some(true),
+            parent: None,
+            thread: None,
+            reactions: Page::empty(),
+            rich: Page::empty(),
+            system: None,
+            edit: Decision::Unknown,
+            delete: Decision::Unknown,
+        };
+        let reply = Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Messages {
+                messages: page([message]),
+                cursor: None,
+                common_read: None,
+            },
+        }));
+        let event = diagnostic_result(73, context, operation, Work::History, &reply).unwrap();
+        assert_eq!(event.request, 73);
+        assert_eq!(event.count, 1);
+        let line = diagnostics::test_line(event);
+        for secret in [
+            "Synthetic Private Name",
+            "draft secret",
+            "person@example.test",
+            "https://",
+            "room-token",
+            "Bearer",
+            "synthetic-secret",
+        ] {
+            assert!(!line.contains(secret));
+        }
+        assert!(line.contains("\"request\":73,"));
+        let error = Err(IdentityError::Request(ErrorKind::Uncertain));
+        let event = diagnostic_result(74, context, operation, Work::Send, &error).unwrap();
+        assert!(matches!(event.outcome, DiagnosticOutcome::Uncertain));
+        assert_eq!(event.error, Some(ErrorKind::Uncertain));
+        let stale = diagnostic_result(
+            75,
+            context,
+            OperationId::from_local(100),
+            Work::History,
+            &reply,
+        )
+        .unwrap();
+        assert!(matches!(stale.outcome, DiagnosticOutcome::Failed));
+        assert_eq!(stale.error, Some(ErrorKind::Malformed));
+        assert_eq!(stale.count, 0);
     }
     #[test]
     fn canonical_merge_updates_without_duplicate_and_bounds_both_paging_directions() {

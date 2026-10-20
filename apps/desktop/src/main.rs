@@ -1,6 +1,7 @@
 mod bundle;
 mod composition;
 mod devices;
+mod diagnostics;
 mod presentation;
 mod settings;
 
@@ -11,5 +12,6 @@ fn main() {
         );
         std::process::exit(1);
     }
+    let _diagnostics = diagnostics::start();
     composition::run();
 }

@@ -18,7 +18,11 @@ gstreamer-app.workspace = true
 gstreamer-video.workspace = true
 image.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
+exacl.workspace = true
 core-graphics.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -28,6 +32,7 @@ futures-lite.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 enigo.workspace = true
+windows-permissions.workspace = true
 windows.workspace = true
 
 [lints]

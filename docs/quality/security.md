@@ -131,7 +131,9 @@ Use allowlisted diagnostic fields. Exclude authorization/cookie headers, app pas
 
 Cache only necessary account-scoped content with explicit bounds, retention and removal rules. Secrets never belong in the content cache. Stored chat/drafts and attachment previews remain sensitive user data even if filesystem permissions restrict access. At-rest protection claims require an implemented, reviewed key lifecycle; session-only mode must not create persistent protected-content keys or new durable content caches. On expiry, removal or access loss, invalidate content/search/preview entries as the product policy requires. Restrict notification previews for sensitive/restricted conversations; do not send conversation contents to telemetry by default.
 
-Acceptance: seed synthetic canary secrets in all input channels, induce failures and inspect logs, caches, support bundles and screenshots. Diagnostics are opt-in and previewable. Raw memory profiles can contain secrets and must use synthetic lab accounts and redaction before publication.
+The automatic local event log accepts only fixed operation/outcome/error categories, timestamps, app version, process-local request numbers and counts. It contains no account or conversation identifiers. Use private per-user files, a bounded nonblocking queue and at most three files of 2 MiB each. Failure or overload of diagnostics must not fail or block a chat operation. Document the [file locations and retention](../install.md#local-diagnostics).
+
+Acceptance: seed synthetic canary secrets in input channels, induce failures and inspect the relevant logs, caches, support bundles and screenshots. Export and any expanded diagnostics are opt-in and previewable; local event logging does not authorize uploads. Raw memory profiles can contain secrets and must use synthetic lab accounts and redaction before publication.
 
 ## Q.SEC-07 — TLS, redirects and endpoint scope
 

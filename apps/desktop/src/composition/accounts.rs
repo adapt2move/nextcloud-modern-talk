@@ -10,6 +10,9 @@ mod messaging;
 mod notifications;
 mod removal;
 mod update;
+use crate::diagnostics::{
+    self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
+};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -99,6 +102,7 @@ pub struct Accounts {
     call_actions: std::sync::Arc<calls::CallActions>,
     connection: Result<AccountConnection, IdentityError>,
     cursor: ConnectionCursor,
+    diagnostic_connection: Option<ConnectionState>,
     next_request: u64,
     pending: Vec<Pending>,
     login: Option<Login>,
@@ -136,6 +140,7 @@ impl Accounts {
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
             cursor: ConnectionCursor::default(),
+            diagnostic_connection: None,
             next_request: 0,
             pending: Vec::new(),
             login: None,
@@ -176,24 +181,51 @@ impl Accounts {
         command: RuntimeCommand,
         purpose: Purpose,
     ) -> Result<ConnectionRequestId, IdentityError> {
-        if self.call_actions.update_sealed() {
-            return Err(ErrorKind::Busy.into());
+        // An empty room has no forward cursor, so its periodic poll still uses
+        // History. Keep those no-change retries as quiet as ordinary empty polls.
+        let idle_history = matches!(purpose, Purpose::Message(_, context, _, messaging::Work::History)
+            if self.history.get(context).is_some_and(|h| h.loaded && h.latest.is_none()));
+        let result = (|| {
+            if self.call_actions.update_sealed() {
+                return Err(ErrorKind::Busy.into());
+            }
+            if self.pending.len() >= 16 {
+                return Err(ErrorKind::Busy.into());
+            }
+            let next = self
+                .next_request
+                .checked_add(1)
+                .ok_or(IdentityError::Request(ErrorKind::Busy))?;
+            let id = ConnectionRequestId(next);
+            self.connection
+                .as_mut()
+                .map_err(|e| *e)?
+                .try_submit(id, command)?;
+            self.next_request = next;
+            self.pending.push(Pending { id, purpose });
+            Ok(id)
+        })();
+        if let Some(operation) = purpose.diagnostic_operation()
+            && operation != DiagnosticOperation::Poll
+            && !idle_history
+        {
+            let (request, outcome, error) = match result {
+                Ok(id) => (id.0, DiagnosticOutcome::Started, None),
+                Err(error) => (
+                    0,
+                    DiagnosticOutcome::Rejected,
+                    Some(diagnostic_error(error)),
+                ),
+            };
+            diagnostics::record(Diagnostic {
+                request,
+                operation,
+                outcome,
+                error,
+                count: 0,
+            });
         }
-        if self.pending.len() >= 16 {
-            return Err(ErrorKind::Busy.into());
-        }
-        let next = self
-            .next_request
-            .checked_add(1)
-            .ok_or(IdentityError::Request(ErrorKind::Busy))?;
-        let id = ConnectionRequestId(next);
-        self.connection
-            .as_mut()
-            .map_err(|e| *e)?
-            .try_submit(id, command)?;
-        self.next_request = next;
-        self.pending.push(Pending { id, purpose });
-        Ok(id)
+        result
     }
     fn request(
         &mut self,
@@ -254,7 +286,29 @@ impl Accounts {
         self.load_rooms = scope;
         self.touch();
     }
+    fn diagnostic_connection(&mut self, state: ConnectionState) {
+        if self.diagnostic_connection == Some(state) {
+            return;
+        }
+        self.diagnostic_connection = Some(state);
+        let (outcome, error) = match state {
+            ConnectionState::Starting => (DiagnosticOutcome::Loading, None),
+            ConnectionState::Ready => (DiagnosticOutcome::Ready, None),
+            ConnectionState::Closing => (DiagnosticOutcome::Stopped, None),
+            ConnectionState::Failed(error) => {
+                (DiagnosticOutcome::Failed, Some(diagnostic_error(error)))
+            }
+        };
+        diagnostics::record(Diagnostic {
+            request: 0,
+            operation: DiagnosticOperation::Connection,
+            outcome,
+            error,
+            count: self.snapshot.accounts.as_slice().len() as u64,
+        });
+    }
     fn sync_accounts(&mut self, state: &ConnectionSnapshot) {
+        self.diagnostic_connection(state.state);
         let accounts = page(
             state
                 .accounts
@@ -341,6 +395,7 @@ impl Accounts {
                 self.cursor = update.cursor;
             }
             Err(error) => {
+                self.diagnostic_connection(ConnectionState::Failed(error));
                 let phase = LoginPhase::Failed(login_error(error));
                 if self.snapshot.login.phase != phase {
                     self.snapshot.login.phase = phase;
@@ -463,7 +518,7 @@ impl Accounts {
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Room(request, context, operation, read) => self.complete_room(request, context, operation, read, result),
-            Purpose::Message(request, context, operation, work) => self.complete_message(request, context, operation, work, result),
+            Purpose::Message(request, context, operation, work) => self.complete_message((request, done.request.0), context, operation, work, result),
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
@@ -558,11 +613,13 @@ impl Accounts {
                 self.snapshot.mutation = Some(ConversationMutationResult { request, context, result: completion });
             }
             Purpose::Send(request, context, operation) => {
+                let error = result.as_ref().err().copied().map(diagnostic_error);
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Send(receipt))) if receipt.operation == operation => match receipt.state { SendState::ServerAccepted(_) => Completion::ServerAccepted, SendState::Rejected => Completion::Failed(UnavailableReason::PermissionDenied), SendState::Uncertain => Completion::Uncertain },
                     Err(error) => completion_error(error),
                     _ => Completion::Uncertain,
                 };
+                diagnostics::record(Diagnostic { request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error });
                 if completion != Completion::Uncertain { self.unresolved.retain(|u| u.operation != operation); }
                 self.snapshot.submission = Some(SubmissionResult { request, context, result: completion });
             }
@@ -1222,6 +1279,33 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         call_scope: r.call_scope,
     }
 }
+
+impl Purpose {
+    fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
+        match self {
+            Self::Message(_, _, _, work) => work.diagnostic_operation(),
+            Self::Send(..) => Some(DiagnosticOperation::Send),
+            _ => None,
+        }
+    }
+}
+fn diagnostic_error(error: IdentityError) -> ErrorKind {
+    match error {
+        IdentityError::Request(error) => error,
+        IdentityError::Storage { .. }
+        | IdentityError::RecoveryRequired
+        | IdentityError::SuppressionUnconfirmed => ErrorKind::StorageUnavailable,
+        IdentityError::WorkerUnavailable => ErrorKind::Unconfigured,
+    }
+}
+fn diagnostic_completion(completion: Completion) -> DiagnosticOutcome {
+    match completion {
+        Completion::ServerAccepted => DiagnosticOutcome::Accepted,
+        Completion::Uncertain => DiagnosticOutcome::Uncertain,
+        Completion::Failed(_) => DiagnosticOutcome::Failed,
+    }
+}
+
 fn submit_error(e: IdentityError) -> SubmitError {
     match e {
         IdentityError::Request(ErrorKind::Unsupported) => {

@@ -301,7 +301,37 @@ impl Accounts {
         let Some(account) = self.background.account_mut(scope) else {
             return;
         };
-        account.live = Some(batch.as_ref().map(|b| b.state).map_err(|e| *e));
+        let live = Some(batch.as_ref().map(|b| b.state).map_err(|e| *e));
+        if account.live != live {
+            let (outcome, error) = match live {
+                Some(Ok(protocol::AccountLiveState::Internal)) => {
+                    (DiagnosticOutcome::Internal, None)
+                }
+                Some(Ok(protocol::AccountLiveState::Connecting)) => {
+                    (DiagnosticOutcome::Loading, None)
+                }
+                Some(Ok(protocol::AccountLiveState::Connected)) => {
+                    (DiagnosticOutcome::Connected, None)
+                }
+                Some(Ok(protocol::AccountLiveState::Reconnecting)) => (
+                    DiagnosticOutcome::Reconnecting,
+                    batch.as_ref().ok().and_then(|b| b.first_transport_failure),
+                ),
+                Some(Ok(protocol::AccountLiveState::Stopped(error))) => {
+                    (DiagnosticOutcome::Stopped, Some(error))
+                }
+                Some(Err(error)) => (DiagnosticOutcome::Failed, Some(diagnostic_error(error))),
+                None => (DiagnosticOutcome::Stopped, None),
+            };
+            diagnostics::record(Diagnostic {
+                request: 0,
+                operation: DiagnosticOperation::LiveConnection,
+                outcome,
+                error,
+                count: 0,
+            });
+        }
+        account.live = live;
         account.due[Observation::LiveEvents.index()] = now + live_interval(account.live);
         if let Ok(batch) = batch {
             account.first_transport_failure = account

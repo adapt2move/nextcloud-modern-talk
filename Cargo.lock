@@ -7148,16 +7148,19 @@ dependencies = [
  "core-graphics 0.24.0",
  "cpal",
  "enigo",
+ "exacl",
  "futures-lite 2.6.1",
  "gpui",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
  "image",
+ "rustix 1.1.5",
  "talk-adapters",
  "talk-core",
  "unicode-segmentation",
  "windows 0.61.3",
+ "windows-permissions",
 ]
 
 [[package]]

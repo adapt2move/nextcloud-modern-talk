@@ -78,6 +78,8 @@ Acceptance: wake revalidates server session and OS devices; stale notifications 
 
 **Actionable errors and redacted diagnostics (P1).** Use concise user language with retry/change-settings/relogin/leave where appropriate. Provide optional diagnostic details containing client version, supported server versions, resolved feature states, and redacted error categories. No primary passwords, app passwords, cookies, poll tokens, private URLs, room passwords, SIP PINs, message text, or full participant lists belong in default diagnostic export. Follow [security.md](../quality/security.md).
 
+Keep an automatic, rotating local event log for chat connection changes, history requests and send outcomes. Record only typed scalar facts and process-local correlation numbers. A bounded background writer owns the private files; logging failure and overload never block chat. Locations and retention are documented in the [installation guide](../install.md#local-diagnostics).
+
 Acceptance: user-visible errors do not contain raw backend dumps. Export is deliberate and reviewable; redaction is tested with synthetic secrets. No telemetry/analytics or diagnostic upload occurs by default. Native integration, performance, and reliability statements cite measured evidence, not design goals.
 
 ## DESK-010

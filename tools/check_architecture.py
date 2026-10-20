@@ -33,9 +33,10 @@ PLATFORM_EDGES = {
     'cfg(target_os = "windows")': {'windows-native-keyring-store', 'windows-permissions', 'winapi-util', 'atomicwrites'},
 }
 DESKTOP_PLATFORM_EDGES = {
-    'cfg(target_os = "macos")': {'core-graphics'},
+    'cfg(unix)': {'rustix'},
+    'cfg(target_os = "macos")': {'core-graphics', 'exacl'},
     'cfg(target_os = "linux")': {'ashpd', 'async-io', 'futures-lite'},
-    'cfg(target_os = "windows")': {'enigo', 'windows'},
+    'cfg(target_os = "windows")': {'enigo', 'windows', 'windows-permissions'},
 }
 failures: list[str] = []
 
@@ -435,7 +436,7 @@ def check() -> None:
     native = ROOT / "apps/desktop/src"
     for path in native.rglob("*.rs"):
         relative = path.relative_to(native)
-        require(relative.parts[0] in {"main.rs", "bundle.rs", "composition.rs", "composition", "presentation", "settings.rs", "settings", "devices.rs", "devices"},
+        require(relative.parts[0] in {"main.rs", "bundle.rs", "composition.rs", "composition", "presentation", "settings.rs", "settings", "devices.rs", "devices", "diagnostics.rs", "diagnostics"},
                 "unreviewed native application module")
     for path in (native / "presentation").rglob("*.rs"):
         source = without_comments(path.read_text())

@@ -146,6 +146,11 @@ pub fn run() {
                 while !services.stopped() {
                     gpui::Timer::after(Duration::from_millis(20)).await;
                 }
+                crate::diagnostics::request_shutdown();
+                let deadline = std::time::Instant::now() + Duration::from_millis(50);
+                while !crate::diagnostics::stopped() && std::time::Instant::now() < deadline {
+                    gpui::Timer::after(Duration::from_millis(5)).await;
+                }
             }
         })
         .detach();
