@@ -335,6 +335,7 @@ pub(super) mod faults {
         }
     }
     impl Faults {
+        #[cfg(unix)]
         pub fn arm_suppression(&self) -> Arc<Gate> {
             let gate = Arc::new(Gate::default());
             assert!(

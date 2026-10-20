@@ -16,6 +16,10 @@ sudo apt-get install -y --no-install-recommends xdg-utils desktop-file-utils xdg
 
 The script supplies compiler, pkg-config/Clang, X11/XCB/xkbcommon, font, SSL, Vulkan/Mesa, Xvfb, D-Bus and capture prerequisites. `libdbus-1-dev` supports the Linux credential provider; actual Secret Service tests additionally need a session bus and service. Bundled SQLite needs a C compiler. Do not change dependency features to bypass prerequisites.
 
+The pinned Linux WebRTC SDK requires Clang 21 or later. On Ubuntu 24.04 the
+script installs Clang 21 from [LLVM's signed package repository](https://apt.llvm.org/)
+and verifies its signing-key fingerprint; use the explicit compiler names below.
+
 Linux browser login uses the session's `org.freedesktop.portal.OpenURI` service and a registered default HTTPS browser. Minimal desktop sessions need a portal backend (GTK in the command above), `xdg-mime` from `xdg-utils`, and `update-desktop-database` from `desktop-file-utils` when registering a browser's desktop entry. Xvfb alone does not supply this browser handoff.
 
 Linux screen-sharing capability checks use ashpd over the session bus, without the `gdbus` command or additional native build prerequisites. Actual ScreenCast availability requires a portal backend matching the desktop/compositor; installing the GTK backend for browser login does not establish ScreenCast support. Checks never open a source picker or capture session. Private portal fixtures require `dbus-run-session`, `dbus-daemon` and GNU `timeout` (coreutils); they use isolated buses with service activation disabled.
@@ -37,7 +41,7 @@ use for `LK_CUSTOM_WEBRTC`:
 ```sh
 export LK_CUSTOM_WEBRTC="$(python3 tools/media/prepare_native.py \
   --target linux-x64-release --output "$HOME/.cache/nextcloud-modern-talk/webrtc")"
-export CC=clang CXX=clang++
+export CC=clang-21 CXX=clang++-21
 ```
 
 Use `mac-arm64-release` on Apple Silicon or `win-x64-release` for Windows MSVC.

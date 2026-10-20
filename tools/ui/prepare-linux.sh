@@ -3,7 +3,26 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends build-essential pkg-config clang lld libclang-dev \
+# The pinned libwebrtc SDK ships libc++ headers that require Clang 21. Ubuntu
+# 24.04 defaults to 18; use LLVM's signed 21 repository when the distro lacks it.
+if ! apt-cache show clang-21 >/dev/null 2>&1; then
+  . /etc/os-release
+  if [[ "$ID" != ubuntu || "$VERSION_CODENAME" != noble ]]; then
+    echo "Install Clang 21 for this distribution before running this script." >&2
+    exit 1
+  fi
+  apt-get install -y --no-install-recommends ca-certificates curl gnupg
+  install -d -m 0755 /etc/apt/keyrings
+  key=$(mktemp)
+  trap 'rm -f "$key"' EXIT
+  curl --fail --silent --show-error --max-time 60 https://apt.llvm.org/llvm-snapshot.gpg.key -o "$key"
+  fingerprint=$(gpg --batch --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" { print $10; exit }')
+  [[ "$fingerprint" == 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 ]]
+  install -m 0644 "$key" /etc/apt/keyrings/llvm.asc
+  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' > /etc/apt/sources.list.d/llvm-21.list
+  apt-get update
+fi
+apt-get install -y --no-install-recommends build-essential pkg-config clang-21 lld-21 libclang-21-dev \
   libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev \
   libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan1 mesa-vulkan-drivers \
   vulkan-tools xvfb xauth xdotool imagemagick fonts-noto-core fonts-noto-color-emoji \

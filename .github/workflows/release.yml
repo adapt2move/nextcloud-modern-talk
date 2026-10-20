@@ -42,8 +42,8 @@ jobs:
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      CC: clang
-      CXX: clang++
+      CC: clang-21
+      CXX: clang++-21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
