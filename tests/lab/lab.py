@@ -92,6 +92,8 @@ class Lab:
         self.base = None
         self.passwords = {}
         self.clients = {}
+        # The development CLI can set its explicit forwarded origin after setup.
+        self.http_host = "127.0.0.1"
 
     def redact(self, text):
         for value in sorted(self.sensitive, key=len, reverse=True):
@@ -135,7 +137,7 @@ class Lab:
         url = self.base + path
         if query:
             url += "?" + urllib.parse.urlencode(query)
-        headers = {"Accept": "application/json", "OCS-APIRequest": "true", "Host": "127.0.0.1"}
+        headers = {"Accept": "application/json", "OCS-APIRequest": "true", "Host": self.http_host}
         if actor is not None:
             credentials = base64.b64encode(f"{actor}:{self.passwords[actor]}".encode()).decode()
             headers["Authorization"] = "Basic " + credentials

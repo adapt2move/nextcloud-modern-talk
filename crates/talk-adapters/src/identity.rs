@@ -1,5 +1,23 @@
-//! Owner of browser authorization, qualified OS vault and nonsecret restoration journal.
-//! No secret storage exists in this bootstrap, including no test/in-memory fallback.
+//! Owner of browser authorization, qualified OS vault and private restoration metadata.
+//! Production implementation keeps secrets, storage and owned runtime workers private.
+pub(crate) mod browser;
+mod connection;
+mod error;
+mod ledger;
+mod login;
+mod private_fs;
+mod provider;
+mod runtime;
+pub use connection::{
+    AccountConnection, CONNECTION_CAPACITY, CONNECTION_PAGE, ConnectionAccount,
+    ConnectionCompletion, ConnectionCursor, ConnectionPending, ConnectionRequestId,
+    ConnectionSnapshot, ConnectionState, ConnectionUpdate, SavedAccountState,
+};
+pub use error::IdentityError;
+pub use runtime::{
+    AccountPhase, AccountSummary, IdentityRuntime, Observation, RecoverySelection, RuntimeCommand,
+    RuntimeConfig, RuntimeReply, StoredItemStatus, StoredState,
+};
 
 use talk_core::identity::{
     AttemptCommand, AttemptReport, IdentityStatus, MaintenanceCommand, MaintenanceContext,
@@ -38,3 +56,9 @@ impl IdentityPort for UnconfiguredIdentity {
         Box::pin(async { Err(PortError::unconfigured()) })
     }
 }
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod test_server;

@@ -4,13 +4,24 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::bounded::{Page, Text};
 use crate::identity::{
     AttemptCommand, AttemptReport, IdentityStatus, MaintenanceCommand, MaintenanceContext,
     MaintenanceReport, PendingAttemptContext, RecoveryContext, RestoredIdentity,
 };
+use crate::ids::OperationId;
 use crate::ids::{AccountId, AccountScope, CallScope, ConversationId};
 use crate::lifecycle::Cancellation;
 use crate::policy::{Moment, PolicyInputs};
+use crate::preferences::{
+    RequestId,
+    account::{AccountPreferenceChange, AccountPreferenceResult},
+};
+use crate::protocol::{
+    AccountProbe, CallObservation, Conversation, ConversationList, ConversationTag,
+    ConversationTagId, ConversationTags, HistoryPage, MessageId, Participants, SendMessage,
+    SendReceipt,
+};
 
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, PortError>> + Send + 'a>>;
 
@@ -33,6 +44,14 @@ pub enum ErrorKind {
     Malformed,
     Uncertain,
     StorageUnavailable,
+    WrongScope,
+    Transport,
+    RedirectRejected,
+    TooLarge,
+    NotFound,
+    Conflict,
+    RateLimited,
+    ServerUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,6 +59,7 @@ pub enum Retry {
     Never,
     UserAction,
     AfterReconciliation,
+    AfterDelay { millis: u32 },
 }
 
 /// Deliberately excludes URLs, wire bodies, provider messages and tokens.
@@ -66,19 +86,117 @@ pub struct OperationContext {
     pub cancellation: Cancellation,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
+    Messaging {
+        conversation: ConversationId,
+        operation: OperationId,
+        command: crate::protocol::messaging::MessagingCommand,
+    },
+    ConversationSettings {
+        conversation: ConversationId,
+        operation: OperationId,
+        command: crate::protocol::conversation::ConversationCommand,
+    },
+    PollIncomingCalls,
+    Meeting(crate::calls::Command),
     ProbeAccount,
     RefreshCallPolicy(CallScope),
     ReconcileConversation(ConversationId),
     Leave(CallScope),
+    InspectAccount,
+    ReadPreferences {
+        request: RequestId,
+    },
+    SetPreference {
+        request: RequestId,
+        change: AccountPreferenceChange,
+    },
+    SetArchived {
+        conversation: ConversationId,
+        archived: bool,
+    },
+    SetFavorite {
+        conversation: ConversationId,
+        favorite: bool,
+    },
+    ReadTags,
+    CreateTag {
+        name: Text<1000>,
+    },
+    RenameTag {
+        tag: ConversationTagId,
+        name: Text<1000>,
+    },
+    DeleteTag(ConversationTagId),
+    SetTagCollapsed {
+        tag: ConversationTagId,
+        collapsed: bool,
+    },
+    ReorderTags {
+        tags: Page<ConversationTagId, 102>,
+    },
+    SetConversationTags {
+        conversation: ConversationId,
+        tags: Page<ConversationTagId, 20>,
+    },
+    ListConversations,
+    Participants(ConversationId),
+    History {
+        conversation: ConversationId,
+        before: Option<MessageId>,
+    },
+    Send(SendMessage),
+    SendStatus(OperationId),
+    MarkRead(MessageId),
+    CreateGroup {
+        name: Text<256>,
+    },
+    FindPeople {
+        query: Text<256>,
+    },
+    CreateDirect {
+        operation: OperationId,
+        recipient: crate::protocol::conversation::RecipientId,
+    },
+    LeaveConversation(ConversationId),
+    ActivateConversation(ConversationId),
+    DeactivateConversation(ConversationId),
+    ObserveCall(CallScope),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolReply {
+    Messaging {
+        conversation: ConversationId,
+        operation: OperationId,
+        result: crate::protocol::messaging::MessagingResult,
+    },
+    ConversationSettings {
+        conversation: ConversationId,
+        operation: OperationId,
+        result: crate::protocol::conversation::ConversationResult,
+    },
+    IncomingCalls(crate::calls::IncomingCalls),
+    Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),
     Policy(Box<PolicyInputs>),
     LeaveAcknowledged(CallScope),
+    Account(AccountProbe),
+    Preferences(AccountPreferenceResult),
+    Tags(ConversationTags),
+    TagCreated(ConversationTag),
+    Conversations(ConversationList),
+    Conversation(Conversation),
+    People(Page<crate::protocol::conversation::Recipient, 100>),
+    Participants(Participants),
+    History(HistoryPage),
+    Send(SendReceipt),
+    ReadAcknowledged(MessageId),
+    ConversationLeft(ConversationId),
+    ConversationActive(ConversationId),
+    ConversationInactive(ConversationId),
+    Call(CallObservation),
 }
 
 pub trait NextcloudPort: Send {

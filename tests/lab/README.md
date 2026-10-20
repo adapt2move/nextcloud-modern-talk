@@ -9,6 +9,12 @@ This bootstrap harness installs two **released** Nextcloud/Talk pairs and exerci
 
 [pins.json](pins.json) pins the **platform image manifest**, packaged application checksum and release-source identity. Tags/index digests are provenance references, not floating runtime inputs. A missing image, mismatched checksum, wrong installed version or failed app-integrity check fails the profile; no replacement version is selected automatically.
 
+## Persistent development backend
+
+Use [the development lab guide](../../docs/backend-lab.md) and `python3 tests/lab/dev.py --help` when a browser, an agent or a future native client needs the server to remain available. `up` provisions one pinned family, seeds the proven smoke scenarios and leaves it running; `status`, `check`, `login-start`, `login-poll`, `reset` and `stop` are separate invocations with an explicit private state path. The workstation-only `access.py` opens a verified SSH tunnel bound to IPv4 loopback; Docker retains the unpublished internal network. The guide covers URL/trusted-domain configuration, private credential files and cleanup.
+
+The following one-shot smoke interface retains its auto-cleanup behavior and unpublished internal bridge. Historical runs apply to their recorded harness hashes; the development extension requires new evidence.
+
 ## Provision, check, clean up
 
 Prerequisites: a disposable Linux amd64 VM with Python 3.11+ and Docker Engine 28+; Internet access for the pinned image/package downloads. Runtime secrets live in restricted `/run` directories, which should be tmpfs. Allow approximately 4 GiB RAM, 10 GiB free disk and a 30-minute execution budget. The two profiles run sequentially; this is a functional fixture, not a production deployment or performance benchmark.
@@ -75,4 +81,4 @@ agent-dev-box status --session "$LAB_SESSION"
 
 Wait for `phase: hibernated`; record snapshot and estimated cost separately. Hibernation is not a substitute for data cleanup. If other work explicitly owns the same running VM, coordinate that lifecycle with its owner.
 
-Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB/TURN, recording, native performance and full parity remain **not tested here**. HPB/TURN artifacts are not pinned or provisioned by this harness. [Recorded execution evidence](../../docs/testing/README.md) states the actual completed subset and limitations.
+Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB/TURN, recording, native performance and full parity remain **not tested here**. HPB/TURN artifacts are not pinned or provisioned by this harness. No native client or full compatibility pass is implied by these harness commands.

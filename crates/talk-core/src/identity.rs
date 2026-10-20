@@ -398,3 +398,44 @@ impl SessionOnlyCommit {
         context.admits(self.intent, now)
     }
 }
+
+/// Qualified persistent routing, independent of transient crate instance IDs.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum StorageBackend {
+    MacKeychain,
+    WindowsCredential,
+    LinuxSecretService,
+    PrivateFile,
+}
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ProviderBinding {
+    pub backend: StorageBackend,
+    pub profile: crate::ids::ProfileId,
+    /// Random registry key for one immutable OS-user/store configuration.
+    pub store: u128,
+}
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct QualifiedItem {
+    pub provider: ProviderBinding,
+    pub account: AccountId,
+    pub generation: VaultGeneration,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageFailure {
+    Missing,
+    Locked,
+    AccessDenied,
+    Corrupt,
+    TemporarilyUnavailable,
+    Unavailable,
+    Unsupported,
+    Cancelled,
+    Conflict,
+    Other,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageChoice {
+    Native,
+    PrivateFile,
+    SessionOnly,
+}

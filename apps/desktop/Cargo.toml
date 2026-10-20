@@ -1,0 +1,30 @@
+[package]
+name = "talk-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+talk-core.workspace = true
+talk-adapters.workspace = true
+gpui.workspace = true
+unicode-segmentation.workspace = true
+atomicwrites.workspace = true
+cpal.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-video.workspace = true
+image.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+
+[lints]
+workspace = true

@@ -6,7 +6,7 @@ Status: **Planned**. This is the end-to-end acceptance layer. Each journey uses 
 
 ### JNY-001
 
-**First account.** Enter HTTPS server → validate → open system browser → complete server authentication/2FA → receive device credentials → confirm storage plus restoration eligibility or explicitly continue session-only after durable restoration suppression → fetch identity/capabilities → load conversations. Success: the account's real data appears with truthful persistence/cleanup status. An uncertain write remains visible and cannot restore automatically. Cancel/expiry invalidates the attempt and returns to recoverable login; late completion cannot activate it. Reauthorization cancellation can retain only the deliberately selected valid older session under AUTH-005. Covers AUTH-001–005 and STATE-001–003.
+**First account.** Enter HTTPS server → validate → open system browser → complete server authentication/2FA → receive/validate device credentials → use preferred native storage or choose durable unencrypted private-file storage when unavailable → commit the required backend-qualified eligibility/suppression → load capabilities/conversations. Success: real data appears with truthful storage mode/cleanup status. File mode survives restart without requiring another login solely because the OS store is unavailable; normal sign-in offers no session-only path. A save failure stays in the storage step with retry/cancel; any existing temporary recovery state remains visibly temporary. An uncertain write stays visible and cannot restore automatically. Cancel/expiry invalidates the attempt; late completion cannot activate it. Reauthorization cancellation retains only deliberately selected valid P under AUTH-005. OS-store recovery never silently changes the committed choice. This follows [AMEND-AUTH-STORAGE-01](accounts.md#spec-amendment--amend-auth-storage-01); covers AUTH-001–005 and STATE-001–003.
 
 ### JNY-002
 
@@ -42,7 +42,7 @@ Status: **Planned**. This is the end-to-end acceptance layer. Each journey uses 
 
 ### JNY-010
 
-**Safely remove an account.** Inspect active work → explicitly remove → stop account activity → attempt remote token revocation → remove accessible local secrets/cache → report any denied secret cleanup or failed remote revocation. Success: no automatic restoration or background access; incomplete cleanup remains truthful. Covers AUTH-008/009 and DESK-008.
+**Safely remove an account.** Inspect active work → explicitly remove → stop account activity → commit all-backend suppression and attempt remote token revocation → remove authorized native/file secrets/cache → report pending exact-item cleanup or failed remote revocation. Success: no automatic restoration or background access; if durable suppression fails, local activity still stops and restart suppression is explicitly unconfirmed. Late writers cannot reactivate removed credentials. Covers AUTH-008/009 and DESK-008.
 
 ## Shared state contracts
 
@@ -72,4 +72,4 @@ Status: **Planned**. This is the end-to-end acceptance layer. Each journey uses 
 
 ### STATE-007
 
-**Success is observable and limited.** Confirm actions only when the responsible component has confirmed them: server acceptance, OS permission, secure-store write, file save, or actual media connection. Acceptance: no “Gesendet”, “Sicher gespeichert”, “Aufnahme beendet”, “Verbunden”, or “Gelöscht” label is derived solely from a local click or animation. Explain partial success and remaining work in the same context.
+**Success is observable and limited.** Confirm actions only when the responsible component has confirmed them: server acceptance, OS permission, provider write plus committed restoration eligibility, file save, or actual media connection. Acceptance: no “Gesendet”, “Sicher gespeichert”, “Aufnahme beendet”, “Verbunden”, or “Gelöscht” label is derived solely from a local click or animation. Credential-file status says “Auf diesem Gerät gespeichert (unverschlüsselte Datei)”; permissions do not justify an encryption/native-vault claim. Explain partial success and remaining work in the same context.

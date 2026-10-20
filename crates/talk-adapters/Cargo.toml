@@ -5,9 +5,72 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+autoexamples = false
 
 [dependencies]
+libwebrtc.workspace = true
+futures-util.workspace = true
+nextcloud-talk-api.workspace = true
 talk-core.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+url.workspace = true
+zeroize.workspace = true
+getrandom.workspace = true
+keyring-core.workspace = true
+rusqlite.workspace = true
+dirs.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store.workspace = true
+dbus-secret-service.workspace = true
+secret-service.workspace = true
+zbus.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store.workspace = true
+exacl.workspace = true
+security-framework.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store.workspace = true
+windows-permissions.workspace = true
+winapi-util.workspace = true
+atomicwrites.workspace = true
+
+# Fixture-only: permits literal loopback HTTP and owner-controlled test credentials.
+[features]
+default = []
+backend-test = ["nextcloud-talk-api/backend-test"]
+
+[[example]]
+name = "media-talk-bridge"
+path = "../../tools/media/talk_bridge.rs"
+required-features = ["backend-test"]
+
+[dev-dependencies]
+nextcloud-talk-api = { workspace = true, features = ["backend-test"] }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "identity-i2-lab"
+path = "../../tests/identity/driver.rs"
+required-features = ["backend-test"]
+
+[[example]]
+name = "media-native-peer"
+path = "../../tools/media/native_peer.rs"
+required-features = ["backend-test"]
+
+[[example]]
+name = "media-normal-talk"
+path = "../../tools/media/normal_talk.rs"
+required-features = ["backend-test"]

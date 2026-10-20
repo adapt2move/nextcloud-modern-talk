@@ -1,0 +1,1139 @@
+//! Explicit development scenarios only. No server, credential or media operation occurs.
+use talk_core::ui::presentation::{
+    AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
+    ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
+    NativeDesktopPort, NativeStoreState, ParticipantView, Presence, PresentationSnapshot,
+    RequestId, RequiredGate, StorageStatus, SubmissionResult, UiIntent,
+};
+use talk_core::ui::{
+    AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
+    RuntimeGeneration, SubmitError, Text, UnavailableReason, UserIntent,
+};
+
+pub const SCENARIOS: &[&str] = &[
+    "server",
+    "validating",
+    "browser",
+    "storage",
+    "ready",
+    "expired",
+    "login-network",
+    "login-tls",
+    "login-denied",
+    "login-browser-error",
+    "login-storage-error",
+    "storage-locked",
+    "storage-denied",
+    "storage-saving",
+    "storage-cleanup",
+    "storage-recovery",
+    "chat",
+    "history",
+    "history-busy",
+    "history-pending",
+    "history-uncertain",
+    "settings",
+    "details",
+    "participants",
+    "files",
+    "thread",
+    "search",
+    "create34",
+    "create35",
+    "discover",
+    "uncertain",
+    "pending",
+    "incoming",
+    "outgoing",
+    "prejoin",
+    "call",
+    "direct-call",
+    "voice",
+    "gate",
+    "gate-mic",
+    "gate-camera",
+    "gate-recording",
+    "gate-lobby",
+    "connecting",
+    "reconnecting",
+    "call-ended",
+    "call-error",
+    "call-error-unknown",
+    "call-controls",
+    "call-active",
+    "call-requested",
+    "sharing",
+    "call-denied",
+    "room",
+    "voice-room",
+    "prejoin-voice",
+    "offline",
+    "loading",
+    "denied",
+    "error",
+    "empty",
+    "busy",
+    "long-labels",
+    "clipboard-denied",
+    "controls",
+    "focus-rooms",
+    "focus-files",
+    "accounts",
+    "focus-accounts",
+];
+fn text<const N: usize>(s: &str) -> Text<N> {
+    Text::new(s).expect("reviewed bounded UI fixture")
+}
+fn page<T, const N: usize>(items: impl IntoIterator<Item = T>) -> Page<T, N> {
+    let mut p = Page::empty();
+    for item in items {
+        p.try_push(item).expect("reviewed fixture count");
+    }
+    p
+}
+pub fn scope() -> AccountScope {
+    AccountScope {
+        account: AccountId::from_local(1),
+        runtime: RuntimeGeneration::from_local(1),
+    }
+}
+pub fn context(id: u128) -> ConversationRef {
+    ConversationRef {
+        account: scope(),
+        conversation: ConversationId {
+            account: scope().account,
+            host: HostId::from_local(1),
+            local: id,
+        },
+    }
+}
+fn call_scope(id: u128) -> CallScope {
+    CallScope {
+        account: scope(),
+        conversation: context(id).conversation,
+        call: CallGeneration::from_local(1),
+    }
+}
+fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantView {
+    ParticipantView {
+        local_id: id,
+        name: text(name),
+        initials: text(initials),
+        role_label: text(if me { "Du" } else { "Teilnehmend" }),
+        presence: Presence::Available,
+        self_user: me,
+    }
+}
+fn participants() -> [ParticipantView; 4] {
+    [
+        participant(1, "Mara Fischer", "MF", false),
+        participant(2, "Jonas Weber", "JW", false),
+        participant(3, "Alex Sommer", "AS", true),
+        participant(4, "Lea Neumann", "LN", false),
+    ]
+}
+fn file() -> FileView {
+    FileView {
+        local_id: 1,
+        name: text("Navigation-v3.fig"),
+        detail: text("Figma-Datei · 2,4 MB"),
+        download: Decision::Unknown,
+    }
+}
+fn message(
+    id: u128,
+    author: &str,
+    initials: &str,
+    time: &str,
+    body: &str,
+    own: bool,
+) -> talk_core::ui::presentation::MessageView {
+    talk_core::ui::presentation::MessageView {
+        local_id: id,
+        author: text(author),
+        initials: text(initials),
+        time_label: text(time),
+        body: text(body),
+        own,
+        delivery: DeliveryState::Received,
+        attachments: Page::empty(),
+        reply_count: 0,
+        metadata: Default::default(),
+    }
+}
+pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("ready") {
+        let mut ready = snapshot(Some("chat"));
+        ready.login.storage = StorageStatus::NativeStored;
+        ready.login.native_store = NativeStoreState::Available;
+        ready.accounts = page(ready.accounts.as_slice().iter().cloned().map(|mut a| {
+            a.storage = StorageStatus::NativeStored;
+            a
+        }));
+        return ready;
+    }
+    let mut s = PresentationSnapshot {
+        create_panel: None,
+        revision: 1,
+        login: LoginView {
+            phase: LoginPhase::EnterServer,
+            attempt: None,
+            server_label: text(""),
+            account_label: text(""),
+            native_store: NativeStoreState::Unknown,
+            storage: StorageStatus::NotSaved,
+        },
+        accounts: Page::empty(),
+        saved_accounts: Page::empty(),
+        active_account: None,
+        conversations: Page::empty(),
+        conversation_list: talk_core::ui::presentation::ConversationListState {
+            content: ContentState::Unconfigured,
+            complete: false,
+        },
+        tags: Page::empty(),
+        tag_state: ContentState::Unconfigured,
+        organization_result: None,
+        selected: None,
+        content: ContentState::Unconfigured,
+        messages: Page::empty(),
+        files: Page::empty(),
+        participants: Page::empty(),
+        conversation_panel: None,
+        message_panel: None,
+        call: None,
+        submission: None,
+        mutation: None,
+    };
+    let Some(scenario) = scenario else {
+        return s;
+    };
+    s.login.server_label = text("cloud.example.test");
+    s.login.account_label = text("Alex Sommer");
+    s.login.attempt = Some(RequestId(1));
+    s.login.phase = match scenario {
+        "server" => LoginPhase::EnterServer,
+        "validating" => LoginPhase::Validating,
+        "browser" => LoginPhase::BrowserWaiting,
+        "storage" | "storage-locked" | "storage-denied" | "storage-saving" | "storage-cleanup"
+        | "storage-recovery" => LoginPhase::ChooseStorage,
+        "login-network" => LoginPhase::Failed(LoginFailure::Network),
+        "login-tls" => LoginPhase::Failed(LoginFailure::Tls),
+        "login-denied" => LoginPhase::Failed(LoginFailure::Denied),
+        "login-browser-error" => LoginPhase::Failed(LoginFailure::BrowserUnavailable),
+        "login-storage-error" => LoginPhase::Failed(LoginFailure::Storage),
+        "expired" => LoginPhase::Failed(LoginFailure::Expired),
+        _ => LoginPhase::Ready,
+    };
+    s.login.native_store = match scenario {
+        "storage-locked" => NativeStoreState::Locked,
+        "storage-denied" => NativeStoreState::Denied,
+        _ => NativeStoreState::Missing,
+    };
+    s.login.storage = match scenario {
+        "storage-saving" => StorageStatus::Saving,
+        "storage-cleanup" => StorageStatus::CleanupPending,
+        "storage-recovery" => StorageStatus::RecoveryRequired,
+        _ => StorageStatus::NotSaved,
+    };
+    if matches!(
+        scenario,
+        "server"
+            | "validating"
+            | "browser"
+            | "storage"
+            | "expired"
+            | "ready"
+            | "storage-locked"
+            | "storage-denied"
+            | "storage-saving"
+            | "storage-cleanup"
+            | "storage-recovery"
+            | "login-network"
+            | "login-tls"
+            | "login-denied"
+            | "login-browser-error"
+            | "login-storage-error"
+    ) {
+        return s;
+    }
+    s.accounts = page([AccountView {
+        scope: scope(),
+        navigation_key: None,
+        connection: talk_core::ui::presentation::AccountConnectionState::Disconnected,
+        label: text("Nord Studio"),
+        server_label: text("cloud.example.test"),
+        self_name: text("Alex Sommer"),
+        initials: text("AS"),
+        presence: Presence::Available,
+        storage: StorageStatus::NotSaved,
+    }]);
+    s.active_account = Some(scope());
+    s.content = ContentState::Ready;
+    let rows = [
+        (
+            1,
+            "Produktteam",
+            "PT",
+            "Mara: Perfekt. Dann nehmen wir das so mit.",
+            ConversationKind::Group,
+            true,
+            0,
+        ),
+        (
+            2,
+            "Teamküche",
+            "TK",
+            "Gesprächsraum · Gespräch öffnen",
+            ConversationKind::Group,
+            true,
+            0,
+        ),
+        (
+            3,
+            "Mara Fischer",
+            "MF",
+            "Hast du später kurz Zeit?",
+            ConversationKind::Direct,
+            false,
+            2,
+        ),
+        (
+            4,
+            "Designbesprechung",
+            "DB",
+            "Nächster Termin am Donnerstag",
+            ConversationKind::GuestAccessible,
+            false,
+            0,
+        ),
+        (
+            5,
+            "Jonas Weber",
+            "JW",
+            "Danke, schaue ich mir an.",
+            ConversationKind::Direct,
+            false,
+            0,
+        ),
+        (
+            6,
+            "Notiz an mich",
+            "AS",
+            "Ideen für die nächste Runde",
+            ConversationKind::NoteToSelf,
+            false,
+            0,
+        ),
+    ];
+    s.conversation_list = talk_core::ui::presentation::ConversationListState {
+        content: ContentState::Ready,
+        complete: true,
+    };
+    s.conversations = page(
+        rows.map(
+            |(id, title, initials, subtitle, kind, favorite, unread)| ConversationView {
+                tags: None,
+                context: context(id),
+                navigation_key: None,
+                title: text(title),
+                initials: text(initials),
+                subtitle: text(subtitle),
+                updated_label: text(if id == 1 { "09:47" } else { "Gestern" }),
+                kind,
+                favorite: Some(favorite),
+                organization: talk_core::ui::presentation::ConversationOrganization {
+                    category: match id {
+                        1 => talk_core::ui::presentation::ConversationCategory::Channel,
+                        2 => talk_core::ui::presentation::ConversationCategory::Huddle,
+                        4 => talk_core::ui::presentation::ConversationCategory::Conference(
+                            talk_core::ui::presentation::ConferencePreset::Standard,
+                        ),
+                        _ => talk_core::ui::presentation::ConversationCategory::Unknown,
+                    },
+                    classified: Some(false),
+                    ..Default::default()
+                },
+                archived: Some(id == 6),
+                archive: Decision::Unknown,
+                unread,
+                presence: if kind == ConversationKind::Direct {
+                    Presence::Available
+                } else {
+                    Presence::Unknown
+                },
+                participants: Some(if kind == ConversationKind::Direct {
+                    2
+                } else {
+                    7
+                }),
+                send: Decision::Allowed,
+                attach: Decision::Unknown,
+                draft_clipboard: Decision::Allowed,
+                call: if kind == ConversationKind::NoteToSelf {
+                    Decision::Denied
+                } else {
+                    Decision::Allowed
+                },
+                call_scope: if kind == ConversationKind::NoteToSelf {
+                    None
+                } else {
+                    Some(call_scope(id))
+                },
+            },
+        ),
+    );
+    populate(
+        &mut s,
+        context(if matches!(scenario, "direct-call" | "outgoing") {
+            3
+        } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
+            2
+        } else if scenario == "room" {
+            4
+        } else {
+            1
+        }),
+    );
+    match scenario {
+        "offline" => s.content = ContentState::Offline,
+        "loading" => {
+            s.content = ContentState::Loading;
+            s.messages = Page::empty();
+        }
+        "denied" => {
+            s.content = ContentState::Denied;
+            s.messages = Page::empty();
+            s.files = Page::empty();
+            s.participants = Page::empty();
+        }
+        "error" => s.content = ContentState::Failed,
+        "empty" => s.messages = Page::empty(),
+        _ => (),
+    }
+    if matches!(
+        scenario,
+        "incoming"
+            | "outgoing"
+            | "call"
+            | "direct-call"
+            | "voice"
+            | "gate"
+            | "gate-mic"
+            | "gate-camera"
+            | "gate-recording"
+            | "gate-lobby"
+            | "connecting"
+            | "reconnecting"
+            | "call-ended"
+            | "call-error"
+            | "call-error-unknown"
+            | "call-controls"
+            | "sharing"
+            | "call-denied"
+            | "call-active"
+            | "call-requested"
+    ) {
+        let direct = matches!(scenario, "incoming" | "outgoing" | "direct-call");
+        let id = if direct {
+            3
+        } else if scenario == "voice" {
+            2
+        } else {
+            1
+        };
+        s.call = Some(CallView {
+            scope: call_scope(id),
+            title: text(if direct {
+                "Mara Fischer"
+            } else if id == 2 {
+                "Teamküche"
+            } else {
+                "Produktteam"
+            }),
+            direct,
+            stage: match scenario {
+                "incoming" => CallStage::Incoming,
+                "outgoing" => CallStage::Outgoing,
+                "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
+                "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
+                "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
+                "gate-recording" => CallStage::Required(RequiredGate::RecordingConsent),
+                "gate-lobby" => CallStage::Required(RequiredGate::Lobby),
+                "connecting" => CallStage::Connecting,
+                "reconnecting" => CallStage::Reconnecting,
+                "call-ended" => CallStage::Ended,
+                "call-error" | "call-error-unknown" => CallStage::Failed,
+                _ => CallStage::Active,
+            },
+            accept: Decision::Allowed,
+            microphone: if scenario == "call-active" {
+                MediaState::Active
+            } else if scenario == "call-requested" {
+                MediaState::Requested
+            } else if scenario == "call-controls" {
+                MediaState::Off
+            } else if scenario == "call-denied" {
+                MediaState::Denied
+            } else {
+                MediaState::Unavailable
+            },
+            camera: if scenario == "call-active" {
+                MediaState::Active
+            } else if scenario == "call-requested" {
+                MediaState::Requested
+            } else if scenario == "call-controls" {
+                MediaState::Off
+            } else if scenario == "call-denied" {
+                MediaState::Denied
+            } else {
+                MediaState::Unavailable
+            },
+            share: if scenario == "sharing" {
+                MediaState::Active
+            } else if scenario == "call-controls" {
+                MediaState::Off
+            } else {
+                MediaState::Unavailable
+            },
+            participants: page(if direct || id == 2 {
+                vec![participants()[0].clone(), participants()[2].clone()]
+            } else {
+                participants().to_vec()
+            }),
+        });
+    }
+    if scenario == "call-error-unknown" {
+        let mut rows = s.conversations.as_slice().to_vec();
+        rows[0].call = Decision::Unknown;
+        s.conversations = page(rows);
+    }
+    if scenario == "clipboard-denied" {
+        let mut rows = s.conversations.as_slice().to_vec();
+        rows[0].draft_clipboard = Decision::Unknown;
+        s.conversations = page(rows);
+    }
+    if scenario == "long-labels" {
+        let mut rows = s.conversations.as_slice().to_vec();
+        rows[0].title =
+            text("Produktteam · Internationale Zusammenarbeit und barrierefreie Kommunikation");
+        s.conversations = page(rows);
+    }
+    if scenario.starts_with("history") {
+        s.messages = page((1..=40).map(|n| {
+            message(
+                100 + n,
+                "Mara Fischer",
+                "MF",
+                "09:47",
+                &format!(
+                    "Geladene Nachricht {n:02} · {}",
+                    if n == 40 {
+                        "Neuester geladener Stand."
+                    } else {
+                        "Fiktiver Verlauf für die lokale Navigation."
+                    }
+                ),
+                false,
+            )
+        }));
+    }
+    s
+}
+fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
+    s.selected = Some(selected);
+    s.participants = page(participants());
+    s.files = page([file()]);
+    if selected.conversation.local == 1 {
+        let mut first = message(
+            1,
+            "Mara Fischer",
+            "MF",
+            "09:41",
+            "Guten Morgen! Die neue Navigation ist bereit für einen letzten Blick.",
+            false,
+        );
+        first.attachments = page([file()]);
+        let mut second = message(
+            2,
+            "Jonas Weber",
+            "JW",
+            "09:43",
+            "Sieht gut aus. Können wir die Suche noch mit einem Tastenkürzel öffnen?",
+            false,
+        );
+        second.reply_count = 3;
+        s.messages = page([
+            first,
+            second,
+            message(
+                3,
+                "Alex Sommer",
+                "AS",
+                "09:45",
+                "Ja, ist drin. Ich habe auch den Wechsel zwischen den Gesprächen vereinfacht.",
+                true,
+            ),
+            message(
+                4,
+                "Mara Fischer",
+                "MF",
+                "09:47",
+                "Perfekt. Dann nehmen wir das so mit.",
+                false,
+            ),
+        ]);
+    } else {
+        s.messages = page([message(
+            5,
+            "Mara Fischer",
+            "MF",
+            "09:51",
+            "Hier ist Platz für unser Gespräch. Diese Inhalte sind fiktive UI-Beispiele.",
+            false,
+        )]);
+    }
+}
+
+/// Three finite projection transitions driven only by explicit development F6:
+/// reorder, remove focused item, then replace account/runtime/host scope.
+fn focus_snapshot(files: bool, step: u8) -> PresentationSnapshot {
+    let mut s = snapshot(Some("chat"));
+    let mut rows = s.conversations.as_slice().to_vec();
+    if !files && step == 1 {
+        rows.swap(2, 4);
+    }
+    if !files && step >= 2 {
+        rows.retain(|r| r.context.conversation.local != 3);
+    }
+    if step == 3 {
+        let account = AccountScope {
+            account: AccountId::from_local(2),
+            runtime: RuntimeGeneration::from_local(2),
+        };
+        let mut accounts = s.accounts.as_slice().to_vec();
+        accounts[0].scope = account;
+        s.accounts = page(accounts);
+        s.active_account = Some(account);
+        for row in &mut rows {
+            row.context.account = account;
+            row.context.conversation.account = account.account;
+            row.context.conversation.host = HostId::from_local(2);
+            row.call_scope = None;
+            row.call = Decision::Unknown;
+        }
+        s.selected = Some(rows[0].context);
+    }
+    s.conversations = page(rows);
+    if files {
+        let mut first = file();
+        first.download = Decision::Allowed;
+        let second = FileView {
+            local_id: 2,
+            name: text("Konzept.pdf"),
+            detail: text("PDF · 1 MB"),
+            download: Decision::Allowed,
+        };
+        let entries = match step {
+            0 => vec![first, second],
+            1 => vec![second, first],
+            _ => vec![second],
+        };
+        let mut messages = s.messages.as_slice().to_vec();
+        messages[0].attachments = page(entries.clone());
+        s.messages = page(messages);
+        s.files = page(entries);
+    }
+    s
+}
+
+// These are explicitly LIVE fictional runtime scopes, not dormant/stored accounts.
+fn account_snapshot(step: u8) -> PresentationSnapshot {
+    let mut s = snapshot(Some("chat"));
+    let template = s.accounts.as_slice()[0].clone();
+    let mut accounts = Vec::with_capacity(3);
+    for (id, label, name, initials) in [
+        (1, "Nord Studio", "Alex Sommer", "AS"),
+        (2, "Werkstatt", "Samira Winter", "SW"),
+        (3, "Projektbüro", "Robin Keller", "RK"),
+    ] {
+        let mut a = template.clone();
+        a.scope = AccountScope {
+            account: AccountId::from_local(id),
+            runtime: RuntimeGeneration::from_local(if step == 3 && id == 3 { 2 } else { 1 }),
+        };
+        a.label = text(label);
+        a.self_name = text(name);
+        a.initials = text(initials);
+        accounts.push(a);
+    }
+    if step == 1 {
+        accounts.swap(1, 2);
+    }
+    if step >= 2 {
+        accounts.retain(|a| a.scope.account.as_local() != 2);
+    }
+    if step == 3 {
+        let active = accounts
+            .iter()
+            .find(|a| a.scope.account.as_local() == 3)
+            .unwrap()
+            .scope;
+        s.active_account = Some(active);
+        let mut rows = s.conversations.as_slice().to_vec();
+        for row in &mut rows {
+            row.context.account = active;
+            row.context.conversation.account = active.account;
+            row.context.conversation.host = HostId::from_local(3);
+            row.call_scope = None;
+            row.call = Decision::Unknown;
+        }
+        s.selected = Some(rows[0].context);
+        s.conversations = page(rows);
+    }
+    s.accounts = page(accounts);
+    s
+}
+
+pub struct DevelopmentPort {
+    snapshot: PresentationSnapshot,
+    dirty: bool,
+    enabled: bool,
+    busy: bool,
+    uncertain: bool,
+    pending: bool,
+    intents: u8,
+    account_probe: bool,
+    focus_probe: Option<bool>, // false: rooms; true: files
+    probe_step: u8,
+}
+impl DevelopmentPort {
+    pub fn new(scenario: Option<&str>) -> Self {
+        let focus_probe = match scenario {
+            Some("focus-rooms") => Some(false),
+            Some("focus-files") => Some(true),
+            _ => None,
+        };
+        let account_probe = scenario == Some("focus-accounts");
+        let initial = if account_probe || scenario == Some("accounts") {
+            account_snapshot(0)
+        } else if let Some(files) = focus_probe {
+            focus_snapshot(files, 0)
+        } else {
+            snapshot(scenario)
+        };
+        Self {
+            account_probe,
+            focus_probe,
+            probe_step: 0,
+            snapshot: initial,
+            dirty: true,
+            enabled: scenario.is_some(),
+            busy: matches!(scenario, Some("busy" | "history-busy")),
+            uncertain: matches!(scenario, Some("uncertain" | "history-uncertain")),
+            pending: matches!(scenario, Some("pending" | "history-pending")),
+            intents: 0,
+        }
+    }
+}
+impl NativeDesktopPort for DevelopmentPort {
+    fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError> {
+        if !self.enabled {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
+        }
+        // This sink consumes synchronously; a bounded counter is diagnostic, no intent backlog/log.
+        self.intents = self.intents.saturating_add(1);
+        // At most 32 diagnostics in explicit development mode: only local IDs
+        // and input lengths, never draft content, credentials or backend data.
+        if self.intents <= 32 {
+            // Explicit fixture-only observation of every port admission attempt.
+            // Only a bounded ordinal, no payload or server-derived text.
+            println!("UI_DISPATCH ordinal={}", self.intents);
+            match &intent {
+                UiIntent::SelectAccount(a) => println!(
+                    "UI_FOCUS_PROBE select account={} runtime={}",
+                    a.account.as_local(),
+                    a.runtime.as_local()
+                ),
+                UiIntent::OpenConversation(c) => println!(
+                    "UI_FOCUS_PROBE open account={} room={}",
+                    c.account.account.as_local(),
+                    c.conversation.local
+                ),
+                UiIntent::DownloadFile { context, local_id } => println!(
+                    "UI_FOCUS_PROBE download account={} file={}",
+                    context.account.account.as_local(),
+                    local_id
+                ),
+                UiIntent::SendDraft {
+                    request,
+                    context,
+                    body,
+                } => println!(
+                    "UI_INTENT send request={} account={} room={} bytes={} lines={}",
+                    request.0,
+                    context.account.account.as_local(),
+                    context.conversation.local,
+                    body.as_str().len(),
+                    body.as_str().split('\n').count()
+                ),
+                UiIntent::Legacy(UserIntent::AcceptDirect { call, .. }) => {
+                    println!("UI_INTENT accept-direct room={}", call.conversation.local)
+                }
+                UiIntent::JoinConference { call, .. } => {
+                    println!("UI_INTENT join-conference room={}", call.conversation.local)
+                }
+                UiIntent::Legacy(UserIntent::Leave(call)) => {
+                    println!("UI_INTENT leave room={}", call.conversation.local)
+                }
+                UiIntent::SetMicrophone { call, .. } => {
+                    println!("UI_INTENT microphone room={}", call.conversation.local)
+                }
+                UiIntent::SetCamera { call, .. } => {
+                    println!("UI_INTENT camera room={}", call.conversation.local)
+                }
+                UiIntent::ShareScreen(call) => {
+                    println!("UI_INTENT share room={}", call.conversation.local)
+                }
+                _ => (),
+            }
+        }
+        match intent {
+            UiIntent::Refresh(_) if self.account_probe => {
+                self.probe_step = (self.probe_step + 1).min(3);
+                let revision = self.snapshot.revision;
+                self.snapshot = account_snapshot(self.probe_step);
+                self.snapshot.revision = revision;
+            }
+            UiIntent::SelectAccount(a) if self.account_probe => {
+                if !self
+                    .snapshot
+                    .accounts
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.scope == a)
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+            }
+            UiIntent::Refresh(_) if self.focus_probe.is_some() => {
+                self.probe_step = (self.probe_step + 1).min(3);
+                let revision = self.snapshot.revision;
+                self.snapshot = focus_snapshot(self.focus_probe.unwrap(), self.probe_step);
+                self.snapshot.revision = revision;
+            }
+            UiIntent::OpenConversation(c) => {
+                if !self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .any(|r| r.context == c)
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                populate(&mut self.snapshot, c);
+            }
+            UiIntent::BeginLogin { request, .. } => {
+                self.snapshot.login.phase = LoginPhase::BrowserWaiting;
+                self.snapshot.login.attempt = Some(request);
+            }
+            UiIntent::CancelLogin(attempt) => {
+                if self.snapshot.login.attempt != Some(attempt) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.snapshot.login.phase = LoginPhase::EnterServer;
+            }
+            UiIntent::ReopenBrowser(_) | UiIntent::ChooseStorage { .. } => {
+                return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
+            }
+            UiIntent::SendDraft {
+                request, context, ..
+            }
+            | UiIntent::Message {
+                request,
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { .. },
+            } => {
+                if self.busy || self.snapshot.submission.is_some() {
+                    return Err(SubmitError::Busy);
+                }
+                if self.snapshot.selected != Some(context) {
+                    return Err(SubmitError::StaleScope);
+                }
+                if !self.pending {
+                    self.snapshot.submission = Some(SubmissionResult {
+                        request,
+                        context,
+                        result: if self.uncertain {
+                            Completion::Uncertain
+                        } else {
+                            Completion::Failed(UnavailableReason::Unconfigured)
+                        },
+                    });
+                }
+            }
+            UiIntent::AcknowledgeSubmission { request, context } => {
+                if self
+                    .snapshot
+                    .submission
+                    .is_some_and(|r| r.request == request && r.context == context)
+                {
+                    self.snapshot.submission = None;
+                }
+            }
+            UiIntent::Legacy(UserIntent::PrepareConference(call)) => {
+                if !self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .any(|r| r.call_scope == Some(call) && r.kind != ConversationKind::Direct)
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+            }
+            UiIntent::Legacy(UserIntent::AcceptDirect { call, .. }) => {
+                let Some(view) = self.snapshot.call.as_mut() else {
+                    return Err(SubmitError::StaleScope);
+                };
+                if view.scope != call || view.stage != CallStage::Incoming || !view.direct {
+                    return Err(SubmitError::StaleScope);
+                }
+                view.stage = CallStage::Connecting;
+                populate(
+                    &mut self.snapshot,
+                    ConversationRef {
+                        account: call.account,
+                        conversation: call.conversation,
+                    },
+                );
+            }
+            UiIntent::StartDirect { call, .. }
+            | UiIntent::JoinConference { call, .. }
+            | UiIntent::Legacy(UserIntent::JoinPrepared { call, .. }) => {
+                let Some(row) = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|r| r.call_scope == Some(call))
+                else {
+                    return Err(SubmitError::StaleScope);
+                };
+                let title = row.title.clone();
+                let direct = row.kind == ConversationKind::Direct;
+                let context = row.context;
+                populate(&mut self.snapshot, context);
+                self.snapshot.call = Some(CallView {
+                    scope: call,
+                    title,
+                    direct,
+                    stage: CallStage::Connecting,
+                    accept: Decision::Unknown,
+                    microphone: MediaState::Unavailable,
+                    camera: MediaState::Unavailable,
+                    share: MediaState::Unavailable,
+                    participants: if direct || call.conversation.local == 2 {
+                        page([participants()[0].clone(), participants()[2].clone()])
+                    } else {
+                        page(participants())
+                    },
+                });
+            }
+            UiIntent::Legacy(UserIntent::Leave(call)) | UiIntent::DeclineDirect(call) => {
+                if self.snapshot.call.as_ref().is_none_or(|c| c.scope != call) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.snapshot.call = None;
+            }
+            _ => return Err(SubmitError::Unavailable(UnavailableReason::Unsupported)),
+        }
+        self.snapshot.revision += 1;
+        self.dirty = true;
+        Ok(())
+    }
+    fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
+        if self.dirty {
+            self.dirty = false;
+            Some(self.snapshot.clone())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talk_core::ui::MediaIntent;
+    #[test]
+    fn live_account_focus_probe_never_reuses_a_runtime_on_removal_or_switch() {
+        let original = account_snapshot(0);
+        let reordered = account_snapshot(1);
+        let removed = account_snapshot(2);
+        let replaced = account_snapshot(3);
+        let second = original.accounts.as_slice()[1].scope;
+        assert_eq!(reordered.accounts.as_slice()[2].scope, second);
+        assert!(
+            !removed
+                .accounts
+                .as_slice()
+                .iter()
+                .any(|a| a.scope == second)
+        );
+        assert_ne!(
+            original.accounts.as_slice()[2].scope,
+            replaced.accounts.as_slice()[1].scope
+        );
+        for s in [&original, &reordered, &removed, &replaced] {
+            assert!(
+                s.conversations
+                    .as_slice()
+                    .iter()
+                    .all(|r| Some(r.context.account) == s.active_account)
+            );
+            assert!(
+                s.accounts
+                    .as_slice()
+                    .iter()
+                    .any(|a| Some(a.scope) == s.active_account)
+            );
+        }
+        let mut port = DevelopmentPort::new(Some("focus-accounts"));
+        for _ in 0..3 {
+            port.try_submit(UiIntent::Refresh(context(1))).unwrap();
+        }
+        assert_eq!(
+            port.try_submit(UiIntent::SelectAccount(second)),
+            Err(SubmitError::StaleScope)
+        );
+    }
+    #[test]
+    fn explicit_focus_projection_transitions_are_bounded_and_scope_consistent() {
+        for files in [false, true] {
+            for step in 0..4 {
+                let s = focus_snapshot(files, step);
+                assert!(
+                    s.conversations
+                        .as_slice()
+                        .iter()
+                        .all(|r| Some(r.context.account) == s.active_account)
+                );
+                assert!(s.selected.is_some_and(|selected| {
+                    s.conversations
+                        .as_slice()
+                        .iter()
+                        .any(|r| r.context == selected)
+                }));
+                let rows = s.conversations.as_slice();
+                assert!(rows.len() <= 6);
+                if !files && step == 1 {
+                    assert_eq!(rows[4].context.conversation.local, 3);
+                }
+                if !files && step >= 2 {
+                    assert!(rows.iter().all(|r| r.context.conversation.local != 3));
+                }
+                if files {
+                    assert_eq!(
+                        s.files.as_slice()[0].local_id,
+                        if step == 0 { 1 } else { 2 }
+                    );
+                }
+                if step == 3 {
+                    assert_eq!(s.active_account.unwrap().account.as_local(), 2);
+                }
+            }
+        }
+    }
+    #[test]
+    fn no_scenario_never_simulates_authorization_or_messages() {
+        let mut port = DevelopmentPort::new(None);
+        let initial = port.take_snapshot().unwrap();
+        assert!(initial.accounts.as_slice().is_empty());
+        assert_eq!(
+            port.try_submit(UiIntent::BeginLogin {
+                request: RequestId(1),
+                server: talk_core::ui::presentation::ServerInput::new("example.test").unwrap()
+            }),
+            Err(SubmitError::Unavailable(UnavailableReason::Unconfigured))
+        );
+        assert!(port.take_snapshot().is_none());
+    }
+    #[test]
+    fn direct_accept_moves_only_to_connecting_and_has_no_capture() {
+        let mut port = DevelopmentPort::new(Some("incoming"));
+        let initial = port.take_snapshot().unwrap();
+        let call = initial.call.unwrap().scope;
+        let mut stale = call;
+        stale.call = CallGeneration::from_local(2);
+        assert_eq!(
+            port.try_submit(UiIntent::Legacy(UserIntent::AcceptDirect {
+                call: stale,
+                media: MediaIntent::MicrophoneOnCameraOff
+            })),
+            Err(SubmitError::StaleScope)
+        );
+        assert!(port.take_snapshot().is_none());
+        port.try_submit(UiIntent::Legacy(UserIntent::AcceptDirect {
+            call,
+            media: MediaIntent::MicrophoneOnCameraOff,
+        }))
+        .unwrap();
+        let result = port.take_snapshot().unwrap().call.unwrap();
+        assert_eq!(result.stage, CallStage::Connecting);
+        assert_eq!(result.camera, MediaState::Unavailable);
+        assert_eq!(result.microphone, MediaState::Unavailable);
+        assert!(port.take_snapshot().is_none());
+    }
+    #[test]
+    fn busy_has_no_completion_and_local_admission_never_fabricates_history() {
+        let mut busy = DevelopmentPort::new(Some("busy"));
+        busy.take_snapshot();
+        let intent = UiIntent::SendDraft {
+            request: RequestId(7),
+            context: context(1),
+            body: text("Test draft"),
+        };
+        assert_eq!(busy.try_submit(intent.clone()), Err(SubmitError::Busy));
+        assert!(busy.take_snapshot().is_none());
+        let mut port = DevelopmentPort::new(Some("chat"));
+        let before = port.take_snapshot().unwrap();
+        port.try_submit(intent).unwrap();
+        let result = port.take_snapshot().unwrap();
+        assert_eq!(before.messages, result.messages);
+        assert_eq!(
+            result.submission.unwrap().result,
+            Completion::Failed(UnavailableReason::Unconfigured)
+        );
+        port.try_submit(UiIntent::AcknowledgeSubmission {
+            request: RequestId(6),
+            context: context(1),
+        })
+        .unwrap();
+        assert!(port.take_snapshot().unwrap().submission.is_some());
+        port.try_submit(UiIntent::AcknowledgeSubmission {
+            request: RequestId(7),
+            context: context(1),
+        })
+        .unwrap();
+        assert!(port.take_snapshot().unwrap().submission.is_none());
+    }
+    #[test]
+    fn conference_preparation_requires_matching_group_scope() {
+        let mut port = DevelopmentPort::new(Some("chat"));
+        port.take_snapshot();
+        assert_eq!(
+            port.try_submit(UiIntent::Legacy(UserIntent::PrepareConference(call_scope(
+                3
+            )))),
+            Err(SubmitError::StaleScope)
+        );
+        port.try_submit(UiIntent::Legacy(UserIntent::PrepareConference(call_scope(
+            1,
+        ))))
+        .unwrap();
+        assert!(port.take_snapshot().unwrap().call.is_none());
+    }
+}

@@ -1,0 +1,13 @@
+import("//webrtc.gni")
+
+executable("nmt-media-helper") {
+  sources = [ "helper.cc", "sctp_limits.cc", "sctp_limits.h" ]
+  deps = [
+    "//:webrtc",
+    "//modules/audio_device:test_audio_device_module",
+  ]
+  # This small embedding consumes the public native API through the aggregate
+  # library. Generated third_party include closure is supplied by WebRTC.
+  check_includes = false
+  configs += [ "//:common_config" ]
+}

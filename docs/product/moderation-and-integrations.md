@@ -50,6 +50,8 @@ Acceptance: a failed/busy/rejected dial-out is not a connected participant. Retr
 
 **Calendar and event-linked conversations (P3).** Support server-scheduled meetings, upcoming event rooms, supported mutual calendar context, and links to the external Calendar application. Identify timezone and room association. Scheduling a meeting differs from scheduling a chat message or starting a call now. Temporary event/instant/phone-room retention and keep/unbind actions must be explained.
 
+Optional local Calendar notifications default off. Enable their controls and category Test only when the admitted account has verified its actual Calendar notification integration; unknown availability, generic DAV support or a saved preference is insufficient. Retain saved choices when the source becomes unavailable, suppress delivery, and explain the unavailable source. Do not invent calendar events or local reminder timers. Turning delivery off never deletes server reminders or events.
+
 Acceptance: saving a meeting does not start devices or a call. A failed server schedule does not create a local calendar promise. Daylight-saving transitions and account timezone differences show an unambiguous instant. Calendar permissions are respected; unavailable event details do not become a guessed “free” status. Removing a calendar association is a distinct, confirmed action.
 
 ## INT-005

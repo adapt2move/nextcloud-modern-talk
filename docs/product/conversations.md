@@ -33,7 +33,7 @@ Acceptance: ordinary users see no administrator-only announcement preset unless 
 
 | Behavior | Normative rule and distinction |
 | --- | --- |
-| Voice room | Deliberate join opens CALL-004's conference prejoin; selection never auto-joins. The reviewed preset's regular-user listability and one-hour message expiry are editable defaults, subject to forced parameters and returned state. |
+| Voice room | A deliberate headphone action joins the audio flow directly under CALL-005, without generic conference prejoin; selection never auto-joins. Permission, consent, lobby and security gates remain required. The reviewed preset's regular-user listability and one-hour message expiry are editable defaults, subject to forced parameters and returned state. |
 | Webinar/presentation | Reviewed ordinary-member defaults allow call join, chat and reactions, without start-call or media-publish permissions. Webinar additionally defaults to a public room and non-moderator lobby. These are preset parameters, not immutable role rules; expose actual effective permissions, admission and consent policy. |
 | Channel | Calls are forbidden for every role, including owner/moderator; only participants with moderator authority receive the member list. The preset's reaction-only ordinary-member permissions and listability are defaults that can change; such edits do not remove the call/member-list invariants. |
 | Announcement | Administrator-only creation; always inherits channel restrictions. Members without moderator authority cannot leave. All-message notifications are the default for participants, not a locked preference; supported personal notification changes remain possible. Moderator leave still obeys other lifecycle rules, including last-moderator restrictions. |
@@ -60,7 +60,7 @@ Acceptance: permissions and discoverability are rechecked at join time. A result
 
 ## CONV-007
 
-**Invite people and show membership accurately (P1 basic; P3 advanced).** Support individual users and permitted Nextcloud groups, circles/teams, email guests, and federated identities as distinct invitation sources. Explain that importing/inviting a group is a server operation, not a promise of a permanent synchronized group binding. Show partial success and rejected recipients. Moderator email resend and CSV import are separately gated; preview and validate CSV recipients before an explicit send.
+**Invite people and show membership accurately (P1 basic; P3 advanced).** Support individual users and permitted NextCloud groups, circles/teams, email guests, and federated identities as distinct invitation sources. Explain that importing/inviting a group is a server operation, not a promise of a permanent synchronized group binding. Show partial success and rejected recipients. Moderator email resend and CSV import are separately gated; preview and validate CSV recipients before an explicit send.
 
 Acceptance: same-named users/groups remain distinguishable by source and server. A guest can edit their supported display name without impersonating an account identity. Invitations never auto-send during recipient search or form preview. A restricted participant list shows its policy rather than a false empty list.
 
@@ -76,10 +76,16 @@ Acceptance: a permission/role change arriving while an action is pending blocks/
 
 Acceptance: a failed favorite/archive/tag update rolls back visibly. A room may be archived yet have a live call or new activity; follow returned policy without losing it permanently. Sensitive presentation applies across list, search, switcher, and OS notifications. Tags on one account never organize another account's rooms.
 
+The compact sidebar gives Inbox and Archive their own destinations. Direct conversations and Note to self precede Channels, Conferences and Huddles; other or unknown types remain explicit. Existing-conversation categories come from typed metadata, with conference presets and classified status represented separately. Names never imply room types. Rows stay single-line, with small unread counts for personal conversations and dots elsewhere; pinning prioritizes a row within its group.
+
+Custom groups support creation, rename, removal, ordering, collapse and room assignment. Supported server tags/favorites use admitted server requests and confirmed replies. Only an explicitly unsupported feature permits account-scoped local fallback; Unknown never does. Local persistence uses owner-issued durable account/room keys and bounded per-item edits, retaining unseen layout entries after refresh. Server tag handles remain scoped to the current account runtime. Failed or uncertain edits keep the last confirmed layout and offer reload; no automatic replay follows uncertainty.
+
 ## CONV-010
 
 **Edit metadata and lifecycle settings (P3; read state P1).** Gate name, description, avatar, guest access, password, read-only mode, mention policy, expiration, and recording-consent settings individually. Show server limits. Distinguish leave room, leave current session, delete room, clear history, preserve, and keep/unbind a temporary event/phone/classified room. Destructive confirmations name the room and scope; CONV-004 invariants apply to edits as well as creation.
 
 For a queued classified room, the supported moderator “Behalten”/unbind action changes the object association from `classified` to `classified_persist`. Confirm that returned transition before claiming exemption from the classified room-retention sweep, including future calls. It does not clear the classified attribute, sensitive treatment, exposure restrictions or message-expiry policy. Do not implement “keep” by erasing attributes/object data locally. Owner-controlled preservation and moderator keep are different actions; neither is a promise of universal retention immunity. [Retention and keep evidence](../compatibility/baselines-and-sources.md#preset-and-policy-precedence).
+
+The [conversation-dialog design](../design/conversation-dialogs.md) places members/bots in a header-invoked dialog and room settings in General, Notifications, Privacy, Permissions and Meeting tabs. It replaces the persistent right details sidebar. Direct chats hide the member-management control. Each form exposes only confirmed capabilities and effective rights; a layout choice never grants server authority.
 
 Acceptance: leaving a call retains room membership. A failed deletion leaves the room visible; timeout or concurrent retention during keep/delete requires reconciliation. A preserved room offers no delete/clear-history/public-private/listability mutation until an authorized unpreserve succeeds; nonowners cannot toggle it. A preserved classified room still expires under its applicable automatic policy unless the separate keep transition was confirmed. Expired messages disappear from live views and managed caches, including pins/reply excerpts; keeping the room does not restore them. No exact server cleanup time is promised.

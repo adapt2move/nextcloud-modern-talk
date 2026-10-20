@@ -1,0 +1,75 @@
+//! Fixed embedded SVG assets. No filesystem or network asset lookup.
+use gpui::{AssetSource, Result, SharedString};
+use std::borrow::Cow;
+pub struct Assets;
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        let bytes: &'static [u8] = match path {
+            "icons/phone-down.svg" => include_bytes!("../../assets/icons/phone-down.svg"),
+            "icons/headphones.svg" => include_bytes!("../../assets/icons/headphones.svg"),
+            "icons/compass.svg" => include_bytes!("../../assets/icons/compass.svg"),
+            "icons/link.svg" => include_bytes!("../../assets/icons/link.svg"),
+            "icons/copy.svg" => include_bytes!("../../assets/icons/copy.svg"),
+            "icons/megaphone.svg" => include_bytes!("../../assets/icons/megaphone.svg"),
+            "icons/shield.svg" => include_bytes!("../../assets/icons/shield.svg"),
+            "icons/video.svg" => include_bytes!("../../assets/icons/video.svg"),
+            "icons/video-off.svg" => include_bytes!("../../assets/icons/video-off.svg"),
+            "icons/mic.svg" => include_bytes!("../../assets/icons/mic.svg"),
+            "icons/mic-off.svg" => include_bytes!("../../assets/icons/mic-off.svg"),
+            "icons/speaker.svg" => include_bytes!("../../assets/icons/speaker.svg"),
+            "icons/monitor-up.svg" => include_bytes!("../../assets/icons/monitor-up.svg"),
+            "icons/hand.svg" => include_bytes!("../../assets/icons/hand.svg"),
+            "icons/more.svg" => include_bytes!("../../assets/icons/more.svg"),
+            "icons/chat.svg" => include_bytes!("../../assets/icons/chat.svg"),
+            "icons/grid.svg" => include_bytes!("../../assets/icons/grid.svg"),
+            "icons/thumbs-up.svg" => include_bytes!("../../assets/icons/thumbs-up.svg"),
+            "icons/sparkles.svg" => include_bytes!("../../assets/icons/sparkles.svg"),
+            "icons/cloud.svg" => include_bytes!("../../assets/icons/cloud.svg"),
+            "icons/globe.svg" => include_bytes!("../../assets/icons/globe.svg"),
+            "icons/arrow-right.svg" => include_bytes!("../../assets/icons/arrow-right.svg"),
+            "icons/arrow-left.svg" => include_bytes!("../../assets/icons/arrow-left.svg"),
+            "icons/arrow-up.svg" => include_bytes!("../../assets/icons/arrow-up.svg"),
+            "icons/arrow-up-right.svg" => include_bytes!("../../assets/icons/arrow-up-right.svg"),
+            "icons/external.svg" => include_bytes!("../../assets/icons/external.svg"),
+            "icons/lock.svg" => include_bytes!("../../assets/icons/lock.svg"),
+            "icons/browser.svg" => include_bytes!("../../assets/icons/browser.svg"),
+            "icons/check.svg" => include_bytes!("../../assets/icons/check.svg"),
+            "icons/check-circle.svg" => include_bytes!("../../assets/icons/check-circle.svg"),
+            "icons/bell.svg" => include_bytes!("../../assets/icons/bell.svg"),
+            "icons/clock.svg" => include_bytes!("../../assets/icons/clock.svg"),
+            "icons/refresh.svg" => include_bytes!("../../assets/icons/refresh.svg"),
+            "icons/sidebar.svg" => include_bytes!("../../assets/icons/sidebar.svg"),
+            "icons/panel-right.svg" => include_bytes!("../../assets/icons/panel-right.svg"),
+            "icons/chevron-left.svg" => include_bytes!("../../assets/icons/chevron-left.svg"),
+            "icons/chevron-down.svg" => include_bytes!("../../assets/icons/chevron-down.svg"),
+            "icons/search.svg" => include_bytes!("../../assets/icons/search.svg"),
+            "icons/inbox.svg" => include_bytes!("../../assets/icons/inbox.svg"),
+            "icons/at.svg" => include_bytes!("../../assets/icons/at.svg"),
+            "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
+            "icons/settings.svg" => include_bytes!("../../assets/icons/settings.svg"),
+            "icons/users.svg" => include_bytes!("../../assets/icons/users.svg"),
+            "icons/user.svg" => include_bytes!("../../assets/icons/user.svg"),
+            "icons/phone.svg" => include_bytes!("../../assets/icons/phone.svg"),
+            "icons/pin.svg" => include_bytes!("../../assets/icons/pin.svg"),
+            "icons/file.svg" => include_bytes!("../../assets/icons/file.svg"),
+            "icons/download.svg" => include_bytes!("../../assets/icons/download.svg"),
+            "icons/smile.svg" => include_bytes!("../../assets/icons/smile.svg"),
+            "icons/paperclip.svg" => include_bytes!("../../assets/icons/paperclip.svg"),
+            "icons/x.svg" => include_bytes!("../../assets/icons/x.svg"),
+            "icons/palette.svg" => include_bytes!("../../assets/icons/palette.svg"),
+            "icons/keyboard.svg" => include_bytes!("../../assets/icons/keyboard.svg"),
+            "icons/sun.svg" => include_bytes!("../../assets/icons/sun.svg"),
+            "icons/moon.svg" => include_bytes!("../../assets/icons/moon.svg"),
+            "icons/reply.svg" => include_bytes!("../../assets/icons/reply.svg"),
+            "icons/info.svg" => include_bytes!("../../assets/icons/info.svg"),
+            "icons/brand-front.svg" => include_bytes!("../../assets/icons/brand-front.svg"),
+            "icons/brand-knockout.svg" => include_bytes!("../../assets/icons/brand-knockout.svg"),
+            "icons/brand.svg" => include_bytes!("../../assets/icons/brand.svg"),
+            _ => return Ok(None),
+        };
+        Ok(Some(Cow::Borrowed(bytes)))
+    }
+    fn list(&self, _path: &str) -> Result<Vec<SharedString>> {
+        Ok(Vec::new())
+    }
+}

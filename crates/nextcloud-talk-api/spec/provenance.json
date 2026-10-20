@@ -1,0 +1,32 @@
+{
+  "purpose": "Pinned protocol reference and generated operation inventory, not generated HTTP client code. Unknown fields/capabilities and bounded OCS ingress remain handwritten.",
+  "specifications": [
+    {
+      "version": "v25.0.6",
+      "document": "openapi-full.json",
+      "url": "https://raw.githubusercontent.com/nextcloud/spreed/refs/tags/v25.0.6/openapi-full.json",
+      "sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
+      "license": "AGPL-3.0-or-later",
+      "operations": 187
+    },
+    {
+      "version": "v24.0.6",
+      "document": "openapi-full.json",
+      "url": "https://raw.githubusercontent.com/nextcloud/spreed/refs/tags/v24.0.6/openapi-full.json",
+      "sha256": "967a55ea4e6d30c2242227ed45670e0f48d8856f70dac064b7ec396cff624388",
+      "license": "agpl",
+      "operations": 185
+    },
+    {
+      "version": "v25.0.6",
+      "document": "openapi.json",
+      "url": "https://raw.githubusercontent.com/nextcloud/spreed/refs/tags/v25.0.6/openapi.json",
+      "sha256": "08949fe2541dbbbdf6da5d2607da7b1116429e7e30d4025d489234c8646480ee",
+      "license": "AGPL-3.0-or-later",
+      "operations": 155
+    }
+  ],
+  "implementation_license": "EUPL-1.2",
+  "inventory_source": "openapi-full-v25.0.6.json",
+  "upstream_license_url": "https://github.com/nextcloud/spreed/blob/v25.0.6/COPYING"
+}

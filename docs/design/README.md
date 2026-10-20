@@ -1,6 +1,6 @@
 # Design reference
 
-**Status: product design targets and schematic artifacts, not an implemented client.** The intended application is native Rust with GPUI, with macOS as the primary platform and no embedded WebView. Browser-rendered mockups do not demonstrate native rendering, server integration, accessibility conformance, or performance.
+These references describe the visual and interaction targets for the native Rust/GPUI application, with macOS as the primary platform and no embedded WebView. Browser-rendered mockups do not demonstrate native rendering, server integration, accessibility conformance, or performance.
 
 Blue is the preferred direction. Sage is retained for comparison. Both use Manrope, shared geometry, fictional people and messages, and CSS-drawn media placeholders. UI examples are German; public documentation is English.
 
@@ -9,6 +9,7 @@ Blue is the preferred direction. Sage is retained for comparison. Both use Manro
 | [Principles](principles.md) | Stable design rules, conversation semantics, native behavior |
 | [Tokens](tokens.md) | Palette, typography, alignment and accessibility targets |
 | [Flows and screen map](flows.md) | Stable screen/flow IDs, acceptance criteria, screenshot links |
+| [Conversation dialogs](conversation-dialogs.md) | Header actions, members/bots and five-tab room settings; [interactive design](prototypes/conversation-dialogs.html) |
 | [Artifact provenance and checks](artifacts.md) | What was copied or revised, reproducible review, limits |
 | [Project notices](../../NOTICE.md) | EUPL scope and the separate Manrope font license |
 
@@ -23,10 +24,11 @@ Product feature specifications govern scope and supported behavior. These Markdo
 ## Call entry decision
 
 - Incoming **direct** colleague call: `D-S13` → **Annehmen** → `D-S19`, a call with Mara and Alex. No conference device-prejoin interstitial.
-- Voluntary conference join, including a voice room: conversation → `D-S09`, **Bereit, wenn du es bist.** → **Jetzt teilnehmen** → `D-S10` (conference) or `D-S18` (Teamküche). Opening Teamküche in the sidebar only opens its conversation, `D-S20`; no call or media activation is depicted.
+- Conference/webinar/presentation: conversation → `D-S09`, **Bereit, wenn du es bist.** → **Jetzt teilnehmen** → required gates → `D-S10`.
+- Huddle/ordinary group: deliberate headphone action → required gates → connecting/joined call, without a generic device-prejoin page. Teamküche selection still opens only `D-S20`; the explicit join leads to `D-S18`. Actual Channel presets forbid calls. Older Teamküche-prejoin sketches are historical, not the current target.
 - OS permissions, required recording consent and security policy remain gates in either flow. Ringing alone never activates microphone or camera.
 
-See [D-F03](flows.md#d-f03-accept-a-direct-call) and [D-F04](flows.md#d-f04-voluntarily-join-a-conference) for acceptance criteria. The earlier incoming-call screenshots are retained only in `assets/superseded/`; their preview-first action is obsolete.
+See [D-F03](flows.md#d-f03-accept-a-direct-call) and [D-F04](flows.md#d-f04-voluntarily-join-a-conference) for acceptance criteria. Incoming calls do not require a device-preview step.
 
 ## Supporting assets
 

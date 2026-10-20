@@ -1,0 +1,129 @@
+name: Alpha packages and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact commit on main
+        required: true
+        type: string
+      tag:
+        description: Existing version tag (for example v0.0.1)
+        required: true
+        type: string
+      publish:
+        description: Publish the verified assets as a GitHub prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  CARGO_TERM_COLOR: always
+  CANDIDATE: ${{ inputs.candidate }}
+  VERSION_TAG: ${{ inputs.tag }}
+
+jobs:
+  package-linux:
+    name: Linux package and install smoke
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 75
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 tools/release/candidate.py
+      - name: Native prerequisites
+        run: |
+          sudo bash tools/ui/prepare-linux.sh
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev libglib2.0-dev dpkg-dev
+      - run: python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
+      - name: Verified WebRTC SDK
+        run: echo "LK_CUSTOM_WEBRTC=$(python3 tools/media/prepare_native.py --target linux-x64-release --output "$RUNNER_TEMP/webrtc")" >> "$GITHUB_ENV"
+      - run: python3 tools/release/build.py --target x86_64-unknown-linux-gnu --version "${VERSION_TAG#v}" --output "$RUNNER_TEMP/packages"
+      - name: Install and exercise the packaged Linux binary
+        run: |
+          sudo apt-get install -y "$RUNNER_TEMP"/packages/*.deb
+          /usr/lib/nextcloud-modern-talk/bin/talk-desktop --licenses
+          timeout 180 python3 tools/ui/capture.py --binary /usr/lib/nextcloud-modern-talk/bin/talk-desktop --output "$RUNNER_TEMP/installed-render" --scenarios server,chat:dark
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-linux
+          path: ${{ runner.temp }}/packages/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installed-linux-render
+          path: ${{ runner.temp }}/installed-render/*
+          if-no-files-found: error
+          retention-days: 7
+
+  package-macos:
+    name: macOS Apple Silicon package (compile only)
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 tools/release/candidate.py
+      - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
+      - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
+      - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
+      - name: Verified WebRTC SDK
+        run: echo "LK_CUSTOM_WEBRTC=$(python3 tools/media/prepare_native.py --target mac-arm64-release --output "$RUNNER_TEMP/webrtc")" >> "$GITHUB_ENV"
+      - run: python3 tools/release/build.py --target aarch64-apple-darwin --version "${VERSION_TAG#v}" --output "$RUNNER_TEMP/packages"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-macos
+          path: ${{ runner.temp }}/packages/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Publish verified prerelease
+    needs: [package-linux, package-macos]
+    if: inputs.publish && github.repository == 'adapt2move/nextcloud-modern-talk' && github.ref == 'refs/heads/main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: packages-*
+          path: ${{ runner.temp }}/packages
+      - name: Verify, create draft, upload, redownload, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/release/candidate.py
+          python3 tools/release/publish.py --directory "$RUNNER_TEMP/packages" --commit "$CANDIDATE" --tag "$VERSION_TAG" --notes docs/alpha.md --publish

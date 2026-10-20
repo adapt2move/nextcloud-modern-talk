@@ -1,17 +1,24 @@
-# Nextcloud Modern Talk
+# NextCloud Modern Talk
 
-A planned native Nextcloud Talk client in Rust and GPUI, with macOS as the first platform. The goal is conversation, chat, files and calls in one desktop experience, compatible with Nextcloud 34 / Talk 24 and Nextcloud 35 / Talk 25 through capability, configuration and permission checks.
+A native desktop client for teams using NextCloud Talk, built in Rust with GPUI and no WebView. It brings conversations, messages, files and calls together, with Manrope typography, blue and sage accents, and system, light and dark appearance.
 
-**This repository is a reviewed specification and contract bootstrap, not a usable Talk client.** The Rust workspace has typed boundaries and unconfigured adapters. It has no GPUI renderer, authenticated network integration, OS vault, native media engine or application runtime. All 140 product features remain **Planned**. See the [current state](docs/status.md).
+The target server families are **NextCloud 34 / Talk 24** and **NextCloud 35 / Talk 25**. Availability depends on server capabilities, configuration and permissions. macOS is the first product target; Linux is a development and packaging target.
 
-Published as **work in progress**. The [PM acceptance record](docs/reviews/bootstrap-acceptance.md) accepts `G.BOOT` for exact source `54cde8e317ed0ea98d88255b9f12cb9a1151229b`, after four independent round-2 reports passed with no exceptions. This publication adds those reports, the decision and current-state prose; it does not implement product features. `G.PRODUCT` and `G.RELEASE` have not been reached. Native functionality, security, media interoperability and performance remain unverified.
+**v0.0.1 alpha:** browser-based account connection, conversation settings, messaging, durable local preferences and ordinary audio/video calls. Download the [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases/tag/v0.0.1) and read its [installation instructions and limits](docs/alpha.md). Full official-client parity is still in progress.
 
-- [Product specifications](docs/product/README.md) and [feature inventory](docs/compatibility/feature-inventory.md)
-- [Design reference](docs/design/README.md) and [HTML design gallery](docs/design/prototypes/index.html) — illustrations, not native integration
-- [Architecture and bootstrap decisions](docs/architecture/README.md)
-- [Quality and acceptance gates](docs/quality/index.md), [documentation index](docs/README.md)
-- [Contributing](CONTRIBUTING.md), [agent rules](AGENTS.md), [security](SECURITY.md)
+![Native conversation view in German, showing a synthetic team conversation](docs/assets/chat.png)
 
-The workspace pins Rust in [rust-toolchain.toml](rust-toolchain.toml) and currently uses only the standard library and local packages. The headless diagnostic `cargo run --locked -p talk-bootstrap` prints its unconfigured state. [Validation commands](docs/architecture/README.md#validation) and evidence requirements distinguish a compiling scaffold from product verification.
+The screenshot shows the native Linux app connected to a disposable NextCloud server with synthetic accounts.
 
-Licensed under [EUPL-1.2](LICENSE); see [NOTICE.md](NOTICE.md) for asset and third-party notices. This is an independent project, not an official Nextcloud client.
+## Contribute
+
+Start with [Contributing](CONTRIBUTING.md) and the [development guide](docs/development.md) for prerequisites, the pinned toolchain and scoped commands. UI scenarios use fictional data and do not log into a server. The [backend lab](docs/backend-lab.md) uses Docker and synthetic accounts.
+
+## Documentation
+
+- [Product requirements](docs/product/README.md) and [feature inventory](docs/compatibility/feature-inventory.md)
+- [Architecture](docs/architecture/README.md) and [design reference](docs/design/README.md)
+- [CI policy](docs/ci.md) and [release tooling](tools/release/README.md)
+- [Documentation index](docs/README.md) and [security reporting](SECURITY.md)
+
+Licensed under [EUPL-1.2](LICENSE); third-party assets retain their [notices and licenses](NOTICE.md). This is an independent project, not an official NextCloud client.

@@ -18,6 +18,10 @@ The full, unchanged copyright and license notice is in [Manrope-LICENSE.txt](doc
 
 The font and its notice were verified byte for byte against [Google Fonts' Manrope distribution](https://github.com/google/fonts/tree/b31870aff700ab7a1d74fa0c6887d95beb9e0037/ofl/manrope) on 2026-10-18. The upstream filename is `Manrope[wght].ttf`; only the local filename was changed. Font SHA-256: `3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6`.
 
+## Linux screen portal bindings
+
+Linux screen-sharing capability checks use [ashpd 0.12.3](https://docs.rs/crate/ashpd/0.12.3/source/) under the MIT license, with its existing zbus bindings. The bounded asynchronous wait uses [async-io 2.6.0](https://docs.rs/crate/async-io/2.6.0/source/) and [futures-lite 2.6.1](https://docs.rs/crate/futures-lite/2.6.1/source/), each under Apache-2.0 OR MIT. These dependency licenses and their copyright notices remain applicable; preserve the corresponding upstream license files in distribution notices.
+
 ## Design provenance and names
 
 The design package carries forward the project's original HTML/CSS sketches and screenshots. Revisions and schematic status are documented in [docs/design/artifacts.md](docs/design/artifacts.md). People, messages and the example organization are fictional; geometric portrait placeholders do not depict real call footage.

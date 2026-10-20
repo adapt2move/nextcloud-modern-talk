@@ -1,70 +1,27 @@
 # Contributing
 
-This is an EUPL-1.2 project in the architecture/bootstrap phase. The accepted
-[product specification review](docs/reviews/product-spec-review-r2.md) covers the
-specification at `adfb44a2aab2e29ba6574c9dacc09475c534bccf`; it does not approve a
-working client. The [recorded `G.BOOT` acceptance](docs/reviews/bootstrap-acceptance.md)
-covers exact source `54cde8e317ed0ea98d88255b9f12cb9a1151229b` and permits a later
-delegated implementation increment. Product and release gates remain outstanding.
-Read [current state](docs/status.md), the
-[architecture](docs/architecture/README.md), and [development guide](docs/development.md)
-before taking a task.
+NextCloud Modern Talk is an EUPL-1.2 Rust/GPUI project for teams. Read [current state](docs/status.md), [development](docs/development.md) and [architecture](docs/architecture/README.md) before taking a task. Coordinate owned paths when working concurrently.
 
 ## Scope a contribution
 
-Start with the [product requirements](docs/product/README.md),
-[feature inventory](docs/compatibility/feature-inventory.md), and
-[compatibility scenarios](docs/compatibility/test-matrix.md). Name the relevant
-requirement IDs, `F-*` features, `CT-*` scenarios and owning modules in your change.
-Preserve IDs; changing a requirement requires an explicit specification change and
-renewed review of affected conclusions. Do not promote a Planned feature because
-its interface or stub compiles.
+Use the [product requirements](docs/product/README.md), [feature inventory](docs/compatibility/feature-inventory.md) and [compatibility scenarios](docs/compatibility/test-matrix.md). Name relevant requirement, feature and scenario IDs. Preserve those IDs and make requirement changes explicit. An interface, stub or successful compile does not verify a feature.
 
-Follow the Deep Modules boundaries: put consequential policy, credential,
-transport, storage and media decisions behind the owning interfaces. Native GPUI
-views consume those interfaces. Keep the domain and permission rules in the
-specifications authoritative; a design image is not an API or a completed flow.
-Compatibility depends on current capabilities, configuration, room policy and
-effective permissions, with evidence for each claimed server profile.
+Keep transport, credentials, persistence and media behind their owning modules. GPUI views consume bounded snapshots and typed intents. Specifications govern permissions and supported behavior; design images are illustrative. Compatibility claims need evidence for the actual server, configuration and platform.
 
-For concurrent work, agree on owned paths and interface changes before editing.
-Do not overwrite another contributor's work. An unresolved cross-module contract
-belongs in the handoff, with an owner, rather than in an undocumented workaround.
+For concurrent work, agree on owned paths and interface changes. Preserve other contributors' edits and active private inputs. Escalate cross-module contract changes to their owner.
 
-## Verify and hand off
+## Verify a change
 
-Use the [bootstrap commands](docs/development.md#bootstrap-checks) and proportionate
-tests for the behavior changed. Follow the
-[quality contracts](docs/quality/index.md), especially
-[Q.VER-03](docs/quality/verification.md#qver-03--exact-candidate-and-evidence-identity)
-for candidate identity and
-[Q.VER-07](docs/quality/verification.md#qver-07--current-state-documentation-and-handoff)
-for IST/current-state documentation. Describe actual before/after behavior, tests
-run and their outcomes, tests not run, and limitations. Update current state and
-affected interfaces/feature evidence in the same candidate. Keep targets,
-fixtures, server observations and native results distinct.
+Choose proportionate checks using the [development guide](docs/development.md#bootstrap-checks) and [quality requirements](docs/quality/index.md). Describe changed behavior, source identity, checks run, outcomes, unrun checks and real limitations. Keep synthetic fixtures, server observations, native results and compilation distinct. Follow [Q.VER-03](docs/quality/verification.md#qver-03--exact-candidate-and-evidence-identity) for consequential verification and [Q.VER-07](docs/quality/verification.md#qver-07--current-state-documentation-and-handoff) for current-state changes.
 
-The project manager delegates implementation and coordinates acceptance. Every
-bootstrap or product candidate needs separately attributable, independent
-architecture/modules, function/compatibility, performance and coarse-security
-reviews under [Q.VER-02](docs/quality/verification.md#qver-02--independent-reviews-and-decision-authority).
-Author checks support those reviews; they do not replace them. Preserve prior
-findings, responses and unresolved objections between rounds. The manager's
-acceptance names the exact committed candidate, accepted scope and remaining gates;
-passing CI alone does not pass `G.BOOT`, `G.PRODUCT` or `G.RELEASE`.
+The task owner selects review scope in proportion to the change. Product and release claims still require evidence and acceptance for their actual scope under [Q.VER-02](docs/quality/verification.md#qver-02--independent-reviews-and-decision-authority); passing CI alone establishes neither.
 
-Use synthetic accounts and sanitized evidence. Keep credentials, private server
-names, private filesystem paths and raw sensitive traces out of commits, issues
-and CI logs. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+Use synthetic accounts and sanitized evidence. Keep credentials, private server names, private paths and raw sensitive traces out of commits, issues and CI logs. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## Documentation and attribution
 
-Write public documentation in English; preserve German UI examples where specified.
-Use relative links to repository documents and stable requirement anchors. Cite
-official, version-pinned sources for protocol and dependency claims, and state
-what was actually verified. See the [documentation check](docs/development.md#documentation-check)
-for supported link syntax and limits.
+Write public documentation in English and use NextCloud for the project's brand. Preserve specified localized UI examples. Keep contributor instructions concise, product specifications normative, and high-level architecture focused on responsibilities and boundaries. Put implementation rationale beside code. Keep historical reports and task ledgers outside normal contributor documentation.
 
-Contribute material you have the right to distribute under the project's
-[EUPL-1.2 license](LICENSE). Preserve third-party licenses and provenance in
-[NOTICE.md](NOTICE.md); separately licensed assets keep their original terms.
+Use relative links and stable requirement anchors. Cite official, pinned sources for protocol and dependency claims. Run the [documentation check](docs/development.md#documentation-check) for changed links.
+
+Preserve [EUPL-1.2](LICENSE) and third-party terms and provenance in [NOTICE.md](NOTICE.md). Contribute only material you have the right to distribute; separately licensed assets retain their terms.

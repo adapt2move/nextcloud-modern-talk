@@ -1,8 +1,8 @@
 # Compatibility contract
 
-Status: **Planned; no native interoperability runs recorded**. Target families are Nextcloud 34.x/Talk 24.x and Nextcloud 35.x/Talk 25.x. The [verified research baseline](baselines-and-sources.md) establishes that the source and published versions exist; it does not certify this client against them.
+Target families are NextCloud 34.x / Talk 24.x and NextCloud 35.x / Talk 25.x. Account and messaging integration has been exercised against 34.0.5 / 24.0.6 and 35.0.2 / 25.0.6. This establishes the tested operations on those deployments, not full client parity or support for every optional backend. The [research baseline](baselines-and-sources.md) and executable tests have different purposes.
 
-Read the [feature inventory](feature-inventory.md) for every planned feature and the [test matrix](test-matrix.md) for required evidence. Product behavior is canonical in [product/README.md](../product/README.md).
+Read the [feature inventory](feature-inventory.md) for implementation scope, the [alpha notes](../alpha.md) for user-facing limits and the [test matrix](test-matrix.md) for required scenarios. Product behavior is canonical in [product/README.md](../product/README.md).
 
 ## COMP-001
 
@@ -52,4 +52,4 @@ Acceptance: a successful chat test never implies working calls/recording/federat
 
 **Record compatibility evidence before making claims.** Every verification run names client revision, OS/architecture, exact server/Talk versions or commits, artifact digest, local/host capabilities, role/permissions, room attributes, backend versions/configuration, test IDs, result, and redacted artifacts. Release claims are limited to the passing scope. Research-only, mock, contract-fixture, native adapter, and live integration results are distinguishable.
 
-Acceptance: all current inventory entries remain **Planned** until evidence exists. A skipped case records a reason and preserves the unsupported/unverified limitation; it cannot be counted as passing. Source citations do not become test reports.
+Acceptance: implementation status and verification scope are recorded separately. A skipped case records a reason and preserves the unsupported/unverified limitation; it cannot be counted as passing. Source citations do not become test reports.

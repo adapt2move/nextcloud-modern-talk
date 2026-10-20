@@ -1,43 +1,34 @@
-# Architecture bootstrap
+# Architecture
 
-Status: **`G.BOOT` accepted by root PM for exact source `54cde8e317ed0ea98d88255b9f12cb9a1151229b`, contracts/scaffolding only**; see the [acceptance and independent reviews](../reviews/bootstrap-acceptance.md). This remains an unimplemented native client. [IST](../status.md) is authoritative for implementation state. The accepted product/quality baseline remains unchanged. These decisions assign the mandatory [bootstrap obligations](../reviews/product-spec-review-r2.md#mandatory-bootstrap-handoff) to concrete owners; their native implementations and proofs are future work.
+The independent [NextCloud Talk API](../../crates/nextcloud-talk-api/README.md) owns origin-bound transport and typed protocol values, including the meeting/signaling seam. It has no dependency on application policy or native media. The app has three layers: a bounded core, cohesive adapters for consequential I/O and policy decisions, and native GPUI presentation/composition. Views consume typed snapshots and intents; they do not own networking, credentials, persistence or media. The [alpha scope](../alpha.md) distinguishes connected functionality from remaining compatibility and platform work.
 
-| ID | Decision and contract |
+| Contract | Responsibility |
 | --- | --- |
-| [ADR-001](decisions/001-native-ui.md) | Rust/GPUI native direction, toolchain and dependency/license boundaries |
-| [ADR-002](decisions/002-deep-modules.md) | Three packages; cohesive modules, narrow interfaces, dependency direction and resource ownership |
-| [ADR-003](decisions/003-credential-lifecycle.md) | Distinct generations, durable nonsecret restoration, staging/settlement/crash recovery and account rejection |
-| [ADR-004](decisions/004-policy-media-lifecycle.md) | Authoritative policy mapping, numeric freshness/control costs, local media enforcement and shutdown |
-| [ADR-005](decisions/005-native-media.md) | Pinned unlinked libwebrtc, private IPC/native ownership and qualification blockers |
-| [Media allocation](media-allocation.md) | Finite controlled buffers and auxiliary ceilings, pre-allocation reservation and shared/GPU reclamation |
-| [Measurement contract](measurement.md) | Executable workload/validator ownership and complete process/peak evidence qualification |
-| [Source evidence](source-evidence.md) | Official source pins, observations and limits of feasibility research |
+| [ADR-001](decisions/001-native-ui.md) | Rust/GPUI native direction, toolchain and dependency boundaries |
+| [ADR-002](decisions/002-deep-modules.md) | Cohesive modules, narrow interfaces, dependency direction and resource ownership |
+| [ADR-003](decisions/003-credential-lifecycle.md) | Generations, durable restoration, settlement/recovery and account rejection |
+| [ADR-004](decisions/004-policy-media-lifecycle.md) | Policy mapping, freshness, local enforcement and shutdown |
+| [ADR-005](decisions/005-native-media.md) | Maintained WebRTC engine, device ownership and distribution |
+| [ADR-006](decisions/006-credential-providers.md) | Native/private-file providers and qualification boundaries |
+| [ADR-007](decisions/007-nextcloud-transport.md) | Bounded HTTP/TLS/OCS owner and diagnostic signaling |
+| [Integration contract](nextcloud-contract.md) | Construction, cancellation, lifetime and projection obligations |
+| [Identity contract](identity-contract.md) | Private runtime and storage transaction boundaries; durable owner, cancellation and restoration |
+| [Media allocation](media-allocation.md) | Future allocation targets and unresolved native/GPU accounting |
+| [Measurement](measurement.md) | Workload ownership, process/lifetime/peak evidence and collector qualification |
+| [Source provenance](source-evidence.md) | Official source pins and limits of feasibility research |
+| [Credential sources](credential-provider-sources.json) | Upstream pins and provenance; not runtime qualification |
 
 ## Validation
 
-From the repository root, the designated verifier runs these on the assigned development VM (or the documented CI runner). Static source authors must not start a VM or run these on the host when their brief prohibits it. `agent-dev-box exec --` is the assigned-session transport; it does not grant provisioning ownership.
+Use the scoped commands and prerequisites in [development](../development.md#bootstrap-checks). Keep the pinned toolchain and lock; never regenerate dependencies to make a check pass.
 
-```sh
-python3 tools/check_architecture.py
-python3 tools/check_docs.py
-cargo fmt --all -- --check
-cargo check --locked --workspace --all-targets
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
-cargo run --locked -p talk-bootstrap
-```
-
-Python requires 3.11+ (`tomllib`); Rust is pinned in [rust-toolchain.toml](../../rust-toolchain.toml). There are no registry dependencies. [Cargo.lock](../../Cargo.lock) explicitly lists only the local graph; the statically authored bytes passed the integrator's pinned-Cargo locked checks without regeneration. [IST](../status.md) records BI-001 closure, author remediation execution, exact-source CI and the independent round-2 assessments with their distinct evidence limits. Later candidates still require affected validation and independent review. If Cargo requests regeneration in a later candidate, stop that validation attempt: the integrator runs `cargo generate-lockfile --offline` on the VM, records the candidate diff and requests fresh locked checks. Do not silently mutate the candidate during verification. Format corrections similarly require an explicitly recorded integration step with `cargo fmt --all` and follow-up checks.
-
-`check_architecture.py` enforces the exact dependency/lock graph, inherited unsafe policy, absence of hidden build/platform edges, and the inspected renderer/core restrictions. It is a conservative source guard, not a Rust parser, information-flow proof or general sandbox. Independent verifier negative fixtures should add an adapter dependency to core, introduce a target-specific edge, import an adapter into presentation, expose an unbounded renderer field and insert a raw OCS route into core; each must fail. The [maintained boundary fixtures](../../tests/contracts/README.md) also exercise the positive UI consumer, grouped imports, exact BTreeMap regression and secret/worker/frame cases in disposable copies. Each negative must match its intended diagnostic; a generic failure is insufficient. Governance owns the separate docs checker and CI.
-
-Rust tests exercise account isolation/stale completions, narrow rejection classification, conservative lease expiry/clock epochs, gate conjunction, exact-generation cleanup/restoration and UTF-8/page bounds. Added tests exercise explicit identity disposition/receipt correlation, maintenance after cancellation, pre-runtime unconfigured seams and the presentation data vocabulary. These are necessary predicates and absence checks, not durable I/O or full authentication recovery. The composition diagnostic must print its unconfigured state and exit; that is not evidence of login, GUI or media. Record commands, platform, exact tree/patch, results and limitations under [Q.VER-03](../quality/verification.md#qver-03--exact-candidate-and-evidence-identity).
+[check_architecture.py](../../tools/check_architecture.py) guards dependency/lock boundaries, unsafe policy and renderer/core restrictions. It is a conservative lexical guard, not a Rust parser or general sandbox. [Boundary fixtures](../../tests/contracts/README.md) must distinguish intended diagnostic failures from incidental failures. Static checks, compilation and synthetic tests cannot establish native behavior or product support.
 
 ## Qualification boundaries
 
-- Both target families have candidate source mappings. Neither currently has a supported native runtime profile. `S=2 s` is a deployment qualification requirement, not an upstream guarantee. Missing/unbounded required sources block affected paths; they do not grant permissions by version inference.
-- No GPUI/media/SQLite/native-vault dependency is in the lockfile. ADR-005 selects an immutable unlinked media source/binding now; native integration still requires complete dependency/license evidence, allocation/FFI/platform qualification and affected reviews after `G.BOOT` acceptance. All media profiles remain blocked, including unmodified upstream whose allocation hooks do not yet prove the contract.
-- Metadata durability, post-crash vault writer settlement, continuous clock/sleep behavior, process termination/device release, HPB/internal interoperability and E2EE require native/integration evidence. A missing recovery barrier retains uncertainty.
-- No memory, startup, energy, capture-release or policy-latency benchmark has been run. The required workload and collector designs do not assert feasibility of the provisional budgets.
+- Both server families need real integration evidence for each claimed profile. Missing or unbounded policy sources block the affected path; version numbers do not grant permission.
+- The production engine runs in the ordinary account/call owner. The old IPC helper is diagnostic-only; its tests do not qualify production device authority or native allocation bounds.
+- Credential durability, crash recovery, clock/suspend behavior, process/device release, native rendering, HPB/TURN and E2EE require their own evidence. Uncertainty must remain visible.
+- No combined-app startup, memory, energy, capture-release or policy-latency benchmark is established. Required workloads and collectors are specifications, not measured passes.
 
-The [PM decision](../reviews/bootstrap-acceptance.md) records all four independent bootstrap reviews and closure of their objections. It permits a later delegated implementation increment; this publication begins none. Product increments and releases still require their own exact-candidate evidence, independent discipline reviews and PM acceptance.
+Keep implementation rationale and local invariants beside the owning code. Historical execution reports belong outside normal contributor documentation.

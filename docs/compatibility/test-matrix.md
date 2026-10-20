@@ -2,14 +2,14 @@
 
 Status: **Planned / not run** for every runtime scenario below. Source verification is recorded separately in [baselines and sources](baselines-and-sources.md). No native client, disposable Talk server, or VM was started for specification authoring. Follow the [quality verification process](../quality/verification.md), [security contract](../quality/security.md), and [test-server guidance](../quality/test-servers.md) when implementation reaches these gates.
 
-Disposable temporary Nextcloud/Talk servers are authorized for later functional checks. They must use synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. VM builds/services use agent-dev-box; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
+Disposable temporary NextCloud/Talk servers are authorized for later functional checks. They must use synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. VM builds/services use agent-dev-box; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
 
 ## Required environments
 
 | Profile | Target | Purpose | Current evidence |
 | --- | --- | --- | --- |
-| R34 | Nextcloud 34.0.5 + released Talk 24.0.6 | Initial published-release compatibility candidate | Release existence verified; runtime not run |
-| R35 | Nextcloud 35.0.2 + released Talk 25.0.6 | Initial published-release compatibility candidate | Release existence verified; runtime not run |
+| R34 | NextCloud 34.0.5 + released Talk 24.0.6 | Initial published-release compatibility candidate | Release existence verified; runtime not run |
+| R35 | NextCloud 35.0.2 + released Talk 25.0.6 | Initial published-release compatibility candidate | Release existence verified; runtime not run |
 | L34 / L35 | Earliest maintained patch pair the client release will claim in each family | Establish the lower bound; select/document exact versions before claiming all `.x` patches | Selection pending; runtime not run |
 | U34 / U35 | Next maintained patch in each family when released | Upgrade/regression and compatibility-hash refresh | Future run; no assumed compatibility |
 | PIN34 / PIN35 | Exact research commits from sources, installed with matching server family | Distinguish branch-source behavior from published releases | Source reviewed only; runtime not run |
@@ -17,9 +17,11 @@ Disposable temporary Nextcloud/Talk servers are authorized for later functional 
 | UNK | Unknown feature strings, room types/attributes, roles, object kinds, malformed or absent fields | Safe forward compatibility and restricted-policy handling | Fixture/test implementation pending |
 | FED | R34↔R34, R35↔R35, R34↔R35 with both hosting directions | Local/host scopes, proxy support, identities and remote failure | Runtime not run |
 | NATIVE | Supported macOS hardware/OS builds, actual GPUI and platform adapters | Keychain, devices, permissions, notifications, sleep, VoiceOver | OS/version minimums and evidence pending |
+| STORE-LINUX | Named Linux OS/filesystem and Secret Service implementation; separately no session D-Bus and D-Bus without Secret Service | Credential-provider contract only: native lock/denial, durable private-file fallback, `0700`/`0600`, restart and backend choice | Specified / not run; does not qualify a Linux UI/call client |
+| STORE-WINDOWS | Named Windows OS/filesystem, user SID, Credential Manager and actual file DACL APIs | Credential-provider contract only: local persistence, denied access, owner/DACL/inheritance/reparse checks and file restart | Specified / not run; does not qualify a Windows UI/call client |
 | CONDITIONAL | Named HPB, TURN, recorder, transcription/translation provider, SIP bridge, bots/bridges | Optional deployment behavior; pin each component separately | Configuration and runtime evidence pending |
 
-R34/R35 are research-date candidates, not frozen forever or already supported client versions. A newer maintained patch replaces the current candidate only with a recorded change and relevant revalidation. Do not install incompatible Nextcloud/Talk major combinations and then label the resulting failure client parity; use those only as explicit negative discovery tests.
+R34/R35 are research-date candidates, not frozen forever or already supported client versions. A newer maintained patch replaces the current candidate only with a recorded change and relevant revalidation. Do not install incompatible NextCloud/Talk major combinations and then label the resulting failure client parity; use those only as explicit negative discovery tests.
 
 ## Common permutations for every delivered feature
 
@@ -33,7 +35,7 @@ Native call tests cover direct and multi-party calls, internal and external sign
 
 ### CT-001
 
-**Baseline identity and API discovery.** On R34/R35, record exact Nextcloud/Talk artifact versions and digests, manifests, capabilities/config-local scope, endpoint generations, installation base path, and client revision. Exercise missing Talk, unsupported versions, incompatible pairing metadata, malformed OCS, and missing required API support. Expected: COMP-001/005/006 hold; no endpoint/version guess grants an action. Covers F-001, F-190/191.
+**Baseline identity and API discovery.** On R34/R35, record exact NextCloud/Talk artifact versions and digests, manifests, capabilities/config-local scope, endpoint generations, installation base path, and client revision. Exercise missing Talk, unsupported versions, incompatible pairing metadata, malformed OCS, and missing required API support. Expected: COMP-001/005/006 hold; no endpoint/version guess grants an action. Covers F-001, F-190/191.
 
 ### CT-002
 
@@ -41,9 +43,15 @@ Native call tests cover direct and multi-party calls, internal and external sign
 
 ### CT-003
 
-**Real secret-store fallback and cleanup.** On NATIVE, test Keychain success, locked, denied, user-canceled prompt, missing item, no qualified provider, corrupt item, transient failure, uncertain write and failed deletion. Apply every [V.AUTH.STORE-01–06](../quality/verification.md#vauthstore--uncertain-storage-transitions) boundary: provider commit with lost acknowledgement; failed activation metadata; fallback/cancel plus late write; crash before/after metadata and provider operations; inaccessible older item; missing/corrupt suppression metadata; early absence before writer settlement. Continue session-only explicitly, cancel-and-retain an older valid session, restart, unlock, retry/save and remove offline.
+**Native stores, durable unencrypted file fallback and cleanup.** Apply [AMEND-AUTH-STORAGE-01](../product/accounts.md#spec-amendment--amend-auth-storage-01) and every [V.AUTH.STORE-01–16](../quality/verification.md#vauthstore--uncertain-storage-transitions) case. On NATIVE qualify actual Keychain plus private-file behavior. On STORE-LINUX test named Secret Service success/lock/denial, no session bus and a bus without a service. On STORE-WINDOWS test user-scoped Credential Manager with local persistence and actual owner-restricted DACL enforcement/failure. All scenarios remain **specified / not run** here.
 
-Expected: AUTH-003–005/008/009 require committed eligibility plus accessible confirmed item for restoration. Chosen session-only suppresses all account generations before activation; suppression failure blocks that replacement and offers repair/cancel. Cleanup touches only the abandoned attempted generation and reports residual uncertainty until settlement/absence, including after restart. Deliberate cancel-and-retain can restore only its named valid older generation. Inspect permitted filesystem/diagnostic evidence for accidental persistence; no secret recovery file or false memory-only/saved/deleted claim. Covers F-003–005/009/010/012 and the future vault portion of F-182. Additional OS clients remain Planned/P4 and require their own native vault/capture/accessibility/notification runs; macOS or a mock does not qualify them.
+Select file mode, validate a synthetic app credential against R34 and R35, exit and restart without the OS store: the committed file binding restores without forcing a new login just because a service is absent. Recover/unlock the native store and restart again: no implicit migration/save or abandoned-generation revival. Test explicit file↔native migration, later session save and cancel-and-retain; never infer equivalence from a common account name or generation number. An existing valid memory session may continue; an unreadable P requires fresh browser authorization or available validated memory, never a primary password. No file encryption/master-password/KDF gate is required.
+
+Exercise wrong directory/file owner, POSIX `0700`/`0600` violations/extra ACLs, unsafe parent/XDG paths, symlinks/hard links/traversal, Windows null/broad/inherited DACL/readback failure and reparse points, shared/synced/temp locations, concurrent processes, collision, short/disk-full/flush/install writes, corrupted/oversized/staging/orphan files and failed metadata. Apply all prior boundaries: commit without acknowledgement, activation failure, cancellation/fallback plus late writes, crash either side of each provider/ledger boundary, inaccessible retained P and early absence before writer settlement. Distinguish one actual native prompt from an injected locked/denied error; verify no repeated background prompts.
+
+Expected: only committed **account/backend/item** eligibility plus the same confirmed accessible item restores. Session-only explicitly suppresses every generation/backend before replacement activation; failed suppression blocks that replacement with repair/cancel. Exact abandoned-N cleanup cannot touch P or a different backend's matching generation; suppression, late-writer uncertainty and account-loss shutdown survive file fallback. Offline logout/removal and confirmed revocation cover file and native credentials separately from remote deletion success. File mode permits only its validated private credential file/staging objects; logs, environment, clipboard, shared caches and recovery exports contain no secret. Session-only creates no new secret file or durable content cache. No false memory-only/encrypted/saved/deleted claim.
+
+Covers F-003–005/009/010/012 and the future credential portion of F-182. Additional OS clients remain Planned/P4: provider preparation or qualification alone cannot pass native UI/capture/accessibility/notification support. Record OS/provider/filesystem evidence separately from live backend authorization and fault fixtures; macOS, Linux lab or mock results cannot qualify another OS.
 
 ### CT-004
 
@@ -51,7 +59,7 @@ Expected: AUTH-003–005/008/009 require committed eligibility plus accessible c
 
 ### CT-005
 
-**Conversation creation and policy.** On both families create direct/group/public/note-to-self; re-open a returned existing direct room; invite a directory group independently of room identity. Test returned default/selected/user/forced merging followed by server invariants, no-create policy, password enforcement, timeout reconciliation and listed/unlisted guest combinations. Verify returned webinar/presentation ordinary-member join/chat/reaction permissions independently of start/publish, and voice-room editable discovery/expiry defaults plus explicit prejoin.
+**Conversation creation and policy.** On both families create direct/group/public/note-to-self; re-open a returned existing direct room; invite a directory group independently of room identity. Test returned default/selected/user/forced merging followed by server invariants, no-create policy, password enforcement, timeout reconciliation and listed/unlisted guest combinations. Verify returned webinar/presentation ordinary-member join/chat/reaction permissions independently of start/publish, and voice-room editable discovery/expiry defaults plus deliberate direct audio entry and its required gates.
 
 On R35 (and any advertised compatible backport), exercise each restrictive case:
 
@@ -87,7 +95,7 @@ Expected: CONTENT-005/006; confirmed closed polls retain their message/share and
 
 ### CT-011
 
-**Direct accept versus conference prejoin.** Receive a direct call with camera off and known microphone permission. Accept from the app and OS notification. Repeat with start-without-media and explicit video acceptance. Then deliberately join a group/event/voice-room call and cancel its prejoin. Expected: CALL-001/004/005; direct accept never displays “Bereit, wenn du es bist.”, conference join does, and ringing/selection/restore captures nothing. Test focus safety while typing Enter in another view. Covers F-100/103/104/106 and JNY-004/005.
+**Direct accept versus conference prejoin.** Receive a direct call with camera off and known microphone permission. Accept from the app and OS notification. Repeat with start-without-media and explicit video acceptance. Then deliberately join a conference/webinar/presentation and cancel its prejoin. Separately use the headphone action for a Huddle and ordinary group, verify direct audio entry without generic prejoin, and cancel a required permission/consent gate. Verify real Channel call denial for every role. Expected: CALL-001/004/005; direct accept never displays “Bereit, wenn du es bist.”, conference join does, and ringing/selection/restore captures nothing. Test focus safety while typing Enter in another view. Covers F-100/103/104/106 and JNY-004/005.
 
 ### CT-012
 
@@ -105,7 +113,7 @@ Expected: CONTENT-005/006; confirmed closed polls retain their message/share and
 
 **Network, lifecycle, and end-of-call.** Degrade/drop connectivity; sleep/wake past policy expiry; replace room session; close window; quit/crash; remove membership/end call during outage. Separately cut policy/control refresh while RTP remains live. Record original grant expiry and actual suspension/leave/device release against Q.SEC-10's approved bounds; failed refresh/heartbeats/media receipt never extend authority. Restrict grid subscriptions/rendering where appropriate; locally leave when membership/required consent/encryption cannot be established, even without a successful leave response.
 
-Confirm account authorization loss during media and pending sends, deliver late join/policy/media/reconnect callbacks, and fail durable restoration suppression while another account stays active. Expected: AUTH-007/CALL-014/COMP-003/DESK-007/008 plus [V.AUTH.LOSS](../quality/verification.md#vauthloss--confirmed-account-authorization-loss) and [V.POLICY.FRESH](../quality/verification.md#vpolicyfresh--ongoing-policy-freshness): invalidated generations never resume; local shutdown is independent of network/vault success, storage uncertainty is visible, unrelated accounts survive. Reauthorize and require deliberate retry/rejoin with fresh checks. Ordinary continuity recovery preserves mute/camera-off intent and never restarts a stopped share; direct continuity has no conference prejoin, new voluntary conference/voice join does. Test duration policy, ordinary leave versus authorized end-for-everyone and no ended-call resurrection. Covers F-008/100/104/120/121/178 and JNY-008.
+Confirm account authorization loss during media and pending sends, deliver late join/policy/media/reconnect callbacks, and fail durable restoration suppression while another account stays active. Expected: AUTH-007/CALL-014/COMP-003/DESK-007/008 plus [V.AUTH.LOSS](../quality/verification.md#vauthloss--confirmed-account-authorization-loss) and [V.POLICY.FRESH](../quality/verification.md#vpolicyfresh--ongoing-policy-freshness): invalidated generations never resume; local shutdown is independent of network/vault success, storage uncertainty is visible, unrelated accounts survive. Reauthorize and require deliberate retry/rejoin with fresh checks. Ordinary continuity recovery preserves mute/camera-off intent and never restarts a stopped share; direct continuity has no conference prejoin, new conference entry does; explicit Huddle/group audio rejoin omits generic prejoin but retains required gates. Test duration policy, ordinary leave versus authorized end-for-everyone and no ended-call resurrection. Covers F-008/100/104/120/121/178 and JNY-008.
 
 ### CT-016
 
@@ -153,7 +161,7 @@ Change consent/recording/E2EE policy during uninterrupted calls, including absen
 
 ### CT-026
 
-**Native accessibility and localization.** Complete JNY-001–010 as applicable using keyboard and VoiceOver; inspect focus, dialog recovery, announcements, reduced motion/contrast, 200% text, small windows, German/English/bidirectional/IME input, timezone presentation, and compact-call controls if implemented. Expected: DESK-001/005/006/010; no inaccessible critical action or accidental keyboard acceptance. Covers F-122/170/175/176/180.
+**Native accessibility and localization.** Complete JNY-001–010 as applicable using keyboard and VoiceOver; inspect focus, dialog recovery, announcements, reduced motion/contrast, 200% text, small windows, English/German/Spanish UI and bidirectional/IME input, timezone presentation, and compact-call controls if implemented. Deterministic localization cases cover complete keys/resources, placeholder compatibility, locale matching and English fallback, formats/plurals, explicit preference persistence and failed-write rollback/Retry. Native Linux cases cover all three locales at narrow widths and 200% text, localized actions/errors/hints/notifications and safe live switching with account/call/draft/focus retained; content and protocol IDs remain unchanged. Linux CI and native evidence do not qualify macOS VoiceOver or platform behavior. The user tests macOS only after all agent-side implementation, integration, reviews and delivery work. Expected: DESK-001/004/005/006/010; no inaccessible critical action or accidental keyboard acceptance. Covers F-122/170/175/176/180.
 
 ### CT-027
 

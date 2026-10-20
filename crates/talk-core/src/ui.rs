@@ -1,6 +1,11 @@
 //! Renderer boundary: bounded display data and user intents, with no network/native types.
 //! No media frame, credential, endpoint, authorization header or signaling payload belongs here.
 
+pub mod conversation;
+pub mod messaging;
+/// Additive native presentation contract; the bootstrap consumer remains source-compatible.
+pub mod presentation;
+
 // Explicit data-only exports are the complete renderer vocabulary. Adding an export
 // requires review of its transitive fields and the matching checker allowlist.
 pub use crate::bounded::{LimitExceeded, Page, Text};

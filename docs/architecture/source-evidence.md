@@ -1,60 +1,83 @@
-# Bootstrap primary-source evidence
+# Upstream references
 
-Read-only source research on **2026-10-18**. No upstream code was executed or copied into the implementation. These observations support interface feasibility and identify qualification gaps; they do not certify integration, source timing, platform behavior or license clearance. The accepted [baseline/release history](../compatibility/baselines-and-sources.md) remains unchanged.
+Use [Cargo.toml](../../Cargo.toml), [Cargo.lock](../../Cargo.lock) and
+[rust-toolchain.toml](../../rust-toolchain.toml) for the exact build inputs.
+References below explain protocol and platform interfaces. They are not substitutes
+for the [compatibility scenarios](../compatibility/test-matrix.md), actual server
+capabilities or platform tests.
 
 ## A-SRC-01 — Rust and native UI
 
-- [Official Rust 1.99.1 announcement](https://blog.rust-lang.org/2026/10/15/Rust-1.99.1/) and [release index](https://blog.rust-lang.org/releases/) establish the selected toolchain release.
-- Zed research commit `56934ec0560bce8929025497411de7f5322fb6ca`: [GPUI README](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/crates/gpui/README.md), [crate manifest](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/crates/gpui/Cargo.toml), [upstream toolchain](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/rust-toolchain.toml). The inspected GPUI manifest is version 0.2.2, Apache-2.0; upstream toolchain is 1.98.1, while README asks for current stable Rust. Neither is a pinned dependency of this workspace. Native Metal/platform setup and changing APIs require an actual integration choice later.
+The desktop uses the pinned GPUI 0.2.2 crate. Its responsibilities and renderer
+boundary are described in [native UI architecture](decisions/001-native-ui.md).
+The local [GPUI guidance](../../.agents/skills/gpui-guidelines/SKILL.md) links the
+upstream APIs used for lifetime, rendering, focus and input. Platform compilation
+and native behavior remain separate checks.
 
 ## A-SRC-02 — Both-family policy sources
 
-Use the same immutable Talk research pins as the accepted specification: **T24** `17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79` and **T25** `f35255ab86f31e8ee894641f6970a09ce4b90927`. They are not the corresponding released-tag commits. Both require release-profile verification before compatibility claims.
+The [supported baselines](../compatibility/baselines-and-sources.md) identify the
+NextCloud and Talk versions used for compatibility. The API crate maintains its
+[pinned OpenAPI input and operation inventory](../../crates/nextcloud-talk-api/README.md).
+For server authority, consult the release-specific capability emitter, response
+schemas and permission constants:
 
-| Source | Both-family evidence and conclusion |
-| --- | --- |
-| Capability emitter | [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Capabilities.php), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Capabilities.php): call enabled, recording/consent, E2EE and grid fields are emitted; local feature/config lists define authority. The E2EE feature is conditional on external signaling. |
-| Config accessors | [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Config.php), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Config.php): actual E2EE/grid/consent accessors exist. Different config plumbing across families is not a cache/cluster timing guarantee. |
-| Settings/hash | [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/settings.md), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/settings.md): non-hash E2EE/grid settings require full periodic reads. Admin setting names are not new public read endpoints. |
-| Room/current session | Conversation docs [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/conversation.md), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/conversation.md); response definitions [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/ResponseDefinitions.php), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/ResponseDefinitions.php): effective permissions and call/consent/session data; response definitions include attributes. Room session ID is a precheck, not permanent session authority. |
-| Call/session and consent | Call docs [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/call.md), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/call.md); call controllers [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Controller/CallController.php), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Controller/CallController.php): call list/join/leave and required consent checks. T25 checks classified before applying consent; this does not permit recording. |
-| Constants | [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/constants.md), [T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/constants.md): permission bit and attribute interpretations; unknown values must not expand authority. |
+- Talk 24: [capabilities](https://github.com/nextcloud/spreed/blob/v24.0.6/lib/Capabilities.php),
+  [response definitions](https://github.com/nextcloud/spreed/blob/v24.0.6/lib/ResponseDefinitions.php),
+  [constants](https://github.com/nextcloud/spreed/blob/v24.0.6/docs/constants.md).
+- Talk 25: [capabilities](https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Capabilities.php),
+  [response definitions](https://github.com/nextcloud/spreed/blob/v25.0.6/lib/ResponseDefinitions.php),
+  [constants](https://github.com/nextcloud/spreed/blob/v25.0.6/docs/constants.md).
 
-Freshly retrieved source hashes (SHA-256) for the concrete mapping implementation files:
-
-| File | T24 | T25 |
-| --- | --- | --- |
-| `lib/Capabilities.php` | `6b104ae22531f460773eaa718fa94a66eb5a4f137249ec321ca9556542e8934d` | `bf73117e6a2bcbbe10eac27d2f9c57feb3f013a3163d108b796f27fda76b7d18` |
-| `lib/Config.php` | `3d2bbc1826e50e938a3ecb281dea55b13053d0705e9c4d21a3a161ec431e0c8b` | `50415256943a46c751309679b0aecded024039949bbb07be275e527822ba52cf` |
-| `lib/ResponseDefinitions.php` | `fd851c90365b5e8ecf47d9d118a9497e3935a09f2443e385fb54449668f4b697` | `e488fc11463130f604e60af7fed423ec4a306a5b83e6f1e39a2e32c889bb3d39` |
-| `lib/Controller/SignalingController.php` | `f4eaa13a70f05bf0cab8aa508893509577cf37604b1935c7db247b518228add1` | `43272bc88e486cb846ce66d000bd135053831b4a6d81785bc837fef32a0fdc09` |
-
-These reads establish fields/routes, not `S=2 s`. PHP/config/database/proxy paths must be bounded and cache bypass tested across every deployed node. No arbitrary deployment has been qualified. Failed/missing evidence leaves the relevant native paths unsupported.
+Capabilities describe supported operations; current room/session responses supply
+permissions and participation. Neither a version number nor cached capabilities
+grant publication authority. See the [policy lifecycle](decisions/004-policy-media-lifecycle.md).
 
 ## A-SRC-03 — Signaling
 
-[T24 signaling controller](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Controller/SignalingController.php), [T25 signaling controller](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Controller/SignalingController.php), and internal-signaling docs [T24](https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/docs/internal-signaling.md)/[T25](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/internal-signaling.md) support the v3 settings and pull/send routes. Settings include mode/server, tickets/hello parameters and STUN/TURN data. The internal protocol prose has an incomplete section, so a running native implementation cannot be inferred from those docs.
+The ordinary call profile uses the released Talk internal-signaling API:
+[T24](https://github.com/nextcloud/spreed/blob/v24.0.6/docs/internal-signaling.md)
+and [T25](https://github.com/nextcloud/spreed/blob/v25.0.6/docs/internal-signaling.md).
+The corresponding call contracts are
+[T24](https://github.com/nextcloud/spreed/blob/v24.0.6/docs/call.md) and
+[T25](https://github.com/nextcloud/spreed/blob/v25.0.6/docs/call.md).
 
-The separately pinned [HPB protocol](https://github.com/strukturag/nextcloud-spreed-signaling/blob/c3817ac2402ef764b8d4e6dc03ac7e60ffab49d3/docs/standalone-signaling-api-v1.md) documents hello, room, session expiry, resume and federation interruption. This pin is source research, not a selected deployed HPB binary. None of these messages supplies a complete, bounded positive authority for all Nextcloud policy fields. They can invalidate known continuity while full source reads establish current policy.
+The [HPB protocol](https://github.com/strukturag/nextcloud-spreed-signaling/blob/c3817ac2402ef764b8d4e6dc03ac7e60ffab49d3/docs/standalone-signaling-api-v1.md)
+is a reference for a different signaling profile. Its existence does not establish
+HPB, federation or end-to-end-encrypted media support in this alpha.
 
 ## A-SRC-04 — Account probe
 
-Use released NC34 commit `77e3cab12d2215bf94d6de67f23b98ed7bad236e` and NC35 commit `ba900af933e61ffa005315b09d6454bfbbcbcc81` here, separately from Talk research branches:
+The authoritative current-user probe is same-origin
+`GET /ocs/v2.php/cloud/user?format=json`. Pinned released server routes are
+[NC34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/apps/provisioning_api/appinfo/routes.php)
+and [NC35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/apps/provisioning_api/appinfo/routes.php).
+The OCS v2 responses are defined in
+[NC34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/lib/private/AppFramework/OCS/V2Response.php)
+and [NC35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/private/AppFramework/OCS/V2Response.php).
 
-- User routes [34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/apps/provisioning_api/appinfo/routes.php)/[35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/apps/provisioning_api/appinfo/routes.php) map `/cloud/user` to the current user controller [34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/apps/provisioning_api/lib/Controller/UsersController.php)/[35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/apps/provisioning_api/lib/Controller/UsersController.php).
-- OCS unauthorized code and response handling: [public OCS controller](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/public/AppFramework/OCSController.php); v2 responses [34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/lib/private/AppFramework/OCS/V2Response.php)/[35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/private/AppFramework/OCS/V2Response.php); middleware [34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/lib/private/AppFramework/Middleware/OCSMiddleware.php)/[35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/private/AppFramework/Middleware/OCSMiddleware.php). These motivate the narrowly scoped 997/401 classifier; actual endpoint envelopes remain live-test prerequisites.
-- Core capabilities controllers [34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/core/Controller/OCSController.php)/[35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/core/Controller/OCSController.php) expose `/cloud/capabilities`, allow public responses and set ETags. Consequently neither a capabilities 200 nor a matching ETag proves valid account credentials or fresh protected policy.
-
-Version-specific Login Flow and app-password deletion sources remain [S17](../compatibility/baselines-and-sources.md#protocol-sources). The controller attributes and actual route files above are the routing evidence used.
+The [credential contract](decisions/003-credential-lifecycle.md) defines the narrow
+HTTP 401 / OCS 997 rejection classifier. A public capabilities response is not
+proof of authenticated account health. Browser Login Flow and app-password
+lifetime references are indexed with the [protocol sources](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## A-SRC-05 — Native measurement
 
-Apple XNU source research pin `f6217f891ac0bb64f3d375211650a4c1ff8ca1ea`: [task memory fields](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/osfmk/mach/task_info.h) and [resource usage structures](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/sys/resource.h). Separate footprint and lifetime-peak fields exist. Their declarations alone do not establish target-OS rights, structure revisions, correctness or post-exit availability; see the [qualification plan](measurement.md).
+Apple's pinned [task memory fields](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/osfmk/mach/task_info.h)
+and [resource usage structures](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/sys/resource.h)
+distinguish physical footprint from resident memory and sampled peaks.
+The [measurement contract](measurement.md) explains required collector validation;
+these declarations are not a measured performance result.
 
-Keychain/platform evidence and SQLite durability sources are linked in [ADR-003](decisions/003-credential-lifecycle.md). Native process/device termination, filesystem durability, post-crash writer settlement and clock/sleep behavior remain unproven. No secret-bearing runtime artifacts or downloaded upstream implementation files were added by this research.
+## A-SRC-06 — Native media research and shipping inputs
 
-## A-SRC-06 — Selected unlinked native media
+The shipping safe Rust binding is `libwebrtc =0.3.52`; the selected native SDK and
+its digests are declared in [prepare_native.py](../../tools/media/prepare_native.py).
+[Native media architecture](decisions/005-native-media.md) describes ownership,
+limitations and packaging. Third-party Rust and native notices accompany packages.
 
-[ADR-005](decisions/005-native-media.md) selects upstream libwebrtc source `a306485b7fc0fe38dd2651420e383f92f196cd77`, its DEPS baseline and a project-owned Rust IPC/native helper boundary. The separate media proposal author's [public provenance manifest](evidence/native-media-sources.json) records pinned source URLs, decoded-file SHA-256s, source claims, retrieval failures and mutable Apple snapshot dates/hashes. It includes libvpx/Chromium/Opus provenance, callback and transform APIs, Talk key/frame protocol evidence and alternative engine scope. No upstream implementation is vendored. This is attributed research, not a complete SBOM, security audit or build closure.
-
-The source limits matter: the current generated libvpx size guard is too large for the selected profile, VP8 has no presumed VP9 external-buffer hook, output-pool limits miss earlier native allocations, and frame-transform APIs do not implement Talk E2EE. Missing pre-allocation coverage blocks admission. The [allocation derivation](media-allocation.md) is a chosen contract; native implementation, device/clock/FFI feasibility, notices/advisories, interoperability and macOS performance remain unproved.
+The older [media source index](evidence/native-media-sources.json) preserves
+attributed upstream references for codecs, transform APIs and Talk framing.
+It is research provenance, not the shipping SDK identity or an SBOM. Application
+queue bounds do not establish codec, framework, GPU or whole-process memory
+bounds; see [allocation requirements](media-allocation.md).

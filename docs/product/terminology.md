@@ -2,6 +2,8 @@
 
 Status: **Planned**. The following are semantic types for the architecture bootstrap, not implemented Rust definitions. Protocol facts are pinned in [sources S03–S08](../compatibility/baselines-and-sources.md#protocol-sources).
 
+Our own UI and prose use **NextCloud** and business, team and workspace vocabulary across English, German and Spanish; Talk is not described as a home, Zuhause or hogar. Preserve exact technical identifiers, URLs, domains, repository paths, protocol values and verbatim source quotations. This is our product-copy convention, not a claim about upstream trademark spelling.
+
 | Concept | Required meaning and identity |
 | --- | --- |
 | `ServerOrigin` | Validated HTTPS origin plus the installation's base path; not merely a hostname. Redirects do not grant permission to forward credentials. |
@@ -15,7 +17,7 @@ Status: **Planned**. The following are semantic types for the architecture boots
 | `PresetId` | Server-provided creation configuration, including `default` and `forced`. A name is not a privilege or a security guarantee. |
 | Guest access | Whether non-account participants may enter through a public conversation flow; password and admission policies still apply. |
 | Discoverability | Independent `listable` scope: participants, eligible regular users, or everyone. A public link need not be searchable. |
-| Invitation source | User, Nextcloud group, circle/team where supported, email, or federated identity. A directory group is not a Talk group conversation. |
+| Invitation source | User, NextCloud group, circle/team where supported, email, or federated identity. A directory group is not a Talk group conversation. |
 | `ActorKey` | Actor type plus opaque actor identifier, scoped to its server/conversation. Users, guests, bots, bridged users, and federated users must not collide. |
 | Participant / attendee | Membership and role in a conversation, distinct from a connected session. One participant may have several sessions/devices. |
 | `ParticipantRole` | Owner, moderator, user, guest, user following a public link, guest moderator, or unknown. A role label does not replace effective action permissions. |

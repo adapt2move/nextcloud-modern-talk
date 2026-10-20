@@ -9,6 +9,8 @@ macro_rules! local_id {
         impl $name {
             /// Import an already allocated local identity, never a credential or wire token.
             pub const fn from_local(value: u128) -> Self { Self(value) }
+            /// Nonsecret stable local representation for the identity ledger only.
+            pub const fn as_local(self) -> u128 { self.0 }
         }
     )+};
 }

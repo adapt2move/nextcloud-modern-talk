@@ -1,0 +1,1507 @@
+{
+  "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
+  "counts": {
+    "implemented": 87,
+    "missing": 66,
+    "not-client": 23,
+    "partial": 11
+  },
+  "operations": [
+    {
+      "operation_id": "avatar-upload-avatar",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "avatar-get-avatar",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "avatar-delete-avatar",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::DeleteAvatar",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "avatar-emoji-avatar",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar/emoji",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::EmojiAvatar",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "avatar-get-avatar-dark",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar/dark",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "ban-ban-actor",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/ban/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Ban",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "ban-list-bans",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/ban/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Bans",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "ban-unban-actor",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/ban/{token}/{banId}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Unban",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "bot-list-bots",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Bots",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "bot-enable-bot",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}/{botId}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Bot",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "bot-disable-bot",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}/{botId}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Bot",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "breakout_room-configure-breakout-rooms",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}",
+      "status": "partial",
+      "api": "Request::Conversation / conversation::Command::ConfigureBreakouts",
+      "scope": "Automatic/manual bounded creation supported; custom attendee mapping and switch/assistance/broadcast workflow remain missing."
+    },
+    {
+      "operation_id": "breakout_room-remove-breakout-rooms",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::RemoveBreakouts",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "breakout_room-broadcast-chat-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/broadcast",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "breakout_room-apply-attendee-map",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/attendees",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "breakout_room-request-assistance",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/request-assistance",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "breakout_room-reset-request-for-assistance",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/request-assistance",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "breakout_room-start-breakout-rooms",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/rooms",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::StartBreakouts",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "breakout_room-stop-breakout-rooms",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/rooms",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::StopBreakouts",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "breakout_room-switch-breakout-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/switch",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "calendar_integration-get-dashboard-events",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/dashboard/events",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "calendar_integration-get-mutual-events",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/mutual-events",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-get-peers-for-call",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}",
+      "status": "implemented",
+      "api": "Request::CallParticipants",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "call-join-call",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}",
+      "status": "implemented",
+      "api": "Request::JoinCall",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "call-update-call-flags",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}",
+      "status": "implemented",
+      "api": "Request::UpdateCallFlags",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "call-leave-call",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}",
+      "status": "implemented",
+      "api": "Request::LeaveCall",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "call-download-participants-for-call",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/download",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-join-federated-call",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/federation",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-update-federated-call-flags",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/federation",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-leave-federated-call",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/federation",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-ring-attendee",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/ring/{attendeeId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call-sip-dial-out",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/dialout/{attendeeId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "call_notification-state",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/notification-state",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "chat-send-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
+      "status": "partial",
+      "api": "Request::Chat / chat::Command::Send",
+      "scope": "Reply/thread/silent/reference supported; object/share metadata uses separate operations. No guest actorDisplayName override."
+    },
+    {
+      "operation_id": "chat-receive-messages",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
+      "status": "partial",
+      "api": "Request::Chat / chat::Command::History / Poll",
+      "scope": "Bounded history/context and finite future polling with safe read/privacy defaults. No destructive chat long-poll owner."
+    },
+    {
+      "operation_id": "chat-clear-history",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::ClearHistory",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-get-scheduled-messages",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/schedule",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Scheduled",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-schedule-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/schedule",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Schedule",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-edit-scheduled-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/schedule/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::EditScheduled",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-delete-schedule-message",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/schedule/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::CancelScheduled",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-share-object-to-chat",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/share",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::ShareObject",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-get-objects-shared-in-room",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/share",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::SharedObjects",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-summarize-chat",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/summarize",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "chat-get-message-context",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/context",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Context",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-delete-message",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Delete",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-edit-message",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Edit",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-set-reminder",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/reminder",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Reminder",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-get-reminder",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/reminder",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::ReadReminder",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-delete-reminder",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/reminder",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Reminder",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-get-upcoming-reminders",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/upcoming-reminders",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Reminders",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-set-read-marker",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/read",
+      "status": "implemented",
+      "api": "Request::MarkRead",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "chat-mark-unread",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/read",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::MarkUnread",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-get-objects-shared-in-room-overview",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/share/overview",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "chat-pin-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/pin",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Pin",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-unpin-message",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/pin",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Unpin",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-hide-pinned-message",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/{messageId}/pin/self",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::HidePin",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-mentions",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/mentions",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Mentions",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "chat-probe-attachment-folder",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment/folder",
+      "status": "partial",
+      "api": "Request::Chat / chat::Command::AttachmentFolder",
+      "scope": "Create-only filename probing; no replace-existing mode."
+    },
+    {
+      "operation_id": "chat-post-attachment-to-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment",
+      "status": "partial",
+      "api": "Request::Chat / chat::Command::ShareAttachment",
+      "scope": "Create-only attachment with reference and caption; richer attachment metadata remains outside this implementation."
+    },
+    {
+      "operation_id": "conversation_tag-get-tags",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags",
+      "status": "implemented",
+      "api": "Request::Tags",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "conversation_tag-create-tag",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags",
+      "status": "implemented",
+      "api": "Request::CreateTag",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "conversation_tag-update-tag",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags/{tagId}",
+      "status": "implemented",
+      "api": "Request::RenameTag",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "conversation_tag-delete-tag",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags/{tagId}",
+      "status": "implemented",
+      "api": "Request::DeleteTag",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "conversation_tag-reorder-tags",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags/reorder",
+      "status": "implemented",
+      "api": "Request::ReorderTags",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "conversation_tag-update-tag-collapsed",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/tags/{tagId}/collapsed",
+      "status": "implemented",
+      "api": "Request::CollapseTag",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "files_integration-get-room-by-file-id",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/file/{fileId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "files_integration-get-room-by-share-token",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/publicshare/{shareToken}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "guest-set-display-name",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/guest/{token}/name",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-enable",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-disable",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-get-available-languages",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/languages",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-get-available-translation-languages",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/translation-languages",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-set-language",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/{token}/language",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "live_transcription-set-target-language",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/live-transcription/{token}/target-language",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "matterbridge-get-bridge-of-room",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "matterbridge-edit-bridge-of-room",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "matterbridge-delete-bridge-of-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "matterbridge-get-bridge-process-state",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge/{token}/process",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-create-poll",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-update-draft-poll",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/draft/{pollId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-get-all-draft-polls",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/drafts",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-show-poll",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-vote-poll",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-close-poll",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "poll-export-poll",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}/export/{format}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "preset-get-presets",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/presets/room",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "public_share_auth-create-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/publicshareauth",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "reaction-react",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/reaction/{token}/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::React",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "reaction-delete",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/reaction/{token}/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::React",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "reaction-get-reactions",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/reaction/{token}/{messageId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::ReactionAuthors",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "recording-start",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "recording-stop",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "recording-notification-dismiss",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}/notification",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "recording-share-to-chat",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}/share-chat",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-get-rooms",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room",
+      "status": "implemented",
+      "api": "Request::Rooms",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-create-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room",
+      "status": "partial",
+      "api": "Request::CreateGroup | Request::CreateDirect",
+      "scope": "Basic group creation and local-user direct rooms. Other creation modes and extended parameters remain unsupported."
+    },
+    {
+      "operation_id": "room-get-listed-rooms",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/listed-room",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-get-breakout-rooms",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/breakout-rooms",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::BreakoutRooms",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-get-single-room",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}",
+      "status": "implemented",
+      "api": "Request::Room",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-rename-room",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Rename",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-delete-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Delete",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-get-note-to-self-conversation",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/note-to-self",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-add-to-favorites",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/favorite",
+      "status": "implemented",
+      "api": "Request::SetFavorite",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-remove-from-favorites",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/favorite",
+      "status": "implemented",
+      "api": "Request::SetFavorite",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-set-notification-level",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/notify",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::NotificationLevel",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-notification-calls",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/notify-calls",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::CallNotifications",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-description",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/description",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Description",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-unbind-room-from-object",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/object",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Keep",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-get-participants",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants",
+      "status": "implemented",
+      "api": "Request::Participants",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-add-participant-to-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Invite",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-get-breakout-room-participants",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/breakout-rooms/participants",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-remove-self-from-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/self",
+      "status": "implemented",
+      "api": "Request::LeaveRoom",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-remove-attendee-from-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/attendees",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::RemoveAttendee",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-make-public",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/public",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Public",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-make-private",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/public",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Public",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-read-only",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/read-only",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::ReadOnly",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-listable",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/listable",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Listable",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-mention-permissions",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/mention-permissions",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::MentionAll",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-password",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/password",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Password",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-archive-conversation",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/archive",
+      "status": "implemented",
+      "api": "Request::SetArchived",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-unarchive-conversation",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/archive",
+      "status": "implemented",
+      "api": "Request::SetArchived",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-preserve-conversation",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/preserve",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Preserve",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-unpreserve-conversation",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/preserve",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Preserve",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-assign-tags",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/tags",
+      "status": "implemented",
+      "api": "Request::SetRoomTags",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-mark-conversation-as-important",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/important",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Important",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-mark-conversation-as-unimportant",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/important",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Important",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-mark-conversation-as-sensitive",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/sensitive",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Sensitive",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-mark-conversation-as-insensitive",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/sensitive",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Sensitive",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-join-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/active",
+      "status": "implemented",
+      "api": "Request::ActivateRoom",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-leave-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/active",
+      "status": "implemented",
+      "api": "Request::DeactivateRoom",
+      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+    },
+    {
+      "operation_id": "room-set-session-state",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/state",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-promote-moderator",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/moderators",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Role",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-demote-moderator",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/moderators",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Role",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-permissions",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/permissions/{mode}",
+      "status": "partial",
+      "api": "Request::Conversation / conversation::Command::DefaultPermissions",
+      "scope": "Default permission mode supported. Call-permission and bulk-attendee modes remain separate unimplemented controls."
+    },
+    {
+      "operation_id": "room-set-attendee-permissions",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/attendees/permissions",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::AttendeePermissions",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-all-attendees-permissions",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/attendees/permissions/all",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-set-lobby",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/webinar/lobby",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Lobby",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-setsip-enabled",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/webinar/sip",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-set-recording-consent",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/recording-consent",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::RecordingConsent",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-resend-invitations",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants/resend-invitations",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::ResendInvitations",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-set-message-expiration",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/message-expiration",
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::Expiration",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "room-import-emails-as-participants",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/import-emails",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-get-capabilities",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/capabilities",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-schedule-meeting",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/meeting",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "settings-set-user-setting",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/settings/user",
+      "status": "partial",
+      "api": "Request::SetPreference",
+      "scope": "Read/typing privacy and attachment folder only."
+    },
+    {
+      "operation_id": "signaling-get-settings",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/signaling/settings",
+      "status": "partial",
+      "api": "Request::SignalingSettings",
+      "scope": "Internal/external mode observation only. HPB URL/token and STUN/TURN configuration integration remain missing."
+    },
+    {
+      "operation_id": "signaling-send-messages",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/signaling/{token}",
+      "status": "partial",
+      "api": "Client::send_signal",
+      "scope": "Bounded internal SDP/ICE, exact own room session, call-handle generation; diagnostic duplex remains separate and default-off. No production native call authority."
+    },
+    {
+      "operation_id": "signaling-pull-messages",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/signaling/{token}",
+      "status": "partial",
+      "api": "Client::poll_signals",
+      "scope": "35-second bounded destructive internal poll, complete typed response; drop/failure retires exchange. Continuous app event supervision and HPB remain missing."
+    },
+    {
+      "operation_id": "temp_avatar-post-avatar",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/temp-user-avatar",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "temp_avatar-delete-avatar",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/temp-user-avatar",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "thread-get-recent-active-threads",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/recent",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Threads",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "thread-get-subscribed-threads",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/subscribed-threads",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "thread-get-thread",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/{threadId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::Thread",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "thread-rename-thread",
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/{threadId}",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::RenameThread",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "thread-set-notification-level",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/threads/{messageId}/notify",
+      "status": "implemented",
+      "api": "Request::Chat / chat::Command::ThreadNotifications",
+      "scope": "Bounded typed protocol operation; application authority and server capability are checked separately."
+    },
+    {
+      "operation_id": "avatar-get-user-proxy-avatar-without-room",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/proxy/new/user-avatar/{size}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "avatar-get-user-proxy-avatar-dark-without-room",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/proxy/new/user-avatar/{size}/dark",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "avatar-get-user-proxy-avatar",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/proxy/{token}/user-avatar/{size}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "avatar-get-user-proxy-avatar-dark",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/proxy/{token}/user-avatar/{size}/dark",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "federation-accept-share",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "federation-reject-share",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "federation-get-shares",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-join-federated-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/federation/active",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "room-leave-federated-room",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/federation/active",
+      "status": "missing",
+      "api": null,
+      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+    },
+    {
+      "operation_id": "bot-send-message",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}/message",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "bot-react",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}/reaction/{messageId}",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "bot-delete-reaction",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/{token}/reaction/{messageId}",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "bot-get-bot-features",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/ask-features",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "bot-admin-list-bots",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bot/admin",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "certificate-get-certificate-expiration",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/certificate/expiration",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "hosted_signaling_server-request-trial",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/hostedsignalingserver/requesttrial",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "hosted_signaling_server-delete-account",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/hostedsignalingserver/delete",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "matterbridge_settings-get-matterbridge-version",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge/version",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "matterbridge_settings-stop-all-bridges",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/bridge",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "recording-get-welcome-message",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/welcome/{serverId}",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "settings-setsip-settings",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/settings/sip",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "signaling-get-welcome-message",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/signaling/welcome/{serverId}",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "recording-backend",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/backend",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "recording-request-upload",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}/request-upload",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "recording-store",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/recording/{token}/store",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-verify-dial-in-pin-deprecated",
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/pin/{pin}",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-verify-dial-in-pin",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/verify-dialin",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-direct-dial-in",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/direct-dial-in",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-verify-dial-out-number",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/verify-dialout",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-create-guest-by-dial-in",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/open-dial-in",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "room-rejected-dial-out-request",
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/rejected-dialout",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    },
+    {
+      "operation_id": "signaling-backend",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/signaling/backend",
+      "status": "not-client",
+      "api": null,
+      "scope": "Server/backend/bot/admin integration identity; not exposed as an ordinary desktop account command."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "action": "actions/checkout",
+    "version": "v7.0.1",
+    "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "release": "https://github.com/actions/checkout/releases/tag/v7.0.1",
+    "published_at": "2026-07-20T15:10:05Z",
+    "files": {
+      "action.yml": "https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/action.yml",
+      "README.md": "https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/README.md"
+    }
+  },
+  {
+    "action": "actions/cache",
+    "version": "v6.1.0",
+    "commit": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+    "release": "https://github.com/actions/cache/releases/tag/v6.1.0",
+    "published_at": "2026-06-26T19:17:06Z",
+    "files": {
+      "action.yml": "https://github.com/actions/cache/blob/55cc8345863c7cc4c66a329aec7e433d2d1c52a9/action.yml",
+      "README.md": "https://github.com/actions/cache/blob/55cc8345863c7cc4c66a329aec7e433d2d1c52a9/README.md"
+    }
+  },
+  {
+    "action": "actions/upload-artifact",
+    "version": "v7.0.2",
+    "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "release": "https://github.com/actions/upload-artifact/releases/tag/v7.0.2",
+    "published_at": "2026-10-07T10:08:14Z",
+    "files": {
+      "action.yml": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/action.yml",
+      "README.md": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/README.md"
+    }
+  },
+  {
+    "action": "actions/download-artifact",
+    "version": "v8.0.2",
+    "commit": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "release": "https://github.com/actions/download-artifact/releases/tag/v8.0.2",
+    "published_at": "2026-10-07T10:09:51Z",
+    "files": {
+      "action.yml": "https://github.com/actions/download-artifact/blob/9000827ccba6bdab643e8b6fd33ac0654aef8333/action.yml",
+      "README.md": "https://github.com/actions/download-artifact/blob/9000827ccba6bdab643e8b6fd33ac0654aef8333/README.md"
+    }
+  }
+]

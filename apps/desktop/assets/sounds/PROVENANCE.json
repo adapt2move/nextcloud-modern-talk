@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "assets": {
+    "message-notification.wav": {
+      "role": "Message notifications and other non-call notification categories",
+      "title": "Ocean message-new-instant",
+      "attribution": "2023 Guilherme Marçal Silva <guimarcalsilva@gmail.com>",
+      "license": "CC-BY-SA-4.0",
+      "license_file": "CC-BY-SA-4.0.txt",
+      "repository": "KDE/ocean-sound-theme",
+      "commit": "cedb2163a6dc8976a780ac72c55a447d15e484a7",
+      "source_path": "ocean/stereo/message-new-instant.oga",
+      "source_url": "https://github.com/KDE/ocean-sound-theme/blob/cedb2163a6dc8976a780ac72c55a447d15e484a7/ocean/stereo/message-new-instant.oga",
+      "raw_source_url": "https://raw.githubusercontent.com/KDE/ocean-sound-theme/cedb2163a6dc8976a780ac72c55a447d15e484a7/ocean/stereo/message-new-instant.oga",
+      "source_sha256": "36258b0046399c721eefa535c13a78d08b54ff1cec98a10db87d89d098760dd0",
+      "license_evidence_url": "https://github.com/KDE/ocean-sound-theme/blob/cedb2163a6dc8976a780ac72c55a447d15e484a7/ocean/stereo/message-new-instant.oga.license",
+      "role_evidence_url": "https://github.com/KDE/ocean-sound-theme/blob/cedb2163a6dc8976a780ac72c55a447d15e484a7/README.md",
+      "modifications": "Technical format conversion only: decode original Vorbis to uncompressed stereo PCM16 WAV at its original 48000 Hz. No EQ, gain, fades, normalization, trim or added content.",
+      "ffmpeg_audio_filter": null,
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "frames": 77993,
+      "sha256": "64e096f0d7090b97a31709a872a861d8eec96ddbf7cc2607c4f781a11bf65604"
+    },
+    "call-ringtone.wav": {
+      "role": "Incoming calls, incoming-call test and one-shot speaker test",
+      "title": "DreamTheme (adapted)",
+      "attribution": "The Android Open Source Project / New Wave Labs sound collection",
+      "license": "Apache-2.0",
+      "license_file": "Apache-2.0.txt",
+      "source_url": "https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a21f71ccc978290e2e212e2f8b168/data/sounds/newwavelabs/DreamTheme.ogg",
+      "license_evidence_url": "https://android.googlesource.com/platform/frameworks/base/+/1cdfff555f4a21f71ccc978290e2e212e2f8b168/data/sounds/Android.bp",
+      "source_sha256": "7158e57503e24fd85d0cf1db9fc1d8029b0bae948a997a0845f641dc122859e9",
+      "conversion": "FFmpeg 8.0.1, first 3.5 seconds, -8 dB gain, -5 dB high shelf at 2500 Hz, 40 ms fade-in and 350 ms fade-out, 500 ms silence; mono PCM16 at 16000 Hz; metadata stripped.",
+      "frames": 64000,
+      "channels": 1,
+      "sample_rate_hz": 16000,
+      "sha256": "a1e5487acc02f68ea41a145ac4b0f6fcf877d7489fe5dc84a9d7a8e48298b9fd"
+    },
+    "call-ringback.wav": {
+      "role": "Outgoing call waiting sound",
+      "title": "PhoneAlarm01.wav (softened)",
+      "attribution": "aj_heels",
+      "license": "CC-BY-4.0",
+      "license_file": "CC-BY-4.0.txt",
+      "source_url": "https://freesound.org/people/aj_heels/sounds/634078/",
+      "download_url": "https://cdn.freesound.org/previews/634/634078_11497740-hq.mp3",
+      "source_format": "Official high-quality MP3 preview, not the original lossless upload",
+      "modifications": "Original full 4-second loop, pitch/stereo/timing preserved; -7 dB gain, -6 dB treble shelf at 2200 Hz, 5 ms/10 ms boundary fades. No synthesis, layers, bass boost or normalization; decoded PCM16 at 48000 Hz.",
+      "sha256": "4c4724c6935921aa23f39a9de8a9f29318b64f23b86bee510cd5dea63c06cb11",
+      "source_sha256": "cd5c64656bb86b13632ecbe085f54e1d864f38d246c97a5a23cf209e6fd3cba2",
+      "ffmpeg_audio_filter": "treble=g=-6:f=2200:t=q:w=0.707:r=f64,volume=-7dB,afade=t=in:ss=0:ns=240:curve=hsin,afade=t=out:ss=191520:ns=480:curve=hsin"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Disposable Nextcloud/Talk verification lab
 
-Status: availability research and future execution plan, checked 2026-10-18. The user permits disposable test servers. This phase creates no VM, container, service, account or server data; it downloads no server image or Talk package. Registry/release metadata is evidence of published candidates only, not successful provisioning or interoperability.
+This contract defines disposable verification environments, not client support. Use the [backend lab guide](../backend-lab.md) for commands; server provisioning and API fixtures do not qualify native product behavior.
 
 ## Q.LAB-01 — Published candidates and immutable inputs
 
@@ -41,6 +41,8 @@ For `CORE`, bind HTTP/TLS only to VM loopback and use the session's actual local
 
 TLS verification stays enabled for the client. Use a temporary lab trust root/certificate or a controlled HTTPS endpoint, with trust setup/removal recorded. A labelled HTTP-loopback development smoke test is narrower evidence and cannot pass production TLS/auth acceptance. Extra media UDP/TCP ports are enabled only in the named media profile with least-necessary ranges, test-peer restrictions, expiry and cleanup; no anonymous public TURN relay.
 
+The explicitly authorized [development transport](../backend-lab.md#reach-a-remote-lab) retains an unpublished internal Docker bridge and uses the assigned dev-box SSH identity/verified host key to forward one workstation IPv4-loopback port directly to its owned container. This equivalent authenticated transport has no VM HTTP listener or public inbound port. It avoids Docker 29's suppressed publication on an internal network. HTTP is confined to that isolated bridge and workstation loopback, with the inter-machine hop inside SSH; the CLI requires an explicit development-HTTP opt-in. No production TLS exemption or trust change follows. Both the local access helper and VM lab must be stopped before hibernation.
+
 ## Q.LAB-03 — Provisioning and functional profile
 
 1. Record run ID, candidate commit/artifact, time budget, VM/runtime versions, image/platform digests and planned tests. Keep all generated secrets outside this manifest.
@@ -74,4 +76,4 @@ A second reviewer must be able to reconstruct the environment from pins, nonsecr
 
 Stop test clients/capture and revoke disposable app credentials where reachable; delete lab-owned browser sessions and vault entries. Remove only this run's containers, networks, volumes, temporary files/certificates, trust changes, port forwards and firewall exceptions. Verify no labelled process/listener/resource remains; never use a global destructive prune on a shared host.
 
-Delete secret-bearing snapshots/artifacts created for the run or explicitly document and protect any retained artifact. If cleanup is interrupted, report residual resource IDs privately and the remaining cost/exposure; do not claim completion. Record agent-dev-box runtime/cost after cleanup, then hibernate the session and confirm the hibernated state. Hibernation alone is not credential/data deletion. This authoring phase started no VM, so it has no lab teardown to perform.
+Delete secret-bearing snapshots/artifacts created for the run or explicitly document and protect any retained artifact. If cleanup is interrupted, report residual resource IDs privately and the remaining cost/exposure; do not claim completion. Record agent-dev-box runtime/cost after cleanup, then hibernate the session and confirm the hibernated state. Hibernation alone is not credential/data deletion. Preserve unrelated recovery snapshots and use the assigned session's lifecycle commands; never bypass a lifecycle/quota failure by deleting them.

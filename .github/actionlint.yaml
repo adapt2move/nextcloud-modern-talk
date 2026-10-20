@@ -1,0 +1,8 @@
+# The exact Blacksmith runner labels selected for this repository (docs/ci.md).
+# tools/release/check_workflows.py requires this list to match its runner policy.
+self-hosted-runner:
+  labels:
+    - blacksmith-2vcpu-ubuntu-2404
+    - blacksmith-4vcpu-ubuntu-2404
+    - blacksmith-4vcpu-windows-2025
+    - blacksmith-6vcpu-macos-latest

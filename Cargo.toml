@@ -1,17 +1,116 @@
 [workspace]
-members = ["crates/talk-core", "crates/talk-adapters", "apps/bootstrap"]
+members = ["crates/nextcloud-talk-api", "crates/talk-core", "crates/talk-adapters", "apps/bootstrap", "apps/desktop"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.0.1"
 edition = "2024"
 rust-version = "1.99"
 license = "EUPL-1.2"
 publish = false
 
 [workspace.dependencies]
+libwebrtc = { version = "=0.3.52", default-features = false }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+nextcloud-talk-api = { path = "crates/nextcloud-talk-api" }
 talk-core = { path = "crates/talk-core" }
 talk-adapters = { path = "crates/talk-adapters" }
+
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "form", "stream"] }
+tokio = { version = "=1.53.3", default-features = false, features = ["rt", "time", "sync", "macros", "net", "io-util", "fs"] }
+serde = { version = "=1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+url = { version = "=2.5.8", default-features = false, features = ["std"] }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
+cookie = { version = "=0.18.1", default-features = false }
+semver = { version = "=1.0.28", default-features = false, features = ["std"] }
+# GPUI's pinned xattr/tar chain still uses libc::ENOATTR. Keep the lock
+# resolution at libc 0.2.186 until that upstream chain is updated and compiled.
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
+unicode-segmentation = "=1.12.0"
+# Application-owned physical devices; native APIs remain in safe dependency bindings.
+cpal = { version = "=0.18.2", default-features = false, features = ["pulseaudio"] }
+gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
+gstreamer-app = { version = "=0.25.2", default-features = false, features = ["v1_24"] }
+gstreamer-video = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
+image = { version = "=0.25.10", default-features = false }
+# Reuse the locked safe CoreGraphics preflight API; it neither prompts nor captures.
+core-graphics = { version = "=0.24.0", default-features = false, features = ["link"] }
+
+# Linux read-only screen portal; capture consent belongs to each share.
+ashpd = { version = "=0.12.3", default-features = false, features = ["async-std"] }
+async-io = { version = "=2.6.0", default-features = false }
+futures-lite = { version = "=2.6.1", default-features = false, features = ["std"] }
+
+# I2 identity: explicit stores; no sample/mock/default provider selection.
+[workspace.dependencies.keyring-core]
+version = "=1.0.1"
+default-features = false
+
+[workspace.dependencies.rusqlite]
+version = "=0.40.2"
+default-features = false
+features = ["bundled", "limits"]
+
+[workspace.dependencies.dirs]
+version = "=5.0.1"
+default-features = false
+
+[workspace.dependencies.rustix]
+version = "=1.1.5"
+default-features = false
+features = ["std", "fs", "process"]
+
+[workspace.dependencies.apple-native-keyring-store]
+version = "=1.0.2"
+default-features = false
+features = ["keychain"]
+
+[workspace.dependencies.windows-native-keyring-store]
+version = "=1.1.0"
+default-features = false
+
+[workspace.dependencies.zbus-secret-service-keyring-store]
+version = "=1.0.1"
+default-features = false
+features = ["crypto-rust"]
+
+[workspace.dependencies.secret-service]
+version = "=5.2.0"
+default-features = false
+features = ["crypto-rust"]
+
+# Direct typed operations with prompt execution disabled; Linux provider only.
+[workspace.dependencies.dbus-secret-service]
+version = "=4.1.0"
+default-features = false
+features = ["crypto-rust"]
+
+[workspace.dependencies.zbus]
+version = "=5.19.0"
+default-features = false
+features = ["blocking-api", "async-io"]
+
+[workspace.dependencies.exacl]
+version = "=0.13.0"
+default-features = false
+
+[workspace.dependencies.security-framework]
+version = "=3.7.0"
+default-features = false
+
+[workspace.dependencies.windows-permissions]
+version = "=0.2.4"
+default-features = false
+
+[workspace.dependencies.winapi-util]
+version = "=0.1.11"
+default-features = false
+
+[workspace.dependencies.atomicwrites]
+version = "=0.4.4"
+default-features = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

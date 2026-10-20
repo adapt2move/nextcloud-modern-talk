@@ -1,6 +1,6 @@
-# Native media allocation contract — companion to ADR-005
+# Native media allocation targets
 
-**Proposed construction/admission limits, not an implemented allocator or measured performance.** Read with [the engine and ownership decision](decisions/005-native-media.md). Every native profile is currently blocked. Units below are bytes, KiB = 1,024 bytes, MiB = 1,048,576 bytes.
+**Future full-profile allocation targets, not an implemented allocator or measured performance.** The alpha uses a maintained in-process engine with bounded application handoffs. This older two-helper reservation model does not describe that engine’s internals and is not an alpha resource guarantee. Read with [the engine and ownership decision](decisions/005-native-media.md). Every production native profile remains blocked. The narrower I1 synthetic diagnostic and its actual enforcement gaps are recorded in §G. Units below are bytes, KiB = 1,024 bytes, MiB = 1,048,576 bytes.
 
 ## A. Admitted shape and ownership
 
@@ -106,7 +106,7 @@ Original CPU, power, network, GPU, latency and footprint targets are unchanged. 
 4. **Bound overload.** Drop a superseded replaceable waiting frame and record it; never grow pools or queue delay. On sustained exhaustion stop/unsubscribe the affected video source and show reduced quality/unavailable media. Preserve separately authorized audio only while its own bounds and policy are satisfied. Audio overflow reports underrun/overrun, discards obsolete data within policy or stops the call; it cannot extend the 100 ms queue. Any adaptation invalidates an unchanged baseline workload. Remote oversize/unknown formats close the affected stream before unsafe allocation; security/policy loss follows the stronger call-stop rule.
 5. **Reclaim on format/generation changes.** Stop old producers and admission, invalidate old leases, drain callbacks/codec references, then retire pools after renderer/GPU completion. Any overlap consumes the same slot and global caps; no double-bank exemption. If no capacity remains, wait boundedly/stop and require deliberate retry, rather than freeing live backing or silently borrowing another account's quota. Stuck old-generation allocations block replacement admission and remain visible to collectors.
 
-The selected source does not yet implement this ledger. In particular, VP8 external reference-buffer hooks, encoded-image allocation interception, source-owned pools and GPUI imports are unresolved qualification work identified in ADR-005. **Missing hook coverage means blocked admission**, even if a small test call appears to work. The default/unconfigured bootstrap must not construct the engine to discover these limits by trial.
+The maintained engine does not implement this proposed global ledger. Native decoder/reference buffers, encoded-image growth, source pools and GPU imports still need a measured inventory or upstream enforcement. The alpha must therefore not claim this full allocation profile, helper isolation or a hard process-memory ceiling. Functional interoperability and application queue bounds are narrower results; they do not establish these targets.
 
 ## F. Static reproduction and future evidence
 
@@ -126,9 +126,15 @@ for C, S in [(0, 0), (1, 0), (2, 0), (4, 0), (4, 1), (5, 2)]:
 print(2 * (64 * 5 + 120 * 2 + 12), 2 * (572 + 128) + 8)
 ```
 
-Expected frame bytes are the four §B values; totals are `12, 76, 140, 268, 388, 572`, then `1144, 1408`. The proposal author checked this arithmetic with standalone Python; the integrated candidate's preliminary derivation check is recorded in the [remediation report](../reviews/bootstrap-remediation-r1.md). The production implementation needs checked fixed-width arithmetic; the arbitrary-precision audit is not a test of its safety.
+Expected frame bytes are the four §B values; totals are `12, 76, 140, 268, 388, 572`, then `1144, 1408`. The production implementation needs checked fixed-width arithmetic; the arbitrary-precision audit is not a test of its safety.
 
 Before profile admission, media/platform supplies the native allocation map, executable denial/overflow/lifetime tests and patched source/artifact identities. The independent verifier checks malformed streams, concurrent two-call/prejoin admission, old generations, captured/cached/decoder reference backing and renderer stalls. Performance qualification additionally requires the frozen workload and complete process/lifetime/peak/GPU evidence from the accepted measurement contract. No native memory, codec quality, power or stop-time result is supplied here.
 
 [Apple-queue]: https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration/queuedepth
 [Apple-threshold]: https://developer.apple.com/documentation/corevideo/kcvreturnwouldexceedallocationthreshold
+
+## G. Qualification limits
+
+The production media port remains unconfigured. Synthetic helper diagnostics do not qualify these budgets. Required allocator hooks still include RTP/encoded-image assembly before allocation, encoder/decoder private references and scratch, audio/NetEQ queues, task/timer/DTLS backing, native capture/conversion pools and shared-surface generation/fence retirement. Count limits and sampled RSS do not prove aggregate allocation bounds. Physical devices, macOS and whole-process collectors require separate qualification.
+
+See the [native helper interface](../../native/media/README.md) for the diagnostic protocol. Keep diagnostic implementation details and rationale beside the owning code; this contract retains the intended production limits.

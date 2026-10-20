@@ -10,7 +10,7 @@ Acceptance: upload and sharing are distinct states. A completed upload whose cha
 
 ## CONTENT-002
 
-**Share existing Nextcloud files (P1).** Browse/search only the account's accessible files, show the selected object and sharing audience, then create the supported Talk attachment/share. A rich object is not evidence the user may download its contents. Respect guest/federated restrictions and current file/share permissions.
+**Share existing NextCloud files (P1).** Browse/search only the account's accessible files, show the selected object and sharing audience, then create the supported Talk attachment/share. A rich object is not evidence the user may download its contents. Respect guest/federated restrictions and current file/share permissions.
 
 Acceptance: selecting a file never changes its sharing permissions until explicit send. If the file moved or access was revoked, fail safely and refresh. File-share credentials and private download URLs stay out of public diagnostics. Declining an access change leaves the file unshared.
 

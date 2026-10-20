@@ -29,15 +29,15 @@ The two palettes share **20 screen IDs** and behavior (four account, nine conver
 | D-S19 | `direct-call` | Accepted direct call; Mara and Alex only | [PNG](assets/blue/19-direct-call.png) | [PNG](assets/sage/19-direct-call.png) |
 | D-S20 | `voice-room` | Teamküche conversation, not joined; added in revision 06 | [PNG](assets/blue/20-voice-room.png) | [PNG](assets/sage/20-voice-room.png) |
 
-D-S09 retains one screen ID across conversation contexts. Its default PNG is Produktteam; contextual captures are [Teamküche blue](assets/blue/contexts/09-prejoin-teamkueche.png) / [sage](assets/sage/contexts/09-prejoin-teamkueche.png) and [Designbesprechung blue](assets/blue/contexts/09-prejoin-designbesprechung.png) / [sage](assets/sage/contexts/09-prejoin-designbesprechung.png). These four supporting captures are not additional gallery screens. Use `?screen=prejoin&conversation=voice` or `&conversation=design` to open those contexts. The Teamküche check depicts devices still off and states the microphone-on / camera-off intent for final join; the retained video-conference sketch illustrates a deliberately authorized local preview, not permission to start one automatically.
+D-S09 retains one screen ID across conversation contexts. Its default PNG is Produktteam; contextual captures are [Teamküche blue](assets/blue/contexts/09-prejoin-teamkueche.png) / [sage](assets/sage/contexts/09-prejoin-teamkueche.png) and [Designbesprechung blue](assets/blue/contexts/09-prejoin-designbesprechung.png) / [sage](assets/sage/contexts/09-prejoin-designbesprechung.png). These four supporting captures are not additional gallery screens. The Teamküche-prejoin interaction is historical and superseded by the explicit direct audio entry in D-F04; its original pixels are retained. Use `?screen=prejoin&conversation=voice` or `&conversation=design` to open those contexts. The Teamküche check depicts devices still off and states the microphone-on / camera-off intent for final join; the retained video-conference sketch illustrates a deliberately authorized local preview, not permission to start one automatically.
 
 ## D-F01 Connect account
 
 `D-S01 → D-S02 → D-S03 → D-S05`; expired authorization branches to `D-S04 → D-S02`.
 
 - **D-F01-A:** Show the server identity before opening the system browser. Password and 2FA entry remain in Nextcloud. Do not add a password form or embedded browser to the native client. This follows [Nextcloud Login Flow v2](https://docs.nextcloud.com/server/34/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2).
-- **D-F01-B:** Persist the app credential only through the OS secret store. On failure offer **Erneut versuchen**, **Abbrechen**, and explicit **Nur für diese Sitzung fortfahren**. Session-only mode holds the credential in process memory, marks the account accordingly and requires reauthentication after restart; cancellation discards the pending credential. No plaintext file, settings, log, clipboard or diagnostics fallback. If session-only operation cannot meet that contract, stop sign-in with a recoverable explanation.
-- **D-F01-C:** A failed/expired authorization leaves a retry path without exposing tokens. Notification permission is optional and separate from authentication. Secure-storage failure and session-only mode need dedicated views; they are not drawn in `D-S03`.
+- **D-F01-B:** Prefer macOS Keychain, Windows Credential Manager or qualified Linux Secret Service through the selected Rust providers. If unavailable, offer **Auf diesem Gerät speichern** (durable **unverschlüsselte Datei**, access restricted to the OS user), **Erneut versuchen** and **Abbrechen**. Normal sign-in always uses durable storage; it has no session-only option. No master password, encryption setup or separate approval dialog. File storage uses a verified private per-user directory and committed backend/item eligibility; it supports restart without a new login merely because the native store is absent. Existing temporary/legacy states retain their suppression and cleanup guarantees and must never appear durably saved. Neither persistent backend may bypass uncertain-writer reconciliation or delete retained P. Locked/denied/corrupt stores have distinct unlock/repair paths without background prompt loops. No secret in ordinary settings, logs, clipboard, diagnostics or shared caches. [AUTH-003–005](../product/accounts.md#auth-003) and [Q.SEC-04](../quality/security.md#private-file-provider) govern exact transitions and file protection.
+- **D-F01-C:** A failed/expired authorization leaves a retry path without exposing tokens. Notification permission is optional and separate from authentication. Show the committed native/file/session mode and any unresolved save/cleanup; never call the unencrypted file encrypted. Failed permission/DACL/durability checks offer repair/retry or cancel while any valid existing memory session may continue; a failed save never silently activates a temporary replacement. Cancel invalidates the attempt; only committed deliberate cancel-and-retain preserves named P's restoration. Native-store recovery keeps the current choice; saving/migration requires a new deliberate action. These amended storage/failure states need dedicated views and are not drawn in `D-S03`; the existing design assets are unchanged references.
 
 ## D-F02 Work within a conversation
 
@@ -46,6 +46,7 @@ D-S09 retains one screen ID across conversation contexts. Its default PNG is Pro
 - **D-F02-A:** Chat, file references, participants and calls share the same account-scoped conversation identity. Show the selected conversation consistently in header, composer, results and call chat.
 - **D-F02-B:** Preserve the draft and reading position when opening replies, searching or returning from a call. Pending, failed and retryable message states must be distinct from delivered messages; these error states are not drawn.
 - **D-F02-C:** “Notiz an mich” is a note-to-self conversation, not a colleague to call. Nextcloud user groups appear in invitation selection, not as an alternative conversation namespace. Respect per-action permissions and unavailable-feature explanations.
+- **D-F02-D:** Use the header members/count action for member and bot management, and the rightmost gear for the five-tab [conversation settings](conversation-dialogs.md). Hide members in direct chats. Replace the persistent right details sidebar; preserve conversation identity, draft, reading position and focus on dialog return.
 
 ## D-F03 Accept a direct call
 
@@ -60,16 +61,16 @@ D-S09 retains one screen ID across conversation contexts. Its default PNG is Pro
 
 ## D-F04 Voluntarily join a conference
 
-`D-S05 or D-S16 → explicit join/start action → D-S09 → Jetzt teilnehmen → required gates/lobby → D-S10`.
+Conference/webinar/presentation: `conversation → explicit join/start → D-S09 → Jetzt teilnehmen → required gates/lobby → D-S10`.
 
-`D-S20 → Anruf beitreten → D-S09 (Teamküche) → Jetzt teilnehmen → required gates/lobby → D-S18`.
+Huddle/ordinary group: `D-S20 → explicit headphone join → required gates/lobby → connecting → D-S18`. The Teamküche discovery shortcut uses this same direct audio entry; selecting the room remains navigation only.
 
-The explicit Teamküche shortcut in `D-S17` also opens `D-S09 (Teamküche)`. This selects Teamküche as the conversation context; cancellation opens `D-S20`, still outside its call.
+- **D-F04-A:** Show **Bereit, wenn du es bist.** only for conference/webinar/presentation preparation. A local preview requires a deliberate preview/test action and OS authorization; it is not published. Huddle/ordinary group audio entry honors saved device/mute state and server start-without-media policy, with camera off unless later explicitly enabled.
+- **D-F04-B:** Cancel/back returns to the originating conversation without joining and releases preview capture. A denied permission or cancelled mandatory gate in direct audio entry likewise leaves the room available with capture stopped. Header, composer and selected sidebar entry must agree.
+- **D-F04-C:** Recheck permissions, call state, consent, lobby and security at every entry. Direct audio omits only generic prejoin, never these requirements. Use authoritative participants; the sketch's example counts grant no authority. [CALL-004/005](../product/calls.md#call-004) define the two entry paths.
+- **D-F04-D:** Local mute/camera changes never alter guest access, discovery or server call-start rights. A real Channel preset cannot call, even if grouped with ordinary rooms under “Kanäle”.
 
-- **D-F04-A:** Show **Bereit, wenn du es bist.** only after the user chooses to join/start the conference. Allow device selection and explicit microphone/camera choices before participation. A local preview requires a deliberate preview/test action and OS authorization; it is not published to other participants. Choosing a conversation or its voice-room preset is not a join or preview action. Initial media intent must honor server policy and user settings; the Teamküche example states microphone on at final join and camera off.
-- **D-F04-B:** Cancel/back (including Escape in the sketch) returns to the originating conversation without joining and releases any preview capture. Check `D-S16 → D-S09 → D-S16` for Designbesprechung, `D-S05 → D-S09 → D-S05` for Produktteam, and `D-S20 → D-S09 → D-S20` for Teamküche; header, composer and selected sidebar entry must agree. Unavailable or denied devices have a recoverable explanation. Where policy permits, offer participation with those devices off.
-- **D-F04-C:** Recheck permissions and meeting state when joining. Lobby, required consent and security policy are not bypassed by the prejoin button. Use authoritative participant counts rather than the sketch's fixed four-person conference or two-person voice-room example. [CALL-004](../product/calls.md#call-004) governs all voluntary entry paths.
-- **D-F04-D:** Changing local mute/camera state never changes the conversation's guest access, discoverability or call-start permissions.
+The older Teamküche and generic Produktteam prejoin captures are retained with their original context. They do not demonstrate this revised direct-entry behavior; the [conversation-dialog prototype](prototypes/conversation-dialogs.html) shows the new header mapping only.
 
 ## D-F05 Share and stop sharing
 
@@ -81,11 +82,11 @@ The explicit Teamküche shortcut in `D-S17` also opens `D-S09 (Teamküche)`. Thi
 
 ## D-F06 Create and discover conversations
 
-`D-S05 → D-S14 or D-S15 → invitation/access setup → D-S16`; `D-S05 → Teamküche sidebar → D-S20`; `D-S17 → explicit Teamküche join → D-S09 (Teamküche) → D-S18`.
+`D-S05 → D-S14 or D-S15 → invitation/access setup → D-S16`; `D-S05 → Teamküche sidebar → D-S20`; `D-S17 → explicit Teamküche join → required gates → D-S18`.
 
 - **D-F06-A:** Resolve available presets from server evidence. `create34` and `create35` are example fixtures, not hardcoded version gates. Server-forced values stay visibly locked. A Nextcloud user group can supply invitees without becoming the conversation's identity.
 - **D-F06-B:** Separate guest access, password, directory visibility and membership. Show the effect of each choice before creating/sharing a link. Do not infer discovery from a public link.
-- **D-F06-C:** Opening the Teamküche conversation is navigation only (`D-S20`), with microphone/camera off and no joined-call state. Its separately labeled **Anruf beitreten** action and the discovery shortcut both require `D-S09`; only **Jetzt teilnehmen**, followed by required gates, leads to `D-S18`. Back from prejoin returns to Teamküche without joining. Apply permission, consent and security gates; no preset or version label bypasses this path. The two people shown in `D-S18` still belong to a group room; use `D-S19` for the direct-call case.
+- **D-F06-C:** Opening Teamküche is navigation only (`D-S20`), with no capture or joined-call state. Its labeled headphone join and the deliberate discovery join enter audio under CALL-005 without generic prejoin, after permission/consent/lobby/security requirements. Cancelling a requirement keeps Teamküche available without joining. The two people in `D-S18` still belong to a group room; use `D-S19` for the direct-call case.
 - **D-F06-D:** Read expiration, moderation and call availability from the conversation/server. “1 Stunde” in the voice-room example is illustrative, not a universal retention rule. See the pinned [VoiceRoom preset](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/RoomPresets/VoiceRoom.php).
 
 ## Coverage limits

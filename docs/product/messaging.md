@@ -78,6 +78,8 @@ Acceptance: a pin creation failure does not leave a local pin presented as share
 
 **Remind later (P3).** Set/change/cancel a server reminder for an accessible message, with timezone-aware date/time selection and a visible upcoming-reminders list where available. A reminder is personal, not a scheduled message to other participants. Use server-confirmed timestamps and status.
 
+An authenticated personal message-reminder notification uses the local important-notices policy, with its own typed reason and account/conversation target. Resolve it from supported server identifiers, never translated subjects or a local timer inferred from a message timestamp. Disabling local delivery does not cancel the server reminder or mark its message read.
+
 Acceptance: ambiguous timezone/DST selection is resolved visibly; a failed creation does not promise a reminder. An inaccessible target opens a neutral unavailable state without its protected excerpt. Client quit does not imply a confirmed server reminder was canceled.
 
 ## MSG-014

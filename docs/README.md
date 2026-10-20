@@ -1,19 +1,22 @@
 # Documentation
 
-[Current state](status.md) records what exists and what remains unverified. Product requirements are targets unless the feature inventory and reproducible evidence say otherwise.
-
-[Root PM accepted the exact bootstrap source](reviews/bootstrap-acceptance.md) at `54cde8e317ed0ea98d88255b9f12cb9a1151229b` for contracts/scaffolding only. This report/status publication preserves that source. All 140 product features remain Planned; native functionality, security, media and performance remain unverified.
+Read [current state](status.md) for limitations and [development](development.md) to contribute. Specifications describe intended behavior; they do not establish implemented support.
 
 | Read | Purpose |
 | --- | --- |
-| [Product](product/README.md) | User outcomes, stable requirement IDs and acceptance criteria |
-| [Compatibility](compatibility/README.md) | Both Nextcloud/Talk families, runtime gates, feature inventory and CT scenarios |
-| [Design](design/README.md) | German UI examples, flow decisions, tokens, galleries and artifact provenance |
-| [Architecture](architecture/README.md) | Deep Modules, typed boundaries, lifecycle decisions and bootstrap validation |
-| [Quality](quality/index.md) | Security, performance, disposable servers and independently reviewed acceptance |
-| [Development](development.md) | Canonical maintenance/CI workflow and exact toolchain selection |
-| [Testing](testing/README.md) | Separately owned disposable-backend fixtures, evidence and native-test limits |
-| [Product review round 2](reviews/product-spec-review-r2.md) | Accepted specification evidence, with attributed quality/design reviews and mandatory bootstrap handoff |
-| [Bootstrap acceptance](reviews/bootstrap-acceptance.md) | PM decision, exact candidate, four independent round-2 reviews, closed findings, evidence limits and VM lifecycle observations |
+| [Development](development.md) | Prerequisites, pinned toolchain, native UI entrypoint and scoped checks |
+| [Alpha notes](alpha.md) | Installation, included functionality and known limitations |
+| [Backend lab](backend-lab.md) | Disposable pinned servers, synthetic accounts and cleanup |
+| [Product](product/README.md) | Intended user outcomes and stable requirement IDs |
+| [Compatibility](compatibility/README.md) | Server families, runtime conditions, inventory and scenarios |
+| [Design](design/README.md) | Design hierarchy, flows, tokens and illustrative assets |
+| [Architecture](architecture/README.md) | Module responsibilities, boundaries and data flow |
+| [Quality](quality/index.md) | Security, performance and verification requirements |
+| [CI](ci.md) | Linux tests, Windows/macOS compile-only jobs |
+| [Release tooling](../tools/release/README.md) | Package inputs, metadata and publication commands |
 
-Documentation follows the [change and IST rules](../AGENTS.md). Accepted source/review history is retained; a later implementation or source update does not retroactively change earlier evidence.
+<a id="active-implementation-and-credential-amendment"></a>
+
+Normal sign-in persists the account, preferring a native credential store and offering an explicit durable unencrypted private-file fallback. The [account contract](product/accounts.md) describes storage failure, restoration and logout. Platform qualification remains separate from the storage interface.
+
+Keep implementation rationale beside code. Historical reports and task ledgers belong outside normal contributor documentation; follow [AGENTS.md](../AGENTS.md).

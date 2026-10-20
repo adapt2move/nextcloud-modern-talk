@@ -35,6 +35,9 @@ def copy_source(destination):
         shutil.copytree(candidate / name, destination / name)
     (destination / 'tools').mkdir()
     shutil.copy2(candidate / 'tools/check_architecture.py', destination / 'tools/check_architecture.py')
+    shutil.copytree(candidate / 'tools/media', destination / 'tools/media')
+    (destination / 'tests/identity').mkdir(parents=True)
+    shutil.copy2(candidate / 'tests/identity/driver.rs', destination / 'tests/identity/driver.rs')
 
 
 def append(root, path, text):
@@ -66,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
             diagnostic is None or diagnostic in checker['stderr']
         )
         if compile_positive:
-            compiler = run(root, ['cargo', 'check', '--locked', '--workspace', '--all-targets'])
+            compiler = run(root, ['cargo', 'check', '--locked', '-p', 'talk-bootstrap', '--all-targets'])
             record['compiler'] = compiler
             record['pass'] = record['pass'] and compiler['exit_code'] == 0
         record['lock_unchanged'] = lock_before == digest(root / 'Cargo.lock')
@@ -99,6 +102,24 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     case('data-wildcard', lambda root: append(root, 'crates/talk-core/src/ui.rs', 'pub use crate::ids::*;'), 1, 'explicit paths without aliases/globs')
     case('frame-field', lambda root: append(root, 'crates/talk-core/src/ui.rs', 'pub struct Frame; pub struct FixtureFrame { pub frame: Frame }'), 1, 'worker or frame')
     case('secret-field', lambda root: append(root, 'crates/talk-core/src/ui.rs', 'pub struct FixtureSecret { pub password: u64 }'), 1, 'secret/transport-bearing')
+    case('recursive-ui-worker', lambda root: append(root, 'crates/talk-core/src/ui/presentation.rs', 'pub use crate::ports::NextcloudPort;'), 1, 'unreviewed data export/import')
+    case('recursive-ui-container', lambda root: append(root, 'crates/talk-core/src/ui/presentation.rs', 'pub struct Unbounded { pub values: Vec<u64> }'), 1, 'unbounded container')
+    case('native-protocol-import', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'use talk_core::protocol::Conversation;'), 1, 'native presentation import')
+    case('native-worker-call', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.http_client(); }'), 1, 'hidden I/O')
+    case('native-clipboard-outside-input', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.read_from_clipboard(); }'), 1, 'hidden I/O')
+    case('native-deep-route', lambda root: (root/'apps/desktop/src/presentation/nested').mkdir() or (root/'apps/desktop/src/presentation/nested/leak.rs').write_text('const ROUTE: &str = "/ocs/v2.php/fixture";'), 1, 'native presentation contains')
+    # I2 edges stay private even when their implementations are linked.
+    for name in ('keyring_core', 'rusqlite', 'secret_service', 'dbus_secret_service', 'security_framework', 'atomicwrites'):
+        case('identity-core-' + name, lambda root, name=name: append(root, 'crates/talk-core/src/identity.rs', 'use ' + name + '::Fixture;'), 1, 'core contains adapter/runtime I/O')
+        case('identity-renderer-' + name, lambda root, name=name: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden() { ' + name + '::fixture(); }'), 1, 'native presentation contains')
+    case('identity-worker-ui', lambda root: append(root, 'crates/talk-core/src/ui.rs', 'pub use talk_adapters::identity::IdentityRuntime;'), 1, 'unreviewed data export/import')
+    case('native-runtime-renderer', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'use talk_adapters::identity::IdentityRuntime;'), 1, 'native presentation import')
+    case('adapter-implicit-examples', lambda root: (root / 'crates/talk-adapters/Cargo.toml').write_text((root / 'crates/talk-adapters/Cargo.toml').read_text().replace('autoexamples = false', 'autoexamples = true')), 1, 'explicit default-off allowlist')
+    case('adapter-ungated-example', lambda root: (root / 'crates/talk-adapters/Cargo.toml').write_text((root / 'crates/talk-adapters/Cargo.toml').read_text().replace('required-features = ["backend-test"]', 'required-features = []', 1)), 1, 'only explicit default-off synthetic diagnostic executables')
+    case('api-application-import', lambda root: append(root, 'crates/nextcloud-talk-api/src/lib.rs', 'use talk_core::policy::Decision;'), 1, 'API contains application/storage/native-media dependency')
+    case('api-native-import', lambda root: append(root, 'crates/nextcloud-talk-api/src/lib.rs', 'use talk_adapters::media::wire;'), 1, 'API contains application/storage/native-media dependency')
+    case('api-renderer-edge', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'use nextcloud_talk_api::Client;'), 1, 'native presentation import')
+    case('api-core-edge', lambda root: append(root, 'crates/talk-core/src/lib.rs', 'use nextcloud_talk_api::Client;'), 1, 'core contains adapter/runtime I/O')
     case('restored-baseline')
 
 result = {

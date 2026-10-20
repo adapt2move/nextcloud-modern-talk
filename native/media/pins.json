@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "webrtc": {
+    "url": "https://webrtc.googlesource.com/src.git",
+    "commit": "a306485b7fc0fe38dd2651420e383f92f196cd77",
+    "tree": "f1bb4132a097a0c65c00f1a0f425a9b403798116"
+  },
+  "depot_tools": {
+    "url": "https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+    "commit": "d38909eb68d85b91259f4bf20fe5ebcd38461bc2"
+  },
+  "libvpx_commit": "5e680f30801d03c21078f8c4b772464752516211",
+  "chromium_third_party_commit": "8a83e63525b495aa7f35648a3b4b676279deb864"
+}

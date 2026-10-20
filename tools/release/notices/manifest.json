@@ -1,0 +1,1069 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "blade-graphics",
+      "version": "0.7.1",
+      "license": "MIT",
+      "crate_sha256": "e71cfb73b98eb9f58ee84048aa1bdf4e7497fd20c141b57523499fa066b48fed",
+      "source_commit": "88b6c64cd7a32dd933acc4e5266808a07143ce84",
+      "files": [
+        {
+          "path": "blade-graphics-0.7.1/LICENSE",
+          "source": "https://raw.githubusercontent.com/kvark/blade/88b6c64cd7a32dd933acc4e5266808a07143ce84/LICENSE",
+          "sha256": "8e9e23a134d00ae1760811ca60482b2e98b2db9154ffda66e58791796aa24ca1"
+        }
+      ]
+    },
+    {
+      "name": "blade-macros",
+      "version": "0.3.0",
+      "license": "MIT",
+      "crate_sha256": "27142319e2f4c264581067eaccb9f80acccdde60d8b4bf57cc50cd3152f109ca",
+      "source_commit": "875b9c87e15e83ed48414c094f9a2b3fb189925d",
+      "files": [
+        {
+          "path": "blade-macros-0.3.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/kvark/blade/875b9c87e15e83ed48414c094f9a2b3fb189925d/LICENSE",
+          "sha256": "8e9e23a134d00ae1760811ca60482b2e98b2db9154ffda66e58791796aa24ca1"
+        }
+      ]
+    },
+    {
+      "name": "blade-util",
+      "version": "0.3.0",
+      "license": "MIT",
+      "crate_sha256": "3a6be3a82c001ba7a17b6f8e413ede5d1004e6047213f8efaf0ffc15b5c4904c",
+      "source_commit": "23e378613440513e1045f4e0f7c5979e67645d3b",
+      "files": [
+        {
+          "path": "blade-util-0.3.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/kvark/blade/23e378613440513e1045f4e0f7c5979e67645d3b/LICENSE",
+          "sha256": "8e9e23a134d00ae1760811ca60482b2e98b2db9154ffda66e58791796aa24ca1"
+        }
+      ]
+    },
+    {
+      "name": "block",
+      "version": "0.1.6",
+      "license": "MIT",
+      "crate_sha256": "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a",
+      "files": [
+        {
+          "path": "block-0.1.6/Cargo.toml",
+          "source": "https://static.crates.io/crates/block/block-0.1.6.crate",
+          "sha256": "24df2f33b48c9e756a4f864f882c1ab07a159b6c2b790f45af2e8162499b6719",
+          "archive_member": "block-0.1.6/Cargo.toml"
+        },
+        {
+          "path": "block-0.1.6/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ],
+      "source_commit": "47178790cfc9d4a8b092051d8b413b78bd31254a",
+      "source_equivalence_sha256": {
+        "Cargo.toml": "24df2f33b48c9e756a4f864f882c1ab07a159b6c2b790f45af2e8162499b6719",
+        "README.md": "01c56329fa14f48ea1c9c7986c3660c41beeff2477f61c2d36bd8e666b9fc562",
+        "src/lib.rs": "eb31678adf63b53109d9b94eba23699fd5f9ebfdb950f6e1a57ad51bb6a146fa",
+        "src/test_utils.rs": "271bd579b67e2440134227cf8ee52c1b8c22854eb0c7923b46306b51810c2cf1"
+      },
+      "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
+    },
+    {
+      "name": "block2",
+      "version": "0.6.2",
+      "license": "MIT",
+      "crate_sha256": "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5",
+      "files": [
+        {
+          "path": "block2-0.6.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/block2/block2-0.6.2.crate",
+          "sha256": "e325c51f01145af3e11f2ee5ce7c47f10697d936c1d90b9ee81a0cf4f700f6d7",
+          "archive_member": "block2-0.6.2/Cargo.toml"
+        },
+        {
+          "path": "block2-0.6.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "block2-0.6.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ],
+      "source_commit": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "convert_case",
+      "version": "0.4.0",
+      "license": "MIT",
+      "crate_sha256": "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e",
+      "source_commit": "300d9eef9e8c970e15f324afbc3df8b6a4ebbf71",
+      "files": [
+        {
+          "path": "convert_case-0.4.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/rutrum/convert-case/f72ca63c9d579fbab22e361c76e39d31d1e86a2e/LICENSE",
+          "sha256": "797087750c4103075e96bb7a60202a040812f8679ae2f7263148a1cc0b298d28"
+        }
+      ],
+      "notice_commit": "f72ca63c9d579fbab22e361c76e39d31d1e86a2e",
+      "provenance": "First upstream license-file addition, two commits after the published commit, while Cargo.toml still declares version 0.4.0 and MIT. The only intervening source changes enable the existing random enum variants in documentation builds; the other changes add LICENSE and its README link."
+    },
+    {
+      "name": "dasp_sample",
+      "version": "0.11.0",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f",
+      "source_commit": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+      "files": [
+        {
+          "path": "dasp_sample-0.11.0/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+          "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0"
+        },
+        {
+          "path": "dasp_sample-0.11.0/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+          "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512"
+        }
+      ]
+    },
+    {
+      "name": "dispatch2",
+      "version": "0.3.1",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38",
+      "files": [
+        {
+          "path": "dispatch2-0.3.1/Cargo.toml",
+          "source": "https://static.crates.io/crates/dispatch2/dispatch2-0.3.1.crate",
+          "sha256": "f246cf8997c346fdcabb8925ad5be967f397fd8b92630ef7bcc9bdce5d33f775",
+          "archive_member": "dispatch2-0.3.1/Cargo.toml"
+        },
+        {
+          "path": "dispatch2-0.3.1/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "dispatch2-0.3.1/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "dispatch2-0.3.1/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "dispatch2-0.3.1/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "dtor",
+      "version": "0.0.6",
+      "license": "Apache-2.0 OR MIT",
+      "crate_sha256": "97cbdf2ad6846025e8e25df05171abfb30e3ababa12ee0a0e44b9bbe570633a8",
+      "source_commit": "e8c8b4a82de72311a5257db0502ced728081e745",
+      "files": [
+        {
+          "path": "dtor-0.0.6/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/mmastrac/rust-ctor/e8c8b4a82de72311a5257db0502ced728081e745/LICENSE-MIT",
+          "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3"
+        },
+        {
+          "path": "dtor-0.0.6/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/mmastrac/rust-ctor/e8c8b4a82de72311a5257db0502ced728081e745/LICENSE-APACHE",
+          "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae"
+        }
+      ]
+    },
+    {
+      "name": "dtor-proc-macro",
+      "version": "0.0.5",
+      "license": "Apache-2.0 OR MIT",
+      "crate_sha256": "7454e41ff9012c00d53cf7f475c5e3afa3b91b7c90568495495e8d9bf47a1055",
+      "source_commit": "b05136ac964049a1ee29de763d0b119c42258567",
+      "files": [
+        {
+          "path": "dtor-proc-macro-0.0.5/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/mmastrac/rust-ctor/b05136ac964049a1ee29de763d0b119c42258567/LICENSE-MIT",
+          "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3"
+        },
+        {
+          "path": "dtor-proc-macro-0.0.5/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/mmastrac/rust-ctor/b05136ac964049a1ee29de763d0b119c42258567/LICENSE-APACHE",
+          "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae"
+        }
+      ]
+    },
+    {
+      "name": "gpu-alloc",
+      "version": "0.6.2",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "45cf04b2726f02df5508c6de726acdc90cdf97ac771a9a0ffd8ba10a6e696bf9",
+      "source_commit": "61020bdcb4eb04fca6bbf748aeb9570e859236e0",
+      "files": [
+        {
+          "path": "gpu-alloc-0.6.2/COPYING",
+          "source": "https://raw.githubusercontent.com/zakarumych/gpu-alloc/61020bdcb4eb04fca6bbf748aeb9570e859236e0/COPYING",
+          "sha256": "12121dfa588677007848ab922a45a1e3248868f6ff063598fceb3141d7897314"
+        }
+      ]
+    },
+    {
+      "name": "gpu-alloc-ash",
+      "version": "0.7.1",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "643756f08ef6def813c776199e4766596395a4c6530373c9a4374a64de2f53a1",
+      "source_commit": "7ddd1fe576fcfc503347eb97e476a47581479f22",
+      "files": [
+        {
+          "path": "gpu-alloc-ash-0.7.1/COPYING",
+          "source": "https://raw.githubusercontent.com/zakarumych/gpu-alloc/7ddd1fe576fcfc503347eb97e476a47581479f22/COPYING",
+          "sha256": "12121dfa588677007848ab922a45a1e3248868f6ff063598fceb3141d7897314"
+        }
+      ]
+    },
+    {
+      "name": "gpu-alloc-types",
+      "version": "0.3.1",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "b2bbed164dd10ed526c2e4fe3e721ca4a71c61730e5aafac6844b417b3227058",
+      "source_commit": "7ddd1fe576fcfc503347eb97e476a47581479f22",
+      "files": [
+        {
+          "path": "gpu-alloc-types-0.3.1/COPYING",
+          "source": "https://raw.githubusercontent.com/zakarumych/gpu-alloc/7ddd1fe576fcfc503347eb97e476a47581479f22/COPYING",
+          "sha256": "12121dfa588677007848ab922a45a1e3248868f6ff063598fceb3141d7897314"
+        }
+      ]
+    },
+    {
+      "name": "hexf-parse",
+      "version": "0.2.1",
+      "license": "CC0-1.0",
+      "crate_sha256": "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df",
+      "source_commit": "4225763d744183d720f575ae96d04161b4d08ea0",
+      "provenance": "The published crate and its exact upstream revision declare CC0-1.0 but contain no license text. Cargo.toml.orig preserves the original author and license declaration. CC0-1.0.txt is the complete official Creative Commons 1.0 legalcode supplied here; it is not represented as an upstream crate file.",
+      "later_upstream_license": {
+        "license": "0BSD",
+        "license_text_commit": "41f0018229c1ee3d6fd813b6808d1ad1f506554c",
+        "scope": "Later upstream license; not substituted for this pinned CC0-1.0 package."
+      },
+      "files": [
+        {
+          "path": "hexf-parse-0.2.1/Cargo.toml.orig",
+          "source": "https://raw.githubusercontent.com/lifthrasiir/hexf/4225763d744183d720f575ae96d04161b4d08ea0/parse/Cargo.toml",
+          "sha256": "4a56dbdbc12054fd33b7a2634a45cbbe6fe12f5e6f4081002cbfa527f7220c70"
+        },
+        {
+          "path": "hexf-parse-0.2.1/CC0-1.0.txt",
+          "source": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        }
+      ]
+    },
+    {
+      "name": "leak",
+      "version": "0.1.2",
+      "license": "Apache-2.0 OR MIT",
+      "crate_sha256": "bd100e01f1154f2908dfa7d02219aeab25d0b9c7fa955164192e3245255a0c73",
+      "files": [
+        {
+          "path": "leak-0.1.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/leak/leak-0.1.2.crate",
+          "sha256": "8800b6172da0ce015fdc69cbe3fdc48c22f4223babe254e207255c681c83e8dd",
+          "archive_member": "leak-0.1.2/Cargo.toml"
+        },
+        {
+          "path": "leak-0.1.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "leak-0.1.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "source_commit": "024bd1ccfa33aea1eff0026b0d8b676874b5e3d2",
+      "source_equivalence_sha256": {
+        "Cargo.toml": "8800b6172da0ce015fdc69cbe3fdc48c22f4223babe254e207255c681c83e8dd",
+        "src/lib.rs": "1bf5c3379719fb99ef78ae60220d70c377d75273b3eb9a7d538c996fabe3077c"
+      },
+      "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
+    },
+    {
+      "name": "leaky-cow",
+      "version": "0.1.1",
+      "license": "MIT / Apache-2.0",
+      "crate_sha256": "40a8225d44241fd324a8af2806ba635fc7c8a7e9a7de4d5cf3ef54e71f5926fc",
+      "files": [
+        {
+          "path": "leaky-cow-0.1.1/Cargo.toml",
+          "source": "https://static.crates.io/crates/leaky-cow/leaky-cow-0.1.1.crate",
+          "sha256": "cd5e595a4b4eede02b0c1b96bb86eb3860bf660fafd7ca6eb0f92b96d9e733f5",
+          "archive_member": "leaky-cow-0.1.1/Cargo.toml"
+        },
+        {
+          "path": "leaky-cow-0.1.1/LICENSE-declaration.rs",
+          "source": "https://static.crates.io/crates/leaky-cow/leaky-cow-0.1.1.crate",
+          "sha256": "5c34776cad80147e94ce1c4af40135d645b478276abf16dc44265cd57da77ea0",
+          "archive_member": "leaky-cow-0.1.1/src/lib.rs"
+        },
+        {
+          "path": "leaky-cow-0.1.1/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "leaky-cow-0.1.1/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "source_commit": "88f4a8cd01ffc634d9f7642b97eb764a8dcd3760",
+      "source_equivalence_sha256": {
+        ".gitignore": "f9b1ca6ae27d1c18215265024629a8960c31379f206d9ed20f64e0b2dcf79805",
+        ".travis.yml": "967d80f7f760ff4681f0dc58d676a761e48201e037dc706ab08ae4a8bf22ac9c",
+        "Cargo.toml": "cd5e595a4b4eede02b0c1b96bb86eb3860bf660fafd7ca6eb0f92b96d9e733f5",
+        "README.md": "de022877415d090896cc7050408bdd2973fd34816f654327b139e32b9e6ddf44",
+        "src/lib.rs": "5c34776cad80147e94ce1c4af40135d645b478276abf16dc44265cd57da77ea0"
+      },
+      "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
+    },
+    {
+      "name": "libwebrtc",
+      "version": "0.3.52",
+      "license": "Apache-2.0",
+      "crate_sha256": "8718693f33f921a97c784f34fcbf085ebe68989e53bf4802f93aa8e083cf0a65",
+      "source_commit": "49b3ebe9ab1c574114b164868ad226cc26a9b1be",
+      "files": [
+        {
+          "path": "libwebrtc-0.3.52/LICENSE",
+          "source": "https://raw.githubusercontent.com/livekit/rust-sdks/49b3ebe9ab1c574114b164868ad226cc26a9b1be/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "name": "lyon",
+      "version": "1.0.19",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "bd0578bdecb7d6d88987b8b2b1e3a4e2f81df9d0ece1078623324a567904e7b7",
+      "source_commit": "56219c95c658d4f39de7b190d98e57d5773ba241",
+      "files": [
+        {
+          "path": "lyon-1.0.19/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon-1.0.19/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_algorithms",
+      "version": "1.0.21",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "cdfa8785f95e57914ddb35e3b59994aeba6f5e79e9cfd03da1c269f010f36009",
+      "source_commit": "994526f2766c7e9bc5bb16687232fd7e8999dbdf",
+      "files": [
+        {
+          "path": "lyon_algorithms-1.0.21/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/994526f2766c7e9bc5bb16687232fd7e8999dbdf/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_algorithms-1.0.21/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/994526f2766c7e9bc5bb16687232fd7e8999dbdf/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_geom",
+      "version": "1.0.19",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "4336502e29e32af93cf2dad2214ed6003c17ceb5bd499df77b1de663b9042b92",
+      "source_commit": "56219c95c658d4f39de7b190d98e57d5773ba241",
+      "files": [
+        {
+          "path": "lyon_geom-1.0.19/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_geom-1.0.19/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_path",
+      "version": "1.0.19",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "5c463f9c428b7fc5ec885dcd39ce4aa61e29111d0e33483f6f98c74e89d8621e",
+      "source_commit": "56219c95c658d4f39de7b190d98e57d5773ba241",
+      "files": [
+        {
+          "path": "lyon_path-1.0.19/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_path-1.0.19/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_tessellation",
+      "version": "1.0.22",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "43b8dcf906637ecef61b3c0740c7a4e7f27caeb31257cfac0cc579ce15be6005",
+      "source_commit": "b456b143215a1942a617c4672776b68b9a30feee",
+      "files": [
+        {
+          "path": "lyon_tessellation-1.0.22/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/b456b143215a1942a617c4672776b68b9a30feee/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_tessellation-1.0.22/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/b456b143215a1942a617c4672776b68b9a30feee/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "malloc_buf",
+      "version": "0.0.6",
+      "license": "MIT",
+      "crate_sha256": "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb",
+      "files": [
+        {
+          "path": "malloc_buf-0.0.6/Cargo.toml",
+          "source": "https://static.crates.io/crates/malloc_buf/malloc_buf-0.0.6.crate",
+          "sha256": "d87624d9d117489bd49dbaeb70077a0721e00ac2a76eb371faec818a92da5661",
+          "archive_member": "malloc_buf-0.0.6/Cargo.toml"
+        },
+        {
+          "path": "malloc_buf-0.0.6/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ],
+      "source_commit": "230861bf873ec72a644ae5a1b39fdf0b3a1ce654",
+      "source_equivalence_sha256": {
+        "Cargo.toml": "d87624d9d117489bd49dbaeb70077a0721e00ac2a76eb371faec818a92da5661",
+        "src/lib.rs": "1130dacbe045a20c1ea1e65e00976f18eb7513da492b07d538e7b1b5c64b8842"
+      },
+      "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
+    },
+    {
+      "name": "naga",
+      "version": "25.0.1",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "2b977c445f26e49757f9aca3631c3b8b836942cb278d69a92e7b80d3b24da632",
+      "source_commit": "060a779fc5f56560215ea84bda70278cbbd31e72",
+      "files": [
+        {
+          "path": "naga-25.0.1/LICENSE.MIT",
+          "source": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.MIT",
+          "sha256": "c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4"
+        },
+        {
+          "path": "naga-25.0.1/LICENSE.APACHE",
+          "source": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.APACHE",
+          "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+        }
+      ]
+    },
+    {
+      "name": "objc2",
+      "version": "0.6.5",
+      "license": "MIT",
+      "crate_sha256": "08849bbd4767dfae9457696856ae1c84fe4e0281bbe4a7abff2d0e06fb7981f8",
+      "files": [
+        {
+          "path": "objc2-0.6.5/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2/objc2-0.6.5.crate",
+          "sha256": "5556dba493fc18e98ebf82f587011f76df6c8c26532613e4c8f904ee586d7cf0",
+          "archive_member": "objc2-0.6.5/Cargo.toml"
+        },
+        {
+          "path": "objc2-0.6.5/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/d7d2fa23ceaa5e6096c923b081040e5d81b3b9df/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-0.6.5/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ],
+      "source_commit": "d7d2fa23ceaa5e6096c923b081040e5d81b3b9df",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-app-kit",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c",
+      "files": [
+        {
+          "path": "objc2-app-kit-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-app-kit/objc2-app-kit-0.3.2.crate",
+          "sha256": "11a761a52774ed9738fb854ba3eecb48fa360b6ce43dddc00c338346853717b5",
+          "archive_member": "objc2-app-kit-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-app-kit-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-app-kit-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-app-kit-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-app-kit-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-audio-toolbox",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08",
+      "files": [
+        {
+          "path": "objc2-audio-toolbox-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-audio-toolbox/objc2-audio-toolbox-0.3.2.crate",
+          "sha256": "1490b8dce5ee70b1b4a953db4109fb5797cefbe9e3973ec9121ee11fc008a012",
+          "archive_member": "objc2-audio-toolbox-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-audio-toolbox-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-audio-toolbox-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-audio-toolbox-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-audio-toolbox-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-core-audio",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2",
+      "files": [
+        {
+          "path": "objc2-core-audio-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-core-audio/objc2-core-audio-0.3.2.crate",
+          "sha256": "62763a0b5d7e8d78402f464c83c2d31e69138b00ec1e19361f6359d500a4274c",
+          "archive_member": "objc2-core-audio-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-core-audio-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-core-audio-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-core-audio-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-core-audio-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-core-audio-types",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c",
+      "files": [
+        {
+          "path": "objc2-core-audio-types-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-core-audio-types/objc2-core-audio-types-0.3.2.crate",
+          "sha256": "f26066fe0a9932213e31793ec1b72578746e3ceb07dd667be2595daaf84760e1",
+          "archive_member": "objc2-core-audio-types-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-core-audio-types-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-core-audio-types-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-core-audio-types-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-core-audio-types-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-core-foundation",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536",
+      "files": [
+        {
+          "path": "objc2-core-foundation-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-core-foundation/objc2-core-foundation-0.3.2.crate",
+          "sha256": "c0f54260fa1396923f2db4edf1e2d54e8ab09dea214af4b8ce37aaefa7185e60",
+          "archive_member": "objc2-core-foundation-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-core-foundation-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-core-foundation-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-core-foundation-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-core-foundation-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-encode",
+      "version": "4.1.0",
+      "license": "MIT",
+      "crate_sha256": "ef25abbcd74fb2609453eb695bd2f860d389e457f67dc17cafc8b8cbc89d0c33",
+      "files": [
+        {
+          "path": "objc2-encode-4.1.0/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-encode/objc2-encode-4.1.0.crate",
+          "sha256": "cf9a8cc812710344d7fe618a5e615530baeeceae5c2826b9d5bb557dc419f159",
+          "archive_member": "objc2-encode-4.1.0/Cargo.toml"
+        },
+        {
+          "path": "objc2-encode-4.1.0/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-encode-4.1.0/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ],
+      "source_commit": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-metal",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794",
+      "files": [
+        {
+          "path": "objc2-metal-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-metal/objc2-metal-0.3.2.crate",
+          "sha256": "8ea9d2d00d2e462d2f1e0a5bb242ccc8753c2bcd3441edd1d2cf05cba69092ff",
+          "archive_member": "objc2-metal-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-metal-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-metal-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-metal-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-metal-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "objc2-quartz-core",
+      "version": "0.3.2",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "crate_sha256": "96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f",
+      "files": [
+        {
+          "path": "objc2-quartz-core-0.3.2/Cargo.toml",
+          "source": "https://static.crates.io/crates/objc2-quartz-core/objc2-quartz-core-0.3.2.crate",
+          "sha256": "7af27150fadd5ac0b3e86ec173b4e3e2b0dd42d614de963a0c9f0bf55cc7b4d9",
+          "archive_member": "objc2-quartz-core-0.3.2/Cargo.toml"
+        },
+        {
+          "path": "objc2-quartz-core-0.3.2/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "objc2-quartz-core-0.3.2/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "objc2-quartz-core-0.3.2/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "objc2-quartz-core-0.3.2/SUPPLIED-Zlib.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/Zlib.txt",
+          "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
+        }
+      ],
+      "source_commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "provenance": "The published crate omits standalone license texts. The exact upstream LICENSE.md licensing statement and published Cargo.toml author/license declarations are retained. SUPPLIED-* files are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
+    },
+    {
+      "name": "pathfinder_geometry",
+      "version": "0.5.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "0b7b7e7b4ea703700ce73ebf128e1450eb69c3a8329199ffbfb9b2a0418e5ad3",
+      "source_commit": "a5e98fac00f433fe2ff4b2135383d82491b8bfc5",
+      "notice_commit": "1cd5966d3d7c3d395b6886d1ed63eb7b306f9be3",
+      "provenance": "The published VCS commit is unavailable upstream. Every published source file and Cargo.toml.orig is byte-identical to geometry/ at this immutable upstream release commit (Cargo.toml.orig matches geometry/Cargo.toml); hashes below record that equivalence. Generated Cargo.toml and .cargo_vcs_info.json are excluded from the source comparison.",
+      "source_equivalence_sha256": {
+        "Cargo.toml.orig": "fdcc9be8eb9a2f08cd416fffc6e6c3d5c3311a9d06a2b8210e16e38ac91e9f78",
+        "src/angle.rs": "dce9c08facbaceccb920035477ac53ffc2798247b42b2ddef9338f2e35ab9c80",
+        "src/lib.rs": "cedfb2d85e682e9b9e327a169347bf0cebecd52668e1ed91a3af05ec91b42090",
+        "src/line_segment.rs": "4af21598890aef0ffec10abd5460c0416cb1bb56b003fb499f0cd75fc68177da",
+        "src/rect.rs": "68d48ddd9934ac11f0ed0e81c2cc6ede9271528dc318c3dd49cc9c9f51cb15ca",
+        "src/transform2d.rs": "36514cf158f7bd2118a1e2f2586e439f6484d61f0505919e8005fb733e3c917c",
+        "src/transform3d.rs": "d42aa24d02570376c429256f24891f489bd71ef257d9691f80b4fb6528e09275",
+        "src/unit_vector.rs": "a6c30c98aaf859492746696b9d67999322b18117fbe891b53f38ccfca5b28a5f",
+        "src/util.rs": "33a05481be71f5cf41128eeeb3e378248249d0f6f30ebc057e4c05f11344a0e5",
+        "src/vector.rs": "cfcaad0394c5489a412bcdbbbe6928e1875d4a422eb5a7da1a3e415fdbc0790c"
+      },
+      "files": [
+        {
+          "path": "pathfinder_geometry-0.5.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/servo/pathfinder/1cd5966d3d7c3d395b6886d1ed63eb7b306f9be3/LICENSE-MIT",
+          "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720"
+        },
+        {
+          "path": "pathfinder_geometry-0.5.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/servo/pathfinder/1cd5966d3d7c3d395b6886d1ed63eb7b306f9be3/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "pathfinder_simd",
+      "version": "0.5.6",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "4500030c302e4af1d423f36f3b958d1aecb6c04184356ed5a833bf6b60435777",
+      "source_commit": "6c3c0466f451c5bd2007087728cd168798cd64e8",
+      "files": [
+        {
+          "path": "pathfinder_simd-0.5.6/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/servo/pathfinder/6c3c0466f451c5bd2007087728cd168798cd64e8/LICENSE-MIT",
+          "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720"
+        },
+        {
+          "path": "pathfinder_simd-0.5.6/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/servo/pathfinder/6c3c0466f451c5bd2007087728cd168798cd64e8/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "profiling",
+      "version": "1.0.18",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5",
+      "source_commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "files": [
+        {
+          "path": "profiling-1.0.18/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+          "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+        },
+        {
+          "path": "profiling-1.0.18/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+          "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+        }
+      ]
+    },
+    {
+      "name": "profiling-procmacros",
+      "version": "1.0.18",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "4488a4a36b9a4ba6b9334a32a39971f77c1436ec82c38707bce707699cc3bbcb",
+      "source_commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "files": [
+        {
+          "path": "profiling-procmacros-1.0.18/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+          "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+        },
+        {
+          "path": "profiling-procmacros-1.0.18/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+          "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+        }
+      ]
+    },
+    {
+      "name": "pulp-wasm-simd-flag",
+      "version": "0.1.1",
+      "license": "MIT",
+      "crate_sha256": "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740",
+      "source_commit": "5eb07fd7b68edf0a5e19f71737d315f72a510295",
+      "files": [
+        {
+          "path": "pulp-wasm-simd-flag-0.1.1/LICENSE",
+          "source": "https://raw.githubusercontent.com/sarah-quinones/pulp/5eb07fd7b68edf0a5e19f71737d315f72a510295/LICENSE",
+          "sha256": "d64f878c89bd5f1e5ada7e4aad57690b122727cf5229b7b87ea1980c188da1d9"
+        }
+      ]
+    },
+    {
+      "name": "seahash",
+      "version": "4.1.0",
+      "license": "MIT",
+      "crate_sha256": "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b",
+      "source_commit": "94b632aeac099031c373599313d5b5f0acbbaec0",
+      "files": [
+        {
+          "path": "seahash-4.1.0/LICENSE",
+          "source": "https://gitlab.redox-os.org/redox-os/seahash/-/raw/3088c5c912b70b586d27bf553fbe964e025a2c89/LICENSE",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "seahash-4.1.0/Cargo.toml",
+          "source": "https://gitlab.redox-os.org/redox-os/seahash/-/raw/3088c5c912b70b586d27bf553fbe964e025a2c89/Cargo.toml",
+          "sha256": "dd213de338ca98b7ef7a2562bcf4e4214d215d1a8277750a6a72b4e809c8d0dd"
+        }
+      ],
+      "notice_commit": "3088c5c912b70b586d27bf553fbe964e025a2c89",
+      "provenance": "Upstream added only LICENSE in the immediate child of the published commit; package source and manifest are unchanged. The original LICENSE has no copyright line; the unchanged upstream author and license declarations are retained in Cargo.toml."
+    },
+    {
+      "name": "simd_helpers",
+      "version": "0.1.0",
+      "license": "MIT",
+      "crate_sha256": "95890f873bec569a0362c235787f3aca6e1e887302ba4840839bcc6459c42da6",
+      "source_commit": "ca1a2f84aa386d758e98f8a609d990263932fb85",
+      "files": [
+        {
+          "path": "simd_helpers-0.1.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/lu-zero/simd_helpers/82040194cd05affb060bf94d6f19f82a771d07fb/LICENSE",
+          "sha256": "d69f24ad84ec2ade64c0b68bdb31b41170e997b158370342056918329cc9af1e"
+        }
+      ],
+      "notice_commit": "82040194cd05affb060bf94d6f19f82a771d07fb",
+      "provenance": "Upstream added only LICENSE in the immediate child of the published commit; package source and manifest are unchanged."
+    },
+    {
+      "name": "spirv",
+      "version": "0.3.0+sdk-1.3.268.0",
+      "license": "Apache-2.0",
+      "crate_sha256": "eda41003dc44290527a59b13432d4a0379379fa074b70174882adfbdfd917844",
+      "source_commit": "e91a5debc10c395b36db7721dfff6326d697a1e2",
+      "files": [
+        {
+          "path": "spirv-0.3.0+sdk-1.3.268.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/e91a5debc10c395b36db7721dfff6326d697a1e2/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
+    },
+    {
+      "name": "stacksafe",
+      "version": "0.1.4",
+      "license": "Apache-2.0",
+      "crate_sha256": "1d9c1172965d317e87ddb6d364a040d958b40a1db82b6ef97da26253a8b3d090",
+      "source_commit": "a5c029b7d3a5fe6771ecd79266b6e21313cfa174",
+      "files": [
+        {
+          "path": "stacksafe-0.1.4/LICENSE",
+          "source": "https://raw.githubusercontent.com/fast/stacksafe/a5c029b7d3a5fe6771ecd79266b6e21313cfa174/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "name": "stacksafe-macro",
+      "version": "0.1.4",
+      "license": "Apache-2.0",
+      "crate_sha256": "172175341049678163e979d9107ca3508046d4d2a7c6682bee46ac541b17db69",
+      "source_commit": "a5c029b7d3a5fe6771ecd79266b6e21313cfa174",
+      "files": [
+        {
+          "path": "stacksafe-macro-0.1.4/LICENSE",
+          "source": "https://raw.githubusercontent.com/fast/stacksafe/a5c029b7d3a5fe6771ecd79266b6e21313cfa174/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "name": "svg_fmt",
+      "version": "0.4.5",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "0193cc4331cfd2f3d2011ef287590868599a2f33c3e69bc22c1a3d3acf9e02fb",
+      "source_commit": "93f414cd572b5c2781df93dbdc068ed13443d05a",
+      "files": [
+        {
+          "path": "svg_fmt-0.4.5/LICENSE",
+          "source": "https://raw.githubusercontent.com/nical/rust_debug/93f414cd572b5c2781df93dbdc068ed13443d05a/LICENSE",
+          "sha256": "7e98bed7f100747aaae7d82ab94fbe6b76fd6b84b09a3aaa413bff8196d0fbb1"
+        }
+      ]
+    },
+    {
+      "name": "taffy",
+      "version": "0.9.0",
+      "license": "MIT",
+      "crate_sha256": "a13e5d13f79d558b5d353a98072ca8ca0e99da429467804de959aa8c83c9a004",
+      "source_commit": "599b1b7d7410d97e13bafc4c01fbe6d7a9cf060a",
+      "files": [
+        {
+          "path": "taffy-0.9.0/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/DioxusLabs/taffy/599b1b7d7410d97e13bafc4c01fbe6d7a9cf060a/LICENSE.md",
+          "sha256": "a7083ef3dd41a65eeb2162c2c091b0082e2724fb4c6ed029b363c7840d244ecd"
+        }
+      ]
+    },
+    {
+      "name": "webrtc-sys-build",
+      "version": "0.3.19",
+      "license": "Apache-2.0",
+      "crate_sha256": "0cd4f418e16f4b7ba028e6b5c70e4f532c7d2b5ca39726d42b699f3e4591ed5c",
+      "source_commit": "2d9f01ab1e933a86a8a5c53805ee29ee58b9be1b",
+      "files": [
+        {
+          "path": "webrtc-sys-build-0.3.19/LICENSE",
+          "source": "https://raw.githubusercontent.com/livekit/rust-sdks/2d9f01ab1e933a86a8a5c53805ee29ee58b9be1b/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "name": "xim-ctext",
+      "version": "0.3.0",
+      "license": "MIT",
+      "crate_sha256": "2ac61a7062c40f3c37b6e82eeeef835d5cc7824b632a72784a89b3963c33284c",
+      "source_commit": "65f77e44524ba487285a63aac4080faf2c05b4ed",
+      "files": [
+        {
+          "path": "xim-ctext-0.3.0/LICENSE",
+          "source": "https://raw.githubusercontent.com/Riey/xim-rs/65f77e44524ba487285a63aac4080faf2c05b4ed/LICENSE",
+          "sha256": "efa1224931b98468f5005f77285457f8d2eab0a77a15941aa10abbab1ae9a74e"
+        }
+      ]
+    },
+    {
+      "name": "xim-parser",
+      "version": "0.2.2",
+      "license": "MIT",
+      "crate_sha256": "5dcee45f89572d5a65180af3a84e7ddb24f5ea690a6d3aa9de231281544dd7b7",
+      "source_commit": "7300de35a111de2df1a694bf70454532a8419685",
+      "files": [
+        {
+          "path": "xim-parser-0.2.2/LICENSE",
+          "source": "https://raw.githubusercontent.com/Riey/xim-rs/7300de35a111de2df1a694bf70454532a8419685/LICENSE",
+          "sha256": "efa1224931b98468f5005f77285457f8d2eab0a77a15941aa10abbab1ae9a74e"
+        }
+      ]
+    },
+    {
+      "name": "zune-inflate",
+      "version": "0.2.54",
+      "license": "MIT OR Apache-2.0 OR Zlib",
+      "crate_sha256": "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02",
+      "source_commit": "69502ce83fdfecdd0beefd677e2abb3781b29d98",
+      "files": [
+        {
+          "path": "zune-inflate-0.2.54/LICENSE.md",
+          "source": "https://raw.githubusercontent.com/etemesi254/zune-image/69502ce83fdfecdd0beefd677e2abb3781b29d98/LICENSE.md",
+          "sha256": "e870d7fd7819a9f0453c62798cb52ae95d148a8c91dc2de1d983f997143c72de"
+        }
+      ]
+    }
+  ]
+}
