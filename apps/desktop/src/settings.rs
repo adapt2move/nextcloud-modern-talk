@@ -1,6 +1,7 @@
 //! Application-owned local settings. GPUI calls only memory-only admission/polling.
 //! One thread owns storage and startup effects, with one replaceable desired slot.
 //! No per-click threads, unbounded channels, credentials or account restoration.
+mod interaction;
 mod native_process;
 pub mod notifications;
 pub mod permissions;
@@ -36,6 +37,12 @@ struct State {
     pending: Option<Work>,
     retry: Option<RetryDraft>,
     confirmed_startup: StartupSnapshot,
+    interaction: interaction::State,
+}
+enum WorkerAction {
+    Save(Work),
+    RefreshInteraction,
+    Emoji(u64, std::time::Instant, interaction::Picker),
 }
 struct Shared {
     state: Mutex<State>,
@@ -98,6 +105,7 @@ impl SettingsRuntime {
                     registered: None,
                     state: EffectState::Unknown,
                 },
+                interaction: interaction::State::default(),
             }),
             wake: Condvar::new(),
         });
@@ -127,6 +135,38 @@ impl SettingsRuntime {
     pub fn poll(&self, last_change: u64) -> Option<(u64, PreferenceSnapshot)> {
         let state = self.shared.lock();
         (state.change != last_change).then(|| (state.change, state.snapshot.clone()))
+    }
+    pub fn reduced_motion(&self) -> bool {
+        self.shared.lock().interaction.profile.reduced_motion
+    }
+    pub fn emoji_picker_available(&self) -> bool {
+        let state = self.shared.lock();
+        state.snapshot.runtime == RuntimeState::Running
+            && state.interaction.profile.picker != interaction::Picker::Unavailable
+    }
+    pub fn show_emoji_picker(&self) -> Result<(), PreferenceError> {
+        let mut state = self.shared.lock();
+        if state.snapshot.runtime != RuntimeState::Running {
+            return Err(PreferenceError::Closed);
+        }
+        state.interaction.admit(std::time::Instant::now())?;
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    pub fn take_emoji_picker_error(&self) -> Option<PreferenceError> {
+        self.shared.lock().interaction.error.take()
+    }
+    pub fn cancel_emoji_picker(&self) {
+        self.shared.lock().interaction.cancel();
+        self.shared.wake.notify_one();
+    }
+    /// Refresh only on app activation. OS preference reads never occur in render.
+    pub fn refresh_native_interaction(&self) {
+        let mut state = self.shared.lock();
+        if state.snapshot.runtime == RuntimeState::Running {
+            state.interaction.refresh = true;
+            self.shared.wake.notify_one();
+        }
     }
     pub fn submit(&self, command: PreferenceCommand) -> Result<Revision, PreferenceError> {
         let mut state = self.shared.lock();
@@ -222,6 +262,7 @@ impl SettingsRuntime {
         let mut state = self.shared.lock();
         if state.snapshot.runtime == RuntimeState::Running {
             state.snapshot.runtime = RuntimeState::Draining;
+            state.interaction.cancel();
             state.changed();
             self.shared.wake.notify_one();
         }
@@ -291,17 +332,58 @@ fn run(shared: &Shared, store: &mut dyn PreferenceStore, effect: &mut dyn Startu
         state.changed();
     }
     loop {
-        let work = {
+        let action = {
             let mut state = shared.lock();
-            while state.pending.is_none() && state.snapshot.runtime == RuntimeState::Running {
+            loop {
+                if let Some(work) = state.pending.take() {
+                    break WorkerAction::Save(work);
+                }
+                if state.snapshot.runtime != RuntimeState::Running {
+                    state.snapshot.runtime = RuntimeState::Stopped;
+                    state.changed();
+                    return;
+                }
+                if let Some((generation, deadline)) = state.interaction.pending.take() {
+                    state.interaction.in_flight = true;
+                    break WorkerAction::Emoji(
+                        generation,
+                        deadline,
+                        state.interaction.profile.picker,
+                    );
+                }
+                if state.interaction.refresh {
+                    state.interaction.refresh = false;
+                    break WorkerAction::RefreshInteraction;
+                }
                 state = shared.wake.wait(state).unwrap_or_else(|e| e.into_inner());
             }
-            let Some(work) = state.pending.take() else {
-                state.snapshot.runtime = RuntimeState::Stopped;
+        };
+        let work = match action {
+            WorkerAction::Save(work) => work,
+            WorkerAction::RefreshInteraction => {
+                let profile = interaction::observe(|| {
+                    shared.lock().snapshot.runtime != RuntimeState::Running
+                });
+                let mut state = shared.lock();
+                state.interaction.profile = profile;
                 state.changed();
-                return;
-            };
-            work
+                continue;
+            }
+            WorkerAction::Emoji(generation, deadline, picker) => {
+                let result = if std::time::Instant::now() >= deadline {
+                    Err(PreferenceError::ApplyFailed)
+                } else {
+                    interaction::open(picker, || {
+                        let state = shared.lock();
+                        state.snapshot.runtime != RuntimeState::Running
+                            || state.interaction.generation != generation
+                    })
+                };
+                let mut state = shared.lock();
+                state.interaction.finish(generation, result);
+                state.changed();
+                continue;
+            }
         };
         let saved = if work.write {
             store.save(&work.values)

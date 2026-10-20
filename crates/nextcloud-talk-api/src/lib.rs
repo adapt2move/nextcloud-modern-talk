@@ -8,10 +8,13 @@ pub mod conversation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
 mod error;
+pub mod events;
 pub mod files;
+pub mod hpb;
 mod json;
 pub mod meeting;
 pub mod models;
+pub mod notifications;
 pub mod presence;
 pub mod scope;
 pub mod signaling;
@@ -180,6 +183,10 @@ pub struct Client {
     creation_uncertain: bool,
     tag_creation_uncertain: bool,
     schedule_uncertain: Vec<RoomToken>,
+    hpb: Option<hpb::Owner>,
+    hpb_route: Option<hpb::Route>,
+    live_settings_at: Option<scope::Moment>,
+    live_internal: bool,
 }
 struct SendAttempt {
     room: RoomToken,
@@ -227,6 +234,10 @@ impl Client {
             creation_uncertain: false,
             tag_creation_uncertain: false,
             schedule_uncertain: Vec::new(),
+            hpb: None,
+            hpb_route: None,
+            live_settings_at: None,
+            live_internal: false,
         })
     }
     pub fn validate(&self, context: &OperationContext) -> Result<(), Error> {
@@ -439,6 +450,7 @@ impl Client {
         );
         if matches!(request, Request::LeaveCall(_)) || leaving_active_room {
             self.call_generation = None;
+            self.cancel_prepared_external_meeting();
         }
         if leaving_active_room {
             self.room_session = None;
@@ -1040,7 +1052,14 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
         Kind::Conversation(kind) => return conversation::decode(kind, v),
         Kind::Account => Reply::Account(Account::decode(v)?),
         Kind::Capabilities => Reply::Capabilities(Capabilities::decode(v)?),
-        Kind::Rooms => Reply::Rooms(list(v, 100, Room::decode)?),
+        Kind::Rooms => {
+            // This operation promises full reconciliation. A partial response
+            // cannot acquire deletion authority merely by fitting the row bound.
+            if r.status != 200 {
+                return Err(ErrorKind::Malformed);
+            }
+            Reply::Rooms(list(v, 100, Room::decode)?)
+        }
         Kind::Room => Reply::Room(Room::decode(v)?),
         Kind::Participants => Reply::Participants(list(v, 100, Participant::decode)?),
         Kind::History => Reply::History {

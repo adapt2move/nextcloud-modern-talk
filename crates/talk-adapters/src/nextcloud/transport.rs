@@ -229,6 +229,7 @@ impl Transport {
         room: RoomToken,
         flags: ParticipantFlags,
         recording_consent: bool,
+        settings: &api::models::SignalingSettings,
     ) -> Result<
         (
             api::meeting::MeetingReader,
@@ -237,6 +238,12 @@ impl Transport {
         ),
         PortError,
     > {
+        if settings.mode == api::models::SignalingMode::External {
+            self.api
+                .prepare_external_meeting(&context(c), &room, settings)
+                .await
+                .map_err(error)?;
+        }
         let reply = self
             .api
             .request(
@@ -249,7 +256,10 @@ impl Transport {
                 },
             )
             .await
-            .map_err(error)?;
+            .map_err(|e| {
+                self.api.cancel_prepared_external_meeting();
+                error(e)
+            })?;
         let api::Reply::CallJoined(handle) = reply else {
             return Err(self.error(ErrorKind::Malformed));
         };
@@ -329,6 +339,28 @@ impl Transport {
         c: &OperationContext,
     ) -> Result<api::presence::UserStatus, PortError> {
         self.api.own_user_status(&context(c)).await.map_err(error)
+    }
+    pub(super) async fn message_notifications(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<api::notifications::MessageNotifications, PortError> {
+        self.api
+            .message_notifications(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn poll_live_events(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<talk_core::protocol::AccountLiveEvents, PortError> {
+        self.validate(c)?;
+        let batch = self
+            .api
+            .poll_live_events(&context(c))
+            .await
+            .map_err(error)?;
+        self.validate(c)?;
+        super::live::project(self.scope, batch).map_err(|kind| self.error(kind))
     }
     pub(super) async fn history(
         &mut self,

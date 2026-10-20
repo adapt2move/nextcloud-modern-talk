@@ -26,7 +26,9 @@ async fn fresh_poll_notification_requires_known_policy_silent_and_current_user_s
         ("missing-status-endpoint", Decision::Unknown, true),
         ("wrong-user", Decision::Unknown, true),
         ("silent", Decision::Denied, false),
-        ("missing-silent", Decision::Unknown, false),
+        ("missing-silent", Decision::Allowed, true),
+        ("null-silent", Decision::Unknown, false),
+        ("malformed-silent", Decision::Unknown, false),
         ("group-default", Decision::Unknown, false),
         ("direct-default", Decision::Allowed, true),
         ("own-mention", Decision::Allowed, true),
@@ -51,6 +53,8 @@ async fn fresh_poll_notification_requires_known_policy_silent_and_current_user_s
             "missing-silent" => {
                 incoming.as_object_mut().unwrap().remove("silent");
             }
+            "null-silent" => incoming["silent"] = Value::Null,
+            "malformed-silent" => incoming["silent"] = json!("false"),
             "group-default" => data["notificationLevel"] = json!(0),
             "direct-default" => {
                 data["notificationLevel"] = json!(0);

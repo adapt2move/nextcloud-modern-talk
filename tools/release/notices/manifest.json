@@ -2,6 +2,26 @@
   "schema": 1,
   "packages": [
     {
+      "name": "asn1-rs-impl",
+      "version": "0.2.0",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7",
+      "source_commit": "a20e5f7319c896737ad0f2557037817b91ad854f",
+      "files": [
+        {
+          "path": "asn1-rs-impl-0.2.0/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-MIT",
+          "sha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513"
+        },
+        {
+          "path": "asn1-rs-impl-0.2.0/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
       "name": "blade-graphics",
       "version": "0.7.1",
       "license": "MIT",
@@ -111,6 +131,32 @@
       ],
       "notice_commit": "f72ca63c9d579fbab22e361c76e39d31d1e86a2e",
       "provenance": "First upstream license-file addition, two commits after the published commit, while Cargo.toml still declares version 0.4.0 and MIT. The only intervening source changes enable the existing random enum variants in documentation builds; the other changes add LICENSE and its README link."
+    },
+    {
+      "name": "crc32c",
+      "version": "0.6.8",
+      "license": "Apache-2.0/MIT",
+      "crate_sha256": "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47",
+      "source_commit": "254a861f7cc71bfe455e86f0e1d86e3c83c33390",
+      "files": [
+        {
+          "path": "crc32c-0.6.8/Cargo.toml.orig",
+          "source": "https://static.crates.io/crates/crc32c/crc32c-0.6.8.crate",
+          "sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31",
+          "archive_member": "crc32c-0.6.8/Cargo.toml.orig"
+        },
+        {
+          "path": "crc32c-0.6.8/SUPPLIED-MIT.txt",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/d46e94e2c78ceede1cfc63cfa0396472d2798d4c/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "path": "crc32c-0.6.8/SUPPLIED-Apache-2.0.txt",
+          "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "provenance": "The exact published archive and its recorded upstream commit omit standalone license texts. The original Cargo.toml preserves the author and dual-license declaration. SUPPLIED-* are complete standard license texts supplied separately, not upstream crate files; template placeholders remain unchanged and no copyright notice is invented."
     },
     {
       "name": "dasp_sample",
@@ -340,20 +386,6 @@
         "src/lib.rs": "5c34776cad80147e94ce1c4af40135d645b478276abf16dc44265cd57da77ea0"
       },
       "provenance": "This older published crate has no VCS record. Every published file is byte-identical to the recorded immutable upstream commit. Its original Cargo.toml preserves the author and license declaration; no standalone license text exists in that revision. SUPPLIED-* files are complete standard license texts supplied separately, with template placeholders unchanged and no invented copyright notice."
-    },
-    {
-      "name": "libwebrtc",
-      "version": "0.3.52",
-      "license": "Apache-2.0",
-      "crate_sha256": "8718693f33f921a97c784f34fcbf085ebe68989e53bf4802f93aa8e083cf0a65",
-      "source_commit": "49b3ebe9ab1c574114b164868ad226cc26a9b1be",
-      "files": [
-        {
-          "path": "libwebrtc-0.3.52/LICENSE",
-          "source": "https://raw.githubusercontent.com/livekit/rust-sdks/49b3ebe9ab1c574114b164868ad226cc26a9b1be/LICENSE",
-          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-        }
-      ]
     },
     {
       "name": "lyon",
@@ -903,6 +935,306 @@
       ]
     },
     {
+      "name": "rtc-crypto",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "404ea28682271626739dfb1f3a04e96c596490b948d7629d9e4651dd4ba6aaf3",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-crypto-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-crypto-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-datachannel",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "8d93dd81014535ff0134c0f19dbccfbae4d5ceb6010cf917c1a6056ea2c0d9bb",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-datachannel-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-datachannel-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-dtls",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "0a2fe5767d6caf61018d52189b3b8e37075799eeb81cd5ab452307c7e7ebd97e",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-dtls-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-dtls-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-ice",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "099984f1be120b2e5692f232f8cbb82e53f6b4261c5c2eeda5be6223ba1adaa9",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-ice-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-ice-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-interceptor",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "43e7df85d7aacf6e3f69bb922a6c9f83b2a29461038d06285df7642206df64cf",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-interceptor-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-interceptor-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-mdns",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "d86ac3cafd411bef81d70aff9d59d9520331b29970f7e361180da99e7a8b5a0d",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-mdns-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-mdns-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-media",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "a76840ad2aff52efeb16a613db26c16981841a6cf50907bff950884f00f9d9a9",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-media-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-media-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-rtcp",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "485aa259bdb68e550363c40c8dc30c1c453ddd80f0cf7224dd2d72dffd5e01c2",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-rtcp-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-rtcp-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-rtp",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "2a640f266927139a899a3a93b5cf4aa3626594ee2e5d26202b60930bb42cb445",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-rtp-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-rtp-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-sctp",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "2eb430b379d90e7984306036d1646454a26b300c9c3256009eb8f7e0615e90b9",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-sctp-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-sctp-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-sdp",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "cd69b1ea06978e045f374ec19eb34177ee4e4f8349cc7d9c0b183683fa7b2d1f",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-sdp-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-sdp-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-shared",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "1250e81796ac6d3d67bd04ecdb891b8371ff97c8a2ce0a5a1c1321f2e12b657b",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-shared-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-shared-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-srtp",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "cbb71f476c84763db0435bc47a598acb31abc5fdc6ca3fc84dcb274ed9b70155",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-srtp-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-srtp-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-stun",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "1e59e5c70b7900f537ded24cfee5fa476e8fdc186b90ced528611e441f4063b4",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-stun-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-stun-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
+      "name": "rtc-turn",
+      "version": "0.21.1",
+      "license": "MIT/Apache-2.0",
+      "crate_sha256": "c53078a0696df5a3a5e4947bc550c5e903b59803b252f1d39062d637ebd3d17e",
+      "source_commit": "2a732df55ca4bcf26b80914fa0f570cfaf74cfcb",
+      "files": [
+        {
+          "path": "rtc-turn-0.21.1/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-MIT",
+          "sha256": "56cc6c08157f4faf70d351b3a7ceac143399d5359a78c180e06dcd0390784f4d"
+        },
+        {
+          "path": "rtc-turn-0.21.1/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/webrtc-rs/rtc/2a732df55ca4bcf26b80914fa0f570cfaf74cfcb/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ],
+      "provenance": "The published subcrate omits standalone license texts. These unmodified workspace license texts come from the immutable upstream commit recorded in its .cargo_vcs_info.json; the subcrate declares the same dual license."
+    },
+    {
       "name": "seahash",
       "version": "4.1.0",
       "license": "MIT",
@@ -1006,20 +1338,6 @@
           "path": "taffy-0.9.0/LICENSE.md",
           "source": "https://raw.githubusercontent.com/DioxusLabs/taffy/599b1b7d7410d97e13bafc4c01fbe6d7a9cf060a/LICENSE.md",
           "sha256": "a7083ef3dd41a65eeb2162c2c091b0082e2724fb4c6ed029b363c7840d244ecd"
-        }
-      ]
-    },
-    {
-      "name": "webrtc-sys-build",
-      "version": "0.3.19",
-      "license": "Apache-2.0",
-      "crate_sha256": "0cd4f418e16f4b7ba028e6b5c70e4f532c7d2b5ca39726d42b699f3e4591ed5c",
-      "source_commit": "2d9f01ab1e933a86a8a5c53805ee29ee58b9be1b",
-      "files": [
-        {
-          "path": "webrtc-sys-build-0.3.19/LICENSE",
-          "source": "https://raw.githubusercontent.com/livekit/rust-sdks/2d9f01ab1e933a86a8a5c53805ee29ee58b9be1b/LICENSE",
-          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
         }
       ]
     },

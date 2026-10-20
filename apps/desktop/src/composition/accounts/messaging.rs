@@ -362,12 +362,6 @@ impl Accounts {
             }
             _ => Vec::new(),
         };
-        if work == Work::Poll
-            && let Ok(wire::MessagingResult::Messages { messages, .. }) = &result
-        {
-            let after = self.snapshot.message_panel.as_ref().and_then(|p| p.latest);
-            self.observe_message_notices(context, messages, after);
-        }
         let Some(panel) = self
             .snapshot
             .message_panel
@@ -601,7 +595,7 @@ impl Accounts {
             panel.shared_files = Page::empty();
             panel.uploaded = None;
             panel.reminders = Page::empty();
-            self.notices.clear();
+            self.notices.remove_room(context);
         } else if work == Work::History && completion != Completion::ServerAccepted {
             self.snapshot.content = ContentState::Failed;
         }

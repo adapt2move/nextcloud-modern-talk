@@ -1,14 +1,24 @@
-//! Explicit public-release checks; no account credentials, background polling or installer.
+//! Device-local release owner: one sleeping worker, one download slot and one reservation.
 //!
-//! One worker owns one operation and one fixed-size snapshot. The response is capped
-//! before JSON decoding; only this repository's version tag becomes an OS browser URL.
-use reqwest::{Client, StatusCode};
+//! Startup is offline and unarmed. Composition must pass the loaded channel through
+//! `set_channel`; the persisted daily claim is committed before any automatic request.
+//! Installing is a separate, explicit transition after composition has sealed calls
+//! synchronously and drained drafts/transfers/media. The worker never ends a call.
+mod archive;
+#[cfg(feature = "backend-test")]
+pub mod fixture;
+mod install;
+mod native;
+mod schedule;
+mod store;
+mod transport;
+
 use semver::Version;
 use std::{
+    path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, SyncSender},
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -18,184 +28,267 @@ use talk_core::{
     lifecycle::Cancellation,
     preferences::{
         UpdateChannel,
-        updates::{ReleaseInfo, UpdateError, UpdateSnapshot, UpdateState},
+        updates::{ReleaseInfo, UpdateCheckResult, UpdateError, UpdateSnapshot, UpdateState},
     },
 };
+use tokio::sync::watch;
 
-const API: &str =
-    "https://api.github.com/repos/adapt2move/nextcloud-modern-talk/releases?per_page=100";
-const RELEASES: &str = "https://github.com/adapt2move/nextcloud-modern-talk/releases/tag/";
-const MAX_BODY: usize = 256 * 1024;
-const DEADLINE: Duration = Duration::from_secs(12);
+fn digest_hex(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Optional additional publisher-signature policy. The mandatory exact GitHub
+/// asset digest, archive bounds and package identity checks always run as well.
+/// Implementations must verify data only; never execute an archive or release text.
+pub trait ArtifactVerifier: Send + Sync {
+    fn verify(&self, archive: &Path, release: &ReleaseInfo) -> Result<(), UpdateError>;
+}
 
 struct State {
     snapshot: UpdateSnapshot,
-    tag: Option<String>,
+    armed: bool,
+    check_requested: bool,
+    install_requested: bool,
+    busy: bool,
+    reserved: bool,
+    poisoned: bool,
+    cancel: Cancellation,
+    relaunch: Option<PathBuf>,
+    previous_usable: bool,
 }
 struct Shared {
     state: Mutex<State>,
-    busy: AtomicBool,
+    wake: Condvar,
+    changed: watch::Sender<u64>,
     stop: AtomicBool,
     stopped: AtomicBool,
-    cancellation: Cancellation,
 }
-enum Command {
-    Check(UpdateChannel),
-    Open(String),
-    Stop,
+
+/// A single-use capability returned only after composition's authoritative call
+/// check and admission seal succeeds. No constructor or Clone is exposed to views.
+#[derive(Debug)]
+pub struct InstallReservation {
+    generation: u64,
 }
+
 pub struct UpdateRuntime {
     shared: Arc<Shared>,
-    sender: SyncSender<Command>,
     worker: Option<JoinHandle<()>>,
 }
 impl UpdateRuntime {
-    /// Starting is offline. Only `check` may contact the public GitHub API.
     pub fn start(current_version: &str) -> Result<Self, UpdateError> {
+        Self::start_with_verifier(current_version, None)
+    }
+    pub fn start_with_verifier(
+        current_version: &str,
+        verifier: Option<Arc<dyn ArtifactVerifier>>,
+    ) -> Result<Self, UpdateError> {
         let current = Version::parse(current_version).map_err(|_| UpdateError::InvalidResponse)?;
+        let (changed, _) = watch::channel(1);
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 snapshot: UpdateSnapshot {
                     revision: 1,
+                    generation: 1,
                     current_version: Text::new(current_version)
                         .map_err(|_| UpdateError::InvalidResponse)?,
                     channel: UpdateChannel::Stable,
+                    next_check_unix_seconds: None,
+                    last_check: None,
                     state: UpdateState::Idle,
                 },
-                tag: None,
+                armed: false,
+                check_requested: false,
+                install_requested: false,
+                busy: false,
+                reserved: false,
+                poisoned: false,
+                cancel: Cancellation::default(),
+                relaunch: None,
+                previous_usable: false,
             }),
-            busy: AtomicBool::new(false),
+            wake: Condvar::new(),
+            changed,
             stop: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
-            cancellation: Cancellation::default(),
         });
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = shared.clone();
         let worker = thread::Builder::new()
             .name("talk-updates".into())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build();
-                if let Ok(runtime) = runtime {
-                    // The worker sleeps on recv when idle, with no polling wakeups.
-                    while !owner.stop.load(Ordering::Acquire) {
-                        let Ok(command) = receiver.recv() else { break };
-                        if owner.stop.load(Ordering::Acquire) || matches!(command, Command::Stop) {
-                            break;
-                        }
-                        match command {
-                            Command::Check(channel) => {
-                                let result = runtime
-                                    .block_on(interruptible(&owner, check(&current, channel)));
-                                let mut state =
-                                    owner.state.lock().unwrap_or_else(|e| e.into_inner());
-                                state.tag = None;
-                                state.snapshot.state = match result {
-                                    Ok(Some((tag, info))) => {
-                                        state.tag = Some(tag);
-                                        UpdateState::Available(info)
-                                    }
-                                    Ok(None) => UpdateState::Current,
-                                    Err(error) => UpdateState::Failed(error),
-                                };
-                                advance(&mut state.snapshot, &owner);
-                            }
-                            Command::Open(tag) => {
-                                let result = runtime.block_on(async {
-                                    let url = release_url(&tag)?;
-                                    // The browser owner must finish its own child kill/reap;
-                                    // dropping its future is not cancellation on macOS/Windows.
-                                    super::identity::browser::open(&url, &owner.cancellation)
-                                        .await
-                                        .map_err(|_| UpdateError::BrowserUnavailable)
-                                });
-                                if let Err(error) = result {
-                                    let mut state =
-                                        owner.state.lock().unwrap_or_else(|e| e.into_inner());
-                                    state.snapshot.state = UpdateState::Failed(error);
-                                    advance(&mut state.snapshot, &owner);
-                                }
-                            }
-                            Command::Stop => break,
-                        }
-                        owner.busy.store(false, Ordering::Release);
-                    }
-                    runtime.shutdown_timeout(Duration::from_secs(1));
-                }
-                let mut state = owner.state.lock().unwrap_or_else(|e| e.into_inner());
-                state.snapshot.state = UpdateState::Stopped;
-                advance(&mut state.snapshot, &owner);
-                owner.busy.store(false, Ordering::Release);
+                let result = worker(&owner, &current, verifier.as_deref());
+                let mut state = lock(&owner);
+                state.busy = false;
+                state.snapshot.state = match result {
+                    Ok(()) => UpdateState::Stopped,
+                    Err(error) => UpdateState::Failed(error),
+                };
+                advance(&mut state);
                 owner.stopped.store(true, Ordering::Release);
             })
             .map_err(|_| UpdateError::Unavailable)?;
         Ok(Self {
             shared,
-            sender,
             worker: Some(worker),
         })
     }
     pub fn snapshot(&self) -> UpdateSnapshot {
-        self.shared
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .snapshot
-            .clone()
+        lock(&self.shared).snapshot.clone()
     }
     pub fn poll(&self, after: u64) -> Option<(u64, UpdateSnapshot)> {
         let snapshot = self.snapshot();
         (snapshot.revision != after).then_some((snapshot.revision, snapshot))
     }
-    pub fn check(&self, channel: UpdateChannel) -> Result<(), UpdateError> {
-        self.admit()?;
+    /// The first confirmed preference arms scheduling, with no immediate request.
+    /// A later channel change cancels any old result and requests one new check.
+    pub fn set_channel(&self, channel: UpdateChannel) -> Result<(), UpdateError> {
+        let mut state = lock(&self.shared);
+        self.running()?;
+        if state.reserved
+            || state.install_requested
+            || matches!(
+                state.snapshot.state,
+                UpdateState::Applying(_) | UpdateState::Installed(_)
+            )
         {
-            let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
-            state.snapshot.channel = channel;
-            state.snapshot.state = UpdateState::Checking;
-            state.tag = None;
-            advance(&mut state.snapshot, &self.shared);
+            return Err(UpdateError::Busy);
         }
-        self.send(Command::Check(channel))
-    }
-    pub fn open_release(&self) -> Result<(), UpdateError> {
-        self.admit()?;
-        let tag = self
-            .shared
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .tag
-            .clone();
-        match tag {
-            Some(tag) => self.send(Command::Open(tag)),
-            None => {
-                self.shared.busy.store(false, Ordering::Release);
-                Err(UpdateError::Unavailable)
-            }
+        if state.armed && state.snapshot.channel == channel {
+            return Ok(());
         }
+        let was_armed = state.armed;
+        invalidate(&self.shared, &mut state);
+        state.armed = true;
+        state.snapshot.channel = channel;
+        state.snapshot.state = UpdateState::Idle;
+        state.check_requested = was_armed;
+        state.poisoned = false;
+        advance(&mut state);
+        self.shared.wake.notify_one();
+        Ok(())
     }
-    fn admit(&self) -> Result<(), UpdateError> {
-        if self.shared.stop.load(Ordering::Acquire) || self.is_stopped() {
-            return Err(UpdateError::Stopped);
+    /// One explicit Settings check; repeated clicks during a request are refused.
+    pub fn check(&self, channel: UpdateChannel) -> Result<(), UpdateError> {
+        self.set_channel(channel)?;
+        let mut state = lock(&self.shared);
+        self.running()?;
+        if state.busy || state.reserved || state.install_requested {
+            return Err(UpdateError::Busy);
         }
-        self.shared
-            .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map(|_| ())
-            .map_err(|_| UpdateError::Busy)
+        invalidate(&self.shared, &mut state);
+        state.check_requested = true;
+        state.poisoned = false;
+        state.snapshot.state = UpdateState::Checking;
+        advance(&mut state);
+        self.shared.wake.notify_one();
+        Ok(())
     }
-    fn send(&self, command: Command) -> Result<(), UpdateError> {
-        self.sender.try_send(command).map_err(|_| {
-            self.shared.busy.store(false, Ordering::Release);
-            UpdateError::Stopped
+    /// `seal_calls` must consult the actual serialized call/admission owner,
+    /// including incoming, pending, joining and ending calls, then seal new calls.
+    /// It is invoked once synchronously; callers must not substitute a UI boolean.
+    /// On Err no reservation is made. Composition owns releasing its seal on abort.
+    pub fn reserve_install(
+        &self,
+        expected_generation: u64,
+        seal_calls: impl FnOnce() -> Result<(), UpdateError>,
+    ) -> Result<InstallReservation, UpdateError> {
+        let mut state = lock(&self.shared);
+        self.running()?;
+        if expected_generation != state.snapshot.generation {
+            return Err(UpdateError::Stale);
+        }
+        if state.busy || state.reserved || state.check_requested {
+            return Err(UpdateError::Busy);
+        }
+        let UpdateState::Ready(release) = &state.snapshot.state else {
+            return Err(UpdateError::Unavailable);
+        };
+        let release = release.clone();
+        seal_calls()?;
+        state.reserved = true;
+        state.snapshot.state = UpdateState::Reserved(release);
+        advance(&mut state);
+        Ok(InstallReservation {
+            generation: expected_generation,
         })
+    }
+    /// Captured from the verified shipping installation before any bundle swap.
+    /// Keep this adapter-only path in composition and launch it only after Installed.
+    pub fn relaunch_path(&self, reservation: &InstallReservation) -> Result<PathBuf, UpdateError> {
+        let state = lock(&self.shared);
+        self.running()?;
+        validate_reservation(&state, reservation)?;
+        if !matches!(state.snapshot.state, UpdateState::Reserved(_)) {
+            return Err(UpdateError::Busy);
+        }
+        state
+            .relaunch
+            .clone()
+            .ok_or(UpdateError::UnsupportedInstall)
+    }
+    /// Available only after a settled failure and full verification of the previous
+    /// installation. Uncertain native transactions never grant relaunch authority.
+    pub fn relaunch_after_failure(&self) -> Option<PathBuf> {
+        let state = lock(&self.shared);
+        (state.previous_usable && matches!(state.snapshot.state, UpdateState::Failed(_)))
+            .then(|| state.relaunch.clone())
+            .flatten()
+    }
+    /// Called only after composition has completed its durable-work/lifecycle drain.
+    /// The updater remains alive during that drain. Installation never downloads.
+    pub fn begin_install(&self, reservation: InstallReservation) -> Result<(), UpdateError> {
+        let mut state = lock(&self.shared);
+        self.running()?;
+        validate_reservation(&state, &reservation)?;
+        let UpdateState::Reserved(release) = &state.snapshot.state else {
+            return Err(UpdateError::Stale);
+        };
+        let release = release.clone();
+        state.install_requested = true;
+        state.busy = true;
+        state.snapshot.state = UpdateState::Applying(release);
+        advance(&mut state);
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    pub fn abort_install(&self, reservation: InstallReservation) -> Result<(), UpdateError> {
+        let mut state = lock(&self.shared);
+        self.running()?;
+        validate_reservation(&state, &reservation)?;
+        let UpdateState::Reserved(release) = &state.snapshot.state else {
+            return Err(UpdateError::Busy);
+        };
+        let release = release.clone();
+        state.reserved = false;
+        state.snapshot.state = UpdateState::Ready(release);
+        advance(&mut state);
+        self.shared.wake.notify_one();
+        Ok(())
+    }
+    fn running(&self) -> Result<(), UpdateError> {
+        if self.shared.stop.load(Ordering::Acquire) || self.is_stopped() {
+            Err(UpdateError::Stopped)
+        } else {
+            Ok(())
+        }
     }
     pub fn request_shutdown(&self) {
         self.shared.stop.store(true, Ordering::Release);
-        self.shared.cancellation.cancel();
-        let _ = self.sender.try_send(Command::Stop);
+        let mut state = lock(&self.shared);
+        // A committed native package transaction cannot safely be abandoned. Its
+        // bounded completion/uncertainty owner runs to settlement before stopped.
+        if !matches!(state.snapshot.state, UpdateState::Applying(_)) {
+            state.cancel.cancel();
+        }
+        self.shared
+            .changed
+            .send_replace(state.snapshot.generation.saturating_add(1));
+        advance(&mut state);
+        self.shared.wake.notify_one();
     }
     pub fn is_stopped(&self) -> bool {
         self.shared.stopped.load(Ordering::Acquire)
@@ -204,158 +297,274 @@ impl UpdateRuntime {
 impl Drop for UpdateRuntime {
     fn drop(&mut self) {
         self.request_shutdown();
-        // Composition requests and observes shutdown before disposing its services.
-        // Joining here also owns cleanup if a constructor or startup path exits early.
+        // Composition normally waits for is_stopped before dropping Services.
+        // Joining here preserves ownership even if a caller violates that order.
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
     }
 }
-fn advance(snapshot: &mut UpdateSnapshot, shared: &Shared) {
-    if let Some(next) = snapshot.revision.checked_add(1) {
-        snapshot.revision = next;
+fn validate_reservation(
+    state: &State,
+    reservation: &InstallReservation,
+) -> Result<(), UpdateError> {
+    if state.reserved && state.snapshot.generation == reservation.generation {
+        Ok(())
     } else {
-        shared.stop.store(true, Ordering::Release);
+        Err(UpdateError::Stale)
+    }
+}
+fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, State> {
+    shared.state.lock().unwrap_or_else(|e| e.into_inner())
+}
+fn advance(state: &mut State) {
+    state.snapshot.revision = state.snapshot.revision.saturating_add(1);
+}
+fn invalidate(shared: &Shared, state: &mut State) {
+    state.cancel.cancel();
+    state.cancel = Cancellation::default();
+    state.relaunch = None;
+    state.previous_usable = false;
+    state.snapshot.generation = state.snapshot.generation.saturating_add(1);
+    shared.changed.send_replace(state.snapshot.generation);
+}
+fn publish(shared: &Shared, generation: u64, value: UpdateState) {
+    let mut state = lock(shared);
+    if state.snapshot.generation == generation && !shared.stop.load(Ordering::Acquire) {
+        state.snapshot.state = value;
+        advance(&mut state);
     }
 }
 async fn interruptible<T>(
     shared: &Shared,
-    work: impl std::future::Future<Output = Result<T, UpdateError>>,
+    generation: u64,
+    operation: impl std::future::Future<Output = Result<T, UpdateError>>,
 ) -> Result<T, UpdateError> {
-    let cancelled = async {
-        loop {
-            if shared.stop.load(Ordering::Acquire) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    };
+    let mut changed = shared.changed.subscribe();
+    if shared.stop.load(Ordering::Acquire) {
+        return Err(UpdateError::Stopped);
+    }
+    if *changed.borrow_and_update() != generation {
+        return Err(UpdateError::Stale);
+    }
     tokio::select! {
         biased;
-        _ = cancelled => Err(UpdateError::Stopped),
-        result = tokio::time::timeout(DEADLINE, work) => result.unwrap_or(Err(UpdateError::Network)),
+        _ = changed.changed() => Err(if shared.stop.load(Ordering::Acquire) { UpdateError::Stopped } else { UpdateError::Stale }),
+        result = operation => result,
     }
 }
-async fn check(
+
+fn worker(
+    shared: &Shared,
     current: &Version,
-    channel: UpdateChannel,
-) -> Result<Option<(String, ReleaseInfo)>, UpdateError> {
-    let client = Client::builder()
-        .https_only(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .referer(false)
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(DEADLINE)
-        .user_agent("NextCloud-Modern-Talk-update-check")
+    verifier: Option<&dyn ArtifactVerifier>,
+) -> Result<(), UpdateError> {
+    let mut state = lock(shared);
+    while !state.armed && !shared.stop.load(Ordering::Acquire) {
+        state = shared.wake.wait(state).unwrap_or_else(|e| e.into_inner());
+    }
+    if shared.stop.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    drop(state);
+    let store = store::Store::open()?;
+    let mut schedule = match store.schedule()? {
+        Some(schedule) => schedule,
+        None => {
+            let schedule = schedule::Schedule::new(schedule::now()?, schedule::random_second()?);
+            store.save_schedule(schedule)?;
+            schedule
+        }
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
         .build()
         .map_err(|_| UpdateError::Unavailable)?;
-    let mut response = client
-        .get(API)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .send()
-        .await
-        .map_err(|_| UpdateError::Network)?;
-    match response.status() {
-        StatusCode::NOT_FOUND => return Err(UpdateError::Unavailable),
-        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS => {
-            return Err(UpdateError::RateLimited);
+    let client = transport::client()?;
+    let mut staged: Option<install::Staged> = None;
+    loop {
+        let mut state = lock(shared);
+        if state.snapshot.next_check_unix_seconds != Some(schedule.next) {
+            state.snapshot.next_check_unix_seconds = Some(schedule.next);
+            advance(&mut state);
         }
-        StatusCode::OK => {}
-        _ => return Err(UpdateError::Network),
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_BODY as u64)
-    {
-        return Err(UpdateError::InvalidResponse);
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| UpdateError::Network)? {
-        if chunk.len() > MAX_BODY - bytes.len() {
-            return Err(UpdateError::InvalidResponse);
+        if shared.stop.load(Ordering::Acquire) {
+            break;
         }
-        bytes.extend_from_slice(&chunk);
+        let now = schedule::now()?;
+        let automatic = !state.reserved && !state.poisoned && schedule.due(now);
+        if state.install_requested {
+            state.install_requested = false;
+            let generation = state.snapshot.generation;
+            let channel = state.snapshot.channel;
+            let cancel = state.cancel.clone();
+            drop(state);
+            let (result, previous_usable) = match staged.take() {
+                Some(stage) if stage.generation == generation => {
+                    let result = runtime.block_on(install::apply(
+                        &store, &stage, current, channel, verifier, &cancel,
+                    ));
+                    let previous_usable = result.is_err()
+                        && result != Err(UpdateError::InstallUncertain)
+                        && stage.target.previous_usable(current);
+                    (result, previous_usable)
+                }
+                _ => (Err(UpdateError::Stale), false),
+            };
+            let mut state = lock(shared);
+            state.busy = false;
+            state.reserved = false;
+            state.previous_usable = previous_usable;
+            state.poisoned = true; // no automatic retry or post-install update loop
+            state.snapshot.state = match result {
+                Ok(release) => UpdateState::Installed(release),
+                Err(error) => UpdateState::Failed(error),
+            };
+            advance(&mut state);
+            continue;
+        }
+        if state.check_requested || automatic {
+            if automatic {
+                // Persist while holding the reservation lock: a click cannot race
+                // a daily claim into replacing the selected archive.
+                let claimed = schedule.claim(now, schedule::random_second()?);
+                store.save_schedule(claimed)?;
+                schedule = claimed;
+                state.snapshot.next_check_unix_seconds = Some(schedule.next);
+            }
+            state.check_requested = false;
+            state.busy = true;
+            invalidate(shared, &mut state);
+            let generation = state.snapshot.generation;
+            let channel = state.snapshot.channel;
+            let cancel = state.cancel.clone();
+            state.snapshot.state = UpdateState::Checking;
+            advance(&mut state);
+            drop(state);
+            staged = None;
+            let result = runtime.block_on(check_and_stage(
+                shared, &store, &client, current, channel, generation, verifier, &cancel,
+            ));
+            let mut state = lock(shared);
+            state.busy = false;
+            if state.snapshot.generation == generation && !shared.stop.load(Ordering::Acquire) {
+                state.snapshot.state = match result {
+                    Ok(Some(stage)) => {
+                        let info = stage.selection.info.clone();
+                        state.relaunch = Some(stage.target.executable.clone());
+                        staged = Some(stage);
+                        UpdateState::Ready(info)
+                    }
+                    Ok(None) => UpdateState::Current,
+                    Err(error) => {
+                        state.poisoned = matches!(
+                            error,
+                            UpdateError::Integrity
+                                | UpdateError::UnsafeArchive
+                                | UpdateError::Storage
+                                | UpdateError::TooLarge
+                        );
+                        UpdateState::Failed(error)
+                    }
+                };
+                advance(&mut state);
+            }
+            if staged.is_none() {
+                store.remove_payload()?;
+            }
+            continue;
+        }
+        // No idle polling. A timer is armed only for an unreserved, usable state;
+        // manual/channel/shutdown intents wake this same bounded worker.
+        state = if state.reserved || state.poisoned {
+            shared.wake.wait(state).unwrap_or_else(|e| e.into_inner())
+        } else {
+            let wait = Duration::from_secs(schedule.next.saturating_sub(now).max(1));
+            shared
+                .wake
+                .wait_timeout(state, wait)
+                .unwrap_or_else(|e| e.into_inner())
+                .0
+        };
+        drop(state);
     }
-    select_release(&bytes, current, channel)
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    Ok(())
 }
-fn select_release(
-    bytes: &[u8],
+#[allow(clippy::too_many_arguments)]
+async fn check_and_stage(
+    shared: &Shared,
+    store: &store::Store,
+    client: &reqwest::Client,
     current: &Version,
     channel: UpdateChannel,
-) -> Result<Option<(String, ReleaseInfo)>, UpdateError> {
-    if bytes.len() > MAX_BODY {
-        return Err(UpdateError::InvalidResponse);
-    }
-    let decoded: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| UpdateError::InvalidResponse)?;
-    let releases = decoded
-        .as_array()
-        .filter(|items| items.len() <= 100)
-        .ok_or(UpdateError::InvalidResponse)?;
-    let mut selected: Option<(Version, String, bool)> = None;
-    for release in releases {
-        let draft = release
-            .get("draft")
-            .and_then(|v| v.as_bool())
-            .ok_or(UpdateError::InvalidResponse)?;
-        if draft {
-            continue;
-        }
-        let prerelease = release
-            .get("prerelease")
-            .and_then(|v| v.as_bool())
-            .ok_or(UpdateError::InvalidResponse)?;
-        let tag = release
-            .get("tag_name")
-            .and_then(|v| v.as_str())
-            .ok_or(UpdateError::InvalidResponse)?;
-        let Some(version) = parsed_tag(tag) else {
-            continue;
-        };
-        let prerelease = prerelease || !version.pre.is_empty();
-        if channel == UpdateChannel::Stable && prerelease {
-            continue;
-        }
-        if version.cmp_precedence(current).is_gt()
-            && selected
-                .as_ref()
-                .is_none_or(|(old, _, _)| version.cmp_precedence(old).is_gt())
-        {
-            selected = Some((version, tag.to_owned(), prerelease));
-        }
-    }
-    selected
-        .map(|(version, tag, prerelease)| {
-            Ok((
-                tag,
-                ReleaseInfo {
-                    version: Text::new(&version.to_string())
-                        .map_err(|_| UpdateError::InvalidResponse)?,
-                    prerelease,
-                },
-            ))
-        })
-        .transpose()
-}
-fn parsed_tag(tag: &str) -> Option<Version> {
-    if tag.len() > 64
-        || !tag
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
+    generation: u64,
+    verifier: Option<&dyn ArtifactVerifier>,
+    cancel: &Cancellation,
+) -> Result<Option<install::Staged>, UpdateError> {
+    let target = install::Target::detect(current, cancel)?;
+    let result = interruptible(
+        shared,
+        generation,
+        transport::check(client, current, channel, target.kind),
+    )
+    .await;
     {
-        return None;
+        let mut state = lock(shared);
+        if state.snapshot.generation == generation {
+            state.snapshot.last_check = Some(UpdateCheckResult {
+                at_unix_seconds: schedule::now()?,
+                result: result
+                    .as_ref()
+                    .map(|value| value.as_ref().map(|selection| selection.info.clone()))
+                    .map_err(|e| *e),
+            });
+            advance(&mut state);
+        }
     }
-    Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
-}
-fn release_url(tag: &str) -> Result<String, UpdateError> {
-    parsed_tag(tag).ok_or(UpdateError::InvalidResponse)?;
-    let mut url = url::Url::parse(RELEASES).map_err(|_| UpdateError::InvalidResponse)?;
-    url.path_segments_mut()
-        .map_err(|_| UpdateError::InvalidResponse)?
-        .pop_if_empty()
-        .push(tag);
-    Ok(url.into())
+    let Some(selection) = result? else {
+        return Ok(None);
+    };
+    interruptible(shared, generation, target.preflight()).await?;
+    let mut file = store.create_payload(target.kind)?;
+    publish(
+        shared,
+        generation,
+        UpdateState::Downloading {
+            release: selection.info.clone(),
+            received: 0,
+            total: selection.info.bytes,
+        },
+    );
+    interruptible(
+        shared,
+        generation,
+        transport::download(client, &selection, &mut file, |received| {
+            publish(
+                shared,
+                generation,
+                UpdateState::Downloading {
+                    release: selection.info.clone(),
+                    received,
+                    total: selection.info.bytes,
+                },
+            );
+        }),
+    )
+    .await?;
+    drop(file);
+    publish(
+        shared,
+        generation,
+        UpdateState::Verifying(selection.info.clone()),
+    );
+    let stage = install::Staged {
+        generation,
+        selection,
+        target,
+    };
+    stage.verify(store, verifier, cancel).await?;
+    Ok(Some(stage))
 }
 
 #[cfg(test)]

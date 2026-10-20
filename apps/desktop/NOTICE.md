@@ -30,11 +30,12 @@ and applicable dependency notices. The dependency evidence in
 Synthetic people and organization data are available only through an explicit
 `--ui-scenario` development option and labeled in every application view.
 
-Native SVG geometry is inherited from the repository design prototype
-`docs/design/prototypes/blue/ui-sketch.html` under the repository EUPL-1.2
-scope. No separate upstream icon authorship is asserted. Simple supplemental
-geometries were authored for D1; D1.1 restores the project prototype brand as
-three palette-colored SVG layers and simplifies the sun badge. See `assets/icons/PROVENANCE.md` for the exact
-source boundary. SVG bytes are embedded; no runtime asset directory is needed.
+Functional SVG icons are unmodified Lucide 0.468.0, pinned to commit
+`f12b0de177fbc2a6795e99be065887e72b237123`. Preserve the unchanged
+[Lucide notice](assets/icons/LUCIDE-LICENSE), which includes the ISC license and
+Cole Bemis / Feather MIT attribution. The three brand SVGs remain original
+project artwork under EUPL-1.2. [Icon provenance](assets/icons/PROVENANCE.md) and
+`assets/icons/lucide-manifest.json` identify exact upstream paths and hashes.
+SVG bytes are embedded; no runtime asset directory is needed.
 
 Application sounds have separate upstream licenses. See [sound attribution](assets/sounds/README.md) and the included license texts; retain them in binary distributions.

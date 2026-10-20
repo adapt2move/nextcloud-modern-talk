@@ -1,6 +1,6 @@
 # Messages, threads, and retrieval
 
-Status: **Planned**. Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
+These requirements define messaging behavior. Implemented paths and remaining parity work are described in [current state](../status.md) and the [feature inventory](../compatibility/feature-inventory.md). Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
 
 ## MSG-001
 
@@ -8,9 +8,15 @@ Status: **Planned**. Sources: [chat, reaction, thread, scheduling, and capabilit
 
 Acceptance: duplicate/out-of-order delivery produces one canonical message per ID without jumping the reader to the bottom. Unknown system events/rich objects show an intelligible fallback. A deleted/expired parent is identified as unavailable without exposing its cached text. The room-list preview is not assumed to contain complete reaction or parent data.
 
+Newly appended incoming and own messages appear with a short, subtle entry transition. Animate a scoped message once, without changing its delivery state or delaying interaction. Initial history, older pages, same-message edits, pending-to-confirmed reconciliation and virtualized row remounts do not replay entry motion. Do not infer message identity from matching text or timestamps.
+
+When the reader was already at the end before an append, follow the new end after a minimal bounded delay so layout can settle. Coalesce a burst without repeatedly extending that delay. Manual upward scrolling, navigating to message context, switching conversation or hiding the timeline cancels pending follow; reading older content preserves the visible anchor. Own sends use the same position rule. Reduce Motion renders bubbles immediately and follows after layout without decorative delay. Neither animation nor automatic scrolling marks unseen messages read.
+
 ## MSG-002
 
 **Compose and format (P1).** Provide multiline text, emoji, supported Markdown, paste, and explicit send. Respect the server message-length limit before sending and preserve text on rejection. Offer a discoverable send-key preference; the default is Enter to send and Shift+Enter for a newline, with IME composition never interpreted as send. Native rendering must safely handle lists, code, quotes, links, and supported emphasis; unsupported syntax stays readable.
+
+The composer offers the installed system emoji picker on deliberate activation. Keep the current input target and IME state intact. On systems whose picker copies instead of inserting, explain the paste step and retain the ordinary clipboard permission check. Missing system support is explicit; opening a picker does not imply that an emoji was selected or inserted.
 
 Acceptance: formatting preview and sent text preserve meaning, Unicode, and line breaks. Links display their destination and open only on deliberate activation under the security policy. Copying code preserves its contents. A permission change disables send while retaining the draft; a read-only timeline does not show a writable composer.
 
@@ -31,6 +37,8 @@ Acceptance: restart recovers a protected persisted draft only for the same accou
 **Reply and privately reply (P1 reply; P3 private reply).** Quote only supported replyable messages, preserve original references, and let the reader navigate to context. Private reply creates/opens the permitted direct conversation and clearly changes the audience before send; it must not leak a classified/restricted message or imply that the whole source room receives it.
 
 Acceptance: `isReplyable=false`, deleted parents, unavailable context, and permission removal disable the relevant action with a reason. Private reply requires `private-reply` and source policy; its composer names the private recipient and source context before submission.
+
+Reveal a message's reply arrow and overflow menu when that message is hovered or keyboard-focused, with the reply arrow immediately before the menu and no layout shift. Reply uses the actual server-supported quote/reference operation. These controls retain visible focus and explanations when the message's policy makes an action unavailable.
 
 ## MSG-006
 
@@ -67,6 +75,8 @@ Acceptance: a hidden/minimized conversation does not become read from a backgrou
 **Search with scope and context (P1).** Provide conversation and account-wide message search through supported APIs, showing scope, query, progress, result snippets, and navigation to message context. Keep server search separate from an explicitly labeled partial local-cache search. Do not claim complete offline search. Where supported, add sender/date/type filters only with defined server semantics.
 
 Acceptance: no matches, forbidden search, remote host failure, and incomplete offline results are different states. A result deleted or expired before opening reports unavailable; it does not reintroduce cached content. Search cannot reveal another account or restricted room through snippets or history.
+
+Ctrl+F on Windows/Linux and Command+F on macOS opens or focuses conversation search below the header. Escape closes that search and returns focus without discarding a draft or leaving a call. Modal dialogs and IME composition retain their own input scope.
 
 ## MSG-012
 

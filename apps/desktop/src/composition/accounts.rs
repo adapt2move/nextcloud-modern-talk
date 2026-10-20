@@ -1,10 +1,12 @@
 //! One composition-owned account facade; the renderer receives bounded, scoped data only.
+mod background;
 mod calls;
 mod conversations;
 mod creation;
 pub(super) mod files;
 mod messaging;
 mod notifications;
+mod update;
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -42,6 +44,8 @@ enum Purpose {
     Room(RequestId, ConversationRef, OperationId, bool),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
+    MessageNotifications(AccountScope),
+    LiveEvents(AccountScope),
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
@@ -92,6 +96,7 @@ pub struct Accounts {
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
+    background: background::Background,
     picker: Option<files::Picker>,
     picker_open: bool,
     message_poll_at: Instant,
@@ -125,6 +130,7 @@ impl Accounts {
             room_invite: None,
             message_search: None,
             notices: notifications::Notices::default(),
+            background: background::Background::default(),
             picker: None,
             picker_open: false,
             message_poll_at: Instant::now(),
@@ -147,6 +153,9 @@ impl Accounts {
         command: RuntimeCommand,
         purpose: Purpose,
     ) -> Result<ConnectionRequestId, IdentityError> {
+        if self.call_actions.update_sealed() {
+            return Err(ErrorKind::Busy.into());
+        }
         if self.pending.len() >= 16 {
             return Err(ErrorKind::Busy.into());
         }
@@ -189,7 +198,6 @@ impl Accounts {
         self.picker = None;
         self.room_invite = None;
         self.message_search = None;
-        self.notices.clear();
         self.snapshot.selected = None;
         self.snapshot.messages = Page::empty();
         self.snapshot.files = Page::empty();
@@ -204,7 +212,9 @@ impl Accounts {
         }
         self.snapshot.active_account = scope;
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
-        self.snapshot.conversations = Page::empty();
+        self.snapshot.conversations = scope
+            .and_then(|s| self.background.account(s))
+            .map_or_else(Page::empty, |a| a.rooms.clone());
         self.snapshot.conversation_list = ConversationListState {
             content: if scope.is_some() {
                 ContentState::Loading
@@ -271,6 +281,7 @@ impl Accounts {
         }) {
             self.select(None);
         }
+        self.sync_background();
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
@@ -288,7 +299,6 @@ impl Accounts {
         }
     }
     fn tick(&mut self) {
-        self.tick_calls();
         let update = match &mut self.connection {
             Ok(c) => c.poll(self.cursor),
             Err(error) => Err(*error),
@@ -312,17 +322,8 @@ impl Accounts {
                 }
             }
         }
-        if let Some(scope) = self.load_rooms
-            && self
-                .request(
-                    scope,
-                    ProtocolRequest::ListConversations,
-                    Purpose::Rooms(scope),
-                )
-                .is_ok()
-        {
-            self.load_rooms = None;
-        }
+        self.tick_background();
+        self.tick_calls();
         self.poll_messages();
         if let Some(scope) = self.load_tags
             && self
@@ -390,6 +391,14 @@ impl Accounts {
             Purpose::Message(request, context, operation, work) => self.complete_message(request, context, operation, work, result),
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
+            Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
+            Purpose::LiveEvents(scope) => {
+                if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
+                    return;
+                }
+                // A mailbox drain changes scheduling only, not the visible snapshot.
+                return self.complete_live_events(scope, result);
+            }
             Purpose::Login(request) => {
                 if self.login.as_ref().is_none_or(|l| l.request != request) { return; }
                 match result {
@@ -416,17 +425,7 @@ impl Accounts {
                     _ => (),
                 }
             }
-            Purpose::Rooms(scope) if self.snapshot.active_account == Some(scope) => match result {
-                Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(list))) if list.scope == scope => {
-                    self.snapshot.conversations = page(list.rooms.as_slice().iter().map(|r| conversation(r, scope)));
-                    self.snapshot.conversation_list = ConversationListState { content: ContentState::Ready, complete: true };
-                    if list.rooms.as_slice().iter().any(|r| r.organization.tags == protocol::FeatureSupport::Supported) { self.load_tags = Some(scope); self.snapshot.tag_state = ContentState::Loading; }
-                    if self.snapshot.selected.is_some_and(|s| !self.snapshot.conversations.as_slice().iter().any(|r| r.context == s)) { self.clear_content(); }
-                    if self.snapshot.selected.is_none() { self.snapshot.content = ContentState::Ready; }
-                }
-                Err(error) => { self.snapshot.conversation_list = ConversationListState { content: content_error(error), complete: false }; }
-                _ => self.snapshot.conversation_list = ConversationListState { content: ContentState::Failed, complete: false },
-            },
+            Purpose::Rooms(scope) => self.complete_rooms(scope, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags))) if tags.scope == scope => {
@@ -476,7 +475,6 @@ impl Accounts {
                     }
                 }
             }
-            _ => (),
         }
         self.touch();
     }

@@ -13,6 +13,7 @@ use talk_core::preferences::{
 use talk_core::ui::Text;
 
 pub struct Services {
+    pub(super) install: std::cell::RefCell<super::updates::Install>,
     notification_sequence: std::cell::Cell<u64>,
     notification_sources:
         std::cell::RefCell<Vec<talk_core::preferences::notifications::NotificationSources>>,
@@ -46,9 +47,14 @@ impl Services {
             devices.attach_media(media.clone());
         }
         Ok(Rc::new(Self {
+            install: std::cell::RefCell::default(),
             notification_sequence: std::cell::Cell::new(0),
             notification_sources: std::cell::RefCell::new(Vec::new()),
-            updates: talk_adapters::updates::UpdateRuntime::start(env!("CARGO_PKG_VERSION")),
+            updates: if connect_accounts {
+                talk_adapters::updates::UpdateRuntime::start(env!("CARGO_PKG_VERSION"))
+            } else {
+                Err(talk_core::preferences::updates::UpdateError::UnsupportedInstall)
+            },
             media: media.clone(),
             preferences,
             accounts,
@@ -152,6 +158,9 @@ impl Services {
         if let Ok(updates) = &self.updates {
             updates.request_shutdown();
         }
+        self.request_application_shutdown();
+    }
+    pub(super) fn request_application_shutdown(&self) {
         self.preferences.request_shutdown();
         if let Some(accounts) = &self.accounts {
             accounts.borrow_mut().shutdown();
@@ -170,10 +179,12 @@ impl Services {
         self.updates
             .as_ref()
             .map_or(true, |updates| updates.is_stopped())
-            && self
-                .accounts
-                .as_ref()
-                .is_none_or(|accounts| accounts.borrow().stopped())
+            && self.application_stopped()
+    }
+    pub(super) fn application_stopped(&self) -> bool {
+        self.accounts
+            .as_ref()
+            .is_none_or(|accounts| accounts.borrow().stopped())
             && self.preferences.snapshot().runtime == talk_core::preferences::RuntimeState::Stopped
             && self.permissions.as_ref().map_or(true, |p| {
                 p.snapshot().runtime == talk_core::preferences::RuntimeState::Stopped
@@ -189,7 +200,7 @@ impl Services {
 }
 pub struct Bridge {
     pub notification_worker_request: Option<RequestId>,
-    pub update_cursor: u64,
+    pub update_last: Option<talk_core::preferences::updates::UpdateSnapshot>,
     pub services: Rc<Services>,
     pub cursor: u64,
     pub device_cursor: u64,
@@ -198,41 +209,75 @@ pub struct Bridge {
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
-    fn update_snapshot(&self) -> talk_core::preferences::updates::UpdateSnapshot {
+    fn reduced_motion(&self) -> bool {
+        self.services.preferences.reduced_motion()
+    }
+    fn emoji_picker_available(&self) -> bool {
+        self.services.preferences.emoji_picker_available()
+    }
+    fn show_emoji_picker(&self) -> Result<(), crate::presentation::preferences::EmojiPickerError> {
+        if !self.services.preferences.emoji_picker_available() {
+            return Err(crate::presentation::preferences::EmojiPickerError::Unavailable);
+        }
         self.services
+            .preferences
+            .show_emoji_picker()
+            .map_err(|_| crate::presentation::preferences::EmojiPickerError::Failed)
+    }
+    fn cancel_emoji_picker(&self) {
+        self.services.preferences.cancel_emoji_picker();
+    }
+    fn take_emoji_picker_error(
+        &mut self,
+    ) -> Option<crate::presentation::preferences::EmojiPickerError> {
+        self.services
+            .preferences
+            .take_emoji_picker_error()
+            .map(|_| crate::presentation::preferences::EmojiPickerError::Failed)
+    }
+    fn update_snapshot(&self) -> talk_core::preferences::updates::UpdateSnapshot {
+        let mut snapshot = self
+            .services
             .updates
             .as_ref()
             .map(|u| u.snapshot())
             .unwrap_or_else(|error| talk_core::preferences::updates::UpdateSnapshot {
                 revision: 0,
+                generation: 0,
                 current_version: Text::new(env!("CARGO_PKG_VERSION")).expect("package version"),
                 channel: self.services.preferences.snapshot().active.update_channel,
+                next_check_unix_seconds: None,
+                last_check: None,
                 state: talk_core::preferences::updates::UpdateState::Failed(*error),
-            })
+            });
+        self.services.install.borrow().project(&mut snapshot);
+        snapshot
     }
     fn take_update_snapshot(&mut self) -> Option<talk_core::preferences::updates::UpdateSnapshot> {
-        let (cursor, snapshot) = self
-            .services
-            .updates
-            .as_ref()
-            .ok()?
-            .poll(self.update_cursor)?;
-        self.update_cursor = cursor;
+        let snapshot = self.update_snapshot();
+        if self.update_last.as_ref() == Some(&snapshot) {
+            return None;
+        }
+        self.update_last = Some(snapshot.clone());
         Some(snapshot)
     }
     fn check_updates(&self) -> Result<(), talk_core::preferences::updates::UpdateError> {
-        self.services
-            .updates
-            .as_ref()
-            .map_err(|e| *e)?
-            .check(self.services.preferences.snapshot().active.update_channel)
+        self.services.updates.as_ref().map_err(|e| *e)?.check(
+            self.services
+                .preferences
+                .snapshot()
+                .confirmed
+                .update_channel,
+        )
     }
-    fn open_release(&self) -> Result<(), talk_core::preferences::updates::UpdateError> {
+    fn install_update(
+        &self,
+        expected_generation: u64,
+    ) -> Result<(), talk_core::preferences::updates::UpdateError> {
         self.services
-            .updates
-            .as_ref()
-            .map_err(|e| *e)?
-            .open_release()
+            .install
+            .borrow_mut()
+            .begin(&self.services, expected_generation)
     }
     fn snapshot(&self) -> PreferenceSnapshot {
         self.services.preferences.snapshot()

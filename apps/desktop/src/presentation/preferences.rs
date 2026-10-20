@@ -10,11 +10,84 @@ use talk_core::preferences::{
     PreferenceError, PreferenceSnapshot, RequestId, SaveState, SidebarDensity,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmojiPickerError {
+    Unavailable,
+    Failed,
+}
+impl EmojiPickerError {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Unavailable => "Die native Emoji-Auswahl ist auf diesem System nicht verfügbar.",
+            Self::Failed => "Die native Emoji-Auswahl konnte nicht geöffnet werden.",
+        }
+    }
+}
+
+pub(super) fn update_error_label(
+    error: talk_core::preferences::updates::UpdateError,
+) -> &'static str {
+    use talk_core::preferences::updates::UpdateError;
+    match error {
+        UpdateError::Busy => "Eine Updateaktion läuft bereits.",
+        UpdateError::Network => "Die Updatequelle ist gerade nicht erreichbar.",
+        UpdateError::RateLimited => "Zu viele Anfragen. Bitte später erneut prüfen.",
+        UpdateError::InvalidResponse => "Die Updateantwort war ungültig.",
+        UpdateError::Unavailable => "Updates sind momentan nicht verfügbar.",
+        UpdateError::UnsupportedInstall => {
+            "Diese Installation unterstützt keine automatischen Updates."
+        }
+        UpdateError::PackageManagerUnavailable => "Die Paketverwaltung ist nicht verfügbar.",
+        UpdateError::PackageManagerFailed => {
+            "Die Paketverwaltung konnte das Update nicht installieren."
+        }
+        UpdateError::Storage => "Das Update konnte nicht auf diesem Computer gespeichert werden.",
+        UpdateError::TooLarge => "Das Update überschreitet die unterstützte Größe.",
+        UpdateError::Integrity => "Das Update konnte nicht verifiziert werden.",
+        UpdateError::UnsafeArchive => "Das Updatepaket hat ein ungültiges Format.",
+        UpdateError::InstallFailed => "Das Update konnte nicht installiert werden.",
+        UpdateError::InstallUncertain => {
+            "Der Installationsstatus ist unklar. Prüfe die installierte Version."
+        }
+        UpdateError::ActiveCall => "Beende zuerst den Anruf, um das Update zu installieren.",
+        UpdateError::Stale => "Die Updateauswahl hat sich geändert. Bitte erneut prüfen.",
+        UpdateError::Cancelled => "Die Updateaktion wurde abgebrochen.",
+        UpdateError::Stopped => "Der Updatedienst wurde beendet.",
+    }
+}
+
 pub trait ComputerSettingsPort {
+    /// Cached OS preference only; the platform owner observes changes outside
+    /// rendering. Unknown support suppresses nonessential motion.
+    fn reduced_motion(&self) -> bool {
+        true
+    }
+    /// Non-macOS native picker support, observed by the platform owner.
+    /// Linux's supported system picker copies the chosen emoji; the user pastes
+    /// explicitly. Neither this port nor the view automatically reads clipboard.
+    fn emoji_picker_available(&self) -> bool {
+        false
+    }
+    fn show_emoji_picker(&self) -> Result<(), EmojiPickerError> {
+        Err(EmojiPickerError::Unavailable)
+    }
+    /// The owner clears prior errors when admitting a new picker command, and
+    /// exposes only its latest completion. View scope checks still apply.
+    fn take_emoji_picker_error(&mut self) -> Option<EmojiPickerError> {
+        None
+    }
+    /// Retire a pending command/error without claiming to close an OS picker
+    /// that the platform has already displayed.
+    fn cancel_emoji_picker(&self) {}
     fn update_snapshot(&self) -> talk_core::preferences::updates::UpdateSnapshot;
     fn take_update_snapshot(&mut self) -> Option<talk_core::preferences::updates::UpdateSnapshot>;
     fn check_updates(&self) -> Result<(), talk_core::preferences::updates::UpdateError>;
-    fn open_release(&self) -> Result<(), talk_core::preferences::updates::UpdateError>;
+    /// Composition revalidates the generation, seals new calls, drains owned
+    /// work and only then starts installation. The UI never installs directly.
+    fn install_update(
+        &self,
+        expected_generation: u64,
+    ) -> Result<(), talk_core::preferences::updates::UpdateError>;
     fn snapshot(&self) -> PreferenceSnapshot;
     fn take_snapshot(&mut self) -> Option<PreferenceSnapshot>;
     fn submit(&self, command: PreferenceCommand) -> Result<(), PreferenceError>;
@@ -132,7 +205,28 @@ pub enum PreferenceEdit {
     NotificationBanner(NotificationCategory, bool),
 }
 impl Desktop {
+    pub(super) fn can_install_update(&self) -> bool {
+        !self.update_restart_pending
+            && matches!(
+                self.updates.state,
+                talk_core::preferences::updates::UpdateState::Ready(_)
+            )
+            && self.snapshot.call.as_ref().is_none_or(|call| {
+                matches!(
+                    call.stage,
+                    super::CallStage::Ended | super::CallStage::Failed
+                )
+            })
+    }
     pub(super) fn refresh_preferences(&mut self, cx: &mut Context<Self>) {
+        if let Some(error) = self.settings_port.take_emoji_picker_error()
+            && let Some(context) = self.emoji_picker_context.take()
+            && Some(context) == self.snapshot.selected
+        {
+            self.feedback =
+                Some(super::feedback::Feedback::error(error.label()).in_conversation(context));
+            cx.notify();
+        }
         if let Some(snapshot) = self.settings_port.take_update_snapshot() {
             self.updates = snapshot;
             cx.notify();

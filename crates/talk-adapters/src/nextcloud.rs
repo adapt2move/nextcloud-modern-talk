@@ -4,9 +4,11 @@ mod call_policy;
 mod conversation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
+mod live;
 mod meeting;
 mod meeting_runtime;
 mod messaging;
+mod notifications;
 mod people;
 mod preferences;
 mod projection;
@@ -94,6 +96,7 @@ pub struct NextcloudClient {
     meeting_owner: Option<meeting::CallOwner>,
     incoming_invitation: Option<nextcloud_talk_api::meeting::CallInvitation>,
     dismissed_calls: Vec<u64>,
+    message_notifications: notifications::Observation,
     call_bindings: Vec<(ConversationId, CallScope)>,
     transport: Transport,
     rooms: Vec<RoomBinding>,
@@ -193,6 +196,7 @@ impl NextcloudClient {
             meeting_owner: None,
             incoming_invitation: None,
             dismissed_calls: Vec::new(),
+            message_notifications: notifications::Observation::default(),
             call_bindings: Vec::new(),
             rooms: Vec::new(),
             sends: Vec::new(),
@@ -683,6 +687,16 @@ impl NextcloudClient {
         match request {
             ProtocolRequest::Meeting(command) => return self.meeting(context, command).await,
             ProtocolRequest::PollIncomingCalls => return self.poll_incoming_calls(context).await,
+            ProtocolRequest::PollMessageNotifications => {
+                return self.poll_message_notifications(context).await;
+            }
+            ProtocolRequest::PollLiveEvents => {
+                return self
+                    .transport
+                    .poll_live_events(context)
+                    .await
+                    .map(ProtocolReply::LiveEvents);
+            }
             ProtocolRequest::ProbeAccount => {
                 self.probe(context).await?;
                 return Ok(ProtocolReply::AccountValid(context.scope));

@@ -16,9 +16,8 @@ sudo apt-get install -y --no-install-recommends xdg-utils desktop-file-utils xdg
 
 The script supplies compiler, pkg-config/Clang, X11/XCB/xkbcommon, font, SSL, Vulkan/Mesa, Xvfb, D-Bus and capture prerequisites. `libdbus-1-dev` supports the Linux credential provider; actual Secret Service tests additionally need a session bus and service. Bundled SQLite needs a C compiler. Do not change dependency features to bypass prerequisites.
 
-The pinned Linux WebRTC SDK requires Clang 21 or later. On Ubuntu 24.04 the
-script installs Clang 21 from [LLVM's signed package repository](https://apt.llvm.org/)
-and verifies its signing-key fingerprint; use the explicit compiler names below.
+The script uses Ubuntu's compiler packages. GStreamer's base/good plugins
+provide the Opus and VP8 codecs used by the Rust WebRTC engine.
 
 Linux browser login uses the session's `org.freedesktop.portal.OpenURI` service and a registered default HTTPS browser. Minimal desktop sessions need a portal backend (GTK in the command above), `xdg-mime` from `xdg-utils`, and `update-desktop-database` from `desktop-file-utils` when registering a browser's desktop entry. Xvfb alone does not supply this browser handoff.
 
@@ -36,21 +35,11 @@ rustc --version --verbose
 cargo --version
 ```
 
-The maintained `libwebrtc` binding needs its matching native SDK. Download and
-verify the pinned artifact before building; the helper prints the directory to
-use for `LK_CUSTOM_WEBRTC`:
-
-```sh
-export LK_CUSTOM_WEBRTC="$(python3 tools/media/prepare_native.py \
-  --target linux-x64-release --output "$HOME/.cache/nextcloud-modern-talk/webrtc")"
-export CC=clang-21 CXX=clang++-21
-```
-
-Use `mac-arm64-release` on Apple Silicon or `win-x64-release` for Windows MSVC.
-The helper checks the archive digest and extracted inventory; do not substitute
-an unrelated WebRTC build. The engine is a local library, not a LiveKit service.
-Windows MSVC builds must set `RUSTFLAGS="-C target-feature=+crt-static"` and use
-the explicit `--target x86_64-pc-windows-msvc`, matching the SDK's static runtime.
+The `webrtc` and `rtc` crates supply the WebRTC protocol implementation.
+Cargo resolves their exact versions and checksums from the lockfile; there is
+no separate libwebrtc SDK download. GStreamer remains a native runtime
+dependency for camera capture and media codecs. Windows builds use the explicit
+`--target x86_64-pc-windows-msvc`.
 
 ## Native UI entrypoint
 
@@ -61,6 +50,10 @@ cargo run --locked -p talk-desktop -- --ui-scenario chat
 ```
 
 This opens a native GPUI window without server login or capture. Launch without `--ui-scenario` for ordinary browser login and restored accounts. Previews, focus/keyboard checks and appearance fixtures do not establish integrated behavior. See [native UI boundaries](design/native-ui/README.md). Keep `--licenses` output and installed notices with packages.
+
+Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
+
+Update development builds are not treated as installable packages. For installation checks use the private fixture in [tools/updates](../tools/updates/install_probe.py), which creates a disposable package and never overwrites a system installation. The PackageKit fixture uses a private D-Bus service, not the system package manager. Runtime checks and package-layout fixtures do not qualify native macOS or Windows installation.
 
 <a id="bootstrap-checks"></a>
 

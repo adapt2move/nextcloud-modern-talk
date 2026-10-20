@@ -239,8 +239,49 @@ class DeliveryFixtures(unittest.TestCase):
         self.spec["files"]["dependencies.json"] = sha(self.stage / "dependencies.json")
         self.rejects(self.spec)
 
-    def test_enabled_media_requires_native_identity_and_notices(self):
-        self.spec["media"] = {"enabled": True, "engine": "libwebrtc", "version": "0.3.52"}
+    def media_fixture(self):
+        deps = json.loads((self.stage / "dependencies.json").read_text())
+        for name, version in (("webrtc", "0.21.1"), ("rtc", "0.21.1"),
+                              ("gstreamer", "0.25.4"), ("gstreamer-app", "0.25.2"),
+                              ("gstreamer-video", "0.25.4")):
+            deps["packages"].append({"name": name, "version": version, "license": "fixture-only",
+                                     "source": "registry+https://example.invalid/index",
+                                     "archive_sha256": "3" * 64, "features": [],
+                                     "notices": [REQUIRED_NOTICES[0]]})
+        self.spec["media"] = {"enabled": True, "engine": "webrtc", "version": "0.21.1",
+                              "archive_sha256": "3" * 64, "codecs": "gstreamer"}
+        self.save_dependencies(deps)
+        return deps
+
+    def save_dependencies(self, deps):
+        (self.stage / "dependencies.json").write_text(json.dumps(deps))
+        self.spec["files"]["dependencies.json"] = sha(self.stage / "dependencies.json")
+        save(self.stage, self.spec)
+
+    def test_enabled_media_matches_cargo_inventory_without_external_sdk(self):
+        self.media_fixture()
+        self.assertEqual(validate(self.stage, True)["media"], self.spec["media"])
+        self.spec["media"]["archive_sha256"] = "4" * 64
+        self.rejects(self.spec)
+        self.spec["media"]["archive_sha256"] = "3" * 64
+        self.spec["media"]["version"] = "0.21.0"
+        self.rejects(self.spec)
+
+    def test_media_requires_engine_codecs_and_dependency_notices(self):
+        deps = self.media_fixture()
+        for name in ("webrtc", "rtc", "gstreamer-app"):
+            incomplete = {**deps, "packages": [p for p in deps["packages"] if p["name"] != name]}
+            self.save_dependencies(incomplete)
+            self.rejects()
+        deps["packages"][1]["notices"] = []
+        self.save_dependencies(deps)
+        self.rejects()
+
+    def test_obsolete_sdk_and_helper_payloads_are_rejected(self):
+        deps = self.media_fixture()
+        deps["packages"].append({"name": "libwebrtc", "version": "0.3.52",
+                                 "license": "fixture-only", "notices": [REQUIRED_NOTICES[0]]})
+        self.save_dependencies(deps)
         self.rejects(self.spec)
         (self.stage / "native-media.json").write_text('{"tag":"wrong"}')
         self.spec["files"]["native-media.json"] = sha(self.stage / "native-media.json")

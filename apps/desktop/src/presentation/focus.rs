@@ -125,6 +125,12 @@ impl FocusStates {
         let state = self.0.borrow();
         [
             "call",
+            "conversation-title",
+            "favorite-conversation",
+            "history-search",
+            "history-search-submit",
+            "history-search-close",
+            "emoji-picker",
             "room-info",
             "send",
             "attach",
@@ -147,6 +153,22 @@ impl FocusStates {
                 .entries
                 .get(&ElementId::from(*id))
                 .is_some_and(|(handle, _)| handle.is_focused(window))
+        })
+        .or_else(|| {
+            [
+                ("message-reply:", "message-reply"),
+                ("message-menu:", "message-menu"),
+            ]
+            .into_iter()
+            .find_map(|(prefix, label)| {
+                state
+                    .entries
+                    .iter()
+                    .any(|(id, (handle, _))| {
+                        handle.is_focused(window) && id.to_string().starts_with(prefix)
+                    })
+                    .then_some(label)
+            })
         })
     }
     pub fn finish_frame(&self, window: &mut gpui::Window, fallback: &FocusHandle) {

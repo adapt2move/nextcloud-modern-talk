@@ -215,7 +215,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
 let arguments = CommandLine.arguments
 guard Bundle.main.bundleIdentifier == "org.adapt2move.nextcloud-modern-talk" else { exit(2) }
-if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
+if arguments.count == 2 && arguments[1] == "reduce-motion" {
+    emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
+} else if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
     checkPermission(kind: arguments[2], request: arguments[3] == "request")
 } else if arguments.count == 12 && arguments[1] == "notify", let delegate = NotificationDelegate(arguments: arguments) {
     let app = NSApplication.shared

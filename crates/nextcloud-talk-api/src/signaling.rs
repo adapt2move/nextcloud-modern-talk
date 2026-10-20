@@ -161,6 +161,13 @@ pub enum Signal {
     Candidate(IceCandidate),
 }
 pub enum Event {
+    /// Talk room-session identities mapped by the current HPB room. These are
+    /// routing observations only; REST membership remains authoritative.
+    SfuMembership(Vec<PeerSession>),
+    TransportInterrupted,
+    TransportResumed,
+    PolicyChanged,
+    ForceMute,
     Signal {
         from: PeerSession,
         negotiation: Negotiation,
@@ -189,7 +196,7 @@ pub struct Member {
 }
 /// One completely validated response, at most 84 events / 192 KiB retained signal text.
 pub struct SignalBatch {
-    events: Vec<Event>,
+    pub(crate) events: Vec<Event>,
 }
 impl SignalBatch {
     pub fn events(&self) -> &[Event] {

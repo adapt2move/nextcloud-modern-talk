@@ -14,14 +14,26 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 
 #[derive(Clone)]
-pub struct MeetingStop(Arc<MeetingLifetime>);
+pub struct MeetingStop {
+    lifetime: Arc<MeetingLifetime>,
+    hpb: Option<crate::hpb::Route>,
+}
 impl MeetingStop {
     pub fn close(&self) {
-        self.0.close();
+        self.lifetime.close();
+        if let Some(route) = &self.hpb {
+            route.close();
+        }
     }
     pub fn is_closed(&self) -> bool {
-        self.0.cancellation.is_cancelled()
+        self.lifetime.cancellation.is_cancelled()
+            || self.hpb.as_ref().is_some_and(|r| r.is_closed())
     }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Topology {
+    Direct,
+    Sfu,
 }
 
 struct Binding {
@@ -30,6 +42,7 @@ struct Binding {
     session: Zeroizing<String>,
     scope: SessionScope,
     lifetime: Arc<MeetingLifetime>,
+    hpb: Option<crate::hpb::Route>,
 }
 impl Binding {
     fn context(&self, c: &OperationContext) -> Result<OperationContext, Error> {
@@ -107,13 +120,22 @@ impl Client {
         let room_id = call
             .room_id
             .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+        if let Some(route) = &self.hpb_route {
+            let own = PeerSession::parse(&session).map_err(|e| self.error(e))?;
+            if !route.matches(&call.room, &own) {
+                self.cancel_prepared_external_meeting();
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+        }
         let (reader, writer, lifetime) = self.transport.open_meeting(context)?;
+        let hpb = self.hpb_route.take();
         let binding = Arc::new(Binding {
             room: call.room,
             room_id,
             session,
             scope: call.scope,
             lifetime: lifetime.clone(),
+            hpb: hpb.clone(),
         });
         // The autonomous owner now handles signaling; the consumed handle cannot
         // also be used through the original serial send/poll API.
@@ -126,10 +148,10 @@ impl Client {
             MeetingWriter {
                 transport: writer,
                 binding,
-                selected: Vec::with_capacity(16),
+                selected: Vec::with_capacity(17),
                 leave_started: false,
             },
-            MeetingStop(lifetime),
+            MeetingStop { lifetime, hpb },
         ))
     }
 }
@@ -147,6 +169,15 @@ impl MeetingReader {
     pub async fn poll(&mut self, context: &OperationContext) -> Result<SignalBatch, Error> {
         let context = self.binding.context(context)?;
         let mut guard = ReadGuard(self.binding.lifetime.clone(), false);
+        if let Some(route) = &self.binding.hpb {
+            let batch = route
+                .poll(&context)
+                .await
+                .map_err(|e| self.binding.error(e))?;
+            self.binding.lifetime.validate(&context)?;
+            guard.1 = true;
+            return Ok(batch);
+        }
         let route = format!(
             "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
             self.binding.room.as_str()
@@ -166,6 +197,9 @@ impl MeetingReader {
 impl Drop for MeetingReader {
     fn drop(&mut self) {
         self.binding.lifetime.close();
+        if let Some(route) = &self.binding.hpb {
+            route.close();
+        }
     }
 }
 
@@ -185,6 +219,29 @@ pub struct ObservedReply {
 }
 
 impl MeetingWriter {
+    pub fn topology(&self) -> Topology {
+        if self.binding.hpb.is_some() {
+            Topology::Sfu
+        } else {
+            Topology::Direct
+        }
+    }
+    /// Subscribe only after authoritative REST membership has admitted this Talk
+    /// session. The HPB owner resolves its current SFU session independently.
+    pub async fn request_offer(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+    ) -> Result<(), Error> {
+        let context = self.binding.context(context)?;
+        self.binding
+            .hpb
+            .as_ref()
+            .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?
+            .request_offer(&context, peer)
+            .await
+            .map_err(|e| self.binding.error(e))
+    }
     pub fn now(&self) -> Moment {
         self.transport.now()
     }
@@ -221,6 +278,23 @@ impl MeetingWriter {
             .await?;
         let reply = crate::decode(kind, response).map_err(|k| self.binding.error(k))?;
         match &reply {
+            Reply::SignalingSettings(settings)
+                if (settings.mode == SignalingMode::External) != self.binding.hpb.is_some() =>
+            {
+                return Err(self.binding.error(ErrorKind::WrongScope));
+            }
+            Reply::SignalingSettings(settings) if self.binding.hpb.is_some() => {
+                let external = settings
+                    .external
+                    .as_ref()
+                    .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?;
+                self.binding
+                    .hpb
+                    .as_ref()
+                    .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?
+                    .update(external)
+                    .map_err(|e| self.binding.error(e))?;
+            }
             Reply::Account(account) if account.id != self.transport.user() => {
                 return Err(self.binding.error(ErrorKind::WrongScope));
             }
@@ -246,7 +320,7 @@ impl MeetingWriter {
         if self.binding.lifetime.cancellation.is_cancelled() {
             return Err(self.binding.error(ErrorKind::Cancelled));
         }
-        if peer.0.as_str() == self.binding.session.as_str() {
+        if self.binding.hpb.is_none() && peer.0.as_str() == self.binding.session.as_str() {
             return Err(self.binding.error(ErrorKind::WrongScope));
         }
         if let Some(existing) = self.selected.iter().find(|p| p.peer == peer) {
@@ -256,8 +330,13 @@ impl MeetingWriter {
                 Err(self.binding.error(ErrorKind::Conflict))
             };
         }
-        if self.selected.len() == 16 {
+        if self.selected.len() == if self.binding.hpb.is_some() { 17 } else { 16 } {
             return Err(self.binding.error(ErrorKind::Busy));
+        }
+        if let Some(route) = &self.binding.hpb {
+            route
+                .select(peer.clone(), negotiation.clone())
+                .map_err(|e| self.binding.error(e))?;
         }
         self.selected.push(PeerBudget {
             peer,
@@ -269,6 +348,9 @@ impl MeetingWriter {
     }
     pub fn remove(&mut self, peer: &PeerSession) {
         self.selected.retain(|p| &p.peer != peer);
+        if let Some(route) = &self.binding.hpb {
+            route.remove(peer);
+        }
     }
     pub async fn send(
         &mut self,
@@ -285,6 +367,18 @@ impl MeetingWriter {
         else {
             return Err(self.binding.error(ErrorKind::WrongScope));
         };
+        if let Some(route) = &self.binding.hpb {
+            match &signal {
+                Signal::Description(_) if budget.descriptions < 8 => budget.descriptions += 1,
+                Signal::Candidate(_) if budget.candidates < 128 => budget.candidates += 1,
+                _ => return Err(self.binding.error(ErrorKind::TooLarge)),
+            }
+            route
+                .send(&context, peer, Some(negotiation), Some(signal))
+                .await
+                .map_err(|e| self.binding.error(e))?;
+            return Ok(AcceptedForProcessing);
+        }
         let (kind, payload) = match signal {
             Signal::Description(sdp) => {
                 if budget.descriptions >= 8 {
@@ -338,6 +432,9 @@ impl MeetingWriter {
     /// conversation membership. An uncertain response is never replayed here.
     pub async fn leave(&mut self, context: &OperationContext) -> Result<(), Error> {
         self.binding.lifetime.close();
+        if let Some(route) = &self.binding.hpb {
+            route.close();
+        }
         if self.leave_started {
             return Err(self.binding.error(ErrorKind::Conflict));
         }
@@ -359,6 +456,9 @@ impl MeetingWriter {
 impl Drop for MeetingWriter {
     fn drop(&mut self) {
         self.binding.lifetime.close();
+        if let Some(route) = &self.binding.hpb {
+            route.close();
+        }
     }
 }
 
@@ -402,6 +502,15 @@ impl Client {
             .any(|p| PeerSession::parse(&p.session).is_ok_and(|s| s == own))
         {
             return Err(self.error(ErrorKind::Conflict));
+        }
+        // REST absence and definitive HPB session retirement are separate
+        // cleanup facts. Neither local close nor a dropped socket proves bye.
+        if self
+            .hpb
+            .as_ref()
+            .is_some_and(|owner| owner.retirement_pending())
+        {
+            return Err(self.error(ErrorKind::Uncertain));
         }
         self.call_generation = None;
         self.call_remote_pending = false;

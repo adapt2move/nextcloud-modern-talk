@@ -709,6 +709,22 @@ impl Desktop {
                                 cx,
                             ))
                             .child(self.button(
+                                "room-unread",
+                                "Als ungelesen markieren",
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    self.snapshot.content == super::ContentState::Ready,
+                                    "Die Verbindung ist derzeit nicht bereit.",
+                                ),
+                                LocalAction::MessageIn(
+                                    row.context,
+                                    super::messaging::Action::Command(
+                                        talk_core::ui::messaging::MessageAction::MarkUnread,
+                                    ),
+                                ),
+                                cx,
+                            ))
+                            .child(self.button(
                                 "room-local-groups",
                                 "Zu Gruppe hinzufügen …",
                                 ButtonStyle::Quiet,

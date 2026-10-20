@@ -213,7 +213,7 @@ pub(crate) struct Transport {
 }
 
 // The reservation follows prepared authenticated I/O after the client retires.
-struct AccountCharge {
+pub(crate) struct AccountCharge {
     runtime: NetworkRuntime,
     account: BindingId,
     _slot: OwnedSemaphorePermit,
@@ -249,6 +249,22 @@ impl DiagnosticCallAdmission {
 }
 
 impl Transport {
+    pub(crate) fn hpb_binding(&self) -> Result<crate::hpb::AccountBinding, PortError> {
+        let backend = self
+            .binding
+            .origin
+            .endpoint("ocs/v2.php/apps/spreed/api/v3/signaling/backend")
+            .map_err(|e| self.error(e))?;
+        Ok(crate::hpb::AccountBinding {
+            scope: self.scope(),
+            backend: backend.to_string(),
+            origin: self.binding.origin.0.origin().ascii_serialization(),
+            user: self.binding.user.clone(),
+            cancellation: self.binding.cancellation.clone(),
+            runtime: self.runtime.clone(),
+            _charge: self._account_charge.clone(),
+        })
+    }
     /// Equality-only lifetime ledger, separate from HTTP and response permits.
     /// The caller checks its locally admitted room before invoking this hook.
     #[cfg(any(test, feature = "backend-test"))]

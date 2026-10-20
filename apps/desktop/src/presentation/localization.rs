@@ -1,7 +1,9 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
+mod chat;
 mod conversation;
 mod resources;
+mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
 
@@ -9,23 +11,21 @@ pub fn text(locale: Locale, key: &str) -> &str {
     if locale == Locale::German {
         return key;
     }
-    if let Ok(index) = conversation::MESSAGES.binary_search_by_key(&key, |row| row.0) {
-        return if locale == Locale::Spanish {
-            conversation::MESSAGES[index].2
-        } else {
-            conversation::MESSAGES[index].1
-        };
-    }
-    match resources::MESSAGES.binary_search_by_key(&key, |row| row.0) {
-        Ok(index) => {
-            if locale == Locale::Spanish {
-                resources::MESSAGES[index].2
+    for catalog in [
+        chat::MESSAGES,
+        conversation::MESSAGES,
+        resources::MESSAGES,
+        updates::MESSAGES,
+    ] {
+        if let Ok(index) = catalog.binary_search_by_key(&key, |row| row.0) {
+            return if locale == Locale::Spanish {
+                catalog[index].2
             } else {
-                resources::MESSAGES[index].1
-            }
+                catalog[index].1
+            };
         }
-        Err(_) => key,
     }
+    key
 }
 #[derive(Clone, Copy)]
 pub enum Count {
@@ -68,7 +68,12 @@ mod tests {
     }
     #[test]
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
-        for catalog in [resources::MESSAGES, conversation::MESSAGES] {
+        for catalog in [
+            resources::MESSAGES,
+            conversation::MESSAGES,
+            chat::MESSAGES,
+            updates::MESSAGES,
+        ] {
             let mut last = "";
             for &(key, en, es) in catalog {
                 assert!(key > last && !en.is_empty() && !es.is_empty());

@@ -28,6 +28,9 @@ pub const SCENARIOS: &[&str] = &[
     "storage-cleanup",
     "storage-recovery",
     "chat",
+    "chat-ux",
+    "chat-ux-call",
+    "chat-motion",
     "history",
     "history-busy",
     "history-pending",
@@ -162,6 +165,29 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("chat-motion") {
+        let mut state = snapshot(Some("chat-ux"));
+        state.messages = page((1..=30).map(|id| {
+            message(
+                id,
+                "Fictional teammate",
+                "FT",
+                "10:00",
+                "Fictional history row for the finite native motion fixture.",
+                false,
+            )
+        }));
+        return state;
+    }
+    if matches!(scenario, Some("chat-ux" | "chat-ux-call")) {
+        let mut state = snapshot(Some(if scenario == Some("chat-ux-call") {
+            "call"
+        } else {
+            "chat"
+        }));
+        configure_chat_ux(&mut state);
+        return state;
+    }
     if scenario == Some("ready") {
         let mut ready = snapshot(Some("chat"));
         ready.login.storage = StorageStatus::NativeStored;
@@ -595,6 +621,73 @@ fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
     }
 }
 
+/// Explicit, finite interaction fixture. No server result or native operation is
+/// inferred from these samples; unsupported writes keep their existing failure.
+fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
+    use talk_core::ui::conversation::Availability;
+    use talk_core::ui::messaging::{MessageFeature, MessagePanel, RichObject};
+    use talk_core::ui::presentation::{ConversationCategory, FeatureSupport};
+    let Some(context) = snapshot.selected else {
+        return;
+    };
+    snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+        |mut row| {
+            row.organization.favorites = FeatureSupport::Supported;
+            row.organization.favorite_change = Decision::Allowed;
+            if row.context.conversation.local == 1 {
+                row.title = text("Designteam");
+                row.organization.category = ConversationCategory::Unknown;
+                row.participants = Some(2);
+            }
+            row
+        },
+    ));
+    let mut rows = snapshot.messages.as_slice().to_vec();
+    for row in &mut rows {
+        row.metadata.replyable = true;
+        if row.local_id == 2 {
+            row.metadata.deleted = true;
+        }
+        if row.local_id == 3 {
+            row.delivery = DeliveryState::Pending;
+        }
+    }
+    let mut panel = MessagePanel::new(context);
+    panel.features = page(
+        [
+            MessageFeature::Reply,
+            MessageFeature::Search,
+            MessageFeature::Files,
+            MessageFeature::Pins,
+        ]
+        .map(|feature| {
+            (
+                feature,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            )
+        }),
+    );
+    panel.file_limit = 10 * 1024 * 1024;
+    if let Some(first) = rows.first_mut() {
+        first.metadata.rich = page([RichObject {
+            placeholder: text("file0"),
+            kind: text("file"),
+            name: text("Team-skizze.png"),
+            link: None,
+        }]);
+        panel.shared_files = page([first.clone()]);
+    }
+    if let Some(last) = rows.last() {
+        panel.pinned_messages = page([last.clone()]);
+    }
+    snapshot.messages = page(rows);
+    snapshot.message_panel = Some(panel);
+}
+
 /// Three finite projection transitions driven only by explicit development F6:
 /// reorder, remove focused item, then replace account/runtime/host scope.
 fn focus_snapshot(files: bool, step: u8) -> PresentationSnapshot {
@@ -706,6 +799,8 @@ pub struct DevelopmentPort {
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
     probe_step: u8,
+    chat_ux: bool,
+    chat_motion: bool,
 }
 impl DevelopmentPort {
     pub fn new(scenario: Option<&str>) -> Self {
@@ -726,6 +821,8 @@ impl DevelopmentPort {
             account_probe,
             focus_probe,
             probe_step: 0,
+            chat_ux: matches!(scenario, Some("chat-ux" | "chat-ux-call")),
+            chat_motion: scenario == Some("chat-motion"),
             snapshot: initial,
             dirty: true,
             enabled: scenario.is_some(),
@@ -777,6 +874,17 @@ impl NativeDesktopPort for DevelopmentPort {
                     body.as_str().len(),
                     body.as_str().split('\n').count()
                 ),
+                UiIntent::Message {
+                    context,
+                    action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
+                    ..
+                } if self.chat_ux => println!(
+                    "UI_CHAT_UX send room={} bytes={} reply={:?} thread={:?}",
+                    context.conversation.local,
+                    body.as_str().len(),
+                    target.reply_to,
+                    target.thread,
+                ),
                 UiIntent::Legacy(UserIntent::AcceptDirect { call, .. }) => {
                     println!("UI_INTENT accept-direct room={}", call.conversation.local)
                 }
@@ -799,6 +907,65 @@ impl NativeDesktopPort for DevelopmentPort {
             }
         }
         match intent {
+            UiIntent::Refresh(_) if self.chat_motion => {
+                self.probe_step = (self.probe_step + 1).min(10);
+                let mut rows = self.snapshot.messages.as_slice().to_vec();
+                let step = self.probe_step;
+                match step {
+                    1..=5 | 10 => {
+                        let own = step == 2;
+                        let id = if step == 10 {
+                            36
+                        } else {
+                            30 + u128::from(step)
+                        };
+                        if !rows.iter().any(|row| row.local_id == id) {
+                            rows.push(message(
+                                id,
+                                if own {
+                                    "Fictional own projection"
+                                } else {
+                                    "Fictional teammate"
+                                },
+                                if own { "FO" } else { "FT" },
+                                "10:01",
+                                if own {
+                                    "Own message projection fixture; no backend send or acceptance."
+                                } else {
+                                    "New incoming message projection fixture."
+                                },
+                                own,
+                            ));
+                        }
+                    }
+                    6 => {
+                        if let Some(row) = rows.last_mut() {
+                            row.body = text("Edited fictional row, same stable message ID.");
+                            row.metadata.edited = true;
+                        }
+                    }
+                    7 => self.snapshot.content = ContentState::Loading,
+                    8 => self.snapshot.content = ContentState::Ready,
+                    9 => rows.insert(
+                        0,
+                        message(
+                            0,
+                            "Fictional teammate",
+                            "FT",
+                            "09:00",
+                            "Older loaded history fixture; no new-message entry.",
+                            false,
+                        ),
+                    ),
+                    _ => (),
+                }
+                self.snapshot.messages = page(rows);
+                println!(
+                    "UI_MESSAGE_FIXTURE step={step} rows={} own_projection={} no_backend=true",
+                    self.snapshot.messages.as_slice().len(),
+                    step == 2
+                );
+            }
             UiIntent::Refresh(_) if self.account_probe => {
                 self.probe_step = (self.probe_step + 1).min(3);
                 let revision = self.snapshot.revision;
@@ -834,6 +1001,27 @@ impl NativeDesktopPort for DevelopmentPort {
                     return Err(SubmitError::StaleScope);
                 }
                 populate(&mut self.snapshot, c);
+                if self.chat_ux {
+                    configure_chat_ux(&mut self.snapshot);
+                }
+            }
+            UiIntent::SetFavorite {
+                context, favorite, ..
+            } if self.chat_ux => {
+                if Some(context) != self.snapshot.selected {
+                    return Err(SubmitError::StaleScope);
+                }
+                let mut rows = self.snapshot.conversations.as_slice().to_vec();
+                let row = rows
+                    .iter_mut()
+                    .find(|r| r.context == context)
+                    .ok_or(SubmitError::StaleScope)?;
+                row.favorite = Some(favorite);
+                self.snapshot.conversations = page(rows);
+                println!(
+                    "UI_CHAT_UX favorite room={} value={favorite}",
+                    context.conversation.local
+                );
             }
             UiIntent::BeginLogin { request, .. } => {
                 self.snapshot.login.phase = LoginPhase::BrowserWaiting;
@@ -881,6 +1069,67 @@ impl NativeDesktopPort for DevelopmentPort {
                     .is_some_and(|r| r.request == request && r.context == context)
                 {
                     self.snapshot.submission = None;
+                }
+            }
+            UiIntent::Message {
+                request,
+                context,
+                action,
+            } if self.chat_ux => {
+                use talk_core::ui::messaging::{MessageAction, SearchResult};
+                if Some(context) != self.snapshot.selected {
+                    return Err(SubmitError::StaleScope);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                match action {
+                    MessageAction::Search(query) => {
+                        let query = query.as_str().to_lowercase();
+                        panel.search = page(
+                            self.snapshot
+                                .messages
+                                .as_slice()
+                                .iter()
+                                .filter(|m| {
+                                    !m.metadata.deleted
+                                        && m.body.as_str().to_lowercase().contains(&query)
+                                })
+                                .map(|m| SearchResult {
+                                    id: m.local_id,
+                                    title: text(m.author.as_str()),
+                                    excerpt: m.body.clone(),
+                                }),
+                        );
+                        panel.search_loaded = true;
+                        println!(
+                            "UI_CHAT_UX search room={} results={}",
+                            context.conversation.local,
+                            panel.search.as_slice().len()
+                        );
+                    }
+                    MessageAction::Context(id) => {
+                        if !self
+                            .snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .any(|m| m.local_id == id)
+                        {
+                            return Err(SubmitError::StaleScope);
+                        }
+                        panel.located = Some((request, id));
+                        println!(
+                            "UI_CHAT_UX locate room={} message={id}",
+                            context.conversation.local
+                        );
+                    }
+                    MessageAction::Files | MessageAction::Pins => {
+                        println!("UI_CHAT_UX shared room={}", context.conversation.local);
+                    }
+                    _ => return Err(SubmitError::Unavailable(UnavailableReason::Unsupported)),
                 }
             }
             UiIntent::Legacy(UserIntent::PrepareConference(call)) => {

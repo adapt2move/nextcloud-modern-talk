@@ -1,12 +1,14 @@
 # Conversations, discovery, and membership
 
-Status: **Planned**. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md). Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
+This document defines conversation, discovery and membership behavior. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md); see the [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) for implemented scope and limitations. Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## CONV-001
 
 **Browse one coherent conversation (P1).** Show name, avatar/fallback, unread/mention markers, last activity, muted state, and a call indicator without implying all information is current. Chat, files, people, and call controls address the same room. List loading, no conversations, no filter matches, access removed, and offline cache are distinct states. Respect server read-only/changelog/former-direct/note-to-self behavior.
 
 Acceptance: changing views preserves the room identity and draft. Opening a list row never starts microphone/camera capture. A room removed by the server disappears from live navigation after reconciliation; stale offline content is visibly stale and follows the cache policy.
+
+The conversation header has one compact action area. A favorite star sits beside the title, revealed on hover or keyboard focus; the confirmed favorite also appears in the sidebar. The adjacent search action opens the scoped search field below the header. Clicking the title opens shared media/items in a dialog. Keep member management, call entry and conversation settings as their distinct actions, without a second redundant icon strip.
 
 ## CONV-002
 

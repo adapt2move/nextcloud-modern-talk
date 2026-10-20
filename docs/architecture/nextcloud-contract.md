@@ -20,9 +20,11 @@ Conversation and message writes return correlated results. Composition retains r
 
 ## Calls
 
-Ordinary calls use typed join/leave, participant observation and internal-signaling SDP/ICE. The separate [meeting owner](../../crates/talk-adapters/src/nextcloud/meeting.rs) refreshes the applicable policy, enforces lobby/consent/publication decisions and owns the call lifetime. The [media owner](../../crates/talk-adapters/src/media/service.rs) integrates maintained `libwebrtc` and bounded application audio/video handoffs; device resources belong to the desktop device owner.
+Calls use typed join/leave and participant observation, with internal signaling or the qualified external-signaling route for SDP/ICE. The separate [meeting owner](../../crates/talk-adapters/src/nextcloud/meeting.rs) refreshes the applicable policy, enforces lobby/consent/publication decisions and owns the call lifetime. The [media owner](../../crates/talk-adapters/src/media/service.rs) integrates the Rust `webrtc` engine, GStreamer VP8/Opus codecs and bounded application audio/video handoffs; device resources belong to the desktop device owner.
 
-HPB/external signaling, guest/federated media, required call E2EE and screen publication are outside the implemented alpha profile. Unknown or unavailable required evidence leaves the action unavailable. A signaling POST receipt proves server processing acceptance, not decoded remote media.
+The protocol owner maintains one account-bound HPB WebSocket session when the server supplies usable external-signaling settings. TLS uses native roots; reconnect and resume remain finite. Publisher/subscriber routes correlate HPB and Talk session identities, while current REST membership and policy authorize media. Live events invalidate bounded application observations; they do not grant capture, expose credentials or replace authoritative reads.
+
+The qualified profile uses Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0. UDP STUN and TURN are supported by the pinned media engine; TCP/TLS TURN and live credential rotation remain unavailable. Guest/federated media, required call E2EE and screen publication are outside the profile. Unknown or unavailable required evidence leaves the action unavailable. A signaling receipt or local data-channel send is not proof of recipient delivery.
 
 ## Authoritative account rejection
 

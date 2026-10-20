@@ -16,7 +16,7 @@ Tests run only on Linux. Windows/macOS compilation does not establish native dev
 
 Linux installs [native prerequisites](../tools/ui/prepare-linux.sh), libdbus and GLib development headers. Windows needs MSVC and uses the pinned aws-lc crate's prebuilt NASM objects. macOS needs Xcode and its Metal Toolchain; [build_env.py](../tools/ci/build_env.py) installs the optional Metal component if missing and records the actual host. Neither platform runs the app as a build check.
 
-[prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py) installs checksum-pinned official SDKs on macOS and Windows. The maintained WebRTC engine also uses a checksum-pinned native SDK; Cargo's automatic unchecked native download is not used by the workflows. Third-party native code remains upstream's responsibility; application Rust forbids `unsafe`.
+[prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py) installs checksum-pinned official SDKs on macOS and Windows. The Rust `webrtc` engine comes from the pinned Cargo dependencies and uses GStreamer for codecs, with no separate libwebrtc SDK download. Third-party native code remains upstream's responsibility; application Rust forbids `unsafe`.
 
 ## Releases
 

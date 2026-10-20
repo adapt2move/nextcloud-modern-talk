@@ -172,6 +172,7 @@ impl Desktop {
                     let label = match shortcut.action {
                         ActionId::OpenSettings => "Einstellungen öffnen",
                         ActionId::Search => "Suchen",
+                        ActionId::ConversationSearch => "Im Gespräch suchen",
                         ActionId::Close => "Schließen",
                         ActionId::SendMessage => "Nachricht senden",
                         ActionId::NewLine => "Neue Zeile",
@@ -211,36 +212,57 @@ impl Desktop {
                 }
             }
             SettingsTab::Updates => {
-                use talk_core::preferences::{
-                    UpdateChannel,
-                    updates::{UpdateError, UpdateState},
-                };
+                use talk_core::preferences::{UpdateChannel, updates::UpdateState};
+                let installing = matches!(
+                    self.updates.state,
+                    UpdateState::Reserved(_) | UpdateState::Applying(_) | UpdateState::Installed(_)
+                );
+                let checking = installing
+                    || matches!(
+                        self.updates.state,
+                        UpdateState::Checking
+                            | UpdateState::Downloading { .. }
+                            | UpdateState::Verifying(_)
+                    );
                 page=page.child(self.hint(&self.lf("Installierte Version: {version}",&[("version",self.updates.current_version.as_str())])))
-                    .child(self.hint(self.l("Updates werden nur auf deine Anfrage bei GitHub geprüft. Downloads öffnen sich im Browser.")))
+                    .child(self.hint(self.l("Updates werden automatisch für den gewählten Kanal geprüft und heruntergeladen. Du entscheidest, wann installiert und neu gestartet wird.")))
                     .child(div().flex().flex_wrap().gap_2().children([(UpdateChannel::Stable,"Stable"),(UpdateChannel::Prerelease,"Vorabversionen")].into_iter().enumerate().map(|(i,(channel,label))|
-                        self.button(("update-channel",i),label,if p.update_channel==channel {ButtonStyle::Primary}else{ButtonStyle::Secondary},self.settings_availability(),LocalAction::Preference(PreferenceEdit::UpdateChannel(channel)),cx))))
-                    .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,Availability::when(self.updates.state!=UpdateState::Checking,"Updates werden geprüft …"),LocalAction::CheckUpdates,cx));
-                let status = match &self.updates.state {
-                    UpdateState::Idle => "Noch nicht geprüft.",
-                    UpdateState::Checking => "Updates werden geprüft …",
-                    UpdateState::Current => "Keine neuere Version in diesem Kanal verfügbar.",
-                    UpdateState::Available(_) => "Eine neue Version ist verfügbar.",
-                    UpdateState::Stopped => "Die Updateprüfung wurde beendet.",
-                    UpdateState::Failed(error) => match error {
-                        UpdateError::Busy => "Eine Prüfung läuft bereits.",
-                        UpdateError::Network => "Die Updatequelle ist gerade nicht erreichbar.",
-                        UpdateError::RateLimited => {
-                            "Zu viele Anfragen. Bitte später erneut prüfen."
-                        }
-                        UpdateError::InvalidResponse => "Die Updateantwort war ungültig.",
-                        UpdateError::BrowserUnavailable => {
-                            "Der Browser konnte nicht geöffnet werden."
-                        }
-                        _ => "Updates sind momentan nicht verfügbar.",
-                    },
+                        self.button(("update-channel",i),label,if p.update_channel==channel {ButtonStyle::Primary}else{ButtonStyle::Secondary},
+                            if installing { Availability::when(false,"Das Update wird installiert …") } else { self.settings_availability() },
+                            LocalAction::Preference(PreferenceEdit::UpdateChannel(channel)),cx))))
+                    .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,Availability::when(!checking,"Eine Updateaktion läuft bereits."),LocalAction::CheckUpdates,cx));
+                let (status, state_key) = match &self.updates.state {
+                    UpdateState::Idle => ("Noch nicht geprüft.", 0usize),
+                    UpdateState::Checking => ("Updates werden geprüft …", 1),
+                    UpdateState::Current => ("Keine neuere Version in diesem Kanal verfügbar.", 2),
+                    UpdateState::Downloading { .. } => ("Das Update wird heruntergeladen …", 3),
+                    UpdateState::Verifying(_) => ("Das Update wird geprüft …", 4),
+                    UpdateState::Ready(_) => ("Das Update ist zur Installation bereit.", 5),
+                    UpdateState::Reserved(_) => ("Die App bereitet die Installation vor …", 6),
+                    UpdateState::Applying(_) => ("Das Update wird installiert …", 7),
+                    UpdateState::Installed(_) => (
+                        "Das Update ist installiert. Der Neustart wird vorbereitet …",
+                        8,
+                    ),
+                    UpdateState::Stopped => ("Die Updateprüfung wurde beendet.", 9),
+                    UpdateState::Failed(error) => {
+                        (super::preferences::update_error_label(*error), 10)
+                    }
                 };
-                page = page.child(self.hint(self.l(status)));
-                if let UpdateState::Available(release) = &self.updates.state {
+                // Progress and other data updates keep this variant key; only
+                // the state hint reveals, never the download counter below.
+                page = page
+                    .child(self.reveal(("update-status", state_key), self.hint(self.l(status))));
+                let release = match &self.updates.state {
+                    UpdateState::Downloading { release, .. }
+                    | UpdateState::Verifying(release)
+                    | UpdateState::Ready(release)
+                    | UpdateState::Reserved(release)
+                    | UpdateState::Applying(release)
+                    | UpdateState::Installed(release) => Some(release),
+                    _ => None,
+                };
+                if let Some(release) = release {
                     page = page
                         .child(self.hint(&self.lf(
                             "Verfügbar: {version}",
@@ -248,15 +270,32 @@ impl Desktop {
                         )))
                         .when(release.prerelease, |d| {
                             d.child(self.hint(self.l("Dies ist eine Vorabversion.")))
-                        })
-                        .child(self.button(
-                            "open-update-release",
-                            "Release im Browser öffnen",
-                            ButtonStyle::Primary,
-                            true,
-                            LocalAction::OpenRelease,
-                            cx,
-                        ));
+                        });
+                }
+                if let UpdateState::Downloading {
+                    received, total, ..
+                } = &self.updates.state
+                {
+                    page = page.child(self.hint(&self.lf(
+                        "{received} von {total} MiB heruntergeladen.",
+                        &[
+                            ("received", &format!("{:.1}", *received as f64 / 1_048_576.)),
+                            ("total", &format!("{:.1}", *total as f64 / 1_048_576.)),
+                        ],
+                    )));
+                }
+                if matches!(self.updates.state, UpdateState::Ready(_)) {
+                    page = page.child(self.button(
+                        "settings-install-update",
+                        "Update installieren und neu starten",
+                        ButtonStyle::Primary,
+                        Availability::when(
+                            self.can_install_update(),
+                            "Beende zuerst den Anruf, um das Update zu installieren.",
+                        ),
+                        LocalAction::InstallUpdate(self.updates.generation),
+                        cx,
+                    ));
                 }
             }
             // Replaced by the typed provider pages as their scoped handles arrive.

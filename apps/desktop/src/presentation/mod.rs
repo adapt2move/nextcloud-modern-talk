@@ -9,6 +9,7 @@ mod focus;
 pub mod input;
 pub mod localization;
 mod messaging;
+mod motion;
 mod navigation;
 mod onboarding;
 mod organization;
@@ -72,9 +73,11 @@ pub enum LocalAction {
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
     CheckUpdates,
-    OpenRelease,
+    InstallUpdate(u64),
     Room(conversation_dialog::Action),
     Message(messaging::Action),
+    MessageIn(ConversationRef, messaging::Action),
+    EmojiPicker(ConversationRef),
     Open(Overlay),
     Close,
     DismissFeedback,
@@ -176,6 +179,9 @@ use crate::presentation::feedback::Feedback;
 
 pub struct Desktop {
     updates: talk_core::preferences::updates::UpdateSnapshot,
+    // Successful install admission drains all service owners. This latch is
+    // never cleared by an error snapshot; composition owns restart/quit.
+    update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
     message_ui: messaging::MessageUi,
     probe: Probe,
@@ -183,6 +189,13 @@ pub struct Desktop {
     control_focus: controls::FocusStates,
     navigation: navigation::Navigation,
     hover_hints: controls::HoverHints,
+    hovered_control: Option<gpui::ElementId>,
+    reduced_motion: bool,
+    motion_trigger: Option<motion::MotionTrigger>,
+    motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
+    emoji_picker_pending: Option<(ConversationRef, u64)>,
+    emoji_picker_generation: u64,
+    emoji_picker_context: Option<ConversationRef>,
     keyboard_navigation: bool,
     highlighted_message: Option<(ConversationRef, u128)>,
     dismissed_terminal_call: Option<CallScope>,
@@ -358,6 +371,7 @@ impl Desktop {
         }
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
+            update_restart_pending: false,
             room_ui,
             message_ui,
             probe,
@@ -365,6 +379,13 @@ impl Desktop {
             control_focus: controls::FocusStates::default(),
             navigation: navigation::Navigation::new(cx),
             hover_hints: controls::HoverHints::default(),
+            hovered_control: None,
+            reduced_motion: settings_port.reduced_motion(),
+            motion_trigger: None,
+            motion_frames: Default::default(),
+            emoji_picker_pending: None,
+            emoji_picker_generation: 0,
+            emoji_picker_context: None,
             keyboard_navigation: false,
             highlighted_message: None,
             dismissed_terminal_call: None,
@@ -476,6 +497,12 @@ impl Desktop {
         }
     }
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        let reduced_motion = self.settings_port.reduced_motion();
+        if self.reduced_motion != reduced_motion {
+            self.reduced_motion = reduced_motion;
+            self.motion_trigger = None;
+            cx.notify();
+        }
         self.refresh_preferences(cx);
         if let Some(result) = self.pending_ack
             && self
@@ -571,11 +598,17 @@ impl Desktop {
             self.permission_ui.setup_kind =
                 talk_core::preferences::permissions::PermissionKind::Microphone;
         }
+        if previous != next.selected || previous_account != next.active_account {
+            self.retire_emoji_picker();
+        }
         self.snapshot = next;
         self.refresh_creation(cx);
         self.refresh_room_dialog(cx);
         self.refresh_message_ui(cx);
         if self.incoming_visible() {
+            if self.emoji_picker_pending.is_some() || self.emoji_picker_context.is_some() {
+                self.retire_emoji_picker();
+            }
             self.stop_device_preview(cx);
         }
         if previous_account != self.snapshot.active_account {
@@ -686,13 +719,18 @@ impl Desktop {
             .and_then(|row| call_entry(row, self.snapshot.content))
     }
     fn composer_available(&self) -> bool {
-        composer_allowed(
-            self.overlay,
-            self.prejoin.is_some(),
-            self.incoming_visible(),
-        )
+        !self.update_restart_pending
+            && composer_allowed(
+                self.overlay,
+                self.prejoin.is_some(),
+                self.incoming_visible(),
+            )
     }
     pub fn handle(&mut self, action: LocalAction, window: &mut Window, cx: &mut Context<Self>) {
+        self.motion_trigger = None;
+        if self.update_restart_pending {
+            return;
+        }
         if self.projection_blocked
             && !matches!(
                 &action,
@@ -703,6 +741,17 @@ impl Desktop {
         }
         if self.local_preference_action(&action, cx) {
             return;
+        }
+        if matches!(
+            &action,
+            LocalAction::Destination(_)
+                | LocalAction::ShowNavigation
+                | LocalAction::ToggleCallChat
+                | LocalAction::Call
+                | LocalAction::Accept
+                | LocalAction::PrejoinJoin
+        ) {
+            self.retire_emoji_picker();
         }
         if self.settings_tab == preferences::SettingsTab::Devices
             && matches!(
@@ -754,19 +803,48 @@ impl Desktop {
                         talk_core::preferences::updates::UpdateState::Failed(error);
                 }
             }
-            LocalAction::OpenRelease => {
-                if let Err(error) = self.settings_port.open_release() {
-                    self.updates.state =
-                        talk_core::preferences::updates::UpdateState::Failed(error);
+            LocalAction::InstallUpdate(generation) => {
+                if generation == self.updates.generation
+                    && self.can_install_update()
+                    && self.save_draft(cx)
+                {
+                    if self.drafts.has_unsent()
+                        || !self.composer.read(cx).content.is_empty()
+                        || self.message_ui.pending_edit.is_some()
+                        || self.input_composing(cx)
+                    {
+                        self.feedback = Some(Feedback::info(
+                            "Schließe ungesendete Nachrichten vor dem Neustart ab oder leere sie.",
+                        ));
+                    } else {
+                        match self.settings_port.install_update(generation) {
+                            Ok(()) => self.freeze_for_update(window, cx),
+                            Err(error) => {
+                                self.feedback =
+                                    Some(Feedback::error(preferences::update_error_label(error)));
+                            }
+                        }
+                    }
                 }
             }
             LocalAction::Room(action) => self.room_action(action, cx),
             LocalAction::Message(action) => self.message_action(action, window, cx),
+            LocalAction::MessageIn(context, action) => {
+                if Some(context) == self.snapshot.selected {
+                    self.message_action(action, window, cx);
+                }
+            }
+            LocalAction::EmojiPicker(context) => {
+                if Some(context) == self.snapshot.selected {
+                    self.show_composer_emoji(window, cx);
+                }
+            }
             LocalAction::Open(overlay) => {
                 if !self.save_draft(cx) {
                     cx.notify();
                     return;
                 }
+                self.retire_emoji_picker();
                 if self.overlay.is_none() {
                     self.return_focus = window.focused(cx);
                 }
@@ -895,6 +973,7 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                self.retire_emoji_picker();
                 self.room_ui.password.update(cx, |i, _| i.reset());
                 if self.navigation_open {
                     self.pending_navigation_focus = Some(false);
@@ -917,6 +996,7 @@ impl Desktop {
             }
             LocalAction::Navigate(context) => {
                 if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
+                    self.retire_emoji_picker();
                     self.navigation_open = false;
                     if self.destination == SidebarDestination::Inbox {
                         self.destination = SidebarDestination::Conversations;
@@ -1235,11 +1315,8 @@ impl Desktop {
         cx.notify();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.server.read(cx).composing()
-            || self.search.read(cx).composing()
-            || self.sidebar_filter.read(cx).composing()
-            || self.composer.read(cx).composing()
-        {
+        let diagnostic = self.development && event.keystroke.key == "f7";
+        if (self.update_restart_pending && !diagnostic) || self.input_composing(cx) {
             return;
         }
         let key = &event.keystroke.key;
@@ -1264,6 +1341,7 @@ impl Desktop {
         let action = registry_modifiers.and_then(|m| matching(key, m, KeyContext::Application));
         if key == "f7" && self.development && self.diagnostic_frames < 64 {
             self.diagnostic_frames += 1;
+            self.trace_chat_ui(window, cx);
             // Bounded fixture-only geometry/counts: no input content or server identifiers.
             println!(
                 "UI_LOCAL_STATE editor_chars={} editor_focused={} history_focused={} filter_chars={} search_chars={} overlay={:?} prejoin={} highlighted={:?}",
@@ -1316,6 +1394,8 @@ impl Desktop {
                 );
             }
             println!("UI_HISTORY {:?}", self.navigation.history_geometry());
+            self.trace_message_motion();
+            println!("UI_RESTART_LATCH active={}", self.update_restart_pending);
             println!("UI_HOVER {:?}", self.hover_hints.diagnostic());
             println!(
                 "UI_ACTION_FOCUS {:?}",
@@ -1327,6 +1407,13 @@ impl Desktop {
                 self.navigation.reveal.geometry(),
                 self.navigation.geometry()
             );
+            cx.stop_propagation();
+        } else if key == "f8" && self.development && self.probe == Probe::Messages {
+            // Explicit fictional UI fixture: exercise the admitted UI latch only.
+            // This never reserves an updater, installs files or reports success.
+            println!("UI_RESTART_LATCH fixture=true no_install=true");
+            self.freeze_for_update(window, cx);
+            cx.notify();
             cx.stop_propagation();
         } else if matches!(
             action,
@@ -1340,6 +1427,15 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.conversation_search_open() && self.composer_available() {
+                self.handle(
+                    LocalAction::Message(messaging::Action::CloseSearch),
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+                return;
+            }
             self.handle(
                 if self.incoming_visible() {
                     LocalAction::DismissIncoming
@@ -1358,6 +1454,17 @@ impl Desktop {
         } else if !self.incoming_visible() && action == Some(ActionId::OpenSettings) {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
             cx.stop_propagation();
+        } else if self.composer_available()
+            && !self.onboarding_open
+            && self.destination != SidebarDestination::Inbox
+            && action == Some(ActionId::ConversationSearch)
+        {
+            self.handle(
+                LocalAction::Message(messaging::Action::ToggleSearch),
+                window,
+                cx,
+            );
+            cx.stop_propagation();
         } else if !self.incoming_visible()
             && self.overlay.is_none()
             && action == Some(ActionId::Search)
@@ -1366,7 +1473,7 @@ impl Desktop {
             cx.stop_propagation();
         } else if key == "f6"
             && self.development
-            && ((self.probe == Probe::Focus && self.overlay.is_none())
+            && ((matches!(self.probe, Probe::Focus | Probe::Messages) && self.overlay.is_none())
                 || (self.probe == Probe::Accounts && self.overlay == Some(Overlay::Accounts)))
         {
             if let Some(context) = self.snapshot.selected {
@@ -1382,6 +1489,57 @@ impl Desktop {
             self.handle(LocalAction::Send, window, cx);
             cx.stop_propagation();
         }
+    }
+    fn freeze_for_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_restart_pending = true;
+        self.disable_update_inputs(cx);
+        self.retire_emoji_picker();
+        self.hover_hints.cancel();
+        self.hovered_control = None;
+        self.overlay = None;
+        self.return_focus = None;
+        self.pending_modal_focus = false;
+        self.pending_feedback_focus = false;
+        self.pending_navigation_focus = None;
+        self.pending_prejoin_return = None;
+        self.root_focus.focus(window);
+    }
+    fn disable_update_inputs(&self, cx: &mut Context<Self>) {
+        for input in [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.message_ui.search,
+            &self.message_ui.time_input,
+        ]
+        .into_iter()
+        .chain(self.room_ui.inputs().iter())
+        {
+            input.update(cx, |input, _| input.interactive = false);
+        }
+    }
+    fn input_composing(&self, cx: &App) -> bool {
+        [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.message_ui.search,
+            &self.message_ui.time_input,
+        ]
+        .into_iter()
+        .chain(self.room_ui.inputs().iter())
+        .any(|input| {
+            let input = input.read(cx);
+            input.interactive && input.composing()
+        })
     }
     pub fn sp(&self, value: f32) -> gpui::Pixels {
         px(value * f32::from(self.scale) / 100.)
@@ -1402,6 +1560,7 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.prepare_message_motion(window);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -1409,7 +1568,7 @@ impl Render for Desktop {
         if self.hover_hints.request_frame(Instant::now()) {
             window.request_animation_frame();
         }
-        let incoming = self.incoming_visible();
+        let incoming = !self.update_restart_pending && self.incoming_visible();
         if incoming && self.snapshot.call.as_ref().map(|c| c.scope) != self.last_incoming_scope {
             self.incoming_return_focus = window.focused(cx);
             self.last_incoming_scope = self.snapshot.call.as_ref().map(|c| c.scope);
@@ -1456,7 +1615,7 @@ impl Render for Desktop {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
-                i.interactive = !incoming && self.overlay.is_none();
+                i.interactive = self.composer_available();
                 i.clipboard_allowed = true;
             });
         }
@@ -1536,10 +1695,39 @@ impl Render for Desktop {
             i.clipboard_allowed = clipboard;
             i.max_visible_rows = max_rows.clamp(1, 5);
         });
+        if self.update_restart_pending {
+            self.disable_update_inputs(cx);
+        }
         // Text scaling is independent of spacing; scaling both exhausts small windows.
         window.set_rem_size(px(16.));
         self.background_inert = self.overlay.is_some() || incoming;
-        let body = if self.development && self.probe == Probe::Controls {
+        let body = if self.update_restart_pending {
+            use talk_core::preferences::updates::UpdateState;
+            let status = match self.updates.state {
+                UpdateState::Applying(_) => "Das Update wird installiert …",
+                UpdateState::Installed(_) => {
+                    "Das Update ist installiert. Der Neustart wird vorbereitet …"
+                }
+                UpdateState::Failed(_) | UpdateState::Stopped => {
+                    "Das Update konnte nicht abgeschlossen werden."
+                }
+                _ => "Die App bereitet die Installation vor …",
+            };
+            self.reveal(
+                "update-restart",
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .p_6()
+                    .child(self.state_note(
+                        "download",
+                        "Update installieren und neu starten",
+                        status,
+                    )),
+            )
+        } else if self.development && self.probe == Probe::Controls {
             self.control_probe(cx).into_any_element()
         } else if self.projection_blocked {
             div().size_full().flex().flex_col().items_center().justify_center().gap_4()
@@ -1565,12 +1753,43 @@ impl Render for Desktop {
             self.shell(window, cx).into_any_element()
         };
         self.background_inert = incoming;
-        let overlay = self.overlay.map(|_| self.overlay_view(window, cx));
+        let overlay = self
+            .overlay
+            .filter(|_| !self.update_restart_pending)
+            .map(|overlay| {
+                self.reveal(
+                    ("dialog-reveal", overlay as usize),
+                    self.overlay_view(window, cx),
+                )
+            });
         self.background_inert = false;
         let incoming_card = incoming.then(|| self.incoming(cx));
         let reveal = self.navigation.reveal.clone();
         let view = div()
-            .on_children_prepainted(move |_, _, _| reveal.finish())
+            .on_children_prepainted(cx.processor(move |this, _, window, cx| {
+                // Virtual list controls register during child prepaint, after
+                // Render returns. Retiring them earlier loses row focus and
+                // hover ownership on every keyboard-triggered render.
+                reveal.finish();
+                this.control_focus.finish_frame(
+                    window,
+                    if this.overlay.is_some() || this.prejoin.is_some() {
+                        &this.modal_focus
+                    } else {
+                        &this.root_focus
+                    },
+                );
+                if this.hover_hints.retire(|id| this.control_focus.live(id)) {
+                    cx.notify();
+                }
+                if this
+                    .hovered_control
+                    .as_ref()
+                    .is_some_and(|id| !this.control_focus.live(id))
+                {
+                    this.hovered_control = None;
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -1603,17 +1822,6 @@ impl Render for Desktop {
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(incoming_card, |d, card| d.child(card)),
             );
-        self.control_focus.finish_frame(
-            window,
-            if self.overlay.is_some() || self.prejoin.is_some() {
-                &self.modal_focus
-            } else {
-                &self.root_focus
-            },
-        );
-        if self.hover_hints.retire(|id| self.control_focus.live(id)) {
-            cx.notify();
-        }
         if let Some(scope) = self.pending_prejoin_return.take()
             && self.overlay.is_none()
             && self.prejoin.is_none()
@@ -1641,7 +1849,7 @@ impl Render for Desktop {
                 window.refresh();
             });
         }
-        if self.pending_modal_focus && !incoming {
+        if self.pending_modal_focus && !incoming && !self.update_restart_pending {
             self.pending_modal_focus = false;
             self.keyboard_navigation = false;
             let id: Option<gpui::ElementId> = match self.overlay {
@@ -1684,7 +1892,7 @@ impl Render for Desktop {
                 window.refresh();
             });
         }
-        if self.pending_feedback_focus {
+        if self.pending_feedback_focus && !self.update_restart_pending {
             self.pending_feedback_focus = false;
             if !incoming
                 && self.overlay.is_none()
@@ -1699,6 +1907,7 @@ impl Render for Desktop {
                 });
             }
         }
+        self.finish_search_focus(window, cx);
         view
     }
 }

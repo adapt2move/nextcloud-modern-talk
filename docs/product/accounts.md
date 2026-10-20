@@ -1,12 +1,12 @@
 # Accounts and authentication
 
-Status: **Planned**. This document owns visible behavior; [security.md](../quality/security.md) owns secret handling, trust boundaries, and storage interfaces. Login uses system-browser Login Flow v2 as documented for [NC34](https://docs.nextcloud.com/server/34/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2) and [NC35](https://docs.nextcloud.com/server/35/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2); no embedded browser is required.
+This document defines account and authentication behavior; [security.md](../quality/security.md) owns secret handling, trust boundaries, and storage interfaces. Login uses system-browser Login Flow v2 as documented for [NC34](https://docs.nextcloud.com/server/34/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2) and [NC35](https://docs.nextcloud.com/server/35/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2); no embedded browser is required.
 
 ## Spec amendment — AMEND-AUTH-STORAGE-01
 
 On 2026-10-18 the user required a ready-made Rust abstraction for OS stores and a **durable fallback comparable in purpose to Talk Desktop**, explicitly stating **“Keine verschlüsselung”**. The file fallback below is therefore **unencrypted**, with no master password, KDF, application encryption or extra approval workflow. OS-native stores remain preferred and retain their normal OS protection. Normal sign-in must persist the account. It offers native storage or an explicitly chosen durable private file; it does not offer temporary/session-only sign-in or silently fall back to it. Only app credentials are eligible, never the user's primary password. [ADR-006](../architecture/decisions/006-credential-providers.md) records the exact crate selection and the narrower observed Talk Desktop behavior.
 
-This requirement does not itself implement credential storage or verify application behavior. All 140 feature entries remain **Planned**; [current state](../status.md) records actual limitations.
+The [feature inventory](../compatibility/feature-inventory.md) records implementation and verification scope; [current state](../status.md) records actual limitations. These requirements do not themselves establish a provider or platform pass.
 
 ## AUTH-001
 

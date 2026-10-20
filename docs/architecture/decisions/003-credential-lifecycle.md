@@ -1,6 +1,6 @@
 # ADR-003 — Identity, durable restoration and account loss
 
-Status: architecture contract for [AMEND-AUTH-STORAGE-01](../../product/accounts.md#spec-amendment--amend-auth-storage-01) and [ADR-006](006-credential-providers.md). AUTH-003–008, Q.SEC-02–05 and V.AUTH.STORE/LOSS remain normative. Credentials and I/O stay adapter-private. The current identity correction draft is stopped and unverified; this document supplies no runtime or platform pass.
+This contract defines the credential lifecycle for [AMEND-AUTH-STORAGE-01](../../product/accounts.md#spec-amendment--amend-auth-storage-01) and [ADR-006](006-credential-providers.md). AUTH-003–008, Q.SEC-02–05 and V.AUTH.STORE/LOSS remain normative. Credentials and I/O stay adapter-private. Desktop composition uses [AccountConnection](../../../crates/talk-adapters/src/identity/connection.rs) over the identity runtime; [current state](../../status.md) records integration and platform limits. This contract supplies no runtime or platform pass.
 
 ## Identities and authority
 

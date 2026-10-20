@@ -1,6 +1,6 @@
 # ADR-006 — Credential providers and durable file fallback
 
-Status: selected provider and storage contract for [AMEND-AUTH-STORAGE-01](../../product/accounts.md#spec-amendment--amend-auth-storage-01). The current identity correction draft is stopped and unverified; native macOS/Windows qualification remains pending. [ADR-003](003-credential-lifecycle.md) owns lifecycle/ledger semantics and [Q.SEC-03/04](../../quality/security.md#qsec-03--os-vault-contract) owns protection requirements.
+This contract selects credential providers and storage behavior for [AMEND-AUTH-STORAGE-01](../../product/accounts.md#spec-amendment--amend-auth-storage-01). The [identity adapter](../../../crates/talk-adapters/src/identity.rs) owns provider access; [current state](../../status.md) records integration limits, including pending native macOS/Windows qualification. [ADR-003](003-credential-lifecycle.md) owns lifecycle/ledger semantics and [Q.SEC-03/04](../../quality/security.md#qsec-03--os-vault-contract) owns protection requirements.
 
 ## Decision and scope
 

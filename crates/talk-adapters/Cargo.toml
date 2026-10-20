@@ -8,15 +8,26 @@ publish.workspace = true
 autoexamples = false
 
 [dependencies]
-libwebrtc.workspace = true
+webrtc.workspace = true
+rtc.workspace = true
+async-trait.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-video.workspace = true
 futures-util.workspace = true
 nextcloud-talk-api.workspace = true
 talk-core.workspace = true
 reqwest.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 semver.workspace = true
+self_update.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+flate2.workspace = true
+tar.workspace = true
+zip.workspace = true
 url.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
@@ -73,4 +84,9 @@ required-features = ["backend-test"]
 [[example]]
 name = "media-normal-talk"
 path = "../../tools/media/normal_talk.rs"
+required-features = ["backend-test"]
+
+[[example]]
+name = "update-install-probe"
+path = "../../tools/updates/install_probe.rs"
 required-features = ["backend-test"]

@@ -19,8 +19,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
     "talk-core": ("crates/talk-core", set()),
-    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite"}),
-    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "keyring-core", "rusqlite", "dirs", "semver", "libwebrtc", "futures-util"}),
+    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs"}),
+    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "keyring-core", "rusqlite", "dirs", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
 }
@@ -33,6 +33,7 @@ PLATFORM_EDGES = {
 DESKTOP_PLATFORM_EDGES = {
     'cfg(target_os = "macos")': {'core-graphics'},
     'cfg(target_os = "linux")': {'ashpd', 'async-io', 'futures-lite'},
+    'cfg(target_os = "windows")': {'enigo', 'windows'},
 }
 failures: list[str] = []
 
@@ -199,8 +200,13 @@ def check() -> None:
         "talk-core": {"path": "crates/talk-core"},
         "nextcloud-talk-api": {"path": "crates/nextcloud-talk-api"},
         "talk-adapters": {"path": "crates/talk-adapters"},
-        "libwebrtc": {"version": "=0.3.52", "default-features": False},
+        "webrtc": {"version": "=0.21.1", "default-features": False, "features": ["runtime-tokio", "crypto-ring"]},
+        "rtc": {"version": "=0.21.1", "default-features": False},
+        "async-trait": "=0.1.89",
         "futures-util": {"version": "=0.3.34", "default-features": False, "features": ["std"]},
+        "tokio-tungstenite": {"version": "=0.30.0", "default-features": False, "features": ["connect", "rustls-tls-native-roots"]},
+        "rustls": {"version": "=0.23.46", "default-features": False, "features": ["std", "aws_lc_rs", "tls12"]},
+        "rustls-native-certs": {"version": "=0.8.5", "default-features": False},
         "reqwest": {"version": "=0.13.5", "default-features": False, "features": ["rustls", "form", "stream"]},
         "tokio": {"version": "=1.53.3", "default-features": False, "features": ["rt", "time", "sync", "macros", "net", "io-util", "fs"]},
         "serde": {"version": "=1.0.229", "default-features": False, "features": ["std"]},
@@ -210,6 +216,12 @@ def check() -> None:
         "getrandom": {"version": "=0.4.3", "default-features": False, "features": ["std"]},
         "cookie": {"version": "=0.18.1", "default-features": False},
         "semver": {"version": "=1.0.28", "default-features": False, "features": ["std"]},
+        'self_update': {'version': '=1.3.1', 'default-features': False, 'features': ['reqwest', 'rustls', 'checksums', 'archive-tar', 'compression-tar-gz', 'archive-zip', 'compression-zip-deflate']},
+        'sha2': {'version': '=0.11.1', 'default-features': False},
+        'tempfile': {'version': '=3.27.0', 'default-features': False, 'features': ['getrandom']},
+        'flate2': {'version': '=1.1.10', 'default-features': False, 'features': ['rust_backend']},
+        'tar': {'version': '=0.4.46', 'default-features': False},
+        'zip': {'version': '=9.0.4', 'default-features': False, 'features': ['deflate']},
         "gpui": {"version": "=0.2.2", "default-features": False, "features": ["font-kit", "x11"]},
         "unicode-segmentation": "=1.12.0",
         "cpal": {"version": "=0.18.2", "default-features": False, "features": ["pulseaudio"]},
@@ -217,6 +229,8 @@ def check() -> None:
         "gstreamer-app": {"version": "=0.25.2", "default-features": False, "features": ["v1_24"]},
         "gstreamer-video": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
         "image": {"version": "=0.25.10", "default-features": False},
+        "enigo": {"version": "=0.6.1", "default-features": False},
+        "windows": {"version": "=0.61.3", "default-features": False, "features": ["UI_ViewManagement"]},
         "core-graphics": {"version": "=0.24.0", "default-features": False, "features": ["link"]},
         "ashpd": {"version": "=0.12.3", "default-features": False, "features": ["async-std"]},
         "async-io": {"version": "=2.6.0", "default-features": False},
@@ -261,7 +275,8 @@ def check() -> None:
         require(manifest.get("lints") == {"workspace": True}, f"{name}: inherit workspace lints")
         deps = manifest.get("dependencies", {})
         require(set(deps) == expected, f"{name}: forbidden/missing dependency edge")
-        require(all(value == {"workspace": True} for value in deps.values()),
+        local_features = {("talk-adapters", "tokio"): ["process"], ("nextcloud-talk-api", "futures-util"): ["sink"]}
+        require(all(value == ({"workspace": True, "features": local_features[(name, dep)]} if (name, dep) in local_features else {"workspace": True}) for dep, value in deps.items()),
                 f"{name}: dependencies must use reviewed workspace definitions")
         require("build-dependencies" not in manifest and manifest.get("dev-dependencies", {}) == ({"nextcloud-talk-api": {"workspace": True, "features": ["backend-test"]}} if name == "talk-adapters" else {}),
                 f"{name}: hidden platform/build/test edges need review")
@@ -277,6 +292,7 @@ def check() -> None:
                 {"name": "identity-i2-lab", "path": "../../tests/identity/driver.rs", "required-features": ["backend-test"]},
                 {"name": "media-native-peer", "path": "../../tools/media/native_peer.rs", "required-features": ["backend-test"]},
                 {"name": "media-normal-talk", "path": "../../tools/media/normal_talk.rs", "required-features": ["backend-test"]},
+                {"name": "update-install-probe", "path": "../../tools/updates/install_probe.rs", "required-features": ["backend-test"]},
             ], "only explicit default-off synthetic diagnostic executables are reviewed")
         if name == "nextcloud-talk-api":
             require(manifest.get("features") == {"default": [], "backend-test": []}, "API diagnostics must remain explicitly opt-in")
@@ -319,7 +335,7 @@ def check() -> None:
 
     for path in (ROOT / "crates/talk-core/src").rglob("*.rs"):
         source = without_comments(path.read_text(encoding="utf-8"))
-        require(not re.search(r"\b(?:nextcloud_talk_api|gpui|core_graphics|ashpd|async_io|futures_lite|reqwest|hyper|tokio|talk_adapters|keyring_core|rusqlite|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites)\b|std\s*::\s*(?:net|fs|process|thread)", source),
+        require(not re.search(r"\b(?:nextcloud_talk_api|gpui|core_graphics|ashpd|async_io|futures_lite|enigo|reqwest|hyper|tokio|talk_adapters|keyring_core|rusqlite|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites)\b|windows\s*::|std\s*::\s*(?:net|fs|process|thread)", source),
                 f"{path.relative_to(ROOT)}: core contains adapter/runtime I/O")
         # User-entered server input is not validated authority; only these scheme-test
         # literals are allowed in its reviewed UI value type. Actual URLs/routes still fail.
@@ -388,12 +404,12 @@ def check() -> None:
                 allowed = imported[:2] in {("talk_core", "ui"), ("talk_core", "preferences")} or imported[:2] == ("crate", "presentation") or imported[0] in {"gpui", "unicode_segmentation", "input", "state", "theme"}
                 allowed |= imported[0] == "std" and len(imported) > 1 and imported[1] in {"ops", "borrow", "fmt", "time", "cmp", "mem", "convert", "str", "collections"}
                 allowed |= imported[0] == "super" and len(imported) > 1 and imported[1] not in {"super", "composition"}
-                # Bounded native focus geometry/flags, retained from the frozen R7 UI.
-                allowed |= path == native / "presentation/navigation.rs" and imported in {
+                # Bounded native focus/message geometry and finite presentation deadlines.
+                allowed |= path in {native / "presentation/navigation.rs", native / "presentation/messaging.rs"} and imported in {
                     ("std", "cell", "RefCell"), ("std", "rc", "Rc")
                 }
                 require(allowed, "native presentation import must use core UI, GPUI or local view types")
-        require(not re.search(r"nextcloud_talk_api|talk_adapters|talk_core\s*::\s*(?!(?:ui|preferences)\b)\w+|\b(?:core_graphics|ashpd|async_io|futures_lite|reqwest|hyper|tokio|cookie|serde_json|zeroize|sqlite|rusqlite|keyring_core|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites|cpal|gstreamer|gstreamer_app|gstreamer_video)\b|\bimage\s*::|(?:std|gpui)\s*::\s*(?:net|fs|process|thread|os)|crate\s*::\s*(?!presentation\b)\w+|super\s*::\s*(?:super|composition)|\b(?:include|include_str|include_bytes)\s*!|https?://|/ocs/|/remote\.php/", source),
+        require(not re.search(r"nextcloud_talk_api|talk_adapters|talk_core\s*::\s*(?!(?:ui|preferences)\b)\w+|\b(?:core_graphics|ashpd|async_io|futures_lite|enigo|reqwest|hyper|tokio|cookie|serde_json|zeroize|sqlite|rusqlite|keyring_core|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites|cpal|gstreamer|gstreamer_app|gstreamer_video)\b|\b(?:image|windows)\s*::|(?:std|gpui)\s*::\s*(?:net|fs|process|thread|os)|crate\s*::\s*(?!presentation\b)\w+|super\s*::\s*(?:super|composition)|\b(?:include|include_str|include_bytes)\s*!|https?://|/ocs/|/remote\.php/", source),
                 "native presentation contains worker/secret/network/file/media I/O or route")
         # Native user-entry clipboard only. GPUI's read allocation is not bounded;
         # admission and privacy gating belong to the reviewed input widget/producer.

@@ -141,6 +141,53 @@ pub struct ConversationList {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MessageNotice {
+    pub conversation: ConversationId,
+    pub message: u64,
+    pub title: Text<128>,
+    pub body: Text<512>,
+    pub redacted: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MessageNotifications {
+    pub scope: AccountScope,
+    pub notices: Page<MessageNotice, 4>,
+    /// New source events also request a full navigation reconciliation, even if
+    /// local/server notification policy suppresses every banner.
+    pub changed: bool,
+}
+
+/// Coalescible hints from an admitted account transport (including HPB).
+/// A hint requests a fresh read; it never grants message, room or call authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountChange {
+    Messages,
+    Conversations,
+    IncomingCalls,
+}
+
+/// Informational transport state, never account, membership or media authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountLiveState {
+    Internal,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Stopped(crate::ports::ErrorKind),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountLiveEvents {
+    pub scope: AccountScope,
+    pub state: AccountLiveState,
+    /// Safe first transport failure, retained independently of HTTP observations.
+    pub first_transport_failure: Option<crate::ports::ErrorKind>,
+    /// At most one hint per existing account observation slot; no wire room tokens.
+    pub changes: Page<AccountChange, 3>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Participant {
     pub display_name: Text<256>,
     pub role: Role,

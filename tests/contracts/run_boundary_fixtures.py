@@ -113,6 +113,9 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     case('recursive-ui-worker', lambda root: append(root, 'crates/talk-core/src/ui/presentation.rs', 'pub use crate::ports::NextcloudPort;'), 1, 'unreviewed data export/import')
     case('recursive-ui-container', lambda root: append(root, 'crates/talk-core/src/ui/presentation.rs', 'pub struct Unbounded { pub values: Vec<u64> }'), 1, 'unbounded container')
     case('native-protocol-import', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'use talk_core::protocol::Conversation;'), 1, 'native presentation import')
+    local_state = 'mod fixture_local_state { use std::{cell::RefCell, rc::Rc}; }'
+    case('native-message-state-owner', lambda root: append(root, 'apps/desktop/src/presentation/messaging.rs', local_state))
+    case('native-state-outside-owner', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', local_state), 1, 'native presentation import')
     case('native-worker-call', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.http_client(); }'), 1, 'hidden I/O')
     case('native-clipboard-outside-input', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.read_from_clipboard(); }'), 1, 'hidden I/O')
     case('native-deep-route', lambda root: (root/'apps/desktop/src/presentation/nested').mkdir() or (root/'apps/desktop/src/presentation/nested/leak.rs').write_text('const ROUTE: &str = "/ocs/v2.php/fixture";'), 1, 'native presentation contains')

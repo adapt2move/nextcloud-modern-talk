@@ -30,8 +30,8 @@ jobs:
     env:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      CC: clang-21
-      CXX: clang++-21
+      CC: clang
+      CXX: clang++
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,8 +51,6 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: cargo-linux-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - name: Verified WebRTC SDK
-        run: echo "LK_CUSTOM_WEBRTC=$(python3 tools/media/prepare_native.py --target linux-x64-release --output "$RUNNER_TEMP/webrtc")" >> "$GITHUB_ENV"
       - run: python3 tools/check_architecture.py
       - run: python3 tests/contracts/run_boundary_fixtures.py --candidate "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/boundary.json"
       - run: cargo fmt --all -- --check
@@ -76,8 +74,7 @@ jobs:
     timeout-minutes: 60
     env:
       AWS_LC_SYS_PREBUILT_NASM: "1"
-      # The verified Windows libwebrtc archive uses the static MSVC runtime.
-      RUSTFLAGS: "-D warnings -C target-feature=+crt-static"
+      RUSTFLAGS: "-D warnings"
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,8 +87,6 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: cargo-windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - name: Verified WebRTC SDK
-        run: echo "LK_CUSTOM_WEBRTC=$(python tools/media/prepare_native.py --target win-x64-release --output "$RUNNER_TEMP/webrtc")" >> "$GITHUB_ENV"
       - run: cargo build --locked --workspace --all-targets --target x86_64-pc-windows-msvc
 
   macos:
@@ -111,8 +106,6 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: cargo-macos-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - name: Verified WebRTC SDK
-        run: echo "LK_CUSTOM_WEBRTC=$(python3 tools/media/prepare_native.py --target mac-arm64-release --output "$RUNNER_TEMP/webrtc")" >> "$GITHUB_ENV"
       - run: cargo build --locked --workspace --all-targets --target aarch64-apple-darwin
       - name: Compile native permission and notification helper
         run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"

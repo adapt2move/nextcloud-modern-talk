@@ -22,6 +22,10 @@ The font and its notice were verified byte for byte against [Google Fonts' Manro
 
 Linux screen-sharing capability checks use [ashpd 0.12.3](https://docs.rs/crate/ashpd/0.12.3/source/) under the MIT license, with its existing zbus bindings. The bounded asynchronous wait uses [async-io 2.6.0](https://docs.rs/crate/async-io/2.6.0/source/) and [futures-lite 2.6.1](https://docs.rs/crate/futures-lite/2.6.1/source/), each under Apache-2.0 OR MIT. These dependency licenses and their copyright notices remain applicable; preserve the corresponding upstream license files in distribution notices.
 
+## Lucide icons
+
+The functional SVG icons are unmodified [Lucide 0.468.0](https://github.com/lucide-icons/lucide/tree/f12b0de177fbc2a6795e99be065887e72b237123), pinned to commit `f12b0de177fbc2a6795e99be065887e72b237123`. The unchanged [upstream notice](apps/desktop/assets/icons/LUCIDE-LICENSE) includes the ISC license and Cole Bemis / Feather MIT attribution. [The icon manifest](apps/desktop/assets/icons/lucide-manifest.json) records immutable upstream paths and SHA-256 values. The three application brand SVGs remain separate project artwork under EUPL-1.2.
+
 ## Design provenance and names
 
 The design package carries forward the project's original HTML/CSS sketches and screenshots. Revisions and schematic status are documented in [docs/design/artifacts.md](docs/design/artifacts.md). People, messages and the example organization are fictional; geometric portrait placeholders do not depict real call footage.

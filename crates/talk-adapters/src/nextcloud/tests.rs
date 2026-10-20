@@ -1,6 +1,8 @@
 use super::*;
 #[path = "alpha_tests.rs"]
 mod alpha_tests;
+#[path = "notification_tests.rs"]
+mod notification_tests;
 #[path = "people_tests.rs"]
 mod people_tests;
 #[path = "tag_tests.rs"]

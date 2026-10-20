@@ -290,6 +290,21 @@ impl NextcloudClient {
                 id: scope.conversation,
                 session: session.into_secret(),
             });
+        } else {
+            // HPB session retirement also retires its backend room session.
+            // ActivateRoom(force=false) refreshes a selected room's session
+            // before a new explicit call; it never starts media or a call.
+            let reply = self
+                .transport
+                .api_request(context, api::Request::ActivateRoom(room.clone()))
+                .await?;
+            let api::Reply::RoomSession(session) = reply else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            self.active = Some(super::ActiveConversation {
+                id: scope.conversation,
+                session: session.into_secret(),
+            });
         }
         let bundle = self.policy_sources(context, scope).await?;
         if call
@@ -314,7 +329,13 @@ impl NextcloudClient {
         let flags = ParticipantFlags::new(wishes.microphone, wishes.camera);
         let (reader, writer, stop) = self
             .transport
-            .begin_meeting(context, room, flags, call.recording_consent())
+            .begin_meeting(
+                context,
+                room,
+                flags,
+                call.recording_consent(),
+                &bundle.settings,
+            )
             .await?;
         let service = self
             .media_service

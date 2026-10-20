@@ -9,6 +9,7 @@ pub enum Probe {
     Controls,
     Focus,
     Accounts,
+    Messages,
 }
 impl Desktop {
     pub(super) fn control_probe(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {

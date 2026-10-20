@@ -1,7 +1,52 @@
 use super::*;
 use talk_core::preferences::account::{AccountPreferenceResult, AccountPreferences};
 
-fn model() -> Accounts {
+#[test]
+fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
+    use talk_core::preferences::updates::UpdateError;
+    use talk_core::ui::presentation::{CallStage, CallView, MediaState, RequiredGate};
+    let context = super::super::fixtures::context(1);
+    let scope = talk_core::ids::CallScope {
+        account: context.account,
+        conversation: context.conversation,
+        call: talk_core::ids::CallGeneration::from_local(31),
+    };
+    for stage in [
+        CallStage::Incoming,
+        CallStage::Outgoing,
+        CallStage::Connecting,
+        CallStage::Active,
+        CallStage::Reconnecting,
+        CallStage::Required(RequiredGate::Lobby),
+    ] {
+        let mut m = model();
+        m.snapshot.call = Some(CallView {
+            scope,
+            title: text("Current call"),
+            direct: true,
+            stage,
+            accept: Decision::Unknown,
+            microphone: MediaState::Off,
+            camera: MediaState::Off,
+            share: MediaState::Unavailable,
+            participants: Page::empty(),
+        });
+        assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));
+        assert!(!m.call_actions.update_sealed());
+    }
+    let mut m = model();
+    m.pending.push(Pending {
+        id: ConnectionRequestId(3),
+        purpose: Purpose::Call(scope),
+    });
+    assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));
+    m.pending.clear();
+    assert_eq!(m.seal_for_update(), Ok(()));
+    m.abort_update_admission();
+    assert!(!m.call_actions.update_sealed());
+}
+
+pub(super) fn model() -> Accounts {
     Accounts {
         media: talk_adapters::media::MediaService::new(),
         call_ui: None,
@@ -24,6 +69,7 @@ fn model() -> Accounts {
         room_invite: None,
         message_search: None,
         notices: notifications::Notices::default(),
+        background: background::Background::default(),
         picker: None,
         picker_open: false,
         message_poll_at: Instant::now(),

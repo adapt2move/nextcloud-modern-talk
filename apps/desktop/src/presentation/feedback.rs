@@ -1,7 +1,7 @@
 //! A single bounded, scoped result. No implicit retries or invented delivery.
 use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, state::error_label};
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{AnyElement, Context, div, prelude::*, px};
 use talk_core::ui::presentation::{CallStage, ConversationRef};
 use talk_core::ui::{SubmitError, UnavailableReason};
 
@@ -69,17 +69,17 @@ impl Desktop {
             && self.overlay.is_none()
             && !self.incoming_visible()
     }
-    pub(super) fn feedback_view(&self, cx: &Context<Self>) -> Div {
+    pub(super) fn feedback_view(&self, cx: &Context<Self>) -> AnyElement {
         let t = self.theme;
         let Some(f) = self.feedback else {
-            return div();
+            return div().into_any_element();
         };
         let (bg, fg, symbol) = match f.tone {
             Tone::Info => (t.subtle, t.text, "info"),
             Tone::Warning => (t.warning_bg, t.warning, "info"),
             Tone::Error => (t.danger_bg, t.danger, "info"),
         };
-        div()
+        let banner = div()
             .relative()
             .occlude()
             .rounded(px(8.))
@@ -106,7 +106,8 @@ impl Desktop {
                 LocalAction::DismissFeedback,
                 cx,
             ))
-            .child(self.reveal_region("dismiss-feedback", cx))
+            .child(self.reveal_region("dismiss-feedback", cx));
+        self.reveal((f.text, f.tone as usize), banner)
     }
 }
 #[cfg(test)]

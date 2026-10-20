@@ -1,8 +1,8 @@
 # Compatibility and product acceptance matrix
 
-Status: **Planned / not run** for every runtime scenario below. Source verification is recorded separately in [baselines and sources](baselines-and-sources.md). No native client, disposable Talk server, or VM was started for specification authoring. Follow the [quality verification process](../quality/verification.md), [security contract](../quality/security.md), and [test-server guidance](../quality/test-servers.md) when implementation reaches these gates.
+This matrix defines compatibility scenarios and required profiles. Results belong to evidence for an exact client, server and platform; listing a scenario here establishes neither a pass nor an unrun result. See the [feature inventory](feature-inventory.md) and [current state](../status.md) for implemented scope and limitations. Protocol source verification is recorded separately in [baselines and sources](baselines-and-sources.md). Follow the [quality verification process](../quality/verification.md), [security contract](../quality/security.md), and [test-server guidance](../quality/test-servers.md).
 
-Disposable temporary NextCloud/Talk servers are authorized for later functional checks. They must use synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. VM builds/services use agent-dev-box; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
+Functional checks use disposable NextCloud/Talk servers with synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. VM builds/services use agent-dev-box; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
 
 ## Required environments
 

@@ -1,8 +1,8 @@
 # ADR-005 — Maintained WebRTC engine and native device ownership
 
-The client uses the maintained [`libwebrtc` Rust binding](https://docs.rs/libwebrtc/0.3.52/libwebrtc/) at **0.3.52**, with the matching native SDK pinned by [prepare_native.py](../../../tools/media/prepare_native.py). It does not require a LiveKit server: NextCloud Talk remains the account, conversation and signaling backend.
+The client uses the Rust [`webrtc` crate](https://docs.rs/webrtc/0.21.1/webrtc/) at **0.21.1**, the async runtime layer over the same-version `rtc` Sans-I/O protocol core. The registry archive SHA-256 is `b621e736302bef784948cc8d8099fd0a8fdb5757693c80a344ffbe38c49387d2`. NextCloud Talk remains the account, conversation and signaling backend.
 
-The binding owns the native WebRTC implementation of SDP, ICE, DTLS/SRTP, codecs and data channels. Project Rust remains `forbid(unsafe_code)`. Native FFI and C++ internals belong to the dependency; using a safe Rust API does not make those dependencies memory-safe or establish their resource limits.
+`webrtc` owns SDP, ICE, DTLS/SRTP and SCTP data channels. Maintained GStreamer VP8/Opus elements own encoding, decoding, RTP receive reassembly, conversion and scaling, through the workspace's pinned safe Rust bindings. The engine exposes owned PCM/RGBA frames and engine-neutral configuration/state types. Project Rust remains `forbid(unsafe_code)`; native codec internals remain dependency code, and safe bindings alone do not establish their resource limits.
 
 ## Module boundaries
 
@@ -19,9 +19,9 @@ No device opens merely because a room is selected or an incoming call rings. Dev
 
 ## Source and distribution
 
-Cargo and the native SDK are separate build inputs. The build helper verifies the SDK archive SHA-256 and the complete extracted file inventory before Cargo uses `LK_CUSTOM_WEBRTC`. Linux, macOS Apple Silicon and Windows MSVC have separate pins. The release package includes the SDK's complete `LICENSE.md` and the resolved Rust dependency notices. See [development prerequisites](../../development.md) and [release tooling](../../../tools/release/README.md).
+[Cargo.lock](../../../Cargo.lock) fixes the Rust engine and codec bindings. GStreamer runtime and development libraries supply VP8/Opus codec elements as well as camera capture. The application requires no separate WebRTC SDK archive or custom compiler for that SDK. Packages carry resolved Rust notices and platform-native GStreamer licensing information. See [development prerequisites](../../development.md) and [release tooling](../../../tools/release/README.md).
 
-The older [native helper](../../../native/media/README.md) remains a diagnostic/fault-injection harness. It is not the shipping call engine and its tests do not qualify the maintained binding. Its source/patch cache and historical allocation model are not build prerequisites for the app.
+The older [native helper](../../../native/media/README.md) remains a diagnostic/fault-injection harness. It is not the shipping call engine and its tests do not qualify the Rust engine. Its source/patch cache and historical allocation model are not build prerequisites for the app.
 
 ## Lifetime and supported profiles
 

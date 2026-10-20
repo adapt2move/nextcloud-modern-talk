@@ -4,11 +4,11 @@ A native desktop client for teams using NextCloud Talk, built in Rust with GPUI 
 
 The target server families are **NextCloud 34 / Talk 24** and **NextCloud 35 / Talk 25**. Availability depends on server capabilities, configuration and permissions. macOS is the first product target; Linux is a development and packaging target.
 
-**v0.0.1 alpha:** browser-based account connection, conversation settings, messaging, durable local preferences and ordinary audio/video calls. Download the [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases/tag/v0.0.1) and read its [installation instructions and limits](docs/alpha.md). Full official-client parity is still in progress.
+**v0.0.2 alpha:** browser-based account connection, conversation settings, messaging, background activity, audio/video calls and automatic update downloads. The native UI uses Lucide icons, contextual chat actions and subtle transitions that respect Reduce Motion. Download the [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases/tag/v0.0.2) and read its [installation instructions and limits](docs/alpha.md). Full official-client parity is still in progress.
 
 ![Native conversation view in German, showing a synthetic team conversation](docs/assets/chat.png)
 
-The screenshot shows the native Linux app connected to a disposable NextCloud server with synthetic accounts.
+The untouched screenshot shows the native Linux app with fictional conversations in its built-in UI scenario.
 
 ## Contribute
 

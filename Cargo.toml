@@ -3,15 +3,21 @@ members = ["crates/nextcloud-talk-api", "crates/talk-core", "crates/talk-adapter
 resolver = "3"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 rust-version = "1.99"
 license = "EUPL-1.2"
 publish = false
 
 [workspace.dependencies]
-libwebrtc = { version = "=0.3.52", default-features = false }
+webrtc = { version = "=0.21.1", default-features = false, features = ["runtime-tokio", "crypto-ring"] }
+# Exact core types used by the released async crate (media samples/RTP/codecs).
+rtc = { version = "=0.21.1", default-features = false }
+async-trait = "=0.1.89"
 futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
+rustls-native-certs = { version = "=0.8.5", default-features = false }
 nextcloud-talk-api = { path = "crates/nextcloud-talk-api" }
 talk-core = { path = "crates/talk-core" }
 talk-adapters = { path = "crates/talk-adapters" }
@@ -25,6 +31,13 @@ zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
 cookie = { version = "=0.18.1", default-features = false }
 semver = { version = "=1.0.28", default-features = false, features = ["std"] }
+# Offline staged installation uses the released updater's transactional bundle swap.
+self_update = { version = "=1.3.1", default-features = false, features = ["reqwest", "rustls", "checksums", "archive-tar", "compression-tar-gz", "archive-zip", "compression-zip-deflate"] }
+sha2 = { version = "=0.11.1", default-features = false }
+tempfile = { version = "=3.27.0", default-features = false, features = ["getrandom"] }
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+tar = { version = "=0.4.46", default-features = false }
+zip = { version = "=9.0.4", default-features = false, features = ["deflate"] }
 # GPUI's pinned xattr/tar chain still uses libc::ENOATTR. Keep the lock
 # resolution at libc 0.2.186 until that upstream chain is updated and compiled.
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
@@ -35,6 +48,9 @@ gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"
 gstreamer-app = { version = "=0.25.2", default-features = false, features = ["v1_24"] }
 gstreamer-video = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 image = { version = "=0.25.10", default-features = false }
+# Windows' documented native emoji shortcut; OS calls stay behind safe bindings.
+enigo = { version = "=0.6.1", default-features = false }
+windows = { version = "=0.61.3", default-features = false, features = ["UI_ViewManagement"] }
 # Reuse the locked safe CoreGraphics preflight API; it neither prompts nor captures.
 core-graphics = { version = "=0.24.0", default-features = false, features = ["link"] }
 

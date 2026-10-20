@@ -6,7 +6,11 @@ This is the design contract for conversation controls, governed by [CONV-004–0
 
 Remove the persistent right-hand conversation-details sidebar. Keep the main conversation navigation, timeline, file access and in-call chat. Preserve the reading position and draft when opening or closing a dialog.
 
-The room title retains its personal pin/unpin action. At the right of the header, in this order:
+The room title opens a centered **Shared content** dialog for the current conversation. It lists only the existing server-projected shared files/media and pinned messages, with their typed download and context actions. Member management and conversation settings remain separate dialogs; the shared-content dialog does not recreate a details sidebar.
+
+A **star** directly beside the title changes the real personal favorite state. Reveal the header star on header hover or keyboard focus; distinguish its confirmed active state. The sidebar always shows a star for confirmed favorites. A **search** icon beside the title opens the conversation search field immediately below the header. Ctrl+F on Windows/Linux and Command+F on macOS opens or focuses this field, and toggles it closed when already focused. Escape closes it and restores its invoking focus without discarding a draft or ending a call. Search, result paging and context navigation retain the originating account/room scope. The separate Command/Ctrl+K loaded-content search remains available. Do not intercept IME composition or unrelated modal shortcuts.
+
+At the right of the header, in this order:
 
 1. **Members:** a group icon and the authorized membership count; opens the members dialog. Hide it for direct conversations and Note to self. Unknown, restricted or partially loaded membership is not a fabricated total or an online count.
 2. **Call:** headphones for direct conversations, Huddles and ordinary group chats; camera for conferences/webinars and a presentation icon for presentations. Use a contextual accessible label, “Gespräch starten”, “Gespräch beitreten” or “Meeting vorbereiten”. Resolve the actual start/join permissions, current call and backend readiness before enabling it.
@@ -15,6 +19,12 @@ The room title retains its personal pin/unpin action. At the right of the header
 A deliberate headphone action enters the audio connecting/joining flow without a generic device-prejoin page. Saved device/mute preferences, server start-without-media policy, required OS permission, consent, lobby and security checks still apply. Selecting a conversation never joins or starts capture. Conference/webinar/presentation entry retains its explicit preparation screen.
 
 The local navigation group named “Kanäle” can contain ordinary group chats. It does not confer call authority on the server's actual Channel preset, which forbids calls for every role. Show the disabled call action with its reason. A presentation icon does not itself start screen capture or create a whiteboard.
+
+Per-message reply and more-actions icons reveal on that message's hover or keyboard focus. Reserve their space so revelation never moves the message. Reply uses the existing quote target and revalidates current scope, message identity, send rights, deleted state and pending operations. All icon actions share the same localized hover/focus hint surface, including enabled controls.
+
+Nonessential hover, selection and reveal transitions are finite. Keyboard focus and input changes remain immediate; reduced motion suppresses decoration. Unknown system motion preferences suppress animation until the platform owner provides a value.
+
+The composer opens the native emoji picker only where supported. macOS uses the pinned GPUI character palette and keeps the native input selection. On other systems, availability and launch results come from the platform owner. A Linux system picker that copies a choice explains the explicit paste step and requires admitted clipboard use. No picker action reads or pastes clipboard automatically, changes marked text or crosses a modal/account/room boundary.
 
 ## Members and bots
 

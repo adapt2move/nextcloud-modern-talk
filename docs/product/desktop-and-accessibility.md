@@ -1,6 +1,6 @@
 # Desktop behavior, accessibility, and resilience
 
-Status: **Planned**. macOS is primary. Other OS adapters are architectural targets, not supported downloads. Server notification/presence/settings facts are referenced in [sources S03, S05, S08, S15](../compatibility/baselines-and-sources.md#protocol-sources).
+These requirements define desktop behavior and accessibility. macOS is the primary product target; available packages and platform qualifications are described in [current state](../status.md) and the [alpha notes](../alpha.md). Server notification/presence/settings facts are referenced in [sources S03, S05, S08, S15](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## DESK-001
 
@@ -52,6 +52,10 @@ Acceptance: VoiceOver and keyboard-only users can add an account, change convers
 
 Acceptance: reduced motion removes nonessential animation without hiding progress. At 200% text size, core workflows remain available without text covering their controls. Selection/focus and disabled/error states stay distinguishable in both palettes. Animated images/reactions do not force autoplay when reduced motion or user preference disables it.
 
+Use one consistent Lucide icon set for application actions, retaining upstream attribution; product branding remains separate. Every icon action has a localized styled tooltip and keyboard-accessible explanation. Hover and selection transitions are brief and settle completely; idle windows do not redraw to animate a static control. Unknown system motion preferences use reduced motion until an observation is available.
+
+Use decorative motion for control feedback and newly opened dialogs, settings pages and small contextual surfaces. Input, focus, semantic state and hitboxes take effect immediately. Closing a dialog, updating progress, receiving a message or remounting a virtualized row must not restart unrelated animation. Typing, IME composition, manual scrolling, media frames and incoming-call presentation remain immediate. Newly appended message bubbles use the bounded entry behavior in MSG-001; delivery state is never delayed by decoration. Reduce Motion preserves the same final visuals without decorative transitions.
+
 ## DESK-007
 
 **Offline and reconnect (P1 messaging; P2 media).** Show account-specific offline/stale state and last successful synchronization where useful. Permit reading policy-approved cached content and composing drafts. Do not silently queue permission-changing/destructive actions or automatically send newly composed offline text. On reconnect, refresh credentials/session, capabilities, room membership/policies, and content before making actions available.
@@ -78,6 +82,8 @@ Acceptance: deterministic checks cover resource/key completeness, placeholders, 
 
 ## DESK-011
 
-**Application updates and OS scope (P4 distribution work; honest status P1).** Report the actual client version and a trusted project release location. A future updater requires the distribution/security contract, integrity verification, and rollback/failure behavior before activation. Additional OS clients must verify native secret storage, capture, notification, and accessibility integrations separately.
+**Application updates and OS scope.** Report the actual client version and use this project's GitHub Releases for the selected stable or prerelease channel. Check automatically at a randomized daily time and on explicit request from Settings. Persist the schedule across restarts and download a matching newer package in the background with bounded storage and network work. A verified, installable update exposes a small **Update** action in the top application bar.
 
-Acceptance: source availability or successful cross-compilation is not labeled platform support. No arbitrary update executable is downloaded/run from a server-supplied message. A server “upgrade required” response explains the need without bypassing it or treating it as an authentication failure.
+Hide the update action while a call or conference is ringing, being joined, active or ending. Recheck the authoritative application state when it is activated, block new call admission during the transition, and drain work before installing and restarting. Never end a call implicitly to update. Revalidate the exact staged package; replace the complete application bundle where applicable, and use the native package manager for a system-managed installation. Failure must preserve a usable installation, explain the outcome and offer a deliberate recovery action.
+
+Acceptance: checks cover schedule persistence, channel/version/target selection, interrupted downloads, integrity failure, stale staged data, call-admission races and installation rollback. A package without a supported install route is not shown as ready. No executable is downloaded or run from a chat message or server-supplied update URL. A server “upgrade required” response explains the need without bypassing it or treating it as an authentication failure. Source availability or successful cross-compilation is not labeled platform support; signing, notarization and native OS behavior retain their actual qualification limits.

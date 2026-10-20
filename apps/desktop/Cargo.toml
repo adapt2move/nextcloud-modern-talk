@@ -26,5 +26,9 @@ ashpd.workspace = true
 async-io.workspace = true
 futures-lite.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+enigo.workspace = true
+windows.workspace = true
+
 [lints]
 workspace = true

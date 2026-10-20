@@ -1,6 +1,6 @@
 # Typed terminology and domain rules
 
-Status: **Planned**. The following are semantic types for the architecture bootstrap, not implemented Rust definitions. Protocol facts are pinned in [sources S03–S08](../compatibility/baselines-and-sources.md#protocol-sources).
+The following terms define domain identities, roles and policy distinctions across the product and architecture. They describe required meanings without asserting that every concept has a corresponding Rust type. Protocol facts are pinned in [sources S03–S08](../compatibility/baselines-and-sources.md#protocol-sources).
 
 Our own UI and prose use **NextCloud** and business, team and workspace vocabulary across English, German and Spanish; Talk is not described as a home, Zuhause or hogar. Preserve exact technical identifiers, URLs, domains, repository paths, protocol values and verbatim source quotations. This is our product-copy convention, not a claim about upstream trademark spelling.
 

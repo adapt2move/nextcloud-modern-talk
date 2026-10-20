@@ -2,6 +2,7 @@ use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::Decision;
+use talk_core::ui::messaging::{MessageAction, MessageFeature};
 use talk_core::ui::presentation::{
     ContentState, ConversationKind, ConversationView, Presence, UiIntent,
 };
@@ -197,7 +198,19 @@ impl Desktop {
             talk_core::ui::presentation::ConversationCategory::Conference(_) => "video",
             _ => "headphones",
         };
+        let favorite_name = if self.favorite_value(row) == Some(true) {
+            "Aus Favoriten entfernen"
+        } else {
+            "Zu Favoriten hinzufügen"
+        };
+        let favorite_availability = Availability::when(
+            self.can_favorite(row),
+            "Favoriten sind für dieses Gespräch nicht verfügbar.",
+        );
+        let search_availability = self.message_available(MessageFeature::Search);
         let header = div()
+            .id("conversation-header")
+            .group("conversation-header")
             .flex_none()
             .flex()
             .flex_wrap()
@@ -219,33 +232,54 @@ impl Desktop {
                             .items_center()
                             .gap_2()
                             .child(
-                                div()
-                                    .text_size(self.sp(18.))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(row.title.as_str().to_owned()),
+                                self.control(
+                                    "conversation-title",
+                                    ButtonStyle::Quiet,
+                                    Availability::available().hinted().explained_elsewhere(),
+                                    LocalAction::MessageIn(
+                                        row.context,
+                                        super::messaging::Action::Files,
+                                    ),
+                                    cx,
+                                )
+                                .min_w_0()
+                                .justify_start()
+                                .p_0()
+                                .min_h(px(28.))
+                                .text_color(t.text)
+                                .text_size(self.sp(18.))
+                                .font_weight(FontWeight::BOLD)
+                                .child(row.title.as_str().to_owned()),
+                            )
+                            .child(
+                                self.icon_button(
+                                    "favorite-conversation",
+                                    ("star", favorite_name),
+                                    if self.favorite_value(row) == Some(true) {
+                                        ButtonStyle::Primary
+                                    } else {
+                                        ButtonStyle::Quiet
+                                    },
+                                    favorite_availability.explained_elsewhere(),
+                                    LocalAction::Favorite(
+                                        row.context,
+                                        self.favorite_value(row) != Some(true),
+                                    ),
+                                    cx,
+                                )
+                                .flex_none()
+                                .opacity(0.)
+                                .group_hover("conversation-header", |s| s.opacity(1.))
+                                .focus(|s| s.opacity(1.)),
                             )
                             .child(self.icon_button(
-                                "pin-conversation",
-                                (
-                                    "pin",
-                                    if self.favorite_value(row) == Some(true) {
-                                        "Lösen"
-                                    } else {
-                                        "Anheften"
-                                    },
-                                ),
-                                if self.favorite_value(row) == Some(true) {
-                                    ButtonStyle::Primary
-                                } else {
-                                    ButtonStyle::Quiet
-                                },
-                                Availability::when(
-                                    self.can_favorite(row),
-                                    "Anheften ist für dieses Gespräch nicht verfügbar.",
-                                ),
-                                LocalAction::Favorite(
+                                "history-search",
+                                ("search", "Im Gespräch suchen"),
+                                ButtonStyle::Quiet,
+                                search_availability.explained_elsewhere(),
+                                LocalAction::MessageIn(
                                     row.context,
-                                    self.favorite_value(row) != Some(true),
+                                    super::messaging::Action::ToggleSearch,
                                 ),
                                 cx,
                             )),
@@ -271,6 +305,16 @@ impl Desktop {
                         .child(self.l("Vertraulich")),
                 )
             })
+            .when(self.can_install_update(), |d| {
+                d.child(self.button(
+                    "install-update",
+                    "Update",
+                    ButtonStyle::Primary,
+                    true,
+                    LocalAction::InstallUpdate(self.updates.generation),
+                    cx,
+                ))
+            })
             .when(
                 !matches!(
                     row.kind,
@@ -278,14 +322,16 @@ impl Desktop {
                 ),
                 |d| {
                     d.child(
-                        self.control(
+                        self.icon_button(
                             "room-members",
+                            ("users", "Mitglieder"),
                             ButtonStyle::Quiet,
-                            true,
+                            Availability::available().explained_elsewhere(),
                             LocalAction::Open(Overlay::Participants),
                             cx,
                         )
-                        .child(self.scaled_icon("users", 20., t.text))
+                        .w_auto()
+                        .px_2()
                         .when_some(row.participants, |d, count| d.child(count.to_string())),
                     )
                 },
@@ -302,7 +348,7 @@ impl Desktop {
                 "room-info",
                 ("settings", "Gesprächseinstellungen"),
                 ButtonStyle::Quiet,
-                Availability::available(),
+                Availability::available().explained_elsewhere(),
                 LocalAction::Open(Overlay::RoomInfo),
                 cx,
             ));
@@ -321,6 +367,12 @@ impl Desktop {
             .when(!self.background_inert, |d| {
                 d.child(self.reason_tip("call".into(), call_availability.below_control(), Some(call_name), cx))
                     .child(self.reason_tip("room-info".into(), Availability::available().below_control(), Some("Gesprächseinstellungen"), cx))
+                    .child(self.reason_tip("conversation-title".into(), Availability::available().below_control(), Some("Geteilte Inhalte"), cx))
+                    .child(self.reason_tip("favorite-conversation".into(), favorite_availability.below_control(), Some(favorite_name), cx))
+                    .child(self.reason_tip("history-search".into(), search_availability.below_control(), Some("Im Gespräch suchen"), cx))
+                    .when(!matches!(row.kind, ConversationKind::Direct | ConversationKind::NoteToSelf), |d| {
+                        d.child(self.reason_tip("room-members".into(), Availability::available().below_control(), Some("Mitglieder"), cx))
+                    })
             });
         let timeline = self.message_timeline(constrained, cx);
         let composer =
@@ -346,6 +398,7 @@ impl Desktop {
             .flex_col()
             .bg(t.surface)
             .child(header)
+            .child(self.conversation_search(cx))
             .child(timeline)
             .child(composer);
         div()
@@ -373,6 +426,7 @@ impl Desktop {
         let t = self.theme;
         let ready = self.snapshot.content == ContentState::Ready && row.send == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
+        let emoji_availability = self.emoji_availability(cx).above_composer();
         let attachment_availability = Availability::when(
             self.snapshot.content == ContentState::Ready
                 && self.snapshot.message_panel.as_ref().is_some_and(|p| {
@@ -444,6 +498,12 @@ impl Desktop {
                             cx,
                         ))
                         .child(self.reason_tip(
+                            "emoji-picker".into(),
+                            emoji_availability,
+                            Some("Emoji auswählen"),
+                            cx,
+                        ))
+                        .child(self.reason_tip(
                             "send".into(),
                             send_availability,
                             Some("Senden"),
@@ -456,16 +516,33 @@ impl Desktop {
                             .items_center()
                             .justify_between()
                             .gap_3()
-                            .child(self.icon_button(
-                                "attach",
-                                ("paperclip", "Datei anhängen"),
-                                ButtonStyle::Quiet,
-                                attachment_availability,
-                                LocalAction::Message(super::messaging::Action::Command(
-                                    talk_core::ui::messaging::MessageAction::PickUpload,
-                                )),
-                                cx,
-                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(self.icon_button(
+                                        "attach",
+                                        ("paperclip", "Datei anhängen"),
+                                        ButtonStyle::Quiet,
+                                        attachment_availability,
+                                        LocalAction::MessageIn(
+                                            row.context,
+                                            super::messaging::Action::Command(
+                                                MessageAction::PickUpload,
+                                            ),
+                                        ),
+                                        cx,
+                                    ))
+                                    .child(self.icon_button(
+                                        "emoji-picker",
+                                        ("smile", "Emoji auswählen"),
+                                        ButtonStyle::Quiet,
+                                        emoji_availability,
+                                        LocalAction::EmojiPicker(row.context),
+                                        cx,
+                                    )),
+                            )
                             .child(
                                 div()
                                     .flex()
@@ -512,6 +589,98 @@ impl Desktop {
                     ),
                 )
             })
+    }
+    fn emoji_availability(&self, cx: &Context<Self>) -> Availability {
+        let supported = cfg!(target_os = "macos") || self.settings_port.emoji_picker_available();
+        let clipboard = !cfg!(target_os = "linux") || self.composer.read(cx).clipboard_allowed;
+        let composing = self.input_composing(cx);
+        Availability::when(
+            supported && clipboard && self.composer_available() && !composing,
+            if composing {
+                "Beende zuerst die laufende Texteingabe."
+            } else if !supported {
+                "Die native Emoji-Auswahl ist auf diesem System nicht verfügbar."
+            } else if !clipboard {
+                "Die Emoji-Auswahl benötigt die für diesen Entwurf gesperrte Zwischenablage."
+            } else {
+                "Öffne zuerst das Nachrichtenfeld."
+            },
+        )
+        .help(if cfg!(target_os = "linux") && supported {
+            "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein."
+        } else {
+            ""
+        })
+    }
+    pub(super) fn show_composer_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.composer_available()
+            || self.input_composing(cx)
+            || !self.composer.read(cx).interactive
+            || self.emoji_picker_pending.is_some()
+            || (cfg!(target_os = "linux") && !self.composer.read(cx).clipboard_allowed)
+        {
+            return;
+        }
+        let Some(context) = self.snapshot.selected else {
+            return;
+        };
+        if !cfg!(target_os = "macos") && !self.settings_port.emoji_picker_available() {
+            return;
+        }
+        let Some(generation) = self.emoji_picker_generation.checked_add(1) else {
+            return;
+        };
+        self.emoji_picker_generation = generation;
+        // Focus alone leaves the exact selection, marked text, history and draft
+        // untouched. Wait one frame for the native text handler to own focus.
+        self.composer.focus_handle(cx).focus(window);
+        self.emoji_picker_pending = Some((context, generation));
+        let view = cx.weak_entity();
+        window.on_next_frame(move |window, cx| {
+            let _ = view.update(cx, |this, cx| {
+                if this.emoji_picker_pending != Some((context, generation)) {
+                    return;
+                }
+                this.emoji_picker_pending = None;
+                if this.snapshot.selected != Some(context)
+                    || this.projection_blocked
+                    || !window.is_window_active()
+                    || !this.composer_available()
+                    || this.snapshot.content == ContentState::Denied
+                    || this.selected().is_none_or(|row| row.send == Decision::Denied)
+                    || this.input_composing(cx)
+                    || !this.composer.read(cx).interactive
+                    || (cfg!(target_os = "linux") && !this.composer.read(cx).clipboard_allowed)
+                    || !this.composer.focus_handle(cx).is_focused(window)
+                {
+                    return;
+                }
+                if cfg!(target_os = "macos") {
+                    window.show_character_palette();
+                } else {
+                    this.emoji_picker_context = None;
+                    match this.settings_port.show_emoji_picker() {
+                        Ok(()) if cfg!(target_os = "linux") => {
+                            this.emoji_picker_context = Some(context);
+                            this.feedback = Some(super::feedback::Feedback::info(
+                                "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein.",
+                            ).in_conversation(context));
+                        }
+                        Ok(()) => this.emoji_picker_context = Some(context),
+                        Err(error) => {
+                            this.feedback = Some(super::feedback::Feedback::error(error.label())
+                                .in_conversation(context));
+                        }
+                    }
+                    cx.notify();
+                }
+            });
+        });
+    }
+    pub(super) fn retire_emoji_picker(&mut self) {
+        self.emoji_picker_pending = None;
+        self.emoji_picker_context = None;
+        self.settings_port.cancel_emoji_picker();
     }
     pub(super) fn incoming(&self, cx: &Context<Self>) -> Div {
         let call = self.snapshot.call.as_ref().expect("incoming projection");

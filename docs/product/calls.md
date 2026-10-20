@@ -1,6 +1,6 @@
 # Direct calls and conferences
 
-Status: **Planned**. Native media/signaling integration is not demonstrated by the mockups. Protocol evidence: [call, signaling, recording, constants, and capability sources](../compatibility/baselines-and-sources.md#protocol-sources). Every criterion below is a release requirement for the relevant supported path, not a report of successful tests.
+This document defines direct-call and conference behavior. The [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) record implemented scope and limitations. Protocol evidence: [call, signaling, recording, constants, and capability sources](../compatibility/baselines-and-sources.md#protocol-sources). Every criterion below is a release requirement for the relevant supported path, not a report of successful tests.
 
 ## CALL-001
 

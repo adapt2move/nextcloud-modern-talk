@@ -132,6 +132,13 @@ impl Drafts {
             .iter()
             .any(|d| d.context == context && (d.pending.is_some() || d.uncertain))
     }
+    /// Restart must not discard another room's draft, quoted/thread draft, or
+    /// an empty editor whose previous submission is still unresolved.
+    pub fn has_unsent(&self) -> bool {
+        self.entries.iter().any(|draft| {
+            !draft.text.as_str().is_empty() || draft.pending.is_some() || draft.uncertain
+        })
+    }
     pub fn save(&mut self, context: ConversationRef, text: &str) -> Result<(), SubmitError> {
         if !context.is_consistent() {
             return Err(SubmitError::StaleScope);
@@ -394,6 +401,55 @@ mod tests {
         fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
             None
         }
+    }
+    #[test]
+    fn restart_guard_covers_other_rooms_targets_and_unresolved_empty_drafts() {
+        let mut drafts = Drafts::default();
+        let first = context(1);
+        let second = context(2);
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        assert!(!drafts.has_unsent());
+        drafts.save(first, "Retained in another room").unwrap();
+        drafts.save(second, "").unwrap();
+        assert!(drafts.has_unsent());
+        drafts.save(first, "").unwrap();
+        assert!(!drafts.has_unsent());
+        assert!(drafts.set_target(
+            first,
+            talk_core::ui::messaging::ComposeTarget {
+                reply_to: Some(42),
+                ..Default::default()
+            }
+        ));
+        drafts.save(first, "Reply draft").unwrap();
+        assert!(drafts.set_target(first, Default::default()));
+        assert_eq!(drafts.text(first), "");
+        assert!(drafts.has_unsent());
+        assert!(drafts.set_target(
+            first,
+            talk_core::ui::messaging::ComposeTarget {
+                reply_to: Some(42),
+                ..Default::default()
+            }
+        ));
+        let request = drafts.send(first, Decision::Allowed, &mut port).unwrap();
+        drafts.save(first, "").unwrap();
+        assert!(drafts.has_unsent());
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: first,
+            result: Completion::Uncertain,
+        }));
+        assert!(drafts.has_unsent());
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: first,
+            result: Completion::ServerAccepted,
+        }));
+        assert!(!drafts.has_unsent());
     }
     #[test]
     fn busy_and_denied_never_erase_text_or_create_pending_work() {

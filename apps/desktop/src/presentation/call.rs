@@ -244,8 +244,9 @@ impl Desktop {
             .flex_col()
             .gap_4();
         if call.stage == CallStage::Reconnecting {
-            stage =
-                stage.child(
+            stage = stage.child(
+                self.reveal(
+                    "call-reconnecting",
                     div()
                         .flex_none()
                         .p_4()
@@ -264,7 +265,8 @@ impl Desktop {
                             LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
                             cx,
                         )),
-                );
+                ),
+            );
         }
         if let CallStage::Required(gate) = call.stage {
             let reason = match gate {
@@ -692,7 +694,7 @@ impl Desktop {
                     .font_weight(FontWeight::SEMIBOLD).child(call.title.as_str().to_owned()))
                 .child(self.scroll_area(super::navigation::Region::Call).flex_1().min_h_0().p_6()
                     .child(div().max_w(px(520.)).mx_auto().py_6().flex().flex_col().gap_4()
-                        .child(outcome)
+                        .child(self.reveal(("call-outcome", usize::from(failed)), outcome))
                         .child(self.button("return-conversation", "Zurück zum Gespräch", ButtonStyle::Primary,
                             true, LocalAction::ReturnConversation, cx))
                         .child(self.button("rejoin-call", if call.direct { "Erneut anrufen" } else { "Erneut beitreten" },
@@ -723,46 +725,9 @@ impl Desktop {
                 .child(self.l("Chat")),
         );
         if let Some(row) = row {
-            let mut messages = self
-                .scroll_area(super::navigation::Region::Timeline)
-                .flex_1()
-                .min_h_0()
-                .p_4()
-                .flex()
-                .flex_col()
-                .gap_5()
-                .border_2()
-                .border_color(gpui::transparent_black())
-                .focus(|s| s.border_color(t.focus))
-                .child(self.hint(self.l("Nachrichten bleiben in diesem Gespräch.")));
-            for m in self.snapshot.messages.as_slice() {
-                messages = messages.child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(self.person_avatar(m.initials.as_str(), 26.))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(self.sp(12.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(m.author.as_str().to_owned()),
-                                )
-                                .child(
-                                    div()
-                                        .mt_1()
-                                        .text_size(self.sp(12.))
-                                        .line_height(self.sp(19.))
-                                        .child(m.body.as_str().to_owned()),
-                                ),
-                        ),
-                );
-            }
             body = body
-                .child(messages)
+                .child(self.conversation_search(cx))
+                .child(self.message_timeline(false, cx))
                 .child(self.composer_view(row, true, cx));
         } else {
             body = body.child(self.state_note(

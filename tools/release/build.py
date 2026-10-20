@@ -5,7 +5,6 @@ Uses only the repository toolchain/lock and default-free talk-desktop release ta
 Native dependency notices fail closed when absent. This is not a license approval.
 """
 import argparse
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,7 +14,7 @@ import subprocess
 import tempfile
 import tomllib
 
-from package import TARGETS, assemble, sha, relative, regular
+from package import TARGETS, assemble, sha, relative, regular, media_metadata
 
 MAC_GSTREAMER_LIB = Path("/Library/Frameworks/GStreamer.framework/Versions/1.0/lib")
 
@@ -149,7 +148,10 @@ def dependency_notices(root, stage, target, env):
         notice_files = set()
         for path in package_dir.rglob("*"):
             rel = path.relative_to(package_dir)
-            if len(rel.parts) <= 3 and path.is_file() and re.match(r"^(license|licence|copying|notice|authors|copyright)([._-]|$)", path.name, re.I):
+            if len(rel.parts) <= 3 and path.is_file() and (
+                re.match(r"^(license|licence|copying|notice|authors|copyright)([._-]|$)", path.name, re.I)
+                or any(part.lower() in ("licenses", "licences") for part in rel.parts[:-1])
+            ):
                 notice_files.add(path)
         if p.get("license_file"):
             notice_files.add(package_dir / p["license_file"])
@@ -181,27 +183,6 @@ def dependency_notices(root, stage, target, env):
     (stage / "dependencies.json").write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n")
 
 
-def native_engine(root, stage, target, env):
-    """Validate the exact SDK before building and ship its complete native notices."""
-    spec = importlib.util.spec_from_file_location("nmt_native_sdk", root / "tools/media/prepare_native.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    native_target = {"x86_64-unknown-linux-gnu": "linux-x64-release", "aarch64-apple-darwin": "mac-arm64-release"}[target]
-    configured = Path(env["LK_CUSTOM_WEBRTC"]).resolve()
-    verified = module.prepare(native_target, configured.parent)
-    if verified != configured:
-        raise ValueError("Native SDK path differs from verified input")
-    notice = verified / "LICENSE.md"
-    destination = stage / "licenses/native-libwebrtc-LICENSE.md"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(notice, destination)
-    record = json.loads((verified / ".nmt-native.json").read_text())
-    (stage / "native-media.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-    return {"enabled": True, "engine": "libwebrtc", "version": "0.3.52", "sdk_tag": module.TAG,
-            "sdk_target": native_target, "sdk_sha256": record["archive_sha256"],
-            "notice": "licenses/native-libwebrtc-LICENSE.md"}
-
-
 def build(root, output, target, version):
     root, output = root.resolve(), output.resolve()
     if output == root or root in output.parents or output.exists():
@@ -213,7 +194,7 @@ def build(root, output, target, version):
     policy = json.loads((root / "tools/release/package-policy.json").read_text())
     if policy.get("schema") != 1 or policy.get("composition") not in ("unconfigured", "account-connection"):
         raise ValueError("Unknown application composition")
-    if policy["media"].get("enabled") and policy["media"].get("engine") != "libwebrtc":
+    if policy["media"].get("enabled") and policy["media"].get("engine") != "webrtc":
         raise ValueError("Only the maintained production engine is distributable")
     workspace_version = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]["version"]
     if version.split("-")[0] != workspace_version.split("-")[0]:
@@ -242,10 +223,10 @@ def build(root, output, target, version):
             raise ValueError("Linux package must be built on native Linux x86_64")
         stage = tmp / "input"
         stage.mkdir()
-        native = None
-        if policy["media"].get("enabled"):
-            native = native_engine(root, stage, target, env)
         dependency_notices(root, stage, target, env)
+        media = policy["media"]
+        if media.get("enabled"):
+            media = media_metadata(json.loads((stage / "dependencies.json").read_text())["packages"])
         run(["cargo", "build", "--locked", "--release", "--no-default-features", "-p", "talk-desktop", "--target", target], root, env, 3600)
         executable = tmp / "target" / target / "release/talk-desktop"
         (stage / "bin").mkdir()
@@ -304,7 +285,7 @@ def build(root, output, target, version):
         if before != snapshot(root):
             raise ValueError("Source changed while building")
         spec = {"schema": 1, "version": version, "kind": "development", "target": target, "source": source,
-                "build": build_info, "media": native or policy["media"], "files": {p.relative_to(stage).as_posix(): sha(p) for p in sorted(stage.rglob("*")) if p.is_file()}}
+                "build": build_info, "media": media, "files": {p.relative_to(stage).as_posix(): sha(p) for p in sorted(stage.rglob("*")) if p.is_file()}}
         (stage / "input.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
         report = assemble(stage, output)
         base = next(output.glob("*.provenance.json")).name.removesuffix(".provenance.json")

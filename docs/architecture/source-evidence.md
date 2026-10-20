@@ -71,13 +71,12 @@ these declarations are not a measured performance result.
 
 ## A-SRC-06 — Native media research and shipping inputs
 
-The shipping safe Rust binding is `libwebrtc =0.3.52`; the selected native SDK and
-its digests are declared in [prepare_native.py](../../tools/media/prepare_native.py).
-[Native media architecture](decisions/005-native-media.md) describes ownership,
-limitations and packaging. Third-party Rust and native notices accompany packages.
+The shipping transport is [`webrtc =0.21.1`](https://docs.rs/crate/webrtc/0.21.1/source/), an async runtime over `rtc =0.21.1`. Its registry archive SHA-256 is `b621e736302bef784948cc8d8099fd0a8fdb5757693c80a344ffbe38c49387d2`. The released `play-from-disk-vpx`, `save-to-disk-vpx` and data-channel examples define the API used by the engine; older 0.14 examples do not apply. The [lockfile](../../Cargo.lock) pins the complete resolution, including the safe GStreamer codec bindings.
+
+[Native media architecture](decisions/005-native-media.md) describes ownership, limitations and packaging. Rust dependency and native codec notices accompany packages; a separate libwebrtc SDK is no longer a shipping input.
 
 The older [media source index](evidence/native-media-sources.json) preserves
 attributed upstream references for codecs, transform APIs and Talk framing.
-It is research provenance, not the shipping SDK identity or an SBOM. Application
+It is research provenance, not the shipping engine identity or an SBOM. Application
 queue bounds do not establish codec, framework, GPU or whole-process memory
 bounds; see [allocation requirements](media-allocation.md).

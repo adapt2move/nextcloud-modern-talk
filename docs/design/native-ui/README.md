@@ -14,6 +14,8 @@ Snapshots, input strings, drafts, focus identities and completion retention must
 
 A draft clears only after its matching server-accepted result if the user has not edited it since submission. Server acceptance does not mean delivery or read. Unknown, stale or denied policy keeps gated actions unavailable. A preview cannot invent a successful backend operation or grant device capture.
 
+Update activation carries the displayed release generation and is hidden during nonterminal calls. Before restart, every retained draft and unresolved submission, the current editor and any active text composition must be clear. Once the composition owner admits installation, presentation immediately makes editors and ordinary actions inert while leaving native window close available. A later install failure does not reopen drained services; the composition owner provides the native restart/quit outcome.
+
 ## Settings contract
 
 Blue/System/100%/Comfortable are the intended defaults. Persistent settings require a bounded owner, correlated revisions, one writer and latest-value coalescing. Under [DESK-004](../../product/desktop-and-accessibility.md), a failed write restores the last confirmed active/displayed values, explains the failure and offers explicit Retry. A bounded retry draft is non-authoritative; a stale failure must not replace a newer confirmed revision. No view performs file I/O. These invariants apply to every preference, including platform effects with their own failure states.
@@ -24,7 +26,7 @@ Keep server/search/creation input and draft text distinct from backend snapshots
 
 Bounded multiline plain-text editing, IME integration, focus restoration and modal isolation each need appropriate checks. Actual language/IME sessions, localization, bidi handling, macOS permissions, native accessibility roles/announcements and VoiceOver remain unqualified. Direct incoming acceptance skips voluntary conference prejoin while preserving mandatory permission, consent and security gates.
 
-Embedded [icon provenance](../../../apps/desktop/assets/icons/PROVENANCE.md) and font licenses remain authoritative. Preserve Manrope's OFL notice. A native screenshot must identify its actual source/platform and fictional data; a browser mockup or static contrast calculation does not establish integrated rendering or accessibility.
+Functional icons use pinned official Lucide SVGs; the application mark remains separate project artwork. Embedded [icon provenance](../../../apps/desktop/assets/icons/PROVENANCE.md) and font licenses remain authoritative. Preserve Manrope's OFL notice. A native screenshot must identify its actual source/platform and fictional data; a browser mockup or static contrast calculation does not establish integrated rendering or accessibility.
 
 
 Settings/sidebar composition uses one platform AccountConnection for ordinary launches and an explicitly labelled fictional port for development scenarios. Presentation imports bounded UI/preferences values only. Account preferences, archive, favorites and tags are correlated through the admitted account owner; old-scope results cannot populate a replacement account. A send allocates one operation ID and retains it through uncertain status checks. Native permission and device runtimes remain separate owners: permission checks never capture, and preview replacement waits for disposal acknowledgement.

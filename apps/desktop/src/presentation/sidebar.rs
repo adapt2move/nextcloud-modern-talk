@@ -484,7 +484,7 @@ impl Desktop {
             if rows.is_empty() {
                 continue;
             }
-            // Stable sort changes only pin priority inside this section.
+            // Stable sort changes only favorite priority inside this section.
             rows.sort_by_key(|r| {
                 (
                     self.favorite_value(r) != Some(true),
@@ -636,6 +636,7 @@ impl Desktop {
         let selected = Some(context) == self.snapshot.selected
             && self.destination != SidebarDestination::Inbox;
         let id = scoped_id(namespace, context, 0, 0);
+        let row_focus = self.control_focus(id.clone(), cx);
         let control = self
             .button(
                 id,
@@ -652,7 +653,6 @@ impl Desktop {
             .px_2()
             .py_1()
             .min_h(self.sp(24.).max(px(if self.compact { 32. } else { 38. })))
-            .rounded(px(6.))
             .when(selected, |d| d.bg(t.selected).text_color(t.selected_text))
             .child(if row.kind == ConversationKind::Direct {
                 self.person_avatar(row.initials.as_str(), 22.)
@@ -697,7 +697,13 @@ impl Desktop {
                 |d| d.child(self.scaled_icon("lock", 12., t.muted)),
             )
             .when(self.favorite_value(row) == Some(true), |d| {
-                d.child(self.scaled_icon("pin", 12., t.muted))
+                d.child(self.status_icon(
+                    scoped_id(namespace, context, 0, 1),
+                    ("star", "Favorit"),
+                    (13., t.accent),
+                    row_focus,
+                    cx,
+                ))
             })
             .when(row.unread > 0, |d| {
                 d.child(

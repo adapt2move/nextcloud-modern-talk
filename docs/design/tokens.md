@@ -59,7 +59,7 @@ These roles are shared across palettes. Gray indicates unavailable/unknown state
 | **D-A02** | Full keyboard operation, visible unobscured focus, sensible reading/tab order, no keyboard trap, and focus restoration after dialogs. Receiving a call must not accept it through an unrelated keystroke. |
 | **D-A03** | Expose names, roles, values, toggle states and selected conversation to VoiceOver. Announce meaningful connection/error changes without reading every timer or audio-meter update. |
 | **D-A04** | Text can scale to 200% without loss of primary actions or message content. Honor the macOS contrast/transparency settings and retain status labels in monochrome. |
-| **D-A05** | Avoid unnecessary animation; respect Reduce Motion. No flashing ringing effect. Audio cues have visible equivalents. |
+| **D-A05** | Use short, finite ease-out transitions: 110 ms for hover and switch feedback, 140 ms reveals for dialogs, settings pages, transient feedback and newly appended messages. Closing is immediate. Message entry preserves row geometry and the reader's anchor; only a reader already at the end follows new content after a brief delay. Respect Reduce Motion, including when the system preference is unknown. No flashing ringing effect. Audio cues have visible equivalents. |
 | **D-A06** | Controls have at least 32 × 32 pt hit areas; use 44 pt for principal call actions where space permits. Tooltips supplement persistent labels; they are not the only accessible names. |
 
 The contrast, keyboard, focus and scaling targets use [WCAG 2.2](https://www.w3.org/TR/WCAG22/) as measurable design criteria alongside macOS accessibility conventions. This is not a WCAG conformance claim for a native application. Hit-area sizes above are project targets.

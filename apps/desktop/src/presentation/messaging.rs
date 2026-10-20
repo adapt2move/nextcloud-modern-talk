@@ -1,13 +1,16 @@
 //! Stable, variable-height native history and deliberate message actions.
+mod arrival;
+
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, scoped_id},
     input::TextInput,
 };
 use gpui::{
-    Context, Div, Entity, Focusable, FontWeight, ListAlignment, ListOffset, ListState, Window, div,
-    list, prelude::*, px,
+    Animation, AnimationExt, Context, Div, Entity, FocusHandle, Focusable, FontWeight,
+    ListAlignment, ListOffset, ListState, Window, div, list, prelude::*, px,
 };
+use std::{cell::RefCell, rc::Rc, time::Instant};
 use talk_core::ui::messaging::{ComposeTarget, MessageAction, MessageFeature};
 use talk_core::ui::presentation::{
     Completion, ContentState, ConversationRef, MessageView, RequestId, UiIntent,
@@ -32,6 +35,9 @@ pub(crate) enum Action {
     Forward(u128),
     ConfirmForward(u128, ConversationRef),
     Search,
+    ToggleSearch,
+    CloseSearch,
+    Locate(u128),
     Schedule,
     Remind(u128),
     SubmitTime,
@@ -41,8 +47,10 @@ pub(super) struct MessageUi {
     pub list: ListState,
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
+    arrival: Rc<RefCell<arrival::Arrival>>,
+    geometry: Rc<RefCell<MessageGeometry>>,
     pub editing: Option<u128>,
-    pending_edit: Option<RequestId>,
+    pub(super) pending_edit: Option<RequestId>,
     request: u64,
     menu: Option<u128>,
     confirm_delete: Option<u128>,
@@ -55,8 +63,19 @@ pub(super) struct MessageUi {
     time_error: bool,
     pub search: Entity<TextInput>,
     show_search: bool,
+    search_return_focus: Option<FocusHandle>,
+    search_pending_focus: bool,
     show_pins: bool,
 }
+
+#[derive(Default)]
+struct MessageGeometry {
+    // Only this page's painted rows, drained after prepaint. GPUI's Bottom list
+    // exposes an end sentinel instead of the actual visible first-row offset.
+    painted: Vec<(u128, gpui::Bounds<gpui::Pixels>)>,
+    anchor: Option<(u128, gpui::Pixels)>,
+}
+
 impl MessageUi {
     pub fn new(cx: &mut Context<Desktop>) -> Self {
         let theme = super::theme::Theme::resolve(
@@ -64,8 +83,18 @@ impl MessageUi {
             super::theme::Appearance::Light,
             gpui::WindowAppearance::Light,
         );
+        let arrival = Rc::new(RefCell::new(arrival::Arrival::default()));
+        let scroll_arrival = arrival.clone();
+        let list = ListState::new(0, ListAlignment::Bottom, px(300.));
+        list.set_scroll_handler(move |event, _, _| {
+            if event.is_scrolled {
+                scroll_arrival.borrow_mut().manual_scroll();
+            }
+        });
         Self {
-            list: ListState::new(0, ListAlignment::Bottom, px(300.)),
+            list,
+            arrival,
+            geometry: Rc::new(RefCell::new(MessageGeometry::default())),
             context: None,
             observed: Vec::new(),
             editing: None,
@@ -82,14 +111,109 @@ impl MessageUi {
             time_error: false,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
             show_search: false,
+            search_return_focus: None,
+            search_pending_focus: false,
             show_pins: false,
         }
     }
 }
 impl Desktop {
+    fn timeline_at_bottom(&self) -> bool {
+        let count = self.message_ui.list.item_count();
+        if count == 0 {
+            return true;
+        }
+        if self.message_ui.list.logical_scroll_top().item_ix >= count {
+            return true;
+        }
+        let viewport = self.message_ui.list.viewport_bounds();
+        viewport.size.height > px(0.)
+            && self
+                .message_ui
+                .list
+                .bounds_for_item(count - 1)
+                .is_some_and(|bounds| bounds.bottom() <= viewport.bottom() + px(1.))
+    }
+
+    pub(super) fn prepare_message_motion(&self, window: &Window) {
+        let call_host = self.snapshot.call.as_ref().filter(|call| {
+            call.stage != super::CallStage::Incoming
+                && !(matches!(
+                    call.stage,
+                    super::CallStage::Ended | super::CallStage::Failed
+                ) && self.dismissed_terminal_call == Some(call.scope))
+        });
+        let visible = !self.update_restart_pending
+            && !self.projection_blocked
+            && window.is_window_active()
+            && self.snapshot.selected.is_some()
+            && self.snapshot.content == ContentState::Ready
+            && self.prejoin.is_none()
+            && !self.incoming_visible()
+            && !self.onboarding_open
+            && !self.navigation_open
+            && matches!(self.overlay, None | Some(Overlay::CallChat))
+            && if self.overlay == Some(Overlay::CallChat) {
+                true
+            } else if let Some(call) = call_host {
+                !matches!(
+                    call.stage,
+                    super::CallStage::Ended | super::CallStage::Failed
+                ) && super::docked_call_chat(
+                    window.viewport_size().width >= px(1000.) && self.scale < 150,
+                    self.call_chat_open,
+                    self.overlay,
+                )
+            } else {
+                self.destination != super::SidebarDestination::Inbox
+            };
+        self.message_ui
+            .arrival
+            .borrow_mut()
+            .visibility(visible, self.reduced_motion);
+    }
+
+    pub(super) fn trace_message_motion(&self) {
+        println!(
+            "UI_MESSAGE_MOTION reduced={} following={} anchor={:?} at_bottom={} counters={:?} animation_frames={}",
+            self.reduced_motion,
+            self.message_ui.arrival.borrow().following(),
+            self.message_ui.list.logical_scroll_top(),
+            self.timeline_at_bottom(),
+            self.message_ui.arrival.borrow().diagnostic(),
+            self.motion_frames.get(),
+        );
+    }
+
     pub(super) fn refresh_message_ui(&mut self, cx: &mut Context<Self>) {
         let rows = self.snapshot.messages.as_slice();
         if self.message_ui.context != self.snapshot.selected {
+            self.message_ui.arrival.borrow_mut().reset();
+            *self.message_ui.geometry.borrow_mut() = MessageGeometry::default();
+        }
+        // Explicit history/context loads establish a baseline, even when the
+        // previously loaded conversation remains visible during the request.
+        let live = self.snapshot.content == ContentState::Ready
+            && self.snapshot.message_panel.as_ref().is_none_or(|panel| {
+                panel.history == talk_core::ui::conversation::RemoteState::Idle
+                    && panel
+                        .located
+                        .is_none_or(|(request, _)| self.message_ui.last_located == Some(request))
+            });
+        self.message_ui.arrival.borrow_mut().observe(
+            &self.message_ui.observed,
+            rows,
+            live,
+            self.timeline_at_bottom(),
+            self.reduced_motion,
+            Instant::now(),
+        );
+        if self.message_ui.context != self.snapshot.selected {
+            if self.message_ui.context.is_some() && self.overlay == Some(Overlay::Files) {
+                self.overlay = None;
+                self.return_focus = None;
+                self.pending_modal_focus = false;
+            }
             self.message_ui.context = self.snapshot.selected;
             self.message_ui.list.reset(rows.len());
             self.message_ui.observed = rows.to_vec();
@@ -101,30 +225,47 @@ impl Desktop {
             self.message_ui.pending_edit = None;
             self.message_ui.time_target = None;
             self.message_ui.show_search = false;
+            self.message_ui.search_return_focus = None;
+            self.message_ui.search_pending_focus = false;
+            self.message_ui.search.update(cx, |i, _| i.reset());
             self.message_ui.show_pins = false;
             self.message_ui.last_located = None;
         } else if self.message_ui.observed != rows {
             let anchor = self.message_ui.list.logical_scroll_top();
-            let id = self
+            let (id, offset) = self
                 .message_ui
                 .observed
                 .get(anchor.item_ix)
-                .map(|m| m.local_id);
+                .map(|m| (Some(m.local_id), anchor.offset_in_item))
+                .or_else(|| {
+                    self.message_ui
+                        .geometry
+                        .borrow()
+                        .anchor
+                        .map(|(id, offset)| (Some(id), offset))
+                })
+                .unwrap_or((None, anchor.offset_in_item));
             self.message_ui
                 .list
                 .splice(0..self.message_ui.observed.len(), rows.len());
             if let Some(index) = id.and_then(|id| rows.iter().position(|m| m.local_id == id)) {
                 self.message_ui.list.scroll_to(ListOffset {
                     item_ix: index,
-                    offset_in_item: anchor.offset_in_item,
+                    offset_in_item: offset,
                 });
             }
             self.message_ui.observed = rows.to_vec();
         }
-        if let Some((request, id)) = self.snapshot.message_panel.as_ref().and_then(|p| p.located)
+        if let Some((request, id)) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+            .and_then(|p| p.located)
             && self.message_ui.last_located != Some(request)
             && let Some(index) = rows.iter().position(|m| m.local_id == id)
         {
+            self.message_ui.arrival.borrow_mut().manual_scroll();
             self.message_ui.list.scroll_to(ListOffset {
                 item_ix: index,
                 offset_in_item: px(0.),
@@ -132,8 +273,12 @@ impl Desktop {
             self.message_ui.last_located = Some(request);
             self.highlighted_message = self.snapshot.selected.map(|context| (context, id));
         }
-        if let Some((request, completion)) =
-            self.snapshot.message_panel.as_ref().and_then(|p| p.result)
+        if let Some((request, completion)) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+            .and_then(|p| p.result)
         {
             if self.message_ui.pending_edit == Some(request)
                 && completion == Completion::ServerAccepted
@@ -161,7 +306,8 @@ impl Desktop {
         self.observe_visible_message(context);
     }
     pub(crate) fn visible_message_conversation(&self, window: &Window) -> Option<ConversationRef> {
-        if !window.is_window_active()
+        if self.update_restart_pending
+            || !window.is_window_active()
             || self.overlay.is_some()
             || self.prejoin.is_some()
             || self.incoming_visible()
@@ -172,12 +318,9 @@ impl Desktop {
         self.snapshot.selected
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
-        if !self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|p| p.availability(MessageFeature::ReadReceipts).enabled())
-        {
+        if !self.snapshot.message_panel.as_ref().is_some_and(|p| {
+            p.context == context && p.availability(MessageFeature::ReadReceipts).enabled()
+        }) {
             return;
         }
         let viewport = self.message_ui.list.viewport_bounds();
@@ -204,17 +347,130 @@ impl Desktop {
             self.message_ui.last_read = Some((context, id));
         }
     }
-    fn message_available(&self, feature: MessageFeature) -> Availability {
+    pub(super) fn message_available(&self, feature: MessageFeature) -> Availability {
         let value = self
             .snapshot
             .message_panel
             .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
             .map_or(talk_core::ui::conversation::Availability::UNKNOWN, |p| {
                 p.availability(feature)
             });
         Availability::when(
-            value.enabled(),
-            super::conversation_dialog::unavailable(value),
+            value.enabled() && self.snapshot.content == ContentState::Ready,
+            if self.snapshot.content != ContentState::Ready {
+                "Die Verbindung ist derzeit nicht bereit."
+            } else {
+                super::conversation_dialog::unavailable(value)
+            },
+        )
+    }
+    fn message_feature_enabled(&self, feature: MessageFeature) -> bool {
+        self.snapshot.content == ContentState::Ready
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                Some(panel.context) == self.snapshot.selected
+                    && panel.availability(feature).enabled()
+            })
+    }
+    pub(super) fn conversation_search_open(&self) -> bool {
+        self.message_ui.show_search && self.message_ui.context == self.snapshot.selected
+    }
+    pub(super) fn trace_chat_ui(&self, window: &Window, cx: &Context<Self>) {
+        println!(
+            "UI_CHAT_STATE search_open={} search_focused={} search_chars={} search_bounds={:?} composer_bounds={:?} reply={:?} menu={:?} reduced_motion={}",
+            self.conversation_search_open(),
+            self.message_ui.search.focus_handle(cx).is_focused(window),
+            self.message_ui.search.read(cx).content.len(),
+            self.message_ui.search.read(cx).geometry(),
+            self.composer.read(cx).geometry(),
+            self.snapshot
+                .selected
+                .and_then(|c| self.drafts.target(c).reply_to),
+            self.message_ui.menu,
+            self.reduced_motion,
+        );
+    }
+    pub(super) fn finish_search_focus(&mut self, window: &mut Window, cx: &Context<Self>) {
+        if self.message_ui.search_pending_focus
+            && self.conversation_search_open()
+            && self.composer_available()
+        {
+            self.message_ui.search_pending_focus = false;
+            self.message_ui.search.focus_handle(cx).focus(window);
+            self.navigation.reveal.request();
+        }
+    }
+    fn toggle_conversation_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.composer_available()
+            || !self.message_feature_enabled(MessageFeature::Search)
+            || self.input_composing(cx)
+        {
+            return;
+        }
+        if self.conversation_search_open()
+            && self.message_ui.search.focus_handle(cx).is_focused(window)
+        {
+            self.close_conversation_search(window, cx);
+            return;
+        }
+        if !self.conversation_search_open() {
+            self.message_ui.search_return_focus = window.focused(cx);
+        }
+        // The call remains connected. Reveal its existing chat surface when a
+        // current-room search is invoked during a call.
+        if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+            call.stage != super::CallStage::Incoming
+                && self.dismissed_terminal_call != Some(call.scope)
+        }) {
+            if matches!(
+                call.stage,
+                super::CallStage::Ended | super::CallStage::Failed
+            ) || !self.snapshot.selected.is_some_and(|context| {
+                context.account == call.scope.account
+                    && context.conversation == call.scope.conversation
+            }) {
+                return;
+            }
+            if window.viewport_size().width < px(1000.) || self.scale >= 150 {
+                if self.overlay.is_none() {
+                    self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
+                }
+            } else {
+                self.call_chat_open = true;
+            }
+        }
+        self.message_ui.show_search = true;
+        self.message_ui.search_pending_focus = true;
+        self.message_ui.search.focus_handle(cx).focus(window);
+    }
+    pub(super) fn close_conversation_search(&mut self, window: &mut Window, cx: &Context<Self>) {
+        self.message_ui.show_search = false;
+        self.message_ui.search_pending_focus = false;
+        if let Some(focus) = self
+            .message_ui
+            .search_return_focus
+            .take()
+            .filter(|focus| self.root_focus.contains(focus, window))
+        {
+            focus.focus(window);
+        } else if let Some(focus) = self.control_focus.current(&"history-search".into()) {
+            focus.focus(window);
+        } else if self.composer_available() {
+            self.composer.focus_handle(cx).focus(window);
+        } else {
+            self.root_focus.focus(window);
+        }
+    }
+    fn can_reply_to(&self, message: &MessageView) -> bool {
+        reply_allowed(
+            message,
+            self.snapshot.content,
+            self.selected().map_or(Decision::Unknown, |row| row.send),
+            self.message_feature_enabled(MessageFeature::Reply),
+            self.snapshot
+                .selected
+                .is_some_and(|c| self.drafts.pending(c))
+                || self.message_ui.pending_edit.is_some(),
         )
     }
     pub(super) fn submit_message(&mut self, action: MessageAction) -> Option<RequestId> {
@@ -238,6 +494,7 @@ impl Desktop {
             return;
         };
         let anchor = self.message_ui.list.logical_scroll_top();
+        let prior_compose = self.compose_motion_id(context);
         match action {
             Action::Silent => {
                 let mut target = self.drafts.target(context);
@@ -245,14 +502,19 @@ impl Desktop {
                 self.drafts.set_target(context, target);
             }
             Action::Pins => {
-                self.message_ui.show_pins = !self.message_ui.show_pins;
-                if self.message_ui.show_pins {
+                self.message_ui.show_pins = true;
+                if self.message_feature_enabled(MessageFeature::Pins) {
                     self.submit_message(MessageAction::Pins);
                 }
             }
             Action::Files => {
-                self.submit_message(MessageAction::Files);
-                self.handle(LocalAction::Open(Overlay::Files), window, cx);
+                self.message_ui.show_pins = false;
+                if self.message_feature_enabled(MessageFeature::Files) {
+                    self.submit_message(MessageAction::Files);
+                }
+                if self.overlay != Some(Overlay::Files) {
+                    self.handle(LocalAction::Open(Overlay::Files), window, cx);
+                }
             }
             Action::ShareUpload => {
                 if let Ok(caption) = Text::new(self.composer.read(cx).content.as_str()) {
@@ -281,11 +543,23 @@ impl Desktop {
                 }
             }
             Action::Menu(id) => {
+                if !self
+                    .snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .any(|m| m.local_id == id && message_actions_allowed(m))
+                {
+                    return;
+                }
                 self.message_ui.menu = if self.message_ui.menu == Some(id) {
                     None
                 } else {
                     Some(id)
                 };
+                if self.message_ui.menu.is_some() {
+                    self.begin_surface_reveal(scoped_id("menu-reveal", context, id, 0));
+                }
                 self.message_ui.confirm_delete = None;
                 self.message_ui.forward = None;
                 self.message_ui.forward_destination = None;
@@ -297,7 +571,7 @@ impl Desktop {
                         .messages
                         .as_slice()
                         .iter()
-                        .any(|m| m.local_id == id && m.metadata.replyable)
+                        .any(|m| m.local_id == id && self.can_reply_to(m))
                 {
                     if !self.drafts.set_target(
                         context,
@@ -363,11 +637,22 @@ impl Desktop {
                 self.message_ui.forward_destination = None;
             }
             Action::Search => {
-                self.message_ui.show_search = true;
-                if let Ok(query) = Text::new(self.message_ui.search.read(cx).content.as_str())
+                if self.conversation_search_open()
+                    && self.message_feature_enabled(MessageFeature::Search)
+                    && !self.message_ui.search.read(cx).composing()
+                    && let Ok(query) = Text::new(self.message_ui.search.read(cx).content.as_str())
                     && !query.as_str().trim().is_empty()
                 {
                     self.submit_message(MessageAction::Search(query));
+                }
+            }
+            Action::ToggleSearch => self.toggle_conversation_search(window, cx),
+            Action::CloseSearch => self.close_conversation_search(window, cx),
+            Action::Locate(id) => {
+                if self.submit_message(MessageAction::Context(id)).is_some()
+                    && self.overlay == Some(Overlay::Files)
+                {
+                    self.handle(LocalAction::Close, window, cx);
                 }
             }
             Action::Schedule => self.message_ui.time_target = Some(None),
@@ -408,6 +693,11 @@ impl Desktop {
                     .update(cx, |i, _| i.set_value(&format!("{current}@{identifier} ")));
             }
         }
+        if let Some(id) = self.compose_motion_id(context)
+            && Some(&id) != prior_compose.as_ref()
+        {
+            self.begin_surface_reveal(id);
+        }
         self.message_ui.list.splice(
             0..self.snapshot.messages.as_slice().len(),
             self.snapshot.messages.as_slice().len(),
@@ -425,6 +715,117 @@ impl Desktop {
         }
         true
     }
+    pub(super) fn conversation_search(&self, cx: &Context<Self>) -> Div {
+        let Some(context) = self
+            .snapshot
+            .selected
+            .filter(|_| self.conversation_search_open())
+        else {
+            return div();
+        };
+        let t = self.theme;
+        let field = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .py_2()
+            .child(self.scaled_icon("search", 18., t.muted))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(self.message_ui.search.clone()),
+            )
+            .child(self.button(
+                "history-search-submit",
+                "Suchen",
+                ButtonStyle::Secondary,
+                self.message_available(MessageFeature::Search),
+                LocalAction::MessageIn(context, Action::Search),
+                cx,
+            ))
+            .child(self.icon_button(
+                "history-search-close",
+                ("x", "Gesprächssuche schließen"),
+                ButtonStyle::Quiet,
+                Availability::available(),
+                LocalAction::MessageIn(context, Action::CloseSearch),
+                cx,
+            ));
+        let mut body = div()
+            .id(scoped_id("conversation-search", context, 0, 0))
+            .flex_none()
+            .border_b_1()
+            .border_color(t.border)
+            .on_key_down(
+                cx.listener(move |this, event: &gpui::KeyDownEvent, window, cx| {
+                    if Some(context) == this.snapshot.selected
+                        && event.keystroke.key == "enter"
+                        && !event.keystroke.modifiers.modified()
+                        && this.message_ui.search.focus_handle(cx).is_focused(window)
+                        && !this.message_ui.search.read(cx).composing()
+                    {
+                        this.handle(LocalAction::MessageIn(context, Action::Search), window, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .child(self.reveal("search-reveal", field));
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+        {
+            let mut results = div()
+                .flex_none()
+                .max_h(self.sp(140.).min(px(240.)))
+                .id(scoped_id("message-search-results", context, 0, 0))
+                .overflow_y_scroll()
+                .px_4();
+            for hit in panel.search.as_slice() {
+                results = results.child(
+                    self.control(
+                        scoped_id("message-search", context, hit.id, 0),
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::MessageIn(
+                            context,
+                            Action::Command(MessageAction::Context(hit.id)),
+                        ),
+                        cx,
+                    )
+                    .w_full()
+                    .justify_start()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .child(hit.title.as_str().to_owned())
+                            .child(self.hint(hit.excerpt.as_str())),
+                    ),
+                );
+            }
+            if panel.search_loaded && panel.search.as_slice().is_empty() {
+                results = results.child(self.hint(self.l("Keine Nachrichten gefunden.")));
+            }
+            if panel.search_more {
+                results = results.child(self.button(
+                    "search-next",
+                    "Weitere Treffer",
+                    ButtonStyle::Secondary,
+                    self.message_available(MessageFeature::Search),
+                    LocalAction::MessageIn(context, Action::Command(MessageAction::SearchNext)),
+                    cx,
+                ));
+            }
+            body = body.child(results);
+        }
+        div().flex_none().child(body)
+    }
     pub(super) fn message_timeline(&self, constrained: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let mut body = div()
@@ -433,156 +834,8 @@ impl Desktop {
             .flex()
             .flex_col()
             .when(constrained, |d| d.flex_none().h(px(200.)));
-        let Some(row) = self.selected() else {
+        if self.selected().is_none() {
             return body;
-        };
-        let toolbar = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .flex_wrap()
-            .gap_2()
-            .px_6()
-            .py_2()
-            .child(self.icon_button(
-                "history-search",
-                ("search", "Suchen"),
-                ButtonStyle::Quiet,
-                self.message_available(MessageFeature::Search),
-                LocalAction::Message(Action::Search),
-                cx,
-            ))
-            .child(self.icon_button(
-                "history-files",
-                ("file", "Dateien"),
-                ButtonStyle::Quiet,
-                self.message_available(MessageFeature::Files),
-                LocalAction::Message(Action::Files),
-                cx,
-            ))
-            .child(self.icon_button(
-                "history-pins",
-                ("pin", "Angeheftete Nachrichten"),
-                ButtonStyle::Quiet,
-                self.message_available(MessageFeature::Pins),
-                LocalAction::Message(Action::Pins),
-                cx,
-            ))
-            .child(self.icon_button(
-                "history-unread",
-                ("inbox", "Als ungelesen markieren"),
-                ButtonStyle::Quiet,
-                Availability::available(),
-                LocalAction::Message(Action::Command(MessageAction::MarkUnread)),
-                cx,
-            ));
-        body = body.child(toolbar);
-        if self.message_ui.show_pins {
-            let mut pins = div()
-                .id("pinned-message-list")
-                .flex_none()
-                .max_h(px(200.))
-                .overflow_y_scroll()
-                .px_6()
-                .py_2();
-            if let Some(panel) = &self.snapshot.message_panel {
-                for message in panel.pinned_messages.as_slice() {
-                    pins = pins.child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                self.button(
-                                    ("pinned-message", message.local_id as usize),
-                                    message.body.as_str().to_owned(),
-                                    ButtonStyle::Quiet,
-                                    true,
-                                    LocalAction::Message(Action::Command(MessageAction::Context(
-                                        message.local_id,
-                                    ))),
-                                    cx,
-                                )
-                                .flex_1(),
-                            )
-                            .child(self.button(
-                                ("unpin-message", message.local_id as usize),
-                                "Lösen",
-                                ButtonStyle::Quiet,
-                                self.message_available(MessageFeature::Pins),
-                                LocalAction::Message(Action::Command(MessageAction::Unpin(
-                                    message.local_id,
-                                ))),
-                                cx,
-                            )),
-                    );
-                }
-                if panel.pinned_messages.as_slice().is_empty() {
-                    pins = pins.child(self.hint(self.l("Keine angehefteten Nachrichten geladen.")));
-                }
-            }
-            body = body.child(pins);
-        }
-        if self.message_ui.show_search {
-            body = body.child(
-                div()
-                    .px_6()
-                    .py_2()
-                    .flex()
-                    .gap_2()
-                    .child(self.message_ui.search.clone())
-                    .child(self.button(
-                        "history-search-submit",
-                        "Suchen",
-                        ButtonStyle::Secondary,
-                        self.message_available(MessageFeature::Search),
-                        LocalAction::Message(Action::Search),
-                        cx,
-                    )),
-            );
-            if let Some(panel) = &self.snapshot.message_panel {
-                let mut results = div()
-                    .flex_none()
-                    .max_h(px(180.))
-                    .id("message-search-results")
-                    .overflow_y_scroll()
-                    .px_6();
-                for hit in panel.search.as_slice() {
-                    results = results.child(
-                        self.control(
-                            ("message-search", hit.id as usize),
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::Message(Action::Command(MessageAction::Context(hit.id))),
-                            cx,
-                        )
-                        .w_full()
-                        .justify_start()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_start()
-                                .child(hit.title.as_str().to_owned())
-                                .child(self.hint(hit.excerpt.as_str())),
-                        ),
-                    );
-                }
-                if panel.search_loaded && panel.search.as_slice().is_empty() {
-                    results = results.child(self.hint(self.l("Keine Nachrichten gefunden.")));
-                }
-                if panel.search_more {
-                    results = results.child(self.button(
-                        "search-next",
-                        "Weitere Treffer",
-                        ButtonStyle::Secondary,
-                        self.message_available(MessageFeature::Search),
-                        LocalAction::Message(Action::Command(MessageAction::SearchNext)),
-                        cx,
-                    ));
-                }
-                body = body.child(results);
-            }
         }
         if self
             .snapshot
@@ -638,11 +891,68 @@ impl Desktop {
                         "Hier erscheinen die Nachrichten dieses Gesprächs.",
                     )));
                 } else {
+                    let layout_arrival = self.message_ui.arrival.clone();
+                    let wheel_arrival = self.message_ui.arrival.clone();
+                    let keyboard_arrival = self.message_ui.arrival.clone();
+                    let layout_list = self.message_ui.list.clone();
+                    let keyboard_list = self.message_ui.list.clone();
+                    let keyboard_focus = self.navigation.history_focus();
+                    let reduced = self.reduced_motion;
+                    let layout_geometry = self.message_ui.geometry.clone();
+                    self.message_ui.geometry.borrow_mut().painted.clear();
                     body = body.child(
                         div()
                             .flex_1()
                             .min_h_0()
-                            .track_focus(&self.navigation.history_focus())
+                            .track_focus(&keyboard_focus.clone().tab_stop(!self.background_inert))
+                            .on_scroll_wheel(move |event, _, _| {
+                                if event.delta.pixel_delta(px(20.)).y > px(0.) {
+                                    wheel_arrival.borrow_mut().manual_scroll();
+                                }
+                            })
+                            .on_key_down(move |event, window, cx| {
+                                if !keyboard_focus.is_focused(window) {
+                                    return;
+                                }
+                                let page = keyboard_list.viewport_bounds().size.height * 0.85;
+                                match event.keystroke.key.as_str() {
+                                    "pageup" => keyboard_list.scroll_by(-page),
+                                    "pagedown" => keyboard_list.scroll_by(page),
+                                    "home" => keyboard_list.scroll_to(ListOffset {
+                                        item_ix: 0,
+                                        offset_in_item: px(0.),
+                                    }),
+                                    "end" => keyboard_list.scroll_to(ListOffset {
+                                        item_ix: keyboard_list.item_count(),
+                                        offset_in_item: px(0.),
+                                    }),
+                                    _ => return,
+                                }
+                                keyboard_arrival.borrow_mut().manual_scroll();
+                                cx.stop_propagation();
+                                window.refresh();
+                            })
+                            .on_children_prepainted(move |_, window, _| {
+                                let viewport = layout_list.viewport_bounds();
+                                let mut geometry = layout_geometry.borrow_mut();
+                                geometry.anchor = geometry
+                                    .painted
+                                    .iter()
+                                    .find(|(_, bounds)| bounds.bottom() > viewport.top())
+                                    .map(|(id, bounds)| (*id, viewport.top() - bounds.top()));
+                                geometry.painted.clear();
+                                drop(geometry);
+                                let mut arrival = layout_arrival.borrow_mut();
+                                if arrival.after_layout(Instant::now(), reduced) {
+                                    layout_list.scroll_to(ListOffset {
+                                        item_ix: layout_list.item_count(),
+                                        offset_in_item: px(0.),
+                                    });
+                                    window.request_animation_frame();
+                                } else if arrival.following() {
+                                    window.request_animation_frame();
+                                }
+                            })
                             .child(
                                 list(
                                     self.message_ui.list.clone(),
@@ -651,9 +961,57 @@ impl Desktop {
                                             .messages
                                             .as_slice()
                                             .get(index)
-                                            .map(|m| this.message_row(m, cx))
-                                            .unwrap_or_else(div)
-                                            .into_any_element()
+                                            .map(|m: &MessageView| {
+                                                let geometry = this.message_ui.geometry.clone();
+                                                let id = m.local_id;
+                                                let row = this
+                                                    .message_row(m, cx)
+                                                    .on_children_prepainted(move |bounds, _, _| {
+                                                        let mut geometry = geometry.borrow_mut();
+                                                        if geometry.painted.len() < 100
+                                                            && let Some(bounds) =
+                                                                bounds.first().copied()
+                                                        {
+                                                            geometry.painted.push((id, bounds));
+                                                        }
+                                                    });
+                                                let admitted = this
+                                                    .message_ui
+                                                    .arrival
+                                                    .borrow()
+                                                    .admitted(m.local_id, Instant::now());
+                                                if let Some(admitted) = admitted {
+                                                    let frames = this.motion_frame_counter();
+                                                    row.with_animation(
+                                                        scoped_id(
+                                                            "message-entry",
+                                                            this.snapshot
+                                                                .selected
+                                                                .expect("message context"),
+                                                            m.local_id,
+                                                            0,
+                                                        ),
+                                                        Animation::new(arrival::ENTRY),
+                                                        move |row, _| {
+                                                            super::motion::count_frame(&frames);
+                                                            let progress =
+                                                                (admitted.elapsed().as_secs_f32()
+                                                                    / arrival::ENTRY.as_secs_f32())
+                                                                .min(1.);
+                                                            row.opacity(
+                                                                0.6 + 0.4
+                                                                    * gpui::ease_out_quint()(
+                                                                        progress,
+                                                                    ),
+                                                            )
+                                                        },
+                                                    )
+                                                    .into_any_element()
+                                                } else {
+                                                    row.into_any_element()
+                                                }
+                                            })
+                                            .unwrap_or_else(|| div().into_any_element())
                                     }),
                                 )
                                 .size_full(),
@@ -662,7 +1020,12 @@ impl Desktop {
                 }
             }
         }
-        if let Some(panel) = &self.snapshot.message_panel {
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+        {
             if let talk_core::ui::conversation::RemoteState::Failed(_, reason) = panel.state {
                 body = body.child(div().px_6().py_2().text_color(t.danger).child(self.l(
                     match reason {
@@ -689,12 +1052,14 @@ impl Desktop {
                     .child(self.hint(self.l("Ergebnis unklar. Vor erneutem Ändern neu laden.")));
             }
         }
-        let _ = row;
         body
     }
     fn message_row(&self, m: &MessageView, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let context = self.snapshot.selected.expect("message context");
+        let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
+            .to_string()
+            .into();
         if m.metadata.system {
             return div().child(
                 div()
@@ -719,8 +1084,10 @@ impl Desktop {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_baseline()
                     .gap_2()
+                    .pr(px(76.))
                     .child(
                         div()
                             .text_size(self.sp(13.))
@@ -791,11 +1158,14 @@ impl Desktop {
                                     ButtonStyle::Secondary
                                 },
                                 self.message_available(MessageFeature::React),
-                                LocalAction::Message(Action::Command(MessageAction::React {
-                                    message: m.local_id,
-                                    emoji: r.emoji.clone(),
-                                    add: !r.own,
-                                })),
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::Command(MessageAction::React {
+                                        message: m.local_id,
+                                        emoji: r.emoji.clone(),
+                                        add: !r.own,
+                                    }),
+                                ),
                                 cx,
                             )
                         }),
@@ -817,10 +1187,10 @@ impl Desktop {
                     "Antworten",
                     ButtonStyle::Quiet,
                     Availability::when(
-                        m.metadata.replyable,
+                        self.can_reply_to(m),
                         "Auf diese Nachricht kann nicht geantwortet werden.",
                     ),
-                    LocalAction::Message(Action::Reply(m.local_id)),
+                    LocalAction::MessageIn(context, Action::Reply(m.local_id)),
                     cx,
                 ))
                 .child(self.button(
@@ -828,11 +1198,14 @@ impl Desktop {
                     "👍",
                     ButtonStyle::Quiet,
                     self.message_available(MessageFeature::React),
-                    LocalAction::Message(Action::Command(MessageAction::React {
-                        message: m.local_id,
-                        emoji: Text::new("👍").expect("emoji"),
-                        add: true,
-                    })),
+                    LocalAction::MessageIn(
+                        context,
+                        Action::Command(MessageAction::React {
+                            message: m.local_id,
+                            emoji: Text::new("👍").expect("emoji"),
+                            add: true,
+                        }),
+                    ),
                     cx,
                 ))
                 .child(self.button(
@@ -843,7 +1216,7 @@ impl Desktop {
                         m.metadata.edit == Decision::Allowed,
                         "Diese Nachricht kann nicht bearbeitet werden.",
                     ),
-                    LocalAction::Message(Action::Edit(m.local_id)),
+                    LocalAction::MessageIn(context, Action::Edit(m.local_id)),
                     cx,
                 ))
                 .child(self.button(
@@ -854,7 +1227,7 @@ impl Desktop {
                         m.metadata.delete == Decision::Allowed,
                         "Diese Nachricht kann nicht gelöscht werden.",
                     ),
-                    LocalAction::Message(Action::ConfirmDelete(m.local_id)),
+                    LocalAction::MessageIn(context, Action::ConfirmDelete(m.local_id)),
                     cx,
                 ))
                 .child(self.button(
@@ -862,7 +1235,10 @@ impl Desktop {
                     "Anheften",
                     ButtonStyle::Quiet,
                     self.message_available(MessageFeature::Pins),
-                    LocalAction::Message(Action::Command(MessageAction::Pin(m.local_id))),
+                    LocalAction::MessageIn(
+                        context,
+                        Action::Command(MessageAction::Pin(m.local_id)),
+                    ),
                     cx,
                 ))
                 .child(self.button(
@@ -870,7 +1246,7 @@ impl Desktop {
                     "Später erinnern",
                     ButtonStyle::Quiet,
                     self.message_available(MessageFeature::Reminders),
-                    LocalAction::Message(Action::Remind(m.local_id)),
+                    LocalAction::MessageIn(context, Action::Remind(m.local_id)),
                     cx,
                 ))
                 .child(self.button(
@@ -878,7 +1254,7 @@ impl Desktop {
                     "Weiterleiten",
                     ButtonStyle::Quiet,
                     self.message_available(MessageFeature::Forward),
-                    LocalAction::Message(Action::Forward(m.local_id)),
+                    LocalAction::MessageIn(context, Action::Forward(m.local_id)),
                     cx,
                 ));
             if m.metadata.replyable {
@@ -902,11 +1278,13 @@ impl Desktop {
                             "Löschen bestätigen",
                             ButtonStyle::Danger,
                             true,
-                            LocalAction::Message(Action::Delete(m.local_id)),
+                            LocalAction::MessageIn(context, Action::Delete(m.local_id)),
                             cx,
                         ));
             }
-            content = content.child(actions);
+            content = content.child(
+                self.reveal_from_action(scoped_id("menu-reveal", context, m.local_id, 0), actions),
+            );
             if self.message_ui.forward == Some(m.local_id) {
                 let mut destinations = div()
                     .flex()
@@ -932,7 +1310,10 @@ impl Desktop {
                         room.title.as_str().to_owned(),
                         ButtonStyle::Secondary,
                         true,
-                        LocalAction::Message(Action::ChooseForward(m.local_id, room.context)),
+                        LocalAction::MessageIn(
+                            context,
+                            Action::ChooseForward(m.local_id, room.context),
+                        ),
                         cx,
                     ));
                 }
@@ -952,10 +1333,10 @@ impl Desktop {
                                 "An dieses Gespräch senden",
                                 ButtonStyle::Primary,
                                 true,
-                                LocalAction::Message(Action::ConfirmForward(
-                                    m.local_id,
-                                    destination,
-                                )),
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::ConfirmForward(m.local_id, destination),
+                                ),
                                 cx,
                             ));
                 }
@@ -965,6 +1346,8 @@ impl Desktop {
         div().child(
             div()
                 .id(scoped_id("message", context, m.local_id, 0))
+                .group(action_group.clone())
+                .relative()
                 .px_6()
                 .py_3()
                 .flex()
@@ -975,31 +1358,190 @@ impl Desktop {
                 )
                 .child(self.avatar(m.initials.as_str(), false))
                 .child(content)
-                .child(self.icon_button(
-                    scoped_id("message-menu", context, m.local_id, 0),
-                    ("more", "Nachrichtenaktionen"),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    LocalAction::Message(Action::Menu(m.local_id)),
-                    cx,
-                )),
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(10.))
+                        .flex()
+                        .gap_1()
+                        .child(
+                            self.icon_button(
+                                scoped_id("message-reply", context, m.local_id, 0),
+                                ("reply", "Antworten"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    self.can_reply_to(m),
+                                    "Auf diese Nachricht kann nicht geantwortet werden.",
+                                ),
+                                LocalAction::MessageIn(context, Action::Reply(m.local_id)),
+                                cx,
+                            )
+                            .opacity(0.)
+                            .group_hover(action_group.clone(), |s| s.opacity(1.))
+                            .focus(|s| s.opacity(1.)),
+                        )
+                        .child(
+                            self.icon_button(
+                                scoped_id("message-menu", context, m.local_id, 0),
+                                ("more", "Nachrichtenaktionen"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    message_actions_allowed(m),
+                                    "Für diese Nachricht sind keine Aktionen verfügbar.",
+                                ),
+                                LocalAction::MessageIn(context, Action::Menu(m.local_id)),
+                                cx,
+                            )
+                            .opacity(0.)
+                            .group_hover(action_group, |s| s.opacity(1.))
+                            .focus(|s| s.opacity(1.)),
+                        ),
+                ),
         )
+    }
+    pub(super) fn shared_contents(&self, cx: &Context<Self>) -> Div {
+        let Some(row) = self.selected() else {
+            return div().child(self.hint(self.l("Das Gespräch ist nicht mehr verfügbar.")));
+        };
+        let context = row.context;
+        let pins = self.message_ui.show_pins;
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(row.title.as_str().to_owned()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(self.chip(
+                        "shared-files-tab",
+                        "Dateien und Medien",
+                        (!pins, 0, 2),
+                        LocalAction::MessageIn(context, Action::Files),
+                        cx,
+                    ))
+                    .child(self.chip(
+                        "shared-pins-tab",
+                        "Angeheftete Nachrichten",
+                        (pins, 1, 2),
+                        LocalAction::MessageIn(context, Action::Pins),
+                        cx,
+                    )),
+            );
+        let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+        else {
+            return body.child(self.hint(self.l("Geteilte Inhalte sind derzeit nicht verfügbar.")));
+        };
+        let feature = if pins {
+            MessageFeature::Pins
+        } else {
+            MessageFeature::Files
+        };
+        let available = panel.availability(feature);
+        if !available.enabled() {
+            return body
+                .child(self.hint(self.l(super::conversation_dialog::unavailable(available))));
+        }
+        if pins {
+            for message in panel.pinned_messages.as_slice() {
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap_2()
+                        .child(
+                            self.button(
+                                scoped_id("pinned-message", context, message.local_id, 0),
+                                message.body.as_str().to_owned(),
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::MessageIn(context, Action::Locate(message.local_id)),
+                                cx,
+                            )
+                            .flex_1()
+                            .min_w_0()
+                            .justify_start(),
+                        )
+                        .child(self.icon_button(
+                            scoped_id("unpin-message", context, message.local_id, 0),
+                            ("pin", "Angeheftete Nachricht lösen"),
+                            ButtonStyle::Quiet,
+                            self.message_available(MessageFeature::Pins),
+                            LocalAction::MessageIn(
+                                context,
+                                Action::Command(MessageAction::Unpin(message.local_id)),
+                            ),
+                            cx,
+                        )),
+                );
+            }
+            if panel.pinned_messages.as_slice().is_empty()
+                && !matches!(
+                    panel.state,
+                    talk_core::ui::conversation::RemoteState::Loading(_)
+                )
+            {
+                body = body.child(self.hint(self.l("Keine angehefteten Nachrichten geladen.")));
+            }
+        } else {
+            body = body.child(self.shared_files(cx));
+        }
+        match panel.state {
+            talk_core::ui::conversation::RemoteState::Loading(_) => {
+                body = body.child(self.hint(self.l("Geteilte Inhalte werden geladen …")));
+            }
+            talk_core::ui::conversation::RemoteState::Failed(_, _) => {
+                body =
+                    body.child(self.hint(self.l("Geteilte Inhalte konnten nicht geladen werden.")));
+            }
+            talk_core::ui::conversation::RemoteState::Uncertain(_) => {
+                body = body
+                    .child(self.hint(self.l("Ergebnis unklar. Vor erneutem Ändern neu laden.")));
+            }
+            _ => {}
+        }
+        body.child(self.button(
+            "reload-shared",
+            "Erneut laden",
+            ButtonStyle::Quiet,
+            self.message_available(feature),
+            LocalAction::MessageIn(context, if pins { Action::Pins } else { Action::Files }),
+            cx,
+        ))
     }
     pub(super) fn shared_files(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_3();
-        if let Some(panel) = &self.snapshot.message_panel {
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+        {
+            let context = panel.context;
             body = body.child(self.hint(&format!(
                 "{} {} MiB",
                 self.l("Maximale Dateigröße:"),
                 panel.file_limit / 1024 / 1024
             )));
             for message in panel.shared_files.as_slice() {
-                for object in message
+                for (index, object) in message
                     .metadata
                     .rich
                     .as_slice()
                     .iter()
                     .filter(|r| r.kind.as_str() == "file")
+                    .enumerate()
                 {
                     body = body.child(
                         div()
@@ -1008,23 +1550,36 @@ impl Desktop {
                             .items_center()
                             .child(div().flex_1().child(object.name.as_str().to_owned()))
                             .child(self.button(
-                                ("download-shared", message.local_id as usize),
+                                scoped_id(
+                                    "download-shared",
+                                    context,
+                                    message.local_id,
+                                    index as u128,
+                                ),
                                 "Herunterladen",
                                 ButtonStyle::Secondary,
                                 self.message_available(MessageFeature::Files),
-                                LocalAction::Message(Action::Command(MessageAction::Download {
-                                    message: message.local_id,
-                                    placeholder: object.placeholder.clone(),
-                                    name: Text::new(object.name.as_str()).unwrap_or_else(|_| {
-                                        Text::new("download").expect("constant")
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::Command(MessageAction::Download {
+                                        message: message.local_id,
+                                        placeholder: object.placeholder.clone(),
+                                        name: Text::new(object.name.as_str()).unwrap_or_else(
+                                            |_| Text::new("download").expect("constant"),
+                                        ),
                                     }),
-                                })),
+                                ),
                                 cx,
                             )),
                     );
                 }
             }
-            if panel.shared_files.as_slice().is_empty() {
+            if panel.shared_files.as_slice().is_empty()
+                && !matches!(
+                    panel.state,
+                    talk_core::ui::conversation::RemoteState::Loading(_)
+                )
+            {
                 body = body.child(self.hint(self.l("Keine Dateien geladen")));
             }
         }
@@ -1058,14 +1613,29 @@ impl Desktop {
         }
         body
     }
+    fn compose_motion_id(&self, context: ConversationRef) -> Option<gpui::ElementId> {
+        let target = self.drafts.target(context);
+        self.message_ui
+            .editing
+            .map(|id| scoped_id("compose-mode", context, 0, id))
+            .or_else(|| {
+                target
+                    .thread
+                    .map(|id| scoped_id("compose-mode", context, 1, id))
+            })
+            .or_else(|| {
+                target
+                    .reply_to
+                    .map(|id| scoped_id("compose-mode", context, 2, id))
+            })
+    }
     pub(super) fn composer_context(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_2();
         let Some(context) = self.snapshot.selected else {
             return body;
         };
         let target = self.drafts.target(context);
-        if self.message_ui.editing.is_some() || target.reply_to.is_some() || target.thread.is_some()
-        {
+        if let Some(motion_id) = self.compose_motion_id(context) {
             let label = if self.message_ui.editing.is_some() {
                 "Nachricht bearbeiten"
             } else if target.thread.is_some() {
@@ -1074,19 +1644,22 @@ impl Desktop {
                 "Antwort auf eine Nachricht"
             };
             body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(self.hint(self.l(label)))
-                    .child(self.button(
-                        "cancel-compose-mode",
-                        "Abbrechen",
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::Message(Action::CancelCompose),
-                        cx,
-                    )),
+                self.reveal_from_action(
+                    motion_id,
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(self.hint(self.l(label)))
+                        .child(self.button(
+                            "cancel-compose-mode",
+                            "Abbrechen",
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Message(Action::CancelCompose),
+                            cx,
+                        )),
+                ),
             );
         }
         body = body.child(
@@ -1244,6 +1817,29 @@ impl Desktop {
         body
     }
 }
+fn message_actions_allowed(message: &MessageView) -> bool {
+    !message.metadata.deleted
+        && !message.metadata.system
+        && matches!(
+            message.delivery,
+            talk_core::ui::presentation::DeliveryState::Received
+                | talk_core::ui::presentation::DeliveryState::ServerAccepted
+        )
+}
+fn reply_allowed(
+    message: &MessageView,
+    content: ContentState,
+    send: Decision,
+    reply_feature: bool,
+    pending: bool,
+) -> bool {
+    message_actions_allowed(message)
+        && message.metadata.replyable
+        && content == ContentState::Ready
+        && send == Decision::Allowed
+        && reply_feature
+        && !pending
+}
 /// Explicit UTC offset removes ambiguous daylight-saving interpretation. No local timer sends content.
 fn parse_time(value: &str) -> Option<u64> {
     if value.len() != 23 {
@@ -1301,7 +1897,74 @@ fn parse_time(value: &str) -> Option<u64> {
 }
 #[cfg(test)]
 mod tests {
-    use super::parse_time;
+    use super::*;
+    #[test]
+    fn quick_reply_revalidates_canonical_message_and_current_send_state() {
+        let mut message = MessageView {
+            local_id: 7,
+            author: Text::new("Test").unwrap(),
+            initials: Text::new("T").unwrap(),
+            time_label: Text::new("09:00").unwrap(),
+            body: Text::new("Synthetic message").unwrap(),
+            own: false,
+            delivery: talk_core::ui::presentation::DeliveryState::Received,
+            attachments: talk_core::ui::Page::empty(),
+            reply_count: 0,
+            metadata: talk_core::ui::messaging::MessageMetadata {
+                replyable: true,
+                ..Default::default()
+            },
+        };
+        let allowed =
+            |m: &MessageView| reply_allowed(m, ContentState::Ready, Decision::Allowed, true, false);
+        assert!(allowed(&message));
+        message.metadata.deleted = true;
+        assert!(!allowed(&message));
+        message.metadata.deleted = false;
+        message.metadata.system = true;
+        assert!(!allowed(&message));
+        message.metadata.system = false;
+        for delivery in [
+            talk_core::ui::presentation::DeliveryState::Pending,
+            talk_core::ui::presentation::DeliveryState::Failed,
+            talk_core::ui::presentation::DeliveryState::Uncertain,
+        ] {
+            message.delivery = delivery;
+            assert!(!allowed(&message));
+        }
+        message.delivery = talk_core::ui::presentation::DeliveryState::ServerAccepted;
+        assert!(allowed(&message));
+        assert!(!reply_allowed(
+            &message,
+            ContentState::Offline,
+            Decision::Allowed,
+            true,
+            false
+        ));
+        for send in [Decision::Denied, Decision::Unknown, Decision::Stale] {
+            assert!(!reply_allowed(
+                &message,
+                ContentState::Ready,
+                send,
+                true,
+                false
+            ));
+        }
+        assert!(!reply_allowed(
+            &message,
+            ContentState::Ready,
+            Decision::Allowed,
+            false,
+            false
+        ));
+        assert!(!reply_allowed(
+            &message,
+            ContentState::Ready,
+            Decision::Allowed,
+            true,
+            true
+        ));
+    }
     #[test]
     fn explicit_offset_resolves_daylight_saving_and_rejects_bad_dates() {
         assert_eq!(

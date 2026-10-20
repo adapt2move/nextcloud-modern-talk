@@ -4,6 +4,7 @@ mod assets;
 mod files;
 mod fixtures;
 mod preferences;
+mod updates;
 
 use crate::presentation::{
     Desktop, InitialView, Overlay, input,
@@ -42,11 +43,12 @@ fn options() -> Result<Option<Options>, &'static str> {
         match arg.as_str() {
             "--licenses" => {
                 println!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("../../../LICENSE"),
                     include_str!("../NOTICE.md"),
                     include_str!("../assets/fonts/Manrope-LICENSE.txt"),
                     include_str!("../assets/GPUI-LICENSE-APACHE"),
+                    include_str!("../assets/icons/LUCIDE-LICENSE"),
                     include_str!("../assets/sounds/Apache-2.0.txt"),
                     include_str!("../assets/sounds/CC-BY-4.0.txt"),
                     include_str!("../assets/sounds/CC-BY-SA-4.0.txt")
@@ -214,6 +216,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("controls") => Probe::Controls,
         Some("focus-accounts") => Probe::Accounts,
         Some("focus-rooms" | "focus-files") => Probe::Focus,
+        Some("chat-motion") => Probe::Messages,
         _ => Probe::None,
     };
     let port: Box<dyn talk_core::ui::presentation::NativeDesktopPort> =
@@ -224,7 +227,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         };
     let bridge = Box::new(preferences::Bridge {
         notification_worker_request: None,
-        update_cursor: 0,
+        update_last: None,
         services: services.clone(),
         cursor: 0,
         device_cursor: 0,
@@ -268,6 +271,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 let mut surface = None;
                 let mut sequence = 0;
                 let mut interval = Duration::from_millis(100);
+                let mut was_background = true;
                 loop {
                     gpui::Timer::after(interval).await;
                     if let Some(accounts) = &preview_services.accounts {
@@ -287,6 +291,63 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             Err(_) => break,
                         };
                     preview_services.poll_notifications(background);
+                    if was_background && !background {
+                        preview_services.preferences.refresh_native_interaction();
+                    } else if !was_background && background {
+                        preview_services.preferences.cancel_emoji_picker();
+                    }
+                    was_background = background;
+                    let update_action = preview_services.install.borrow_mut().poll(&preview_services);
+                    if let Some(action) = update_action {
+                        let relaunch = match action {
+                            updates::Action::Relaunch(path) => Some(path),
+                            updates::Action::ExplainFailure { executable, uncertain } => {
+                                let preferences = preview_services.preferences.snapshot();
+                                let locale = match preferences.active.locale {
+                                    talk_core::preferences::LocalePreference::System => preferences.observed_system_locale,
+                                    value => value.resolve(&[]),
+                                };
+                                let message = crate::presentation::localization::text(locale, "Das Update konnte nicht abgeschlossen werden.");
+                                let detail = crate::presentation::localization::text(locale, if uncertain {
+                                    "Der Paketmanager hat die Installation nicht bestätigt. Beende die App und prüfe die Installation, bevor du sie erneut öffnest."
+                                } else if executable.is_some() {
+                                    "Die vorherige Version wurde geprüft und kann erneut gestartet werden."
+                                } else {
+                                    "Beende die App und öffne sie erneut, bevor du weiterarbeitest."
+                                });
+                                let restart = crate::presentation::localization::text(locale, "Vorherige Version starten");
+                                let quit = crate::presentation::localization::text(locale, "App beenden");
+                                let answers = if executable.is_some() {
+                                    vec![gpui::PromptButton::ok(restart), gpui::PromptButton::cancel(quit)]
+                                } else {
+                                    vec![gpui::PromptButton::ok(quit)]
+                                };
+                                let prompt = window.update(cx, |_, window, cx| window.prompt(
+                                    gpui::PromptLevel::Critical, message, Some(detail), &answers, cx));
+                                match prompt {
+                                    Ok(prompt) => match prompt.await {
+                                        Ok(0) if executable.is_some() => executable,
+                                        Ok(_) => {
+                                            let _ = cx.update(|cx| cx.quit());
+                                            break;
+                                        }
+                                        Err(_) => None,
+                                    },
+                                    Err(_) => None,
+                                }
+                            }
+                        };
+                        if let Some(executable) = relaunch {
+                            let result = cx.background_executor().spawn(async move {
+                                updates::relaunch(executable)
+                            }).await;
+                            if result.is_ok() {
+                                let _ = cx.update(|cx| cx.quit());
+                                break;
+                            }
+                            preview_services.install.borrow_mut().relaunch_failed();
+                        }
+                    }
                     interval = Duration::from_millis(if devices_open { 33 } else { 100 });
                     if requested != surface {
                         surface = requested;

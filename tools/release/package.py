@@ -71,6 +71,26 @@ def native_target(path, target):
         raise ValueError("Executable format/architecture does not match target")
 
 
+def media_metadata(packages):
+    """Bind the engine to the actual Cargo shipping closure, not a second SDK."""
+    if any(p["name"] in ("libwebrtc", "webrtc-sys", "webrtc-sys-build") for p in packages):
+        raise ValueError("Obsolete native WebRTC SDK in the shipping dependency closure")
+    required = ("webrtc", "rtc", "gstreamer", "gstreamer-app", "gstreamer-video")
+    selected = {}
+    for name in required:
+        matches = [p for p in packages if p["name"] == name]
+        if len(matches) != 1:
+            raise ValueError("Missing or ambiguous media dependency: " + name)
+        package = matches[0]
+        if not (package.get("source") or "").startswith("registry+"):
+            raise ValueError("Media dependency must use its pinned registry package: " + name)
+        digest(package.get("archive_sha256"))
+        selected[name] = package
+    engine = selected["webrtc"]
+    return {"enabled": True, "engine": "webrtc", "version": engine["version"],
+            "archive_sha256": engine["archive_sha256"], "codecs": "gstreamer"}
+
+
 def validate(stage, allow_fixture=False):
     stage = Path(stage).resolve()
     spec = json.loads(regular(stage, "input.json").read_text())
@@ -108,7 +128,7 @@ def validate(stage, allow_fixture=False):
         total += p.stat().st_size
         if total > 1024 * 1024 * 1024 or sha(p) != digest(expected):
             raise ValueError("Input size or checksum mismatch: " + name)
-        if not (name.startswith(("licenses/", "assets/")) or name in ("bin/talk-desktop", "bin/talk-native-helper", "bin/nmt-media-helper", "source-manifest.json", "dependencies.json", "native-media.json")):
+        if not (name.startswith(("licenses/", "assets/")) or name in ("bin/talk-desktop", "bin/talk-native-helper", "source-manifest.json", "dependencies.json")):
             raise ValueError("Unexpected payload category: " + name)
     for name in (*REQUIRED_NOTICES, "dependencies.json", "source-manifest.json", "assets/fonts/Manrope-Regular.ttf", "assets/fonts/Manrope-SemiBold.ttf", "assets/fonts/Manrope-Bold.ttf"):
         if name not in files:
@@ -146,17 +166,9 @@ def validate(stage, allow_fixture=False):
     if type(media.get("enabled")) is not bool:
         raise ValueError("Media availability must be explicit")
     if media["enabled"]:
-        native = json.loads(regular(stage, "native-media.json").read_text())
-        if (media.get("engine") != "libwebrtc" or media.get("version") != "0.3.52"
-                or media.get("sdk_tag") != native.get("tag")
-                or media.get("sdk_target") != native.get("target")
-                or digest(media.get("sdk_sha256")) != native.get("archive_sha256")
-                or media.get("notice") not in files
-                or not media["notice"].startswith("licenses/")):
-            raise ValueError("Production native engine identity/notice mismatch")
-        if "bin/nmt-media-helper" in files or media.get("helper"):
-            raise ValueError("Diagnostic IPC helpers are not the production engine")
-    elif "bin/nmt-media-helper" in files or "native-media.json" in files or media.get("helper"):
+        if media != media_metadata(dependencies["packages"]):
+            raise ValueError("Media engine does not match the shipping dependency inventory")
+    elif media.get("helper"):
         raise ValueError("Disabled media cannot silently carry a helper")
     return spec
 
@@ -212,8 +224,6 @@ def assemble(stage, output, allow_fixture=False):
                 dest = binary_dir / "talk-native-helper"
             elif mac and name.startswith("assets/sounds/") and name.endswith(".wav"):
                 dest = resources / Path(name).name
-            elif name == "bin/nmt-media-helper":
-                dest = root / ("Contents/Helpers/nmt-media-helper" if mac else "libexec/nmt-media-helper")
             else:
                 dest = resources / name
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -224,7 +234,7 @@ def assemble(stage, output, allow_fixture=False):
             "NextCloud Modern Talk development package. No product or platform acceptance.\n"
             + ("Copy this .app to Applications. No Developer ID signature or notarization is supplied. Gatekeeper may block launch. Do not disable system protection.\n" if mac else
                "Ubuntu 24.04 x86_64 candidate: install the matching .deb using sudo apt install ./FILE.deb; launch talk-desktop from the application menu. The tar archive needs the runtime libraries recorded in provenance.\n")
-            + "Media: " + ("maintained libwebrtc engine; see release notes for supported server profiles.\n" if spec["media"]["enabled"] else "unavailable; no media helper is bundled.\n")
+            + "Media: " + ("Rust webrtc engine with GStreamer codecs; see release notes for supported server profiles.\n" if spec["media"]["enabled"] else "unavailable.\n")
         )
         if mac:
             plist = {"CFBundleName": "NextCloud Modern Talk", "CFBundleDisplayName": "NextCloud Modern Talk",

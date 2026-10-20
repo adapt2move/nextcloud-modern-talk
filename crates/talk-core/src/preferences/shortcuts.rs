@@ -4,6 +4,7 @@
 pub enum ActionId {
     OpenSettings,
     Search,
+    ConversationSearch,
     Close,
     SendMessage,
     NewLine,
@@ -32,7 +33,7 @@ pub struct Shortcut {
     pub modifiers: Modifiers,
     pub context: KeyContext,
 }
-pub const SHORTCUTS: [Shortcut; 9] = [
+pub const SHORTCUTS: [Shortcut; 10] = [
     Shortcut {
         action: ActionId::OpenSettings,
         key: ",",
@@ -42,6 +43,12 @@ pub const SHORTCUTS: [Shortcut; 9] = [
     Shortcut {
         action: ActionId::Search,
         key: "k",
+        modifiers: Modifiers::Primary,
+        context: KeyContext::Application,
+    },
+    Shortcut {
+        action: ActionId::ConversationSearch,
+        key: "f",
         modifiers: Modifiers::Primary,
         context: KeyContext::Application,
     },

@@ -25,7 +25,7 @@ impl Desktop {
         );
         let (title, width) = match overlay {
             Overlay::RoomInfo | Overlay::Participants => ("Gesprächsdetails", 448.),
-            Overlay::Files => ("Dateien", 700.),
+            Overlay::Files => ("Geteilte Inhalte", 700.),
             Overlay::Thread => ("Antworten", 400.),
             Overlay::CallParticipants => ("Im Anruf", 400.),
             Overlay::CallChat => ("Chat im Anruf", 440.),
@@ -36,9 +36,8 @@ impl Desktop {
             _ => unreachable!("settings handled above"),
         };
         let body = match overlay {
-            Overlay::RoomInfo | Overlay::Participants | Overlay::Files => {
-                self.details_body(overlay, cx)
-            }
+            Overlay::Files => self.shared_contents(cx),
+            Overlay::RoomInfo | Overlay::Participants => self.details_body(overlay, cx),
             Overlay::CallParticipants => {
                 let mut body = div().flex().flex_col().gap_3();
                 if let Some(call) = &self.snapshot.call {
@@ -543,7 +542,7 @@ impl Desktop {
                         scoped_id("search-file", context, 0, file.local_id),
                         ("file", file.name.as_str(), file.detail.as_str()),
                         true,
-                        LocalAction::Open(Overlay::Files),
+                        LocalAction::MessageIn(context, super::messaging::Action::Files),
                         cx,
                     ));
                 }

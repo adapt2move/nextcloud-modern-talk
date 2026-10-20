@@ -529,7 +529,7 @@ impl Desktop {
                                     .size_full()
                                     .px(px(24.))
                                     .py(px(20.))
-                                    .child(content),
+                                    .child(self.reveal(("settings-page", tab as usize), content)),
                             ),
                     )
                     .child(

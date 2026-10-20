@@ -60,6 +60,7 @@ impl AssetSource for Assets {
             "icons/keyboard.svg" => include_bytes!("../../assets/icons/keyboard.svg"),
             "icons/sun.svg" => include_bytes!("../../assets/icons/sun.svg"),
             "icons/moon.svg" => include_bytes!("../../assets/icons/moon.svg"),
+            "icons/star.svg" => include_bytes!("../../assets/icons/star.svg"),
             "icons/reply.svg" => include_bytes!("../../assets/icons/reply.svg"),
             "icons/info.svg" => include_bytes!("../../assets/icons/info.svg"),
             "icons/brand-front.svg" => include_bytes!("../../assets/icons/brand-front.svg"),

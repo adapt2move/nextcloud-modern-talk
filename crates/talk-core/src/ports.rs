@@ -99,6 +99,10 @@ pub enum ProtocolRequest {
         command: crate::protocol::conversation::ConversationCommand,
     },
     PollIncomingCalls,
+    /// Read-only account-wide Notifications observation; never a chat/read-marker poll.
+    PollMessageNotifications,
+    /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
+    PollLiveEvents,
     Meeting(crate::calls::Command),
     ProbeAccount,
     RefreshCallPolicy(CallScope),
@@ -178,6 +182,8 @@ pub enum ProtocolReply {
         result: crate::protocol::conversation::ConversationResult,
     },
     IncomingCalls(crate::calls::IncomingCalls),
+    MessageNotifications(crate::protocol::MessageNotifications),
+    LiveEvents(crate::protocol::AccountLiveEvents),
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),
     Policy(Box<PolicyInputs>),

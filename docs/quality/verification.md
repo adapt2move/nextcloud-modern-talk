@@ -1,8 +1,8 @@
 # Verification and acceptance
 
-Status: verification requirements for claimed product behavior; this document records no passed gate. The task owner selects proportionate checks and review scope. Routine documentation and bounded settings work do not automatically require repeated independent reviews. The current cleanup/settings milestone requires no further review rounds. Product/release acceptance still needs evidence for its actual claims.
+This document defines verification requirements for claimed product behavior; it records no passed gate. The task owner selects proportionate checks and review scope. Routine documentation and bounded settings work do not automatically require repeated independent reviews. Product/release acceptance needs evidence for its actual claims.
 
-[AMEND-AUTH-STORAGE-01](../product/accounts.md#spec-amendment--amend-auth-storage-01) defines the native/private-file storage requirements. The AUTH cases below remain **specified / not run**; the requirement itself establishes no provider, platform or feature pass.
+[AMEND-AUTH-STORAGE-01](../product/accounts.md#spec-amendment--amend-auth-storage-01) defines the native/private-file storage requirements. The AUTH cases below specify required coverage; results belong to exact candidate and platform evidence. A requirement alone establishes no provider, platform or feature pass.
 
 ## Q.VER-01 — Ordered gates
 

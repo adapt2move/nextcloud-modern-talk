@@ -11,16 +11,12 @@ use talk_core::ui::MediaIntent;
 use talk_core::ui::presentation::{CallStage, CallView, MediaState, ParticipantView, RequiredGate};
 
 pub(super) struct CallEvents {
-    poll_at: Instant,
-    source: Option<(AccountScope, Instant)>,
     event: Option<NotificationEvent>,
     notified: Option<CallScope>,
 }
 impl CallEvents {
     pub(super) fn new() -> Self {
         Self {
-            poll_at: Instant::now(),
-            source: None,
             event: None,
             notified: None,
         }
@@ -34,6 +30,7 @@ struct ActionLease {
 struct ActionState {
     lease: Option<ActionLease>,
     pending: Option<(CallScope, NativeCallAction)>,
+    update_sealed: bool,
 }
 pub(super) struct CallActions(Mutex<ActionState>);
 impl CallActions {
@@ -41,6 +38,7 @@ impl CallActions {
         Self(Mutex::new(ActionState {
             lease: None,
             pending: None,
+            update_sealed: false,
         }))
     }
     pub(super) fn clear(&self) {
@@ -49,8 +47,51 @@ impl CallActions {
             state.pending = None;
         }
     }
-    fn admit(&self, call: CallScope, cancellation: talk_core::lifecycle::Cancellation) {
+    pub(super) fn update_sealed(&self) -> bool {
+        self.0.lock().map_or(true, |state| state.update_sealed)
+    }
+    pub(super) fn seal_for_update(
+        &self,
+    ) -> Result<(), talk_core::preferences::updates::UpdateError> {
+        use talk_core::preferences::updates::UpdateError;
+        let mut state = self.0.lock().map_err(|_| UpdateError::Unavailable)?;
+        if state.update_sealed {
+            return Err(UpdateError::Busy);
+        }
+        if state.pending.is_some()
+            || state.lease.as_ref().is_some_and(|lease| {
+                lease.expires > Instant::now() && !lease.cancellation.is_cancelled()
+            })
+        {
+            return Err(UpdateError::ActiveCall);
+        }
+        state.lease = None;
+        state.update_sealed = true;
+        Ok(())
+    }
+    pub(super) fn release_update_seal(&self) {
         if let Ok(mut state) = self.0.lock() {
+            state.update_sealed = false;
+        }
+    }
+    fn clear_account(&self, scope: AccountScope) {
+        if let Ok(mut state) = self.0.lock() {
+            if state
+                .lease
+                .as_ref()
+                .is_some_and(|l| l.call.account == scope)
+            {
+                state.lease = None;
+            }
+            if state.pending.is_some_and(|(call, _)| call.account == scope) {
+                state.pending = None;
+            }
+        }
+    }
+    fn admit(&self, call: CallScope, cancellation: talk_core::lifecycle::Cancellation) {
+        if let Ok(mut state) = self.0.lock()
+            && !state.update_sealed
+        {
             state.lease = Some(ActionLease {
                 call,
                 expires: Instant::now() + Duration::from_secs(7),
@@ -65,7 +106,8 @@ impl CallActions {
 impl crate::settings::notifications::NotificationCallDispatcher for CallActions {
     fn available_actions(&self, call: CallScope) -> NativeCallActions {
         let valid = self.0.lock().is_ok_and(|s| {
-            s.pending.is_none()
+            !s.update_sealed
+                && s.pending.is_none()
                 && s.lease.as_ref().is_some_and(|l| {
                     l.call == call && l.expires > Instant::now() && !l.cancellation.is_cancelled()
                 })
@@ -77,6 +119,9 @@ impl crate::settings::notifications::NotificationCallDispatcher for CallActions 
     }
     fn dispatch(&self, call: CallScope, action: NativeCallAction) -> Result<(), NotificationError> {
         let mut state = self.0.lock().map_err(|_| NotificationError::Closed)?;
+        if state.update_sealed {
+            return Err(NotificationError::Closed);
+        }
         if state.pending.is_some() {
             return Err(NotificationError::Busy);
         }
@@ -103,12 +148,11 @@ impl Accounts {
     ) -> Arc<dyn crate::settings::notifications::NotificationCallDispatcher> {
         self.call_actions.clone()
     }
-    pub fn incoming_source_available(&self) -> bool {
-        self.call_events.source.is_some_and(|(scope, at)| {
-            Some(scope) == self.snapshot.active_account
-                && at.elapsed() < Duration::from_secs(12)
-                && self.current(scope).is_ok()
-        })
+    pub fn incoming_source_available(&self, scope: AccountScope) -> bool {
+        self.current(scope).is_ok()
+            && self
+                .background
+                .source(scope, background::Observation::Calls, Instant::now())
     }
     pub fn ringing_call(&self) -> Option<CallScope> {
         self.snapshot
@@ -116,7 +160,7 @@ impl Accounts {
             .as_ref()
             .filter(|c| {
                 c.stage == CallStage::Incoming
-                    && self.incoming_source_available()
+                    && self.incoming_source_available(c.scope.account)
                     && self.current(c.scope.account).is_ok()
             })
             .map(|c| c.scope)
@@ -146,43 +190,69 @@ impl Accounts {
         scope: AccountScope,
         result: Result<RuntimeReply, IdentityError>,
     ) {
-        if self.current(scope).is_err() {
-            self.call_actions.clear();
-            self.call_events.source = None;
+        if self.call_actions.update_sealed() {
             return;
         }
+        let cancellation = match self
+            .connection
+            .as_ref()
+            .map_err(|e| *e)
+            .and_then(|c| c.account_cancellation(scope))
+        {
+            Ok(cancellation) => cancellation,
+            Err(_) => {
+                self.invalidate_incoming(scope);
+                return;
+            }
+        };
         let Ok(RuntimeReply::Protocol(ProtocolReply::IncomingCalls(value))) = result else {
-            self.call_actions.clear();
-            self.call_events.source = None;
+            self.invalidate_incoming(scope);
             return;
         };
-        if value.scope != scope {
+        self.apply_incoming(scope, value, cancellation);
+    }
+    fn apply_incoming(
+        &mut self,
+        scope: AccountScope,
+        value: talk_core::calls::IncomingCalls,
+        cancellation: talk_core::lifecycle::Cancellation,
+    ) {
+        if cancellation.is_cancelled() {
+            self.invalidate_incoming(scope);
             return;
         }
-        self.call_events.source = Some((scope, Instant::now()));
+        if value.scope != scope || value.call.is_some() != value.title.is_some() {
+            self.invalidate_incoming(scope);
+            return;
+        }
+        self.background
+            .observed(scope, background::Observation::Calls, true);
         if let (Some(call), Some(title)) = (value.call, value.title) {
             if call.call.account != scope
+                || !call.call.is_consistent()
                 || call.entry != Entry::IncomingDirect
                 || call.phase != Phase::Ringing
             {
+                self.invalidate_incoming(scope);
                 return;
             }
-            if self.snapshot.call.as_ref().is_some_and(|v| {
-                !matches!(
-                    v.stage,
-                    CallStage::Incoming | CallStage::Ended | CallStage::Failed
-                )
-            }) {
-                return;
-            }
-            if let Ok(cancellation) = self
-                .connection
+            if self
+                .snapshot
+                .call
                 .as_ref()
-                .map_err(|e| *e)
-                .and_then(|c| c.account_cancellation(scope))
+                .is_some_and(|v| !can_offer(v, call.call))
             {
-                self.call_actions.admit(call.call, cancellation);
+                return;
             }
+            if self
+                .call_ui
+                .as_ref()
+                .is_some_and(|ui| ui.scope != call.call)
+            {
+                self.call_actions.clear();
+                self.call_events.event = None;
+            }
+            self.call_actions.admit(call.call, cancellation);
             self.snapshot.call = Some(project(&call, &title, true));
             self.call_ui = Some(CallUi {
                 scope: call.call,
@@ -223,6 +293,25 @@ impl Accounts {
                 call.stage = CallStage::Ended;
                 call.accept = Decision::Denied;
             }
+            self.touch();
+        }
+    }
+    fn invalidate_incoming(&mut self, scope: AccountScope) {
+        self.background
+            .observed(scope, background::Observation::Calls, false);
+        self.call_actions.clear_account(scope);
+        if self.call_events.event.as_ref().is_some_and(
+            |e| matches!(e.kind, NotificationKind::IncomingCall { call } if call.account == scope),
+        ) {
+            self.call_events.event = None;
+        }
+        if let Some(call) = self
+            .snapshot
+            .call
+            .as_mut()
+            .filter(|c| c.scope.account == scope && c.stage == CallStage::Incoming)
+        {
+            call.accept = Decision::Unknown;
             self.touch();
         }
     }
@@ -323,7 +412,28 @@ impl Accounts {
                     ui.wishes = MediaWishes::default();
                     Command::Reconnect(*call)
                 }
-                UiIntent::DeclineDirect(call) | UiIntent::Legacy(UserIntent::Leave(call)) => {
+                UiIntent::DeclineDirect(call) => {
+                    if self.ringing_call() != Some(*call) {
+                        return Err(SubmitError::StaleScope);
+                    }
+                    self.request(
+                        call.account,
+                        ProtocolRequest::Meeting(Command::Stop(*call)),
+                        Purpose::Call(*call),
+                    )?;
+                    self.call_actions.clear();
+                    self.call_events.event = None;
+                    if let Some(view) = &mut self.snapshot.call {
+                        view.stage = CallStage::Ended;
+                        view.accept = Decision::Denied;
+                    }
+                    self.touch();
+                    return Ok(());
+                }
+                UiIntent::Legacy(UserIntent::Leave(call)) => {
+                    if self.call_ui.as_ref().is_none_or(|ui| ui.scope != *call) {
+                        return Err(SubmitError::StaleScope);
+                    }
                     self.media.close_call(*call);
                     self.call_actions.clear();
                     self.call_events.event = None;
@@ -385,6 +495,9 @@ impl Accounts {
             return Err(SubmitError::Busy);
         }
         let title = if entry == Entry::IncomingDirect {
+            if self.ringing_call() != Some(scope) {
+                return Err(SubmitError::StaleScope);
+            }
             self.call_ui
                 .as_ref()
                 .filter(|u| u.scope == scope)
@@ -406,8 +519,6 @@ impl Accounts {
             }
             row.title.clone()
         };
-        self.call_actions.clear();
-        self.call_events.event = None;
         self.request(
             scope.account,
             ProtocolRequest::Meeting(Command::Start {
@@ -417,6 +528,11 @@ impl Accounts {
             }),
             Purpose::Call(scope),
         )?;
+        self.call_actions.clear();
+        self.call_events.event = None;
+        if entry == Entry::IncomingDirect {
+            self.select(Some(scope.account));
+        }
         self.call_ui = Some(CallUi {
             scope,
             title: title.clone(),
@@ -443,6 +559,9 @@ impl Accounts {
         Ok(())
     }
     pub(super) fn tick_calls(&mut self) {
+        if self.call_actions.update_sealed() {
+            return;
+        }
         if let Some((call, action)) = self.call_actions.take() {
             let intent = match action {
                 NativeCallAction::Accept => UiIntent::Legacy(UserIntent::AcceptDirect {
@@ -453,29 +572,11 @@ impl Accounts {
             };
             let _ = self.submit_call(&intent);
         }
-        if let Some(scope) = self.snapshot.active_account {
-            let free = self.snapshot.call.as_ref().is_none_or(|c| {
-                matches!(
-                    c.stage,
-                    CallStage::Incoming | CallStage::Ended | CallStage::Failed
-                )
-            });
-            if free
-                && Instant::now() >= self.call_events.poll_at
-                && !self
-                    .pending
-                    .iter()
-                    .any(|p| matches!(p.purpose, Purpose::IncomingCalls(_)))
-                && self
-                    .request(
-                        scope,
-                        ProtocolRequest::PollIncomingCalls,
-                        Purpose::IncomingCalls(scope),
-                    )
-                    .is_ok()
-            {
-                self.call_events.poll_at = Instant::now() + Duration::from_secs(5);
-            }
+        if let Some(call) = self.snapshot.call.as_ref()
+            && call.stage == CallStage::Incoming
+            && !self.incoming_source_available(call.scope.account)
+        {
+            self.invalidate_incoming(call.scope.account);
         }
         let Some(ui) = &self.call_ui else {
             return;
@@ -563,6 +664,12 @@ impl Accounts {
         }
     }
 }
+// One visible/current invitation. Other accounts remain observed and may offer
+// their invitation after this one ends; they never replace an active call.
+fn can_offer(current: &CallView, incoming: CallScope) -> bool {
+    matches!(current.stage, CallStage::Ended | CallStage::Failed)
+        || current.stage == CallStage::Incoming && current.scope.account == incoming.account
+}
 fn wishes(value: MediaIntent) -> MediaWishes {
     MediaWishes {
         microphone: value != MediaIntent::MicrophoneOffCameraOff,
@@ -645,6 +752,123 @@ mod action_tests {
             call: CallGeneration::from_local(5),
         }
     }
+    fn invitation(call: CallScope) -> talk_core::calls::IncomingCalls {
+        talk_core::calls::IncomingCalls {
+            scope: call.account,
+            call: Some(Snapshot {
+                call,
+                entry: Entry::IncomingDirect,
+                phase: Phase::Ringing,
+                participants: Page::empty(),
+                microphone: DeviceState::Off,
+                camera: DeviceState::Off,
+                screen: DeviceState::Off,
+                peers: 0,
+                recording: talk_core::policy::RecordingState::Unknown,
+                counters: Default::default(),
+                revision: 1,
+            }),
+            title: Some(text("Incoming fixture")),
+            eligible: true,
+        }
+    }
+    #[test]
+    fn inactive_account_can_offer_without_selecting_or_capturing_and_other_errors_cannot_revoke_it()
+    {
+        let mut model = super::super::tests::model();
+        let call = call();
+        let active = AccountScope {
+            account: AccountId::from_local(2),
+            runtime: RuntimeGeneration::from_local(2),
+        };
+        model.snapshot.active_account = Some(active);
+        model
+            .background
+            .sync(&[active, call.account], Instant::now());
+        model.apply_incoming(
+            call.account,
+            invitation(call),
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        let view = model.snapshot.call.as_ref().unwrap().clone();
+        assert_eq!(view.scope, call);
+        assert_eq!(view.stage, CallStage::Incoming);
+        assert_eq!(view.microphone, MediaState::Off);
+        assert_eq!(view.camera, MediaState::Off);
+        assert_eq!(
+            model.snapshot.active_account,
+            Some(active),
+            "ringing never navigates"
+        );
+        assert!(model.call_actions.available_actions(call).accept);
+        model.complete_incoming(active, Err(IdentityError::Request(ErrorKind::Deadline)));
+        assert_eq!(model.snapshot.call, Some(view));
+        assert!(model.call_actions.available_actions(call).accept);
+        let stale = AccountScope {
+            runtime: RuntimeGeneration::from_local(1),
+            ..call.account
+        };
+        model.complete_incoming(stale, Err(IdentityError::Request(ErrorKind::WrongScope)));
+        assert!(model.call_actions.available_actions(call).accept);
+        model.invalidate_incoming(call.account);
+        assert!(!model.call_actions.available_actions(call).accept);
+    }
+    #[test]
+    fn another_account_invitation_never_takes_the_current_call_and_cancelled_observations_do_not_ring()
+     {
+        let mut model = super::super::tests::model();
+        let first = call();
+        let account = AccountId::from_local(2);
+        let second = CallScope {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(2),
+            },
+            conversation: ConversationId {
+                account,
+                ..first.conversation
+            },
+            ..first
+        };
+        model
+            .background
+            .sync(&[first.account, second.account], Instant::now());
+        model.apply_incoming(
+            first.account,
+            invitation(first),
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        model.apply_incoming(
+            second.account,
+            invitation(second),
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        assert_eq!(model.snapshot.call.as_ref().unwrap().scope, first);
+        model.snapshot.call.as_mut().unwrap().stage = CallStage::Active;
+        model.apply_incoming(
+            second.account,
+            invitation(second),
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        assert_eq!(model.snapshot.call.as_ref().unwrap().scope, first);
+        assert_eq!(
+            model.snapshot.call.as_ref().unwrap().stage,
+            CallStage::Active
+        );
+        model.invalidate_incoming(second.account);
+        assert_eq!(
+            model.snapshot.call.as_ref().unwrap().stage,
+            CallStage::Active
+        );
+        model.snapshot.call = None;
+        model.call_ui = None;
+        model.call_actions.clear();
+        let cancelled = talk_core::lifecycle::Cancellation::default();
+        cancelled.cancel();
+        model.apply_incoming(second.account, invitation(second), cancelled);
+        assert!(model.snapshot.call.is_none());
+        assert!(!model.call_actions.available_actions(second).decline);
+    }
     #[test]
     fn native_action_requires_current_invitation_and_accepts_only_once() {
         let actions = CallActions::new();
@@ -687,5 +911,28 @@ mod action_tests {
             actions.dispatch(call, NativeCallAction::Accept),
             Err(NotificationError::Stale)
         );
+    }
+    #[test]
+    fn update_seal_refuses_ringing_or_queued_action_and_cannot_be_cleared_by_call_cleanup() {
+        use talk_core::preferences::updates::UpdateError;
+        let actions = CallActions::new();
+        let call = call();
+        actions.admit(call, talk_core::lifecycle::Cancellation::default());
+        assert_eq!(actions.seal_for_update(), Err(UpdateError::ActiveCall));
+        assert_eq!(actions.dispatch(call, NativeCallAction::Accept), Ok(()));
+        assert_eq!(actions.seal_for_update(), Err(UpdateError::ActiveCall));
+        assert_eq!(actions.take(), Some((call, NativeCallAction::Accept)));
+        assert_eq!(actions.seal_for_update(), Ok(()));
+        actions.admit(call, talk_core::lifecycle::Cancellation::default());
+        assert!(!actions.available_actions(call).accept);
+        assert_eq!(
+            actions.dispatch(call, NativeCallAction::Accept),
+            Err(NotificationError::Closed)
+        );
+        actions.clear();
+        assert!(actions.update_sealed());
+        actions.release_update_seal();
+        actions.admit(call, talk_core::lifecycle::Cancellation::default());
+        assert!(actions.available_actions(call).accept);
     }
 }

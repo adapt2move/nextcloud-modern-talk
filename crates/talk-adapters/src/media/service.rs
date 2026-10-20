@@ -1,10 +1,7 @@
 //! Composition-owned bridge between an admitted call and selected native devices.
 //! Every callback rechecks the irreversible lifetime and current policy deadline.
 //! This module never chooses or opens a device and never manufactures call scope.
-use libwebrtc::{
-    native::yuv_helper,
-    video_frame::{I420Buffer, native::VideoFrameBufferExt},
-};
+use super::engine::VideoFrame;
 use std::{
     collections::VecDeque,
     sync::{
@@ -46,7 +43,7 @@ pub(crate) struct Session {
     deadline: AtomicU64,
     pub(crate) snapshot: Mutex<Snapshot>,
     audio: Mutex<VecDeque<[i16; 480]>>,
-    video: Mutex<Option<I420Buffer>>,
+    video: Mutex<Option<VideoFrame>>,
     output: Mutex<VecDeque<[i16; 480]>>,
     received: Mutex<Vec<VideoImage>>,
     microphone_seen: AtomicBool,
@@ -234,7 +231,7 @@ impl Session {
         }
         self.audio.try_lock().ok()?.pop_front()
     }
-    pub(crate) fn take_video(&self) -> Option<I420Buffer> {
+    pub(crate) fn take_video(&self) -> Option<VideoFrame> {
         if !self.publication().camera {
             return None;
         }
@@ -258,43 +255,28 @@ impl Session {
             images.retain(|i| peers.contains(&i.participant));
         }
     }
-    pub(crate) fn show_video(
-        &self,
-        participant: u128,
-        frame: libwebrtc::video_frame::BoxVideoFrame,
-    ) {
+    pub(crate) fn show_video(&self, participant: u128, frame: VideoFrame) {
         if !self.valid() {
             return;
         }
-        let (width, height) = (frame.buffer.width(), frame.buffer.height());
-        if width == 0 || height == 0 || width > 1920 || height > 1080 {
+        if frame.width == 0
+            || frame.height == 0
+            || frame.width > 640
+            || frame.height > 360
+            || frame.rgba.len() != (frame.width * frame.height * 4) as usize
+        {
             return;
         }
         if let Ok(mut images) = self.received.try_lock() {
             if images.len() == 16 || images.iter().any(|i| i.participant == participant) {
                 return;
             }
-            let ratio = (640.0 / f64::from(width))
-                .min(360.0 / f64::from(height))
-                .min(1.0);
-            let width = ((f64::from(width) * ratio) as u32 & !1).max(2);
-            let height = ((f64::from(height) * ratio) as u32 & !1).max(2);
-            let mut buffer = frame.buffer.to_i420();
-            let buffer = buffer.scale(width as i32, height as i32);
-            let mut rgba = vec![0; (width * height * 4) as usize];
-            buffer.to_argb(
-                libwebrtc::video_frame::VideoFormatType::ABGR,
-                &mut rgba,
-                width * 4,
-                width as i32,
-                height as i32,
-            );
             if self.valid() {
                 images.push(VideoImage {
                     participant,
-                    width,
-                    height,
-                    rgba,
+                    width: frame.width,
+                    height: frame.height,
+                    rgba: frame.rgba,
                 });
             }
         }
@@ -372,21 +354,11 @@ impl CaptureHandle {
         if video.is_some() {
             return false;
         }
-        let mut frame = I420Buffer::new(width, height);
-        let (sy, su, sv) = frame.strides();
-        let (y, u, v) = frame.data_mut();
-        yuv_helper::abgr_to_i420(
-            rgba,
-            width * 4,
-            y,
-            sy,
-            u,
-            su,
-            v,
-            sv,
-            width as i32,
-            height as i32,
-        );
+        let frame = VideoFrame {
+            width,
+            height,
+            rgba: rgba.to_vec(),
+        };
         if !s.publication().camera {
             return false;
         }

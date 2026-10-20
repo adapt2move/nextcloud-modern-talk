@@ -266,7 +266,12 @@ impl Message {
             thread_title: string(v.get("threadTitle"), 256)?,
             thread_replies: integer(v.get("threadReplies")),
             system: string(v.get("systemMessage"), 128)?,
-            silent: v.get("silent").and_then(Value::as_bool),
+            // Talk 24/25 Message::toArray omits false. An explicitly malformed
+            // value still conveys no notification permission.
+            silent: match v.get("silent") {
+                None => Some(false),
+                Some(value) => value.as_bool(),
+            },
             reactions: crate::chat::reactions(v)?,
             rich: crate::chat::rich(v.get("messageParameters"))?,
             update: if matches!(
@@ -457,8 +462,7 @@ pub enum SignalingMode {
     External,
     Unknown,
 }
-/// Only engine-neutral ICE data; HPB authentication is not exposed until its
-/// websocket lifetime is implemented. Credentials are redacted from Debug.
+/// Engine-neutral ICE data. Credentials are redacted from Debug.
 #[derive(Clone)]
 pub struct IceServer {
     pub urls: Vec<String>,
@@ -469,6 +473,8 @@ pub struct IceServer {
 pub struct SignalingSettings {
     pub mode: SignalingMode,
     pub ice_servers: Vec<IceServer>,
+    /// Opaque server-issued credentials consumed only by this account's HPB owner.
+    pub external: Option<crate::hpb::ExternalSettings>,
 }
 impl std::fmt::Debug for SignalingSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -519,7 +525,16 @@ impl SignalingSettings {
                 });
             }
         }
-        Ok(Self { mode, ice_servers })
+        let external = if mode == SignalingMode::External {
+            Some(crate::hpb::ExternalSettings::decode(v)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            mode,
+            ice_servers,
+            external,
+        })
     }
 }
 /// Session IDs are network-only; never Debug/Clone or included in a core/UI snapshot.
@@ -543,4 +558,28 @@ pub enum Preference {
     ReadReceipts(bool),
     TypingStatus(bool),
     AttachmentFolder(String),
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn silent_omission_matches_talk_without_trusting_malformed_values() {
+        let mut message = json!({
+            "id": 42, "token": "testroom", "actorDisplayName": "Bob", "timestamp": 1
+        });
+        assert_eq!(Message::decode(&message).unwrap().silent, Some(false));
+        for (value, expected) in [
+            (json!(false), Some(false)),
+            (json!(true), Some(true)),
+            (Value::Null, None),
+            (json!("false"), None),
+            (json!(0), None),
+        ] {
+            message["silent"] = value;
+            assert_eq!(Message::decode(&message).unwrap().silent, expected);
+        }
+    }
 }

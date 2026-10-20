@@ -80,6 +80,17 @@ class ImportStrings(unittest.TestCase):
         source = 'use gpui::div;\nconst COPY: &str = "Both will use GitHub Releases in the future.";'
         self.assertEqual(self.native(source), [])
 
+    def test_native_interaction_edges_stay_out_of_core_and_views(self):
+        # Platform cfg is presentation metadata, not an OS API invocation.
+        self.assertEqual(self.native('#[cfg(target_os = "windows")]\nfn platform_label() {}',
+                                     core='#[cfg(target_os = "windows")]\nfn label() {}'), [])
+        for source in ('use enigo::Enigo;', 'let _ = enigo::Enigo::new;',
+                       'use windows::UI::ViewManagement::UISettings;',
+                       'let _ = windows::UI::ViewManagement::UISettings::new;'):
+            with self.subTest(source=source):
+                self.assertTrue(self.native(source))
+                self.assertTrue(self.native('', core=source))
+
     def test_permitted_nested_grouped_imports(self):
         self.assertEqual(self.native('use gpui::{div, prelude::*};\n'
                                      'use talk_core::{ui::{Text, Page}};\n'

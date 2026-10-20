@@ -112,12 +112,14 @@ pub(super) use super::focus::{FocusStates, scoped_id};
 pub(super) struct Availability {
     enabled: bool,
     reason: Option<&'static str>,
+    help: Option<&'static str>,
     above_composer: bool,
     below_control: bool,
     beside_control: bool,
     explained_elsewhere: bool,
     visible_label: bool,
     hover_hint: bool,
+    switch_value: Option<bool>,
 }
 impl Availability {
     pub fn available() -> Self {
@@ -127,16 +129,26 @@ impl Availability {
         Self {
             enabled,
             reason: (!enabled).then_some(reason),
+            help: None,
             above_composer: false,
             below_control: false,
             beside_control: false,
             explained_elsewhere: false,
             visible_label: false,
             hover_hint: false,
+            switch_value: None,
         }
     }
     pub fn labelled(mut self) -> Self {
         self.visible_label = true;
+        self
+    }
+    pub fn hinted(mut self) -> Self {
+        self.hover_hint = true;
+        self
+    }
+    pub fn help(mut self, text: &'static str) -> Self {
+        self.help = Some(text);
         self
     }
     pub fn beside_control(mut self) -> Self {
@@ -286,10 +298,12 @@ impl gpui::RenderOnce for ReasonTip {
                 child: div()
                     .max_w(limit)
                     .px_3()
-                    .py_1()
-                    .rounded_md()
-                    .bg(self.theme.text)
-                    .text_color(self.theme.surface)
+                    .py_2()
+                    .rounded(px(8.))
+                    .bg(self.theme.surface)
+                    .border_1()
+                    .border_color(self.theme.border)
+                    .text_color(self.theme.text)
                     .text_size(self.text_size)
                     .line_height(self.line_height)
                     .shadow_sm()
@@ -434,6 +448,71 @@ impl gpui::Element for MeasuredHint {
     }
 }
 impl Desktop {
+    /// Passive status with the same single hint surface as controls. Its own
+    /// retained key is never a tab stop; keyboard explanation follows the row.
+    pub(super) fn status_icon(
+        &self,
+        id: ElementId,
+        symbol: (&'static str, &'static str),
+        geometry: (f32, Hsla),
+        row_focus: Option<FocusHandle>,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let _ = self.control_focus(id.clone(), cx);
+        let anchors = self.navigation.hints.clone();
+        let anchor_id = id.clone();
+        let hover_id = id.clone();
+        let epoch = self.hover_hints.epoch();
+        let hovered = self.hover_hints.displayed(&id);
+        let focused = row_focus.clone();
+        div()
+            .id(id.clone())
+            .relative()
+            .flex_none()
+            .flex()
+            .items_center()
+            .child(self.scaled_icon(symbol.0, geometry.0, geometry.1))
+            .child(
+                gpui::canvas(
+                    move |bounds, window, _| {
+                        anchors.record(
+                            anchor_id.clone(),
+                            bounds,
+                            focused.as_ref().is_some_and(|h| h.is_focused(window)),
+                            hovered,
+                        );
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .when(!self.background_inert, |d| {
+                d.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    if *hovered && this.control_focus.live(&hover_id) {
+                        this.hover_hints
+                            .enter(epoch, hover_id.clone(), Instant::now());
+                    } else {
+                        this.hover_hints.exit(epoch, &hover_id);
+                    }
+                    cx.notify();
+                }))
+                .child(ReasonTip {
+                    text_size: self.sp(12.),
+                    line_height: self.sp(16.),
+                    handle: row_focus,
+                    hover_owner: self.hover_hints.displayed_owner().cloned(),
+                    keyboard_name: self.keyboard_navigation,
+                    id,
+                    anchors: self.navigation.hints.clone(),
+                    below_control: false,
+                    beside_control: true,
+                    action_name: Some(self.l(symbol.1)),
+                    label: "".into(),
+                    theme: self.theme,
+                })
+            })
+    }
     /// Inline geometry follows the same square-root text scale as avatars.
     /// Decorative miniature previews and the project mark retain their own size.
     pub(super) fn scaled_icon(&self, name: &'static str, size: f32, color: Hsla) -> gpui::Svg {
@@ -510,6 +589,7 @@ impl Desktop {
         let id = id.into();
         let hover_id = id.clone();
         let anchor_id = id.clone();
+        let click_id = id.clone();
         let anchors = self.navigation.hints.clone();
         let hovered = self.hover_hints.displayed(&id);
         let hover_epoch = self.hover_hints.epoch();
@@ -518,7 +598,13 @@ impl Desktop {
         let enabled = availability.enabled && focus.is_some();
         let (bg, fg, border) = control_colors(t, style, enabled);
         let room_row = matches!(&action, LocalAction::Navigate(_));
-        let selected_segment = match action {
+        let navigation_row = matches!(style, ButtonStyle::Quiet)
+            && (room_row || matches!(&action, LocalAction::Destination(_)));
+        let selected = match action {
+            LocalAction::Navigate(context) if navigation_row => {
+                Some(context) == self.snapshot.selected
+                    && self.destination != super::SidebarDestination::Inbox
+            }
             LocalAction::Destination(destination) => self.destination == destination,
             LocalAction::Scale(n) => self.scale == n,
             LocalAction::Density(compact) => self.compact == compact,
@@ -526,6 +612,26 @@ impl Desktop {
             LocalAction::Open(overlay) => self.overlay == Some(overlay),
             _ => false,
         };
+        let hover_bg = if matches!(style, ButtonStyle::Primary | ButtonStyle::StageDanger) {
+            Hsla {
+                l: (bg.l - 0.04).max(0.),
+                ..bg
+            }
+        } else if matches!(style, ButtonStyle::Stage) {
+            Hsla {
+                l: (bg.l + 0.04).min(1.),
+                ..bg
+            }
+        } else if navigation_row && selected {
+            t.selected
+        } else if selected {
+            t.segment
+        } else if room_row || navigation_row {
+            t.row_hover
+        } else {
+            t.hover
+        };
+        let pointer_hovered = self.hovered_control.as_ref() == Some(&id);
         div()
             .id(id)
             .relative()
@@ -547,6 +653,9 @@ impl Desktop {
             .text_color(fg)
             .border_1()
             .border_color(border)
+            .when(pointer_hovered && enabled && !self.background_inert, |d| {
+                d.child(self.control_wash(hover_bg, corner_radius - border_width))
+            })
             // Absolute bounds begin inside the host border: external gap 2 +
             // stroke 2, radius concentric with the actual host, for every width.
             .child(
@@ -578,43 +687,45 @@ impl Desktop {
                 border_width + 4.,
                 self.navigation.reveal.clone(),
             ))
-            .when(!self.background_inert && availability.hover_hint, |b| {
-                b.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                    if *hovered && this.control_focus.live(&hover_id) {
-                        this.hover_hints
-                            .enter(hover_epoch, hover_id.clone(), Instant::now());
-                    } else {
-                        this.hover_hints.exit(hover_epoch, &hover_id);
-                    }
-                    cx.notify();
-                }))
-            })
+            .when(
+                !self.background_inert && (enabled || availability.hover_hint),
+                |b| {
+                    b.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        if *hovered && this.control_focus.live(&hover_id) {
+                            this.hovered_control = Some(hover_id.clone());
+                            if availability.hover_hint {
+                                this.hover_hints.enter(
+                                    hover_epoch,
+                                    hover_id.clone(),
+                                    Instant::now(),
+                                );
+                            }
+                        } else {
+                            if this.hovered_control.as_ref() == Some(&hover_id) {
+                                this.hovered_control = None;
+                            }
+                            this.hover_hints.exit(hover_epoch, &hover_id);
+                        }
+                        cx.notify();
+                    }))
+                },
+            )
             .when(enabled && !self.background_inert, |b| {
                 b.cursor_pointer()
-                    .hover(|s| {
-                        s.bg(
-                            if matches!(style, ButtonStyle::Primary | ButtonStyle::StageDanger) {
-                                Hsla {
-                                    l: (bg.l - 0.04).max(0.),
-                                    ..bg
-                                }
-                            } else if matches!(style, ButtonStyle::Stage) {
-                                Hsla {
-                                    l: (bg.l + 0.04).min(1.),
-                                    ..bg
-                                }
-                            } else if selected_segment {
-                                t.segment
-                            } else if room_row {
-                                t.row_hover
-                            } else {
-                                t.hover
-                            },
-                        )
-                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
-                        this.handle(action.clone(), window, cx)
+                        this.handle(action.clone(), window, cx);
+                        if !this.reduced_motion
+                            && !this.update_restart_pending
+                            && !this.projection_blocked
+                            && let Some(from) = availability.switch_value
+                        {
+                            this.motion_trigger = Some(super::motion::MotionTrigger {
+                                id: click_id.clone(),
+                                kind: super::motion::TriggerKind::Switch(from),
+                                admitted: Instant::now(),
+                            });
+                        }
                     }))
                     .on_key_down(|event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
@@ -651,7 +762,7 @@ impl Desktop {
             line_height: self.sp(16.),
             handle: self.control_focus(id.clone(), cx),
             hover_owner: self.hover_hints.displayed_owner().cloned(),
-            keyboard_name: self.keyboard_navigation,
+            keyboard_name: self.keyboard_navigation && !availability.visible_label,
             id,
             anchors: self.navigation.hints.clone(),
             // Composer callers attach this element to the actual card top;
@@ -659,7 +770,9 @@ impl Desktop {
             below_control: availability.below_control,
             beside_control: availability.beside_control,
             action_name: action_name.map(|name| self.l(name)),
-            label: self.l(availability.reason.unwrap_or("")).into(),
+            label: self
+                .l(availability.reason.or(availability.help).unwrap_or(""))
+                .into(),
             theme: self.theme,
         }
     }
@@ -701,6 +814,7 @@ impl Desktop {
         let mut availability = availability;
         availability.enabled &= value.is_some();
         availability.hover_hint = true;
+        availability.switch_value = value;
         let enabled = availability.enabled && self.control_focus(id.clone(), cx).is_some();
         let t = self.theme;
         let (track, thumb) = match (enabled, value) {
@@ -740,22 +854,28 @@ impl Desktop {
         .bg(track)
         .border_color(if enabled { track } else { t.border })
         .child(
-            div()
-                .absolute()
-                .left(offset - px(1.))
-                .top(px(3.))
-                .size(thumb_size)
-                .rounded_full()
-                .bg(thumb)
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(value == Some(true), |d| {
-                    d.child(icon("check", f32::from(thumb_size) - 4., track))
-                })
-                .when(value.is_none(), |d| {
-                    d.child(div().w(px(8.)).h(px(2.)).bg(t.subtle))
-                }),
+            self.switch_thumb(
+                &id,
+                value,
+                div()
+                    .absolute()
+                    .left(offset - px(1.))
+                    .top(px(3.))
+                    .size(thumb_size)
+                    .rounded_full()
+                    .bg(thumb)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(value == Some(true), |d| {
+                        d.child(icon("check", f32::from(thumb_size) - 4., track))
+                    })
+                    .when(value.is_none(), |d| {
+                        d.child(div().w(px(8.)).h(px(2.)).bg(t.subtle))
+                    }),
+                px(3.),
+                width - thumb_size - px(5.),
+            ),
         )
         .when(!self.background_inert, |d| {
             d.child(self.reason_tip(id, hint, Some(label), cx))
@@ -888,7 +1008,7 @@ impl Desktop {
         let t = self.theme;
         let color = icon_color(t, style, availability.enabled);
         let mut availability = availability;
-        availability.hover_hint = !availability.visible_label || !availability.enabled;
+        availability.hover_hint = true;
         self.control_with_geometry(id.clone(), style, availability, action, (1., radius), cx)
             .size(px(extent))
             .min_h(px(extent))
@@ -897,17 +1017,11 @@ impl Desktop {
             .when(
                 !self.background_inert
                     && !availability.above_composer
-                    && !availability.explained_elsewhere
-                    && (!availability.visible_label || !availability.enabled),
+                    && !availability.explained_elsewhere,
                 |d| {
                     // Active icons also expose their name to keyboard users. This
                     // same anchored surface handles hover: no overlapping GPUI tip.
-                    d.child(self.reason_tip(
-                        id,
-                        availability,
-                        (!availability.visible_label).then_some(label),
-                        cx,
-                    ))
+                    d.child(self.reason_tip(id, availability, Some(label), cx))
                 },
             )
     }

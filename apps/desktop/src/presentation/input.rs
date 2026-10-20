@@ -339,7 +339,9 @@ impl TextInput {
         window: &mut Window,
         _: &mut Context<Self>,
     ) {
-        window.show_character_palette();
+        if self.interactive && !self.composing() && cfg!(target_os = "macos") {
+            window.show_character_palette();
+        }
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
@@ -1178,8 +1180,13 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-x", Cut, context),
         KeyBinding::new("home", Home, context),
         KeyBinding::new("end", End, context),
-        KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, context),
     ]);
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new(
+        "ctrl-cmd-space",
+        ShowCharacterPalette,
+        context,
+    )]);
 }
 
 fn from_utf16(text: &str, offset: usize) -> usize {
