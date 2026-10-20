@@ -76,7 +76,8 @@ jobs:
     timeout-minutes: 60
     env:
       AWS_LC_SYS_PREBUILT_NASM: "1"
-      RUSTFLAGS: "-D warnings"
+      # The verified Windows libwebrtc archive uses the static MSVC runtime.
+      RUSTFLAGS: "-D warnings -C target-feature=+crt-static"
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

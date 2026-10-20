@@ -47,6 +47,8 @@ export CC=clang-21 CXX=clang++-21
 Use `mac-arm64-release` on Apple Silicon or `win-x64-release` for Windows MSVC.
 The helper checks the archive digest and extracted inventory; do not substitute
 an unrelated WebRTC build. The engine is a local library, not a LiveKit service.
+Windows MSVC builds must set `RUSTFLAGS="-C target-feature=+crt-static"` and use
+the explicit `--target x86_64-pc-windows-msvc`, matching the SDK's static runtime.
 
 ## Native UI entrypoint
 

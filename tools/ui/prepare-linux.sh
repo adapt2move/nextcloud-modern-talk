@@ -5,7 +5,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 # The pinned libwebrtc SDK ships libc++ headers that require Clang 21. Ubuntu
 # 24.04 defaults to 18; use LLVM's signed 21 repository when the distro lacks it.
-if ! apt-cache show clang-21 >/dev/null 2>&1; then
+candidate=$(apt-cache policy clang-21 | awk '$1 == "Candidate:" { print $2 }')
+if [[ -z "$candidate" || "$candidate" == "(none)" ]]; then
   . /etc/os-release
   if [[ "$ID" != ubuntu || "$VERSION_CODENAME" != noble ]]; then
     echo "Install Clang 21 for this distribution before running this script." >&2
