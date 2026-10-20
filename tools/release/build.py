@@ -263,8 +263,9 @@ def build(root, output, target, version):
             linked = run(["otool", "-L", str(executable)], root).splitlines()[1:]
             linked += run(["otool", "-L", str(stage / "bin/talk-native-helper")], root).splitlines()[1:]
             allowed = ("/System/Library/", "/usr/lib/", "/Library/Frameworks/GStreamer.framework/", "@rpath/GStreamer.framework/")
-            if any(not line.strip().startswith(allowed) for line in linked):
-                raise ValueError("Undeclared macOS dynamic library")
+            undeclared = [line.strip() for line in linked if not line.strip().startswith(allowed)]
+            if undeclared:
+                raise ValueError("Undeclared macOS dynamic libraries:\n" + "\n".join(undeclared))
             build_info["linked_libraries"] = [line.strip() for line in linked]
             build_info["required_runtime"] = {
                 "name": "GStreamer official runtime framework", "version": "1.28.4",

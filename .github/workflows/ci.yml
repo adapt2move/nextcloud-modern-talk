@@ -116,3 +116,7 @@ jobs:
       - run: cargo build --locked --workspace --all-targets --target aarch64-apple-darwin
       - name: Compile native permission and notification helper
         run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
+      - name: Inspect native library dependencies
+        run: |
+          otool -L target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper"
+          otool -l target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper" | awk '/cmd LC_RPATH/ { remaining=3 } remaining > 0 { print; remaining-- }'
