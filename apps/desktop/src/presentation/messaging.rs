@@ -7,8 +7,8 @@ use super::{
     input::TextInput,
 };
 use gpui::{
-    Animation, AnimationExt, Context, Div, Entity, FocusHandle, Focusable, FontWeight,
-    ListAlignment, ListOffset, ListState, Window, div, list, prelude::*, px,
+    Context, Div, Entity, FocusHandle, Focusable, FontWeight, ListAlignment, ListOffset, ListState,
+    Window, div, list, prelude::*, px,
 };
 use std::{cell::RefCell, rc::Rc, time::Instant};
 use talk_core::ui::messaging::{ComposeTarget, MessageAction, MessageFeature};
@@ -943,13 +943,18 @@ impl Desktop {
                                 geometry.painted.clear();
                                 drop(geometry);
                                 let mut arrival = layout_arrival.borrow_mut();
-                                if arrival.after_layout(Instant::now(), reduced) {
+                                let now = Instant::now();
+                                let followed = arrival.after_layout(now, reduced);
+                                if followed {
                                     layout_list.scroll_to(ListOffset {
                                         item_ix: layout_list.item_count(),
                                         offset_in_item: px(0.),
                                     });
-                                    window.request_animation_frame();
-                                } else if arrival.following() {
+                                }
+                                if followed
+                                    || arrival.following()
+                                    || arrival.animate_next_frame(now)
+                                {
                                     window.request_animation_frame();
                                 }
                             })
@@ -975,36 +980,17 @@ impl Desktop {
                                                             geometry.painted.push((id, bounds));
                                                         }
                                                     });
-                                                let admitted = this
+                                                let progress = this
                                                     .message_ui
                                                     .arrival
                                                     .borrow()
-                                                    .admitted(m.local_id, Instant::now());
-                                                if let Some(admitted) = admitted {
+                                                    .progress(m.local_id, Instant::now());
+                                                if let Some(progress) = progress {
                                                     let frames = this.motion_frame_counter();
-                                                    row.with_animation(
-                                                        scoped_id(
-                                                            "message-entry",
-                                                            this.snapshot
-                                                                .selected
-                                                                .expect("message context"),
-                                                            m.local_id,
-                                                            0,
-                                                        ),
-                                                        Animation::new(arrival::ENTRY),
-                                                        move |row, _| {
-                                                            super::motion::count_frame(&frames);
-                                                            let progress =
-                                                                (admitted.elapsed().as_secs_f32()
-                                                                    / arrival::ENTRY.as_secs_f32())
-                                                                .min(1.);
-                                                            row.opacity(
-                                                                0.6 + 0.4
-                                                                    * gpui::ease_out_quint()(
-                                                                        progress,
-                                                                    ),
-                                                            )
-                                                        },
+                                                    super::motion::count_frame(&frames);
+                                                    row.opacity(
+                                                        0.6 + 0.4
+                                                            * gpui::ease_out_quint()(progress),
                                                     )
                                                     .into_any_element()
                                                 } else {

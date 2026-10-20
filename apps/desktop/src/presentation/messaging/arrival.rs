@@ -8,7 +8,9 @@ const MAX_ENTRIES: usize = 100; // The snapshot's existing message-page bound.
 
 struct Batch {
     ids: Vec<u128>,
-    admitted: Instant,
+    // None while the admitted bottom-follow waits for its layout deadline.
+    // Measuring an offscreen row must not consume its visible entry clock.
+    started: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -47,6 +49,13 @@ impl Arrival {
     pub fn manual_scroll(&mut self) {
         if self.follow.is_some() {
             self.cancelled_follows = self.cancelled_follows.saturating_add(1);
+        }
+        if self
+            .entry
+            .as_ref()
+            .is_some_and(|batch| batch.started.is_none())
+        {
+            self.entry = None;
         }
         self.follow = None;
     }
@@ -93,11 +102,11 @@ impl Arrival {
         }
         self.new_rows = self.new_rows.saturating_add(ids.len() as u64);
         if !reduced {
-            if let Some(batch) = self
-                .entry
-                .as_mut()
-                .filter(|batch| now.saturating_duration_since(batch.admitted) < ENTRY)
-            {
+            let waiting = at_bottom || self.follow.is_some();
+            if let Some(batch) = self.entry.as_mut().filter(|batch| match batch.started {
+                None => waiting && self.follow.is_some(),
+                Some(started) => !waiting && now.saturating_duration_since(started) < ENTRY,
+            }) {
                 // A burst shares the original deadline; it cannot keep motion alive.
                 for id in ids {
                     if batch.ids.len() < MAX_ENTRIES && !batch.ids.contains(&id) {
@@ -105,7 +114,10 @@ impl Arrival {
                     }
                 }
             } else {
-                self.entry = Some(Batch { ids, admitted: now });
+                self.entry = Some(Batch {
+                    ids,
+                    started: (!waiting).then_some(now),
+                });
             }
         }
         if at_bottom && self.follow.is_none() {
@@ -113,13 +125,29 @@ impl Arrival {
         }
     }
 
-    pub fn admitted(&self, id: u128, now: Instant) -> Option<Instant> {
+    pub fn progress(&self, id: u128, now: Instant) -> Option<f32> {
         self.entry
             .as_ref()
-            .filter(|batch| {
-                now.saturating_duration_since(batch.admitted) < ENTRY && batch.ids.contains(&id)
+            .filter(|batch| batch.ids.contains(&id))
+            .and_then(|batch| {
+                let Some(started) = batch.started else {
+                    return self.follow.is_some().then_some(0.);
+                };
+                let elapsed = now.saturating_duration_since(started);
+                (elapsed < ENTRY).then(|| elapsed.as_secs_f32() / ENTRY.as_secs_f32())
             })
-            .map(|batch| batch.admitted)
+    }
+
+    /// The timeline owns one finite frame driver, including one final paint.
+    /// Lazy row measurement cannot start or restart this clock.
+    pub fn animate_next_frame(&mut self, now: Instant) -> bool {
+        let Some(started) = self.entry.as_ref().and_then(|batch| batch.started) else {
+            return false;
+        };
+        if now.saturating_duration_since(started) >= ENTRY {
+            self.entry = None;
+        }
+        true
     }
 
     pub fn following(&self) -> bool {
@@ -150,6 +178,11 @@ impl Arrival {
             });
             self.follows = self.follows.saturating_add(1);
             self.follow = None;
+            if let Some(batch) = self.entry.as_mut()
+                && batch.started.is_none()
+            {
+                batch.started = Some(now);
+            }
             true
         } else {
             false
@@ -180,7 +213,7 @@ mod tests {
         let mut state = Arrival::default();
         state.visibility(true, false);
         state.observe(&[], &[row(10)], true, true, false, now);
-        assert!(state.admitted(10, now).is_none());
+        assert!(state.progress(10, now).is_none());
         assert!(!state.following());
         state
     }
@@ -192,9 +225,11 @@ mod tests {
         let mut own = row(12);
         own.own = true;
         state.observe(&[row(10)], &[row(10), row(11), own], true, true, false, now);
-        assert_eq!(state.admitted(11, now), Some(now));
-        assert_eq!(state.admitted(12, now), Some(now));
-        let settled = now + ENTRY;
+        assert_eq!(state.progress(11, now), Some(0.));
+        assert_eq!(state.progress(12, now), Some(0.));
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        let settled = now + FOLLOW + ENTRY;
         state.observe(
             &[row(11)],
             &[row(5), row(10), row(11)],
@@ -203,12 +238,12 @@ mod tests {
             false,
             settled,
         );
-        assert!(state.admitted(5, settled).is_none());
-        assert!(state.admitted(10, settled).is_none());
-        assert!(state.admitted(11, settled).is_none());
+        assert!(state.progress(5, settled).is_none());
+        assert!(state.progress(10, settled).is_none());
+        assert!(state.progress(11, settled).is_none());
         state.observe(&[row(11)], &[], false, false, false, settled);
         state.observe(&[], &[row(11), row(13)], true, true, false, settled);
-        assert!(state.admitted(13, settled).is_none());
+        assert!(state.progress(13, settled).is_none());
         assert!(!state.following());
     }
 
@@ -234,13 +269,21 @@ mod tests {
             false,
             now,
         );
-        assert!(state.admitted(11, now).is_none());
+        assert!(state.progress(11, now).is_none());
         state.observe(&[row(11)], &[row(11), row(12)], true, true, false, now);
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        let visible = now + FOLLOW;
         assert_eq!(
-            state.admitted(12, now + Duration::from_millis(90)),
-            Some(now)
+            state.progress(12, visible + Duration::from_millis(70)),
+            Some(0.5)
         );
-        assert!(state.admitted(12, now + ENTRY).is_none());
+        // Re-querying a remounted row cannot restart or reverse its clock.
+        assert_eq!(
+            state.progress(12, visible + Duration::from_millis(70)),
+            Some(0.5)
+        );
+        assert!(state.progress(12, visible + ENTRY).is_none());
     }
 
     #[test]
@@ -264,6 +307,7 @@ mod tests {
         state.observe(&[row(12)], &[row(13)], true, true, false, now + ENTRY);
         state.manual_scroll();
         assert!(!state.after_layout(now + ENTRY + FOLLOW, false));
+        assert!(state.progress(13, now + ENTRY + FOLLOW).is_none());
         state.observe(&[row(13)], &[row(14)], true, false, false, now + ENTRY);
         assert!(!state.following());
     }
@@ -273,16 +317,39 @@ mod tests {
         let now = Instant::now();
         let mut state = baseline(now);
         state.observe(&[row(10)], &[row(11)], true, true, true, now);
-        assert!(state.admitted(11, now).is_none());
+        assert!(state.progress(11, now).is_none());
         assert!(state.after_layout(now, true));
         state.observe(&[row(11)], &[row(12)], true, true, false, now);
         state.visibility(false, false);
         assert!(!state.following());
-        assert!(state.admitted(12, now).is_none());
+        assert!(state.progress(12, now).is_none());
         state.visibility(true, false);
         state.observe(&[row(12)], &[row(13)], true, true, false, now);
         state.reset();
         assert!(!state.following());
-        assert!(state.admitted(13, now).is_none());
+        assert!(state.progress(13, now).is_none());
+    }
+
+    #[test]
+    fn visible_entry_starts_at_follow_commit_and_has_one_finite_frame_driver() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        state.observe(&[row(10)], &[row(10), row(11)], true, true, false, now);
+        // A slow first layout must not consume the visible 140 ms fade.
+        let layout = now + Duration::from_millis(200);
+        assert_eq!(state.progress(11, layout), Some(0.));
+        assert!(!state.animate_next_frame(layout));
+        assert!(!state.after_layout(layout, false));
+        let visible = layout + FOLLOW;
+        assert!(state.after_layout(visible, false));
+        assert_eq!(state.progress(11, visible), Some(0.));
+        assert_eq!(
+            state.progress(11, visible + Duration::from_millis(70)),
+            Some(0.5)
+        );
+        assert!(state.animate_next_frame(visible + Duration::from_millis(70)));
+        assert!(state.animate_next_frame(visible + ENTRY));
+        assert!(state.progress(11, visible + ENTRY).is_none());
+        assert!(!state.animate_next_frame(visible + ENTRY));
     }
 }
