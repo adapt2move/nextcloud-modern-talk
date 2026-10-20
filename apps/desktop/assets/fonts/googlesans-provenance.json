@@ -1,0 +1,43 @@
+{
+  "family": "Google Sans",
+  "release": "v14.000",
+  "repository": "https://github.com/googlefonts/googlesans",
+  "commit": "5c8f512c5fb42a7be099b951a7c097f96209c78e",
+  "tag_object": "4e3370b94d97e5c3e4a4f2ef2aaab15071bd1aeb",
+  "archive_url": "https://github.com/googlefonts/googlesans/releases/download/v14.000/GoogleSans-v14.000.zip",
+  "archive_sha256": "d338f0e74f5eabead86a85b87edf4cc50cd6561196dbe173d1db4139e95b3ca7",
+  "license": "SIL Open Font License 1.1, no Reserved Font Names",
+  "modified": false,
+  "files": [
+    {
+      "file": "GoogleSans-Regular.ttf",
+      "archive_path": "build/GoogleSans/static/GoogleSans-Regular.ttf",
+      "sha256": "2ab1f257d8c87bd7a376fc8504238fd0ffbc435d7605907196db31a1867cb59e",
+      "bytes": 2190444
+    },
+    {
+      "file": "GoogleSans-Medium.ttf",
+      "archive_path": "build/GoogleSans/static/GoogleSans-Medium.ttf",
+      "sha256": "1c87b72912ef81b48ab4852976f3d5bf75c7205e0a58a97ffca947d171c722a7",
+      "bytes": 2232604
+    },
+    {
+      "file": "GoogleSans-Bold.ttf",
+      "archive_path": "build/GoogleSans/static/GoogleSans-Bold.ttf",
+      "sha256": "280eab71ebed3dca9281ca7b071a219d48a4b379f3277b4a10c1b21b7e697126",
+      "bytes": 2219128
+    },
+    {
+      "file": "GoogleSans-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/googlefonts/googlesans/5c8f512c5fb42a7be099b951a7c097f96209c78e/OFL.txt",
+      "sha256": "831b6e041705873c3e6efb18c4c96202bc41c8be42a456d3d26c47abf14816d0",
+      "bytes": 4397
+    },
+    {
+      "file": "GoogleSans-TRADEMARKS.txt",
+      "url": "https://raw.githubusercontent.com/googlefonts/googlesans/5c8f512c5fb42a7be099b951a7c097f96209c78e/TRADEMARKS.txt",
+      "sha256": "9b75a5efcc2de1e1aa214a896c4d58a5544c1d88cb1e3fb7a42281404ff10708",
+      "bytes": 1471
+    }
+  ]
+}

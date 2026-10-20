@@ -31,10 +31,11 @@ def copy_source(destination):
     destination.mkdir()
     for name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'rustfmt.toml'):
         shutil.copy2(candidate / name, destination / name)
-    for name in ('crates', 'apps'):
+    for name in ('crates', 'apps', 'vendor'):
         shutil.copytree(candidate / name, destination / name)
     (destination / 'tools').mkdir()
     shutil.copy2(candidate / 'tools/check_architecture.py', destination / 'tools/check_architecture.py')
+    shutil.copy2(candidate / 'tools/vendor.py', destination / 'tools/vendor.py')
     shutil.copytree(candidate / 'tools/media', destination / 'tools/media')
     (destination / 'tests/identity').mkdir(parents=True)
     shutil.copy2(candidate / 'tests/identity/driver.rs', destination / 'tests/identity/driver.rs')

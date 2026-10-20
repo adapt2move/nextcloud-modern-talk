@@ -40,6 +40,33 @@ fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
 impl Theme {
+    fn chat_header_tints(self) -> [Hsla; 2] {
+        [0.92, 0.86].map(|a| Hsla { a, ..self.surface })
+    }
+
+    /// Windows has no backdrop implementation. Its explicit product fallback
+    /// is a white header, including when the surrounding application is dark.
+    pub fn chat_header_theme(self, palette: Palette) -> Self {
+        if cfg!(target_os = "windows") {
+            Self::resolve(palette, Appearance::Light, WindowAppearance::Light)
+        } else {
+            self
+        }
+    }
+
+    /// Readability tint painted after the supported native backdrop pass.
+    pub fn chat_header_surface(self) -> gpui::Background {
+        if cfg!(target_os = "windows") {
+            return color(0xffffff).into();
+        }
+        let [top, bottom] = self.chat_header_tints();
+        gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(top, 0.),
+            gpui::linear_color_stop(bottom, 1.),
+        )
+    }
+
     pub fn chrome(self) -> gpui::Background {
         gpui::linear_gradient(
             155.,
@@ -168,6 +195,29 @@ mod tests {
         let a = luminance(a);
         let b = luminance(b);
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+    #[test]
+    fn translucent_header_keeps_text_and_focus_readable_over_extreme_content() {
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let t = Theme::resolve(palette, appearance, WindowAppearance::Light);
+                for tint in t.chat_header_tints().map(gpui::Rgba::from) {
+                    assert!((0.5..1.).contains(&tint.a));
+                    for underlying in [0., 1.] {
+                        let mixed = gpui::Rgba {
+                            r: tint.r * tint.a + underlying * (1. - tint.a),
+                            g: tint.g * tint.a + underlying * (1. - tint.a),
+                            b: tint.b * tint.a + underlying * (1. - tint.a),
+                            a: 1.,
+                        };
+                        for text in [t.text, t.sidebar_secondary] {
+                            assert!(contrast(text, mixed.into()) >= 4.5);
+                        }
+                        assert!(contrast(t.focus, mixed.into()) >= 3.);
+                    }
+                }
+            }
+        }
     }
     #[test]
     fn row_hover_is_a_distinct_intermediate_lightness_step_across_chrome() {

@@ -62,6 +62,7 @@ impl TagId {
 pub struct Account {
     pub id: String,
     pub display_name: Option<String>,
+    pub organization: Option<String>,
 }
 impl Account {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -81,6 +82,7 @@ impl Account {
                 .ok_or(ErrorKind::Malformed)?
                 .to_owned(),
             display_name: string(v.get("displayname"), 256)?,
+            organization: string(v.get("organisation"), 256)?,
         };
         if result.id.is_empty() || result.id.chars().any(char::is_control) {
             return Err(ErrorKind::Malformed);
@@ -90,6 +92,8 @@ impl Account {
 }
 #[derive(Clone, Debug)]
 pub struct Room {
+    pub avatar_version: Option<String>,
+    pub custom_avatar: Option<bool>,
     pub token: String,
     pub server_id: Option<u64>,
     pub name: String,
@@ -141,6 +145,8 @@ impl Room {
         }
         let v = &v;
         let result = Self {
+            avatar_version: string(v.get("avatarVersion"), 128)?,
+            custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             server_id: v.get("id").and_then(Value::as_u64).filter(|n| *n > 0),
             name: string(v.get("displayName"), 256)?.ok_or(ErrorKind::Malformed)?,

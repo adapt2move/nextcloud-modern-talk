@@ -151,7 +151,7 @@ impl Desktop {
                     .py_3()
                     .mb_3()
                     .text_size(self.sp(16.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l("Einstellungen")),
             )
             .children(
@@ -170,7 +170,7 @@ impl Desktop {
                         .child(
                             div()
                                 .text_size(self.sp(20.))
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .font_weight(FontWeight::MEDIUM)
                                 .child(self.l("Darstellung")),
                         )
                         .child(self.hint(self.l("Ein Arbeitsplatz, der sich nach dir anfühlt."))),
@@ -319,7 +319,7 @@ impl Desktop {
                                 .child(
                                     div()
                                         .text_size(self.sp(12.))
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .font_weight(FontWeight::MEDIUM)
                                         .child(self.l("Du")),
                                 )
                                 .child(
@@ -334,7 +334,7 @@ impl Desktop {
             content = content.child(
                 div()
                     .text_size(self.sp(20.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l("Konten")),
             );
             let quick = self.preferences.active.quick_switcher;
@@ -551,7 +551,7 @@ impl Desktop {
     fn settings_label(&self, text: &str) -> Div {
         div()
             .text_size(self.sp(13.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .child(self.l(text).to_owned())
     }
     fn settings_nav(&self, tab: SettingsTab, active: bool, cx: &Context<Self>) -> Stateful<Div> {
@@ -786,7 +786,7 @@ impl Desktop {
                         div()
                             .text_size(self.sp(14.))
                             .text_color(t.text)
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .child(self.l(if p == Palette::Blue { "Blau" } else { "Salbei" })),
                     )
                     .child(self.hint(self.l(if p == Palette::Blue {

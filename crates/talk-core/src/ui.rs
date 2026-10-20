@@ -1,6 +1,7 @@
 //! Renderer boundary: bounded display data and user intents, with no network/native types.
 //! No media frame, credential, endpoint, authorization header or signaling payload belongs here.
 
+pub mod content;
 pub mod conversation;
 pub mod messaging;
 /// Additive native presentation contract; the bootstrap consumer remains source-compatible.

@@ -88,6 +88,10 @@ pub struct OperationContext {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
+    Content {
+        operation: OperationId,
+        command: crate::protocol::content::ContentCommand,
+    },
     Messaging {
         conversation: ConversationId,
         operation: OperationId,
@@ -171,6 +175,10 @@ pub enum ProtocolRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolReply {
+    Content {
+        operation: OperationId,
+        result: crate::protocol::content::ContentResult,
+    },
     Messaging {
         conversation: ConversationId,
         operation: OperationId,

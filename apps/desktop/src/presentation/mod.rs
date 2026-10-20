@@ -1,5 +1,6 @@
 mod account_settings;
 mod call;
+mod content;
 mod controls;
 mod conversation_dialog;
 mod creation;
@@ -52,6 +53,8 @@ pub enum Overlay {
     Create,
     Discover,
     Organize,
+    ContentPreview,
+    CreatePoll,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
@@ -65,11 +68,14 @@ pub enum SearchKind {
     Messages,
     Files,
     Conversations,
+    People,
 }
 #[derive(Clone)]
 pub enum LocalAction {
+    Content(content::Action),
     CreateMode(bool),
     FindPeople,
+    FindSearchPeople,
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
     CheckUpdates,
@@ -131,7 +137,6 @@ pub enum LocalAction {
     StopDevice(talk_core::preferences::devices::DeviceKind),
     Search,
     SearchKind(SearchKind),
-    ClearFilter,
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
@@ -184,6 +189,7 @@ pub struct Desktop {
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
     message_ui: messaging::MessageUi,
+    content_ui: content::ContentUi,
     probe: Probe,
     background_inert: bool,
     control_focus: controls::FocusStates,
@@ -254,6 +260,8 @@ pub struct Desktop {
     pub search: Entity<TextInput>,
     pub sidebar_filter: Entity<TextInput>,
     pub composer: Entity<TextInput>,
+    composer_focus: FocusHandle,
+    composer_active: bool,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
     upload_folder: Entity<TextInput>,
@@ -261,6 +269,7 @@ pub struct Desktop {
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
     pub search_kind: SearchKind,
+    directory_query: Option<(talk_core::ui::AccountScope, String)>,
     pub thread_parent: Option<(ConversationRef, u128)>,
     drafts: Drafts,
     root_focus: FocusHandle,
@@ -276,7 +285,8 @@ pub struct Desktop {
     incoming_return_focus: Option<FocusHandle>,
     last_incoming_scope: Option<CallScope>,
     _appearance_observer: Subscription,
-    _input_observers: [Subscription; 2],
+    _input_observers: [Subscription; 3],
+    _composer_focus_observers: [Subscription; 2],
     _dialog_observers: Vec<Subscription>,
     pending_ack: Option<talk_core::ui::presentation::SubmissionResult>,
     pub theme: Theme,
@@ -332,6 +342,15 @@ impl Desktop {
         let input_observers = [
             cx.observe(&search, |_, _, cx| cx.notify()),
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
+            cx.observe(&composer, |_, _, cx| cx.notify()),
+        ];
+        let composer_focus = cx.focus_handle().tab_stop(false);
+        let composer_focus_observers = [
+            cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus_out(&composer_focus, window, |this, _, _, cx| {
+                this.content_ui.menu = false;
+                cx.notify();
+            }),
         ];
         let prejoin = if prejoin {
             snapshot
@@ -361,11 +380,14 @@ impl Desktop {
             };
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let message_ui = messaging::MessageUi::new(cx);
+        let content_ui =
+            content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
         let mut dialog_observers = Vec::new();
         for input in room_ui
             .inputs()
             .into_iter()
             .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
@@ -374,6 +396,7 @@ impl Desktop {
             update_restart_pending: false,
             room_ui,
             message_ui,
+            content_ui,
             probe,
             background_inert: false,
             control_focus: controls::FocusStates::default(),
@@ -440,6 +463,8 @@ impl Desktop {
             search,
             sidebar_filter,
             composer,
+            composer_focus,
+            composer_active: false,
             conversation_name,
             group_name,
             upload_folder,
@@ -447,6 +472,7 @@ impl Desktop {
             account_preference_request: 0,
             account_preference_error: None,
             search_kind: SearchKind::All,
+            directory_query: None,
             thread_parent: None,
             drafts: Drafts::default(),
             root_focus,
@@ -463,6 +489,7 @@ impl Desktop {
             last_incoming_scope: None,
             _appearance_observer: observer,
             _input_observers: input_observers,
+            _composer_focus_observers: composer_focus_observers,
             _dialog_observers: dialog_observers,
             pending_ack: None,
             theme,
@@ -497,6 +524,8 @@ impl Desktop {
         }
     }
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_composer_mentions(cx);
+        self.refresh_content_ui(cx);
         let reduced_motion = self.settings_port.reduced_motion();
         if self.reduced_motion != reduced_motion {
             self.reduced_motion = reduced_motion;
@@ -602,6 +631,7 @@ impl Desktop {
             self.retire_emoji_picker();
         }
         self.snapshot = next;
+        self.refresh_content_ui(cx);
         self.refresh_creation(cx);
         self.refresh_room_dialog(cx);
         self.refresh_message_ui(cx);
@@ -777,6 +807,7 @@ impl Desktop {
         let previous_feedback = self.feedback;
         let invoker = window.focused(cx);
         match action {
+            LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
             LocalAction::FindPeople => {
                 if let Ok(query) =
@@ -787,6 +818,7 @@ impl Desktop {
                     ));
                 }
             }
+            LocalAction::FindSearchPeople => self.find_search_people(cx),
             LocalAction::CreateConversation => {
                 if let Ok(name) =
                     talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim())
@@ -858,6 +890,7 @@ impl Desktop {
                 self.pending_modal_focus = true;
                 self.keyboard_navigation = false;
                 if overlay == Overlay::Search {
+                    self.directory_query = None;
                     self.search.focus_handle(cx).focus(window);
                 } else {
                     self.modal_focus.focus(window);
@@ -887,10 +920,6 @@ impl Desktop {
             LocalAction::ToggleTag(id) => self.toggle_tag(id),
             LocalAction::EditGroup(scope, edit) => self.edit_group(scope, edit, cx),
             LocalAction::PlaceInGroup(context, group) => self.place_in_group(context, group, cx),
-            LocalAction::ClearFilter => self.sidebar_filter.update(cx, |i, cx| {
-                i.set_value("");
-                cx.notify();
-            }),
             LocalAction::LocateMessage(context, id) => {
                 if Some(context) == self.snapshot.selected
                     && let Some(index) = self
@@ -973,6 +1002,21 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.close_content_overlay() {
+                    if self.overlay.is_none() {
+                        if let Some(focus) = self
+                            .return_focus
+                            .take()
+                            .filter(|f| self.root_focus.contains(f, window))
+                        {
+                            focus.focus(window);
+                        } else {
+                            self.root_focus.focus(window);
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
                 self.retire_emoji_picker();
                 self.room_ui.password.update(cx, |i, _| i.reset());
                 if self.navigation_open {
@@ -1454,6 +1498,13 @@ impl Desktop {
         } else if !self.incoming_visible() && action == Some(ActionId::OpenSettings) {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
             cx.stop_propagation();
+        } else if key == "enter"
+            && self.overlay == Some(Overlay::Search)
+            && self.search.focus_handle(cx).is_focused(window)
+            && !self.search.read(cx).composing()
+        {
+            self.handle(LocalAction::FindSearchPeople, window, cx);
+            cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open
             && self.destination != SidebarDestination::Inbox
@@ -1518,6 +1569,7 @@ impl Desktop {
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
         {
             input.update(cx, |input, _| input.interactive = false);
         }
@@ -1536,6 +1588,7 @@ impl Desktop {
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
         .any(|input| {
             let input = input.read(cx);
             input.interactive && input.composing()
@@ -1560,6 +1613,10 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Retained parent focus includes toolbar controls reached by Tab.
+        // Only entry/exit notifications rebuild the optional composer details.
+        self.composer_active =
+            window.is_window_active() && self.composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
@@ -1579,6 +1636,22 @@ impl Render for Desktop {
         self.navigation.prepare_history(self.snapshot.selected);
         self.theme = Theme::resolve(self.palette, self.appearance, cx.window_appearance());
         let t = self.theme;
+        for input in self.content_ui.inputs() {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.clipboard_allowed = true;
+                i.interactive = self.overlay == Some(Overlay::CreatePoll)
+                    && !self.snapshot.content_panel.poll_state.pending()
+                    && !incoming;
+            });
+        }
+        self.content_ui
+            .question
+            .update(cx, |i, _| i.set_placeholder(self.l("Frage der Umfrage")));
+        for input in &self.content_ui.options {
+            input.update(cx, |i, _| i.set_placeholder(self.l("Antwortoption")));
+        }
         for input in [
             &self.server,
             &self.search,
@@ -1635,7 +1708,7 @@ impl Render for Desktop {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
         for (input, key) in [
-            (&self.search, "Geladene Inhalte durchsuchen …"),
+            (&self.search, "Nachrichten, Gespräche und Personen suchen …"),
             (&self.sidebar_filter, "Gespräche filtern …"),
             (&self.conversation_name, "Name des Gesprächs"),
             (&self.group_name, "Name der Gruppe"),
@@ -1793,7 +1866,7 @@ impl Render for Desktop {
             .size_full()
             .flex()
             .flex_col()
-            .font_family("Manrope")
+            .font_family("Google Sans")
             .text_size(self.sp(14.))
             .line_height(self.sp(22.))
             .bg(t.chrome())
@@ -1871,6 +1944,10 @@ impl Render for Desktop {
                 Some(Overlay::Settings | Overlay::Accounts) => Some("close-settings".into()),
                 Some(Overlay::Search) => {
                     self.search.focus_handle(cx).focus(window);
+                    None
+                }
+                Some(Overlay::CreatePoll) => {
+                    self.content_ui.question.focus_handle(cx).focus(window);
                     None
                 }
                 Some(_) => Some("close-overlay".into()),

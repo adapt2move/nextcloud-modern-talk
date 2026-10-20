@@ -1,4 +1,4 @@
-# v0.0.2 — alpha
+# v0.0.3 — alpha
 
 NextCloud Modern Talk is a native Rust/GPUI desktop client for teams. It connects
 through the system browser and brings conversations, messages, files, settings
@@ -7,6 +7,9 @@ progress.
 
 ## Included
 
+- A self-contained Apple Silicon app in a styled drag-to-Applications DMG.
+  GStreamer libraries and plugins are included; no separate runtime installation
+  is required. Complete app ZIPs remain available for subsequent in-app updates.
 - Persistent accounts through native credential storage where available, or an
   explicitly selected unencrypted private-file fallback, with restoration and
   logout handled by the same account owner.
@@ -15,12 +18,17 @@ progress.
 - Text, replies, edits, deletion, reactions, threads, pins, reminders, server
   schedules and room search. The title opens shared content; Ctrl+F or Cmd+F
   opens search. Reply and overflow actions appear on message hover or focus.
+- Image and document thumbnails, enlarged image previews, an explicit Cloud web
+  view for documents and download progress. Published polls support creation,
+  voting, permitted results and closure; server-managed poll drafts remain open.
 - Bounded background room/message reconciliation and incoming-call discovery
   across admitted accounts, without marking messages read or replaying old
   notifications on startup.
 - Persistent appearance, language, startup, notification and device preferences
-  in English, German and Spanish. Lucide icons, contextual tooltips and short
+  in English, German and Spanish. Google Sans, Lucide icons, contextual tooltips and short
   transitions respect Reduce Motion. Device checks remain separate from calls.
+- The chat header blurs content beneath it on macOS and Linux. Windows uses a
+  plain opaque white header with dark text and icons.
 - New incoming and sent messages enter gently. The view follows after a brief
   delay only when already at the end; scrolling up preserves the reading position.
 - Rust WebRTC with GStreamer VP8/Opus codecs, ordinary Talk signaling and the
@@ -37,26 +45,30 @@ Download the matching package and checksum file from this release. Preserve the
 included source/provenance and third-party notices when redistributing.
 
 **Ubuntu 24.04 x86_64:** install with
-`sudo apt install ./nextcloud-modern-talk-0.0.2-linux-x86_64.deb`, then launch
+`sudo apt install ./nextcloud-modern-talk-0.0.3-linux-x86_64.deb`, then launch
 NextCloud Modern Talk from the application menu. Browser login needs a desktop
 session with a registered browser and portal service. The tar archive is an
 alternative for an owned installation with the required native libraries.
 System package updates use PackageKit and may request administrator approval;
 an unavailable installation route is reported in Settings.
 
-**Apple Silicon macOS 15.7 or later:** install the official GStreamer runtime
-specified in `Contents/Resources/INSTALL.txt`, then copy the app to Applications.
-This alpha has no Developer ID signature or notarization. Gatekeeper may require
-explicit approval or block it; do not disable system protection. The package is
-compile-checked. Native Mac login, permissions, devices and bundle installation
-still require platform qualification.
+**Apple Silicon macOS 15.7 or later:** open the DMG and drag NextCloud Modern Talk
+to Applications. Eject the disk image, then open the installed app. GStreamer is
+bundled; no Homebrew packages or separate framework installation are needed.
+The app uses an ad-hoc signature, not a Developer ID signature or notarization.
+Gatekeeper may require explicit approval or block it; do not disable system
+protection. Mac CI compiles and checks package structure, native library paths
+and signatures. Native login, permissions, devices and update installation still
+require platform qualification.
 
 Windows is compile-checked only; no Windows installer is supplied.
 
-Upgrade **v0.0.1 manually**: that release has no in-app installer. From v0.0.2,
-select the prerelease channel to receive later alpha releases. Downloads are
-automatic; installation remains an explicit action. Unsaved message composition
-must be resolved first, and an update never ends a call implicitly.
+Upgrade **v0.0.1 manually**: that release has no in-app installer. On macOS, also
+upgrade **v0.0.2 manually using this DMG**: its updater does not recognize the new
+self-contained bundle layout. From v0.0.3 on Mac, select the prerelease channel
+to receive later alpha releases; Linux v0.0.2 already supports that route.
+Downloads are automatic; installation remains an explicit action. Unsaved message
+composition must be resolved first, and an update never ends a call implicitly.
 
 ## Known limits
 
@@ -69,9 +81,9 @@ must be resolved first, and an update never ends a call implicitly.
 - Guest/federated media, required call E2EE, screen/system-audio sharing and
   conference-scale qualification remain outside this profile. A remote screen
   offer ends the unsupported call. Permission guidance is not a sharing engine.
-- Typing indicators, voice messages, advanced file/media previews, account-wide
-  search and parts of moderation remain incomplete. See the
-  [feature inventory](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.2/docs/compatibility/feature-inventory.md).
+- Typing indicators, voice messages, video/native document viewers, account-wide
+  content search and parts of moderation remain incomplete. See the
+  [feature inventory](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.3/docs/compatibility/feature-inventory.md).
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
@@ -82,4 +94,4 @@ must be resolved first, and an update never ends a call implicitly.
   semantic accessibility or whole-process performance and energy targets.
 
 Report reproducible problems without credentials, private server details or
-message contents. Security issues follow [SECURITY.md](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.2/SECURITY.md).
+message contents. Security issues follow [SECURITY.md](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.3/SECURITY.md).

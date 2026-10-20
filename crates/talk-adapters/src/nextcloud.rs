@@ -1,6 +1,7 @@
 //! Nextcloud HTTP/OCS deep module. Wire identifiers, authenticated transport and
 //! correlation journals stay here; core receives bounded normalized observations.
 mod call_policy;
+mod content;
 mod conversation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
@@ -757,6 +758,10 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
+                operation,
+                result: self.content(context, operation, command, &caps).await?,
+            }),
             ProtocolRequest::Messaging {
                 conversation,
                 operation,
@@ -1063,6 +1068,7 @@ impl NextcloudPort for NextcloudClient {
     ) -> Task<'_, ProtocolReply> {
         Box::pin(async move {
             let mutation = match &request {
+                ProtocolRequest::Content { command, .. } => content::is_mutation(command),
                 ProtocolRequest::Messaging { command, .. } => messaging::is_mutation(command),
                 ProtocolRequest::ConversationSettings { command, .. } => {
                     conversation::is_mutation(command)

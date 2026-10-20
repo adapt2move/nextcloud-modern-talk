@@ -47,7 +47,7 @@ impl Desktop {
     fn settings_heading(&self, key: &str) -> Div {
         div()
             .text_size(self.sp(13.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .child(self.l(key).to_owned())
     }
     pub(super) fn settings_page(&self, tab: SettingsTab, cx: &Context<Self>) -> Div {
@@ -55,7 +55,7 @@ impl Desktop {
         let mut page = div().flex().flex_col().gap_3().w_full().child(
             div()
                 .text_size(self.sp(20.))
-                .font_weight(FontWeight::SEMIBOLD)
+                .font_weight(FontWeight::MEDIUM)
                 .child(self.l(tab.key())),
         );
         match tab {

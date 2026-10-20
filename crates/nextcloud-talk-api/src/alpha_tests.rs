@@ -333,3 +333,105 @@ async fn scheduled_edit_accepts_documented_202_envelope() {
         .unwrap();
     assert!(matches!(reply,Reply::Chat(chat::Response::Schedule(s)) if s.id==123456789012345678));
 }
+
+#[tokio::test]
+async fn published_poll_drop_retains_create_uncertainty_and_read_correlates_id() {
+    let mut delayed = reply(json!([]));
+    delayed.2 = Duration::from_secs(1);
+    let server = Server::start(vec![delayed]).await;
+    let (mut c, r) = client(&server);
+    let command = || poll::Command::Create {
+        question: "When?".into(),
+        options: vec!["Today".into(), "Tomorrow".into()],
+        hidden_results: true,
+        max_votes: 1,
+    };
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            c.poll(&context(&r), &room(), command())
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        c.poll(&context(&r), &room(), command())
+            .await
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::Uncertain
+    );
+    assert_eq!(server.count(), 1);
+    let server=Server::start(vec![reply(json!({"id":8,"question":"When?","options":["Today","Tomorrow"],"votes":[],"votedSelf":[],"status":0,"resultMode":0,"maxVotes":1,"numVoters":0,"actorType":"users","actorId":"synthetic-user"}))]).await;
+    let (mut c, r) = client(&server);
+    assert_eq!(
+        c.poll(&context(&r), &room(), poll::Command::Read(7))
+            .await
+            .err()
+            .unwrap()
+            .kind,
+        ErrorKind::WrongScope
+    );
+}
+#[tokio::test]
+async fn streamed_download_reports_observed_bytes_and_content_length() {
+    let server = Server::start(vec![(200, "a".repeat(1024 * 1024), Duration::ZERO)]).await;
+    let (mut c, r) = client(&server);
+    let observed = std::sync::Mutex::new(Vec::new());
+    let progress = |received, total| observed.lock().unwrap().push((received, total));
+    let mut sink = CountingSink::default();
+    let bytes = c
+        .download_file_progress(
+            &context(&r),
+            files::FilePath::parse("/progress.txt").unwrap(),
+            &mut sink,
+            &progress,
+        )
+        .await
+        .unwrap();
+    let values = observed.lock().unwrap();
+    assert!(values.len() > 1);
+    assert_eq!(values[0], (0, Some(bytes)));
+    assert_eq!(values.last().copied(), Some((bytes, Some(bytes))));
+    assert!(values.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+    assert_eq!(bytes, sink.bytes as u64);
+}
+#[test]
+fn rich_numeric_poll_and_file_metadata_survive_typed_decode() {
+    let mut m = message(8, "");
+    m["messageParameters"] = json!({"poll":{"type":"talk-poll","id":42,"name":"Lunch"},"file":{"type":"file","id":3,"name":"notes.pdf","mimetype":"application/pdf","size":30,"path":"Talk/notes.pdf"}});
+    let decoded = models::Message::decode(&m).unwrap();
+    let poll = decoded.rich.iter().find(|r| r.kind == "talk-poll").unwrap();
+    assert_eq!(poll.id.as_deref(), Some("42"));
+    let file = decoded.rich.iter().find(|r| r.kind == "file").unwrap();
+    assert_eq!(file.mime_type.as_deref(), Some("application/pdf"));
+    assert_eq!(file.size, Some(30));
+}
+
+#[tokio::test]
+async fn image_lane_rejects_non_image_body_and_ambiguous_avatar_targets() {
+    let server = Server::start(vec![reply(json!({"not":"an image"}))]).await;
+    let (mut client, runtime) = client(&server);
+    let error = client
+        .image(
+            &context(&runtime),
+            content::ImageRequest::UserAvatar {
+                user: "synthetic-user".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Unsupported);
+    for user in ["", ".", "..", "invalid\nuser"] {
+        let error = client
+            .image(
+                &context(&runtime),
+                content::ImageRequest::UserAvatar { user: user.into() },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Malformed);
+    }
+    assert_eq!(server.count(), 1);
+}

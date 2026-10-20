@@ -1,6 +1,7 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
 mod chat;
+mod content;
 mod conversation;
 mod resources;
 mod updates;
@@ -13,6 +14,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
     }
     for catalog in [
         chat::MESSAGES,
+        content::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
         updates::MESSAGES,
@@ -72,6 +74,7 @@ mod tests {
             resources::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,
+            content::MESSAGES,
             updates::MESSAGES,
         ] {
             let mut last = "";

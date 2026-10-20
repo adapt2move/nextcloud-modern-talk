@@ -6,9 +6,9 @@ use talk_core::policy::Moment;
 use talk_core::protocol::conversation::{Recipient, RecipientId, RecipientSource};
 
 pub(super) struct PersonBinding {
-    id: RecipientId,
-    actor_id: String,
-    expires: Moment,
+    pub(super) id: RecipientId,
+    pub(super) actor_id: String,
+    pub(super) expires: Moment,
 }
 pub(super) struct DirectAttempt {
     operation: OperationId,

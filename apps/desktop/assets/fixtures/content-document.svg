@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640" viewBox="0 0 480 640">
+  <rect width="480" height="640" fill="#f1f4f7"/>
+  <rect x="28" y="20" width="424" height="600" rx="4" fill="#ffffff"/>
+  <rect x="56" y="51" width="29" height="5" rx="2.5" fill="#3978cb"/>
+  <g font-family="Google Sans, sans-serif">
+    <text x="56" y="85" font-size="12" letter-spacing="1.5" fill="#657b92">DESIGNTEAM · BEISPIELDOKUMENT</text>
+    <text x="56" y="130" font-size="31" font-weight="700" fill="#21384f">Raumkonzept</text>
+    <text x="56" y="157" font-size="15" fill="#657b92">Ideen für unsere neue Meetingecke</text>
+    <rect x="56" y="187" width="368" height="172" rx="8" fill="#e8eff7"/>
+    <rect x="76" y="205" width="328" height="134" rx="5" fill="#fbfcfe" stroke="#becbda"/>
+    <rect x="93" y="218" width="11" height="108" rx="2" fill="#d6e6fa"/>
+    <rect x="374" y="218" width="11" height="108" rx="2" fill="#d6e6fa"/>
+    <ellipse cx="240" cy="273" rx="68" ry="43" fill="#c7a479"/>
+    <ellipse cx="240" cy="273" rx="60" ry="35" fill="#dbbc96"/>
+    <rect x="198" y="211" width="84" height="25" rx="10" fill="#90accb"/>
+    <rect x="198" y="310" width="84" height="21" rx="9" fill="#90accb"/>
+    <circle cx="350" cy="300" r="18" fill="#9fc6ad"/>
+    <circle cx="357" cy="290" r="13" fill="#6fa589"/>
+    <circle cx="341" cy="289" r="10" fill="#81b898"/>
+    <text x="56" y="400" font-size="18" font-weight="700" fill="#21384f">01  Platz für gute Gespräche</text>
+    <text x="56" y="427" font-size="13" fill="#657b92">Ein gemeinsamer Tisch, bequeme Sitze und</text>
+    <text x="56" y="447" font-size="13" fill="#657b92">natürliches Licht schaffen eine ruhige Atmosphäre.</text>
+    <text x="56" y="490" font-size="18" font-weight="700" fill="#21384f">02  Gemeinsam auswählen</text>
+    <text x="56" y="517" font-size="13" fill="#657b92">Materialien sammeln und die nächsten Schritte</text>
+    <text x="56" y="537" font-size="13" fill="#657b92">im Team abstimmen.</text>
+    <path d="M56 568H424" stroke="#e0e7ef"/>
+    <text x="56" y="591" font-size="10" fill="#8a9bad">FIKTIVES ENTWICKLUNGSBEISPIEL · OKTOBER 2026</text>
+    <text x="415" y="591" font-size="10" fill="#8a9bad">1</text>
+  </g>
+</svg>

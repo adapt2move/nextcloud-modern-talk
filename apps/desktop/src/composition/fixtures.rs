@@ -1,4 +1,6 @@
 //! Explicit development scenarios only. No server, credential or media operation occurs.
+mod content;
+pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
     ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
@@ -30,6 +32,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat",
     "chat-ux",
     "chat-ux-call",
+    "chat-content",
+    "chat-content-progress",
     "chat-motion",
     "history",
     "history-busy",
@@ -165,6 +169,14 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(scenario, Some("chat-content" | "chat-content-progress")) {
+        let mut state = snapshot(Some("chat-ux"));
+        content::configure(&mut state);
+        if scenario == Some("chat-content-progress") {
+            content::transfer(&mut state);
+        }
+        return state;
+    }
     if scenario == Some("chat-motion") {
         let mut state = snapshot(Some("chat-ux"));
         state.messages = page((1..=30).map(|id| {
@@ -199,6 +211,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return ready;
     }
     let mut s = PresentationSnapshot {
+        content_panel: talk_core::ui::content::ContentPanel::default(),
         create_panel: None,
         revision: 1,
         login: LoginView {
@@ -674,6 +687,9 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
     panel.file_limit = 10 * 1024 * 1024;
     if let Some(first) = rows.first_mut() {
         first.metadata.rich = page([RichObject {
+            id: None,
+            mime_type: Some(text("image/png")),
+            size: None,
             placeholder: text("file0"),
             kind: text("file"),
             name: text("Team-skizze.png"),
@@ -801,6 +817,7 @@ pub struct DevelopmentPort {
     probe_step: u8,
     chat_ux: bool,
     chat_motion: bool,
+    chat_content: bool,
 }
 impl DevelopmentPort {
     pub fn new(scenario: Option<&str>) -> Self {
@@ -823,6 +840,7 @@ impl DevelopmentPort {
             probe_step: 0,
             chat_ux: matches!(scenario, Some("chat-ux" | "chat-ux-call")),
             chat_motion: scenario == Some("chat-motion"),
+            chat_content: matches!(scenario, Some("chat-content" | "chat-content-progress")),
             snapshot: initial,
             dirty: true,
             enabled: scenario.is_some(),
@@ -907,6 +925,14 @@ impl NativeDesktopPort for DevelopmentPort {
             }
         }
         match intent {
+            UiIntent::Content {
+                account, action, ..
+            } if self.chat_content => {
+                if self.snapshot.active_account != Some(account) {
+                    return Err(SubmitError::StaleScope);
+                }
+                content::action(&mut self.snapshot, action)?;
+            }
             UiIntent::Refresh(_) if self.chat_motion => {
                 self.probe_step = (self.probe_step + 1).min(10);
                 let mut rows = self.snapshot.messages.as_slice().to_vec();
@@ -1003,6 +1029,9 @@ impl NativeDesktopPort for DevelopmentPort {
                 populate(&mut self.snapshot, c);
                 if self.chat_ux {
                     configure_chat_ux(&mut self.snapshot);
+                }
+                if self.chat_content {
+                    content::configure(&mut self.snapshot);
                 }
             }
             UiIntent::SetFavorite {

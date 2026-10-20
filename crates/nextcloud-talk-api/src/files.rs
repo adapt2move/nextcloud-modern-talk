@@ -69,6 +69,15 @@ impl Client {
             .map(|_| ())
             .map_err(|e| self.mutation_error(e))
     }
+    pub async fn download_file_progress<W: AsyncWrite + Unpin + Send>(
+        &mut self,
+        c: &OperationContext,
+        path: FilePath,
+        sink: &mut W,
+        progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
+    ) -> Result<u64, Error> {
+        self.transport.file_progress(c, path, sink, progress).await
+    }
     /// Writes bounded chunks into an application-owned staging sink. The caller publishes
     /// the destination only after success and removes partial output on cancellation/drop.
     pub async fn download_file<W: AsyncWrite + Unpin + Send>(

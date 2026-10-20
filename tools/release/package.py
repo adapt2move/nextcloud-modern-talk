@@ -20,12 +20,15 @@ import subprocess
 import tarfile
 import tempfile
 import zipfile
+import macos_runtime
+import macos_dmg
 
 
 TARGETS = {"x86_64-unknown-linux-gnu": "linux-x86_64", "aarch64-apple-darwin": "macos-arm64-unsigned"}
 REQUIRED_NOTICES = (
     "licenses/project/LICENSE", "licenses/project/NOTICE.md", "licenses/desktop/NOTICE.md",
-    "licenses/manrope/Manrope-LICENSE.txt", "licenses/gpui/GPUI-LICENSE-APACHE",
+    "licenses/google-sans/GoogleSans-LICENSE.txt", "licenses/gpui/GPUI-LICENSE-APACHE",
+    "licenses/google-sans/GoogleSans-TRADEMARKS.txt",
 )
 
 
@@ -128,9 +131,9 @@ def validate(stage, allow_fixture=False):
         total += p.stat().st_size
         if total > 1024 * 1024 * 1024 or sha(p) != digest(expected):
             raise ValueError("Input size or checksum mismatch: " + name)
-        if not (name.startswith(("licenses/", "assets/")) or name in ("bin/talk-desktop", "bin/talk-native-helper", "source-manifest.json", "dependencies.json")):
+        if not (name.startswith(("licenses/", "assets/", macos_runtime.PREFIX)) or name in ("bin/talk-desktop", "bin/talk-native-helper", "source-manifest.json", "dependencies.json")):
             raise ValueError("Unexpected payload category: " + name)
-    for name in (*REQUIRED_NOTICES, "dependencies.json", "source-manifest.json", "assets/fonts/Manrope-Regular.ttf", "assets/fonts/Manrope-SemiBold.ttf", "assets/fonts/Manrope-Bold.ttf"):
+    for name in (*REQUIRED_NOTICES, "dependencies.json", "source-manifest.json", "assets/fonts/GoogleSans-Regular.ttf", "assets/fonts/GoogleSans-Medium.ttf", "assets/fonts/GoogleSans-Bold.ttf"):
         if name not in files:
             raise ValueError("Required notice/provenance/asset missing: " + name)
     if files["source-manifest.json"] != source["manifest_sha256"]:
@@ -170,6 +173,10 @@ def validate(stage, allow_fixture=False):
             raise ValueError("Media engine does not match the shipping dependency inventory")
     elif media.get("helper"):
         raise ValueError("Disabled media cannot silently carry a helper")
+    macos_runtime.validate_inputs(stage, spec)
+    if spec["target"] == "aarch64-apple-darwin" and spec["kind"] == "development":
+        if not {macos_dmg.ICON, macos_dmg.BACKGROUND} <= files.keys():
+            raise ValueError("Source-bound macOS artwork missing")
     return spec
 
 
@@ -217,22 +224,27 @@ def assemble(stage, output, allow_fixture=False):
         resources = root / ("Contents/Resources" if mac else "share/nextcloud-modern-talk")
         binary_dir.mkdir(parents=True)
         resources.mkdir(parents=True)
+        copied = {}
         for name in spec["files"]:
             if name == "bin/talk-desktop":
                 dest = binary_dir / "talk-desktop"
             elif name == "bin/talk-native-helper":
                 dest = binary_dir / "talk-native-helper"
+            elif name.startswith(macos_runtime.PREFIX):
+                dest = root / macos_runtime.bundle_path(name)
+            elif mac and name == macos_dmg.ICON:
+                dest = resources / "AppIcon.icns"
             elif mac and name.startswith("assets/sounds/") and name.endswith(".wav"):
                 dest = resources / Path(name).name
             else:
                 dest = resources / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(stage / name, dest)
-            dest.chmod(0o755 if name.startswith("bin/") else 0o644)
-        (resources / "provenance.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
+            dest.chmod(0o755 if name.startswith(("bin/", macos_runtime.PREFIX)) else 0o644)
+            copied[name] = dest
         (resources / "INSTALL.txt").write_text(
             "NextCloud Modern Talk development package. No product or platform acceptance.\n"
-            + ("Copy this .app to Applications. No Developer ID signature or notarization is supplied. Gatekeeper may block launch. Do not disable system protection.\n" if mac else
+            + ("Drag NextCloud Modern Talk to Applications. Its media runtime is included; no GStreamer installation is required. No Developer ID signature or notarization is supplied. Gatekeeper may block launch. Do not disable system protection.\n" if mac else
                "Ubuntu 24.04 x86_64 candidate: install the matching .deb using sudo apt install ./FILE.deb; launch talk-desktop from the application menu. The tar archive needs the runtime libraries recorded in provenance.\n")
             + "Media: " + ("Rust webrtc engine with GStreamer codecs; see release notes for supported server profiles.\n" if spec["media"]["enabled"] else "unavailable.\n")
         )
@@ -242,17 +254,60 @@ def assemble(stage, output, allow_fixture=False):
                      "CFBundlePackageType": "APPL", "CFBundleShortVersionString": spec["version"].split("-")[0],
                      "CFBundleVersion": spec["version"].split("-")[0], "LSMinimumSystemVersion": "15.7",
                      "NSHighResolutionCapable": True, "NMTDevelopmentVersion": spec["version"]}
+            if macos_dmg.ICON in spec["files"]:
+                plist["CFBundleIconFile"] = "AppIcon.icns"
             if spec["build"].get("native_helper"):
                 plist["NSMicrophoneUsageDescription"] = "Use the microphone when you explicitly check it in Devices or join a call with audio."
                 plist["NSCameraUsageDescription"] = "Use the camera when you explicitly start a preview or enable video in a call."
-            # No Developer ID is claimed. The final Mac check must qualify native
-            # permissions and this sibling helper with the distributable bundle.
-            if runtime := spec["build"].get("required_runtime"):
-                install = resources / "INSTALL.txt"
-                install.write_text(install.read_text() + "\nRequired before launch: " + runtime["name"] + " " + runtime["version"] + "\n" + runtime["url"] + "\nSHA256 " + runtime["sha256"] + "\n")
             (root / "Contents/Info.plist").write_bytes(plistlib.dumps(plist, sort_keys=True))
+            # Ad-hoc signing meets Apple Silicon's code-integrity requirement.
+            # It supplies neither an authenticated Developer ID nor notarization.
+            # Seal the provenance as an ordinary resource before signing. Only
+            # the main executable uses the explicitly named signature-independent
+            # identity: its final raw hash depends on this resource envelope.
+            if spec["kind"] == "development":
+                spec["files"]["bin/talk-desktop"] = macos_runtime.unsigned_executable_sha256(binary_dir / "talk-desktop")
+                spec["build"]["macos_main_identity"] = macos_runtime.MAIN_IDENTITY
+                spec["build"]["bundle_signing"] = "ad-hoc; no Developer ID; not notarized"
+                spec["build"]["native_linkage"] = macos_runtime.inspect_bundle(root)
+            (resources / "provenance.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
+            # Archive permissions must work regardless of the build user's umask.
+            for path in [root, *root.rglob("*")]:
+                path.chmod(0o755 if path.is_dir() or path.stat().st_mode & stat.S_IXUSR else 0o644)
+            if spec["kind"] == "development":
+                if sorted(path.name for path in root.iterdir()) != ["Contents"]:
+                    raise ValueError("Unexpected application bundle root contents")
+                # codesign creates CodeResources; its delivered mode must also
+                # be predictable under a private build user's restrictive umask.
+                old_umask = os.umask(0o022)
+                try:
+                    macos_runtime.run(["codesign", "--force", "--sign", "-", "--timestamp=none", root])
+                finally:
+                    os.umask(old_umask)
+                # No bundle member is written after this point. Verify immediately
+                # so a native layout/sealing failure has an unambiguous checkpoint.
+                macos_runtime.run(["codesign", "--verify", "--deep", "--strict", root])
+                print("macOS package: strict bundle verification passed immediately after signing", flush=True)
+                if macos_runtime.unsigned_executable_sha256(binary_dir / "talk-desktop") != spec["files"]["bin/talk-desktop"]:
+                    raise ValueError("Bundle signing changed the signature-independent main executable identity")
+                if any(sha(path) != spec["files"][name] for name, path in copied.items() if name != "bin/talk-desktop"):
+                    raise ValueError("Bundle signing changed an undeclared payload file")
+                final_main_sha256 = sha(binary_dir / "talk-desktop")
+                print("macOS package: signature-independent main executable roundtrip passed", flush=True)
+                objects = macos_runtime.inspect_bundle(root)
+                for path in objects:
+                    # Apple's output complements our bounded Mach-O parser.
+                    macos_runtime.run(["otool", "-L", root / path])
+                    macos_runtime.run(["otool", "-l", root / path])
+                dmg_report = macos_dmg.create(root, output / (base + ".dmg"))
+            expanded_bytes = sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+            if expanded_bytes > 1024 * 1024 * 1024:
+                raise ValueError("Bundle exceeds the updater's expanded size limit")
             zip_bundle(root, output / (base + ".zip"), epoch)
+            if (output / (base + ".zip")).stat().st_size > 512 * 1024 * 1024:
+                raise ValueError("ZIP exceeds the updater's download size limit")
         else:
+            (resources / "provenance.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
             tar_gz(root, output / (base + ".tar.gz"), epoch)
             depends = spec["build"].get("debian_depends", "")
             if not depends or not re.fullmatch(r"[a-zA-Z0-9.,+~():<>= \-]+", depends):
@@ -280,6 +335,17 @@ def assemble(stage, output, allow_fixture=False):
               "source": spec["source"], "input_sha256": sha(stage / "input.json"), "media_enabled": spec["media"]["enabled"],
               "signing": "no Developer ID / not notarized" if mac else "unsigned distribution archive",
               "assets": {p.name: {"sha256": sha(p), "bytes": p.stat().st_size} for p in sorted(output.iterdir())}}
+    if mac and spec["kind"] == "development":
+        report["manual_download"] = base + ".dmg"
+        report["updater_download"] = base + ".zip"
+        report["macos_structure"] = dmg_report
+        report["bundled_runtime"] = spec["build"]["bundled_runtime"]
+        report["bundle_expanded_bytes"] = expanded_bytes
+        report["main_executable"] = {
+            "path": "Contents/MacOS/talk-desktop", "sha256": final_main_sha256,
+            "manifest_identity_algorithm": macos_runtime.MAIN_IDENTITY,
+            "manifest_identity_sha256": spec["files"]["bin/talk-desktop"],
+        }
     provenance = output / (base + ".provenance.json")
     provenance.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     (output / (base + ".SHA256SUMS")).write_text("".join(f"{sha(p)}  {p.name}\n" for p in sorted(output.iterdir()) if p.is_file()))

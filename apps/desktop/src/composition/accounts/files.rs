@@ -86,15 +86,34 @@ impl Accounts {
                 Kind::Download {
                     message,
                     placeholder,
-                    ..
-                } => MessagingCommand::DownloadFile {
-                    message: protocol::MessageId {
-                        conversation: picker.context.conversation,
-                        sequence: u64::try_from(message).map_err(|_| SubmitError::StaleScope)?,
-                    },
-                    placeholder,
-                    destination: local,
-                },
+                    name,
+                } => {
+                    let progress = protocol::content::TransferProgress::default();
+                    self.content_owner.transfer = Some(progress.clone());
+                    self.snapshot.content_panel.transfer =
+                        Some(talk_core::ui::content::DownloadView {
+                            request: picker.request,
+                            attachment: talk_core::ui::content::AttachmentRef {
+                                context: picker.context,
+                                message,
+                                placeholder: placeholder.clone(),
+                            },
+                            name,
+                            received: 0,
+                            total: None,
+                            state: talk_core::ui::content::DownloadState::Transferring,
+                        });
+                    MessagingCommand::DownloadFile {
+                        progress,
+                        message: protocol::MessageId {
+                            conversation: picker.context.conversation,
+                            sequence: u64::try_from(message)
+                                .map_err(|_| SubmitError::StaleScope)?,
+                        },
+                        placeholder,
+                        destination: local,
+                    }
+                }
             }))
         })();
         let outcome = match command {
@@ -115,6 +134,10 @@ impl Accounts {
                 _ => UnavailableReason::Unconfigured,
             };
             panel.state = RemoteState::Failed(picker.request, reason);
+            self.content_owner.transfer = None;
+            if let Some(transfer) = self.snapshot.content_panel.transfer.as_mut() {
+                transfer.state = talk_core::ui::content::DownloadState::Failed(reason);
+            }
             self.touch();
         }
     }

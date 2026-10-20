@@ -599,6 +599,32 @@ impl Accounts {
         } else if work == Work::History && completion != Completion::ServerAccepted {
             self.snapshot.content = ContentState::Failed;
         }
+        if self
+            .snapshot
+            .content_panel
+            .transfer
+            .as_ref()
+            .is_some_and(|t| t.request == request && t.attachment.context == context)
+            && let Some(progress) = self.content_owner.transfer.take()
+        {
+            let (received, total, _) = progress.snapshot();
+            if let Some(transfer) = self.snapshot.content_panel.transfer.as_mut() {
+                transfer.received = received;
+                transfer.total = total;
+                transfer.state =
+                    if progress.is_published() || completion == Completion::ServerAccepted {
+                        talk_core::ui::content::DownloadState::Saved
+                    } else if progress.is_cancelled() {
+                        talk_core::ui::content::DownloadState::Cancelled
+                    } else {
+                        talk_core::ui::content::DownloadState::Failed(match completion {
+                            Completion::Failed(reason) => reason,
+                            _ => UnavailableReason::PolicyStale,
+                        })
+                    };
+            }
+        }
+        self.reconcile_content_assets();
         if reload {
             let _ = self.start_message(
                 request,
@@ -712,6 +738,7 @@ fn message_view(m: &wire::MessageDetails) -> MessageView {
         attachments: Page::empty(),
         reply_count: 0,
         metadata: view::MessageMetadata {
+            expires_at: m.message.expires_at,
             timestamp: m.message.timestamp,
             truncated,
             edited: m.message.edited_at.is_some(),
@@ -735,6 +762,9 @@ fn message_view(m: &wire::MessageDetails) -> MessageView {
                 own: r.own,
             })),
             rich: page(m.rich.as_slice().iter().map(|r| view::RichObject {
+                id: r.id.clone(),
+                mime_type: r.mime_type.clone(),
+                size: r.size,
                 placeholder: r.placeholder.clone(),
                 kind: r.kind.clone(),
                 name: r.name.clone(),

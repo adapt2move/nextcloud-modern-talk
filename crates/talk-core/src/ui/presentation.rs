@@ -424,6 +424,7 @@ pub struct ConversationMutationResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSnapshot {
+    pub content_panel: super::content::ContentPanel,
     pub create_panel: Option<super::conversation::CreatePanel>,
     pub revision: u64,
     pub login: LoginView,
@@ -459,6 +460,11 @@ pub struct ConversationListState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    Content {
+        request: RequestId,
+        account: AccountScope,
+        action: super::content::ContentAction,
+    },
     Create {
         account: AccountScope,
         request: RequestId,

@@ -20,6 +20,8 @@ Acceptance: selecting a file never changes its sharing permissions until explici
 
 Acceptance: one account's cached thumbnail cannot appear for another. Canceling a download leaves no misleading completed file. Opening a remote resource requires a deliberate action under the security policy. A missing preview falls back to file metadata, not a broken or blank message.
 
+Images and documents show a thumbnail where the server or a bounded native decoder can supply one. Opening an image presents an enlarged, room-scoped preview dialog. PDF and office documents use a supported native inline view when available; otherwise show their preview and an explicit link to the authenticated Cloud web view. Every permitted item offers Download, with progress derived from transferred bytes and a clear pending/failed/cancelled state. Unknown totals stay indeterminate. A progress animation never implies successful publication of a partial file.
+
 ## CONTENT-004
 
 **Captions and rich objects (P1 safe rendering; P3 rich creation).** Render supported captions, references, file associations, locations, and other structured objects with source/actor identity. Preserve thread/reply/silent metadata only where that sharing API supports it. Unknown object types remain readable and never run executable content.
@@ -35,6 +37,8 @@ Acceptance: denied microphone access explains recovery without sending an empty 
 ## CONTENT-006
 
 **Create, participate in and close polls (P3).** With `talk-polls`, render question/options, open/closed state, permitted votes/results, and anonymous-versus-visible voting semantics. Apply the server's multiple-choice rules. Moderator draft create/edit/publish uses `talk-polls-drafts` and `edit-draft-poll` where appropriate. Publishing is explicit.
+
+Expose the same scoped poll flow from the composer's additional-content action and from conversation settings. Both entry points use current server capabilities and permissions; neither creates a local-only poll or fabricates results.
 
 An open published poll offers an accessible **“Umfrage schließen”** action to its author (matching typed actor identity) or a participant with moderator authority, subject to current room/access/lobby gates. An ordinary voter who is neither cannot close it. Explain that closing ends voting and reveals the permitted final results. Submit once and show pending state; use the poll close operation, not message deletion. The [poll contract](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/docs/poll.md#close-a-poll) uses `DELETE /poll/{token}/{pollId}` to close a published poll; its chat/share remains. Deleting a moderator draft is a separate action even though the [controller](https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Controller/PollController.php#L389-L469) uses the same route with a different outcome.
 

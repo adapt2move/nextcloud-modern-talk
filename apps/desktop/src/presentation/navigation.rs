@@ -23,7 +23,8 @@ impl Group {
         match self {
             Self::Appearance | Self::Details => 3,
             Self::Palette | Self::Density => 2,
-            Self::Scale | Self::Search => 4,
+            Self::Scale => 4,
+            Self::Search => 5,
         }
     }
     fn id(self, i: usize) -> ElementId {
@@ -64,6 +65,7 @@ impl Group {
                 SearchKind::Messages => 1,
                 SearchKind::Files => 2,
                 SearchKind::Conversations => 3,
+                SearchKind::People => 4,
             },
         }
     }
@@ -219,6 +221,51 @@ impl Reveal {
             window.on_next_frame(|window, _| window.refresh());
         }
         s.adjusted = true;
+    }
+
+    pub fn reveal_history(
+        &self,
+        list: &gpui::ListState,
+        header_inset: Pixels,
+        painted_anchor: Option<gpui::ListOffset>,
+        window: &mut Window,
+    ) -> bool {
+        let mut s = self.0.borrow_mut();
+        if !s.pending {
+            return false;
+        }
+        let Some(target) = s.bounds else {
+            return false;
+        };
+        let area = list.viewport_bounds();
+        let dy = reveal_delta(
+            f32::from(target.top()),
+            f32::from(target.bottom()),
+            f32::from(area.top() + header_inset) + 8.,
+            f32::from(area.bottom()) - 8.,
+        );
+        if dy.abs() < 0.5 {
+            return false;
+        }
+        // Bottom alignment exposes an end sentinel. Use the same frame's
+        // measured first row before asking GPUI for a relative displacement.
+        if list.logical_scroll_top().item_ix >= list.item_count()
+            && let Some(anchor) = painted_anchor
+        {
+            list.scroll_to(anchor);
+        }
+        let old = list.logical_scroll_top();
+        list.scroll_by(px(-dy));
+        let next = list.logical_scroll_top();
+        if old.item_ix == next.item_ix && (old.offset_in_item - next.offset_in_item).abs() < px(0.5)
+        {
+            return false;
+        }
+        if !s.adjusted {
+            window.on_next_frame(|window, _| window.refresh());
+        }
+        s.adjusted = true;
+        true
     }
 }
 fn reading_latest(offset: f32, maximum: f32) -> bool {

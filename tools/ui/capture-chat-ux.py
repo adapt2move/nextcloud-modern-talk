@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Finite native chat-control checks against one frozen compiled input.
 
-Synthetic chat-ux/chat-ux-call projections only; the disconnected fixture never
+Synthetic chat-ux/chat-ux-call/chat-motion projections only; the disconnected fixture never
 confirms server sending, calling or update installation. Every PNG is an original
 native window. Actual native emoji insertion and IME composition need the
 separate platform steps in the author handoff; this recipe does not simulate them.
@@ -23,16 +23,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-input', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--batch', choices=['controls', 'search'], required=True)
+    parser.add_argument('--batch', choices=['controls', 'search', 'header'], required=True)
     parser.add_argument('--scenarios', default='chat-ux:light:blue,chat-ux:dark:sage')
     parser.add_argument('--scale', type=int, choices=[100, 200], default=100)
     parser.add_argument('--width', type=int, default=1120)
-    parser.add_argument('--height', type=int, default=716)
+    parser.add_argument('--height', type=int)
     args = parser.parse_args()
+    if args.height is None:
+        # Four chat-ux messages must overflow to exercise live scroll-behind.
+        args.height = 620 if args.batch == 'header' else 716
     base, output = args.build_input.resolve(), args.output.resolve()
     cases = args.scenarios.split(',')
-    if any(case.split(':')[0] not in ('chat-ux', 'chat-ux-call') for case in cases):
-        parser.error('Only explicit synthetic chat-ux and chat-ux-call scenarios are allowed')
+    allowed = ('chat-ux', 'chat-motion') if args.batch == 'header' else ('chat-ux', 'chat-ux-call')
+    if any(case.split(':')[0] not in allowed for case in cases):
+        parser.error('This batch requires its explicit synthetic chat scenarios')
     if args.batch == 'controls' and any(case.startswith('chat-ux-call:') for case in cases):
         parser.error('Use the search batch for the in-call surface')
     sys.path.insert(0, str(base / 'source/tools/ui'))
@@ -80,7 +84,8 @@ def main():
             return {name: next((line for line in reversed(lines) if line.startswith(prefix)), '')
                     for name, prefix in [('chat', 'UI_CHAT_STATE'), ('state', 'UI_LOCAL_STATE'),
                                          ('focus', 'UI_ACTION_FOCUS'), ('hover', 'UI_HOVER'),
-                                         ('geometry', 'UI_GEOMETRY'), ('history', 'UI_HISTORY')]}
+                                         ('geometry', 'UI_GEOMETRY'), ('history', 'UI_HISTORY'),
+                                         ('header', 'UI_CHAT_HEADER'), ('motion', 'UI_MESSAGE_MOTION')]}
 
         def dispatch():
             return [line for line in log.read_text().splitlines()
@@ -131,10 +136,78 @@ def main():
                     return data
             raise AssertionError('Native keyboard target not reached: ' + name)
 
+        def header_bounds(data):
+            match = re.search(r'inset=([\d.]+)px', data['header'])
+            native = re.search(BOUNDS, data['header'].split('list=', 1)[1])
+            if not match or not native:
+                raise AssertionError('No measured native header/list bounds: ' + data['header'])
+            x, y, width, height = map(float, native.groups())
+            inset = float(match[1])
+            check('header-and-history-have-a-visible-viewport',
+                  0 < inset < height and width > 32, data['header'])
+            return x, y, width, inset, height
+
+        def header_pixels(frame):
+            x, y, width, inset, _ = header_bounds(frame['diagnostics'])
+            # The untouched full native PNG is the evidence/deliverable.
+            # Cropping occurs only in memory to compare its header pixels.
+            crop = f'{round(width-8)}x{round(inset-8)}+{round(x+4)}+{round(y+4)}'
+            raw = subprocess.run(
+                ['convert', str(folder / frame['image']), '-crop', crop, '-depth', '8', 'rgba:-'],
+                env=env, check=True, capture_output=True, timeout=20,
+            ).stdout
+            return hashlib.sha256(raw).hexdigest()
+
+        def wheel(data, button, count):
+            x, y, width, inset, height = header_bounds(data)
+            move(x + width / 2, y + inset + (height - inset) / 2)
+            run(['xdotool', 'click', '--repeat', str(count), '--delay', '40', str(button)], env)
+            events.append({'wheel': button, 'count': count})
+            move()
+
         try:
             move()
             initial = image('initial-no-hover')
-            if args.batch == 'search':
+            if args.batch == 'header':
+                header_bounds(initial['diagnostics'])
+                click_composer(initial['diagnostics'])
+                focus_named('room-info', backwards=True)
+                key('Tab')
+                history_focus = diagnostic()
+                check('header-to-history-keeps-native-tab-order',
+                      'history_focused=true' in history_focus['state'], history_focus)
+                key('Home')
+                click_composer(diagnostic())
+                move()
+                top = image('history-top-clear-of-header')
+                wheel(top['diagnostics'], 5, 3)
+                behind = image('live-content-under-translucent-header')
+                anchors = [re.search(r'anchor=(.*?) at_bottom=', frame['diagnostics']['motion'])[1]
+                           for frame in [top, behind]]
+                check('wheel-moves-real-history', anchors[0] != anchors[1], anchors)
+                check('scroll-retains-header-and-composer-geometry',
+                      header_bounds(top['diagnostics']) == header_bounds(behind['diagnostics'])
+                      and bounds(top['diagnostics'], 'composer_bounds')
+                      == bounds(behind['diagnostics'], 'composer_bounds'), behind['diagnostics'])
+                check('real-header-pixels-change-with-scrolling-content',
+                      header_pixels(top) != header_pixels(behind),
+                      [header_pixels(top), header_pixels(behind)])
+                time.sleep(.7)
+                settled = image('scroll-under-header-settled')
+                check('header-settles-without-permanent-animation',
+                      header_pixels(behind) == header_pixels(settled)
+                      and behind['diagnostics']['motion'] == settled['diagnostics']['motion'],
+                      [behind['diagnostics']['motion'], settled['diagnostics']['motion']])
+                before = dispatch()
+                x, y, _, inset, _ = header_bounds(settled['diagnostics'])
+                move(x + 6, y + inset / 2)
+                run(['xdotool', 'click', '1'], env)
+                move()
+                shielded = image('header-background-keeps-history-controls-inert')
+                check('header-background-does-not-dispatch-hidden-message-actions',
+                      dispatch() == before and 'menu=None' in shielded['diagnostics']['chat']
+                      and 'reply=None' in shielded['diagnostics']['chat'], shielded['diagnostics'])
+            elif args.batch == 'search':
                 key('ctrl+f')
                 opened = image('search-below-header')
                 check('primary-F-focuses-current-conversation-search',
@@ -256,7 +329,9 @@ def main():
                     'Lucide geometry, one styled hint, clear focus and selected star',
                     'Reply/menu reveal only on owning row hover or control focus',
                     'No clipping or overlap at selected scale; shared media/member/settings separation',
+                    'Header batch: live text scrolls underneath; first row, focus and toolbar stay readable',
                 ],
+                'header_effect': 'Live timeline under a translucent header; backdrop blur is requested from GPUI',
                 'not_qualified': ['backend delivery', 'media', 'native emoji insertion', 'IME', 'accessibility semantics',
                                   'Windows/macOS', 'energy performance', 'update installation'],
             }, indent=2) + '\n')

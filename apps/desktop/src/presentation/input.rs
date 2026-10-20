@@ -111,6 +111,49 @@ pub struct TextInput {
 }
 
 impl TextInput {
+    pub(super) fn mention_query(&self) -> Option<&str> {
+        if self.composing() || !self.selected_range.is_empty() {
+            return None;
+        }
+        let range = mention_range(&self.content, self.cursor_offset())?;
+        Some(&self.content[range.start + 1..range.end])
+    }
+
+    pub(super) fn insert_mention(&mut self, identifier: &str, cx: &mut Context<Self>) {
+        if self.composing() || !self.selected_range.is_empty() {
+            return;
+        }
+        let Some(range) = mention_range(&self.content, self.cursor_offset()) else {
+            return;
+        };
+        let replacement = format!("@{identifier} ");
+        if !replacement_fits(
+            &self.content,
+            &range,
+            &replacement,
+            self.limit,
+            self.multiline,
+        ) {
+            self.rejected = true;
+            cx.notify();
+            return;
+        }
+        self.history.record(self.edit_snapshot());
+        self.content = format!(
+            "{}{}{}",
+            &self.content[..range.start],
+            replacement,
+            &self.content[range.end..]
+        )
+        .into();
+        let cursor = range.start + replacement.len();
+        self.selected_range = cursor..cursor;
+        self.selection_reversed = false;
+        self.rejected = false;
+        self.invalidate_geometry();
+        cx.notify();
+    }
+
     fn edit_snapshot(&self) -> EditSnapshot {
         EditSnapshot {
             text: self.content.clone(),
@@ -487,6 +530,22 @@ impl TextInput {
         self.last_bounds = None;
         self.is_selecting = false;
     }
+}
+
+fn mention_range(text: &str, cursor: usize) -> Option<Range<usize>> {
+    let before = text.get(..cursor)?;
+    let start = before.rfind('@')?;
+    let query = before.get(start + 1..)?;
+    if query.len() > 256
+        || query.chars().any(char::is_whitespace)
+        || before[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| !c.is_whitespace() && !matches!(c, '(' | '[' | '{'))
+    {
+        return None;
+    }
+    Some(start..cursor)
 }
 
 impl EntityInputHandler for TextInput {
@@ -1242,9 +1301,21 @@ fn replacement_fits(
 #[cfg(test)]
 mod tests {
     use super::{
-        EditHistory, EditSnapshot, current_boundary, from_utf16, next_grapheme, previous_grapheme,
-        replacement_fits, to_utf16,
+        EditHistory, EditSnapshot, current_boundary, from_utf16, mention_range, next_grapheme,
+        previous_grapheme, replacement_fits, to_utf16,
     };
+    #[test]
+    fn typed_mentions_follow_the_caret_and_do_not_match_email_or_old_tokens() {
+        assert_eq!(mention_range("@", 1), Some(0..1));
+        assert_eq!(mention_range("Hallo @Zoë und Text", 11), Some(6..11));
+        assert_eq!(mention_range("(@Mia)", 5), Some(1..5));
+        assert_eq!(mention_range("mail@example.test", 17), None);
+        assert_eq!(mention_range("@Mia fertig", 11), None);
+        assert_eq!(mention_range("Hallo @Mia", 2), None);
+        assert_eq!(mention_range("Grüße @Zoë", 3), None);
+        let long = format!("@{}", "x".repeat(257));
+        assert_eq!(mention_range(&long, long.len()), None);
+    }
     #[test]
     fn editing_history_restores_text_and_selection_and_bounds_old_edits() {
         let mut history = EditHistory::default();

@@ -16,6 +16,8 @@ import re
 import sys
 import tomllib
 
+from vendor import verify_gpui
+
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
     "talk-core": ("crates/talk-core", set()),
@@ -105,6 +107,7 @@ UI_MODULE_TYPES = {
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",
     },
     "messaging": {"MessageMetadata", "MessagePanel", "MessageAction"},
+    "content": {"ContentPanel", "ContentAction"},
 }
 UNBOUNDED = (
     r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"
@@ -228,7 +231,7 @@ def check() -> None:
         "gstreamer": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
         "gstreamer-app": {"version": "=0.25.2", "default-features": False, "features": ["v1_24"]},
         "gstreamer-video": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
-        "image": {"version": "=0.25.10", "default-features": False},
+        "image": {"version": "=0.25.10", "default-features": False, "features": ["png", "jpeg", "webp", "gif"]},
         "enigo": {"version": "=0.6.1", "default-features": False},
         "windows": {"version": "=0.61.3", "default-features": False, "features": ["UI_ViewManagement"]},
         "core-graphics": {"version": "=0.24.0", "default-features": False, "features": ["link"]},
@@ -252,10 +255,17 @@ def check() -> None:
         "atomicwrites": {"version": "=0.4.4", "default-features": False},
     }
     require(shared == reviewed, "shared dependency pins/features differ from reviewed network/native plan")
-    require(set(workspace) <= {"members", "resolver", "package", "dependencies", "lints"},
+    require(set(workspace) <= {"members", "exclude", "resolver", "package", "dependencies", "lints"},
             "unreviewed workspace patch/target/configuration")
+    require(workspace.get("exclude") == ["vendor/gpui"], "unreviewed workspace exclusions")
     root = read_toml(ROOT / "Cargo.toml")
-    require(set(root) == {"workspace"}, "unreviewed root manifest section")
+    require(set(root) == {"workspace", "patch"}, "unreviewed root manifest section")
+    require(root.get("patch") == {"crates-io": {"gpui": {"path": "vendor/gpui"}}},
+            "only the source-bound GPUI renderer patch is allowed")
+    try:
+        verify_gpui(ROOT)
+    except (ValueError, KeyError, TypeError, OSError) as error:
+        require(False, "vendored GPUI source verification failed: " + str(error))
 
     for name, (directory, expected) in GRAPH.items():
         manifest = read_toml(ROOT / directory / "Cargo.toml")
@@ -306,10 +316,14 @@ def check() -> None:
     require(lock.get("version") == 4, "unexpected lockfile format")
     packages = lock.get("package", [])
     local = [p for p in packages if "source" not in p]
-    require({p["name"] for p in local} == set(GRAPH) and len(local) == len(GRAPH),
+    require({p["name"] for p in local} == set(GRAPH) | {"gpui"} and len(local) == len(GRAPH) + 1,
             "lockfile local packages differ from reviewed layers")
     for package in local:
         name = package["name"]
+        if name == "gpui":
+            require(package.get("version") == "0.2.2" and "checksum" not in package,
+                    "vendored GPUI lock identity differs from the source pin")
+            continue
         require(package.get("version") == workspace["package"]["version"], f"{name}: lockfile version mismatch")
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         expected_edges = GRAPH.get(name, (None, set()))[1] | set().union(*platform_edges.values())
@@ -391,7 +405,7 @@ def check() -> None:
     native = ROOT / "apps/desktop/src"
     for path in native.rglob("*.rs"):
         relative = path.relative_to(native)
-        require(relative.parts[0] in {"main.rs", "composition.rs", "composition", "presentation", "settings.rs", "settings", "devices.rs", "devices"},
+        require(relative.parts[0] in {"main.rs", "bundle.rs", "composition.rs", "composition", "presentation", "settings.rs", "settings", "devices.rs", "devices"},
                 "unreviewed native application module")
     for path in (native / "presentation").rglob("*.rs"):
         source = without_comments(path.read_text())

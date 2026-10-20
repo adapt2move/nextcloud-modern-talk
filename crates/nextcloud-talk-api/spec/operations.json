@@ -1,10 +1,10 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
   "counts": {
-    "implemented": 87,
-    "missing": 66,
+    "implemented": 90,
+    "missing": 61,
     "not-client": 23,
-    "partial": 11
+    "partial": 13
   },
   "operations": [
     {
@@ -19,9 +19,9 @@
       "operation_id": "avatar-get-avatar",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Client::image / content::ImageRequest::ConversationAvatar",
+      "scope": "Bounded authenticated avatar bytes on the pinned light route; native decoding and current scope/access checks belong to the application."
     },
     {
       "operation_id": "avatar-delete-avatar",
@@ -635,9 +635,9 @@
       "operation_id": "poll-create-poll",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "partial",
+      "api": "Client::poll / poll::Command::Create",
+      "scope": "Published polls only; bounded options and vote limits, hidden/public results and uncertain-write retention. Server draft creation is not implemented."
     },
     {
       "operation_id": "poll-update-draft-poll",
@@ -659,25 +659,25 @@
       "operation_id": "poll-show-poll",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Client::poll / poll::Command::Read",
+      "scope": "Bounded published poll state with correlated poll ID, server-hidden results and permitted voter details."
     },
     {
       "operation_id": "poll-vote-poll",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Client::poll / poll::Command::Vote",
+      "scope": "Published poll voting with bounded unique option IDs; current room authority and vote limits are enforced by the application and server."
     },
     {
       "operation_id": "poll-close-poll",
       "method": "DELETE",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "partial",
+      "api": "Client::poll / poll::Command::Close",
+      "scope": "Published poll closure retains the poll and reads final results. Draft deletion through the same route is intentionally unsupported."
     },
     {
       "operation_id": "poll-export-poll",

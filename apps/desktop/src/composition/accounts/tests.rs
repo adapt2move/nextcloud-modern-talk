@@ -48,6 +48,7 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
 
 pub(super) fn model() -> Accounts {
     Accounts {
+        content_owner: content::ContentOwner::default(),
         media: talk_adapters::media::MediaService::new(),
         call_ui: None,
         call_poll_at: Instant::now(),

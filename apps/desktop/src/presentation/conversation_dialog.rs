@@ -331,7 +331,7 @@ impl Desktop {
     fn room_heading(&self, label: &str) -> Div {
         div()
             .text_size(self.sp(14.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .child(self.l(label).to_owned())
     }
     fn room_row(&self, label: &str, detail: &str) -> Div {
@@ -622,6 +622,7 @@ impl Desktop {
         };
         match self.room_ui.tab {
             Tab::General => {
+                body = body.child(self.create_poll_button("room-create-poll", cx));
                 if matches!(
                     row.kind,
                     ConversationKind::Direct | ConversationKind::NoteToSelf
@@ -1164,7 +1165,14 @@ impl Desktop {
                     .py_3()
                     .border_b_1()
                     .border_color(self.theme.border)
-                    .child(self.avatar(&person_initials(member.name.as_str()), false))
+                    .child(self.content_avatar(
+                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
+                            context: panel.context,
+                            participant: member.id.local,
+                        },
+                        &person_initials(member.name.as_str()),
+                        36.,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -1407,14 +1415,10 @@ impl Desktop {
                 )
             })
             .when_some(person_name, |d, name| {
-                d.child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(name.to_owned()),
-                )
+                d.child(div().font_weight(FontWeight::MEDIUM).child(name.to_owned()))
             })
             .when_some(permission, |d, label| {
-                d.child(div().font_weight(FontWeight::SEMIBOLD).child(label))
+                d.child(div().font_weight(FontWeight::MEDIUM).child(label))
             })
             .child(self.hint(self.l(key)))
             .child(

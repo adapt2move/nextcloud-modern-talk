@@ -471,7 +471,7 @@ impl Desktop {
                     .min_w_0()
                     .whitespace_normal()
                     .mt_3()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l(help.status)),
             );
         if let Some(explanation) = help.explanation {

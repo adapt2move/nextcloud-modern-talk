@@ -317,15 +317,37 @@ impl Transport {
         c: &OperationContext,
         path: api::files::FilePath,
         file: &mut tokio::fs::File,
+        progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
     ) -> Result<u64, PortError> {
         self.api
-            .download_file(&context(c), path, file)
+            .download_file_progress(&context(c), path, file, progress)
             .await
             .map_err(error)
     }
     pub(super) fn public_room_link(&self, token: &str) -> Result<String, PortError> {
         let token = RoomToken::parse(token).map_err(|k| self.error(kind(k)))?;
         self.api.public_room_link(&token).map_err(error)
+    }
+    pub(super) async fn image(
+        &mut self,
+        c: &OperationContext,
+        request: api::content::ImageRequest,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api.image(&context(c), request).await.map_err(error)
+    }
+    pub(super) async fn poll(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+        command: api::poll::Command,
+    ) -> Result<api::poll::Poll, PortError> {
+        self.api
+            .poll(&context(c), room, command)
+            .await
+            .map_err(error)
+    }
+    pub(super) fn file_link(&self, file: u64) -> Result<String, PortError> {
+        self.api.file_link(file).map_err(error)
     }
     pub(super) async fn api_request(
         &mut self,

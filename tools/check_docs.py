@@ -23,6 +23,8 @@ MARKDOWN = {".md", ".markdown"}
 HTML = {".html", ".htm", ".svg"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "target", "__pycache__"}
 RESEARCH = (Path("design/research"), Path("docs/design/research"))
+# Upstream docs are retained unchanged as part of the verified GPUI source.
+UPSTREAM_DOCS = (Path("vendor/gpui"),)
 ESCAPE = re.compile(r"\\([" + re.escape(string.punctuation) + r"])")
 DEFINITION = re.compile(r"(?m)^ {0,3}\[([^\]\n]+)\]:[ \t]*")
 INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)")
@@ -212,7 +214,7 @@ def documents(root: Path):
         current = Path(directory)
         dirs[:] = sorted(name for name in dirs if name not in SKIP_DIRS
                          and not (current / name).is_symlink()
-                         and (current / name).relative_to(root) not in RESEARCH)
+                         and (current / name).relative_to(root) not in RESEARCH + UPSTREAM_DOCS)
         for name in sorted(files):
             path = current / name
             if path.suffix.lower() in MARKDOWN and not path.is_symlink():

@@ -66,17 +66,39 @@ pub(super) struct MessageUi {
     search_return_focus: Option<FocusHandle>,
     search_pending_focus: bool,
     show_pins: bool,
+    mention_candidate: Option<(ConversationRef, String, Instant)>,
+    mention_request: Option<(RequestId, String)>,
+    mention_ready: Option<String>,
 }
 
 #[derive(Default)]
 struct MessageGeometry {
     // Only this page's painted rows, drained after prepaint. GPUI's Bottom list
     // exposes an end sentinel instead of the actual visible first-row offset.
-    painted: Vec<(u128, gpui::Bounds<gpui::Pixels>)>,
+    painted: Vec<(usize, u128, gpui::Bounds<gpui::Pixels>)>,
     anchor: Option<(u128, gpui::Pixels)>,
+    header_inset: gpui::Pixels,
+}
+
+fn preserved_row_offset(
+    offset: gpui::Pixels,
+    was_first: bool,
+    is_first: bool,
+    header_inset: gpui::Pixels,
+) -> gpui::Pixels {
+    offset + header_inset * (f32::from(u8::from(is_first)) - f32::from(u8::from(was_first)))
 }
 
 impl MessageUi {
+    fn visible_bounds(&self) -> gpui::Bounds<gpui::Pixels> {
+        let bounds = self.list.viewport_bounds();
+        let inset = self.geometry.borrow().header_inset.min(bounds.size.height);
+        gpui::Bounds::from_corners(
+            gpui::point(bounds.left(), bounds.top() + inset),
+            bounds.bottom_right(),
+        )
+    }
+
     pub fn new(cx: &mut Context<Desktop>) -> Self {
         let theme = super::theme::Theme::resolve(
             super::theme::Palette::Blue,
@@ -114,10 +136,61 @@ impl MessageUi {
             search_return_focus: None,
             search_pending_focus: false,
             show_pins: false,
+            mention_candidate: None,
+            mention_request: None,
+            mention_ready: None,
         }
     }
 }
 impl Desktop {
+    /// Reuse the composition owner's finite refresh tick for one debounced
+    /// mention query. No per-keystroke task or unbounded request queue.
+    pub(super) fn refresh_composer_mentions(&mut self, cx: &Context<Self>) {
+        let current = self
+            .snapshot
+            .selected
+            .filter(|_| {
+                self.composer_active
+                    && self.composer_available()
+                    && self.message_feature_enabled(MessageFeature::Mentions)
+            })
+            .and_then(|context| {
+                self.composer
+                    .read(cx)
+                    .mention_query()
+                    .map(|q| (context, q.to_owned()))
+            });
+        let changed = self
+            .message_ui
+            .mention_candidate
+            .as_ref()
+            .map(|(c, q, _)| (*c, q.as_str()))
+            != current.as_ref().map(|(c, q)| (*c, q.as_str()));
+        if changed {
+            self.message_ui.mention_candidate = current.map(|(c, q)| (c, q, Instant::now()));
+            self.message_ui.mention_request = None;
+            self.message_ui.mention_ready = None;
+        }
+        let Some((_, query, since)) = &self.message_ui.mention_candidate else {
+            return;
+        };
+        if since.elapsed() < std::time::Duration::from_millis(200)
+            || self.message_ui.mention_request.is_some()
+            || self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .is_none_or(|p| p.state.pending())
+        {
+            return;
+        }
+        let query = query.clone();
+        if let Ok(bounded) = Text::new(&query)
+            && let Some(request) = self.submit_message(MessageAction::Mentions(bounded))
+        {
+            self.message_ui.mention_request = Some((request, query));
+        }
+    }
     fn timeline_at_bottom(&self) -> bool {
         let count = self.message_ui.list.item_count();
         if count == 0 {
@@ -249,9 +322,19 @@ impl Desktop {
                 .list
                 .splice(0..self.message_ui.observed.len(), rows.len());
             if let Some(index) = id.and_then(|id| rows.iter().position(|m| m.local_id == id)) {
+                let was_first = self
+                    .message_ui
+                    .observed
+                    .first()
+                    .is_some_and(|row| Some(row.local_id) == id);
                 self.message_ui.list.scroll_to(ListOffset {
                     item_ix: index,
-                    offset_in_item: offset,
+                    offset_in_item: preserved_row_offset(
+                        offset,
+                        was_first,
+                        index == 0,
+                        self.message_ui.geometry.borrow().header_inset,
+                    ),
                 });
             }
             self.message_ui.observed = rows.to_vec();
@@ -268,7 +351,11 @@ impl Desktop {
             self.message_ui.arrival.borrow_mut().manual_scroll();
             self.message_ui.list.scroll_to(ListOffset {
                 item_ix: index,
-                offset_in_item: px(0.),
+                offset_in_item: if index == 0 {
+                    px(0.)
+                } else {
+                    -self.message_ui.geometry.borrow().header_inset
+                },
             });
             self.message_ui.last_located = Some(request);
             self.highlighted_message = self.snapshot.selected.map(|context| (context, id));
@@ -280,6 +367,12 @@ impl Desktop {
             .filter(|p| Some(p.context) == self.snapshot.selected)
             .and_then(|p| p.result)
         {
+            if let Some((pending, query)) = &self.message_ui.mention_request
+                && *pending == request
+                && completion == Completion::ServerAccepted
+            {
+                self.message_ui.mention_ready = Some(query.clone());
+            }
             if self.message_ui.pending_edit == Some(request)
                 && completion == Completion::ServerAccepted
             {
@@ -323,7 +416,7 @@ impl Desktop {
         }) {
             return;
         }
-        let viewport = self.message_ui.list.viewport_bounds();
+        let viewport = self.message_ui.visible_bounds();
         let id = self
             .snapshot
             .messages
@@ -376,6 +469,12 @@ impl Desktop {
         self.message_ui.show_search && self.message_ui.context == self.snapshot.selected
     }
     pub(super) fn trace_chat_ui(&self, window: &Window, cx: &Context<Self>) {
+        println!(
+            "UI_CHAT_HEADER inset={:?} list={:?} visible={:?}",
+            self.message_ui.geometry.borrow().header_inset,
+            self.message_ui.list.viewport_bounds(),
+            self.message_ui.visible_bounds(),
+        );
         println!(
             "UI_CHAT_STATE search_open={} search_focused={} search_chars={} search_bounds={:?} composer_bounds={:?} reply={:?} menu={:?} reduced_motion={}",
             self.conversation_search_open(),
@@ -688,9 +787,9 @@ impl Desktop {
                 }
             }
             Action::InsertMention(identifier) => {
-                let current = self.composer.read(cx).content.to_string();
                 self.composer
-                    .update(cx, |i, _| i.set_value(&format!("{current}@{identifier} ")));
+                    .update(cx, |i, cx| i.insert_mention(&identifier, cx));
+                self.composer.focus_handle(cx).focus(window);
             }
         }
         if let Some(id) = self.compose_motion_id(context)
@@ -827,13 +926,45 @@ impl Desktop {
         div().flex_none().child(body)
     }
     pub(super) fn message_timeline(&self, constrained: bool, cx: &Context<Self>) -> Div {
+        self.message_timeline_with_header(constrained, None, cx)
+    }
+    pub(super) fn conversation_timeline(
+        &self,
+        header: Div,
+        constrained: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        if matches!(
+            self.snapshot.content,
+            ContentState::Ready | ContentState::Offline
+        ) && !self.snapshot.messages.as_slice().is_empty()
+        {
+            self.message_timeline_with_header(constrained, Some(header), cx)
+        } else {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .when(constrained, |d| d.flex_none())
+                .child(header)
+                .child(self.message_timeline(constrained, cx))
+        }
+    }
+    fn message_timeline_with_header(
+        &self,
+        constrained: bool,
+        mut header: Option<Div>,
+        cx: &Context<Self>,
+    ) -> Div {
         let t = self.theme;
         let mut body = div()
             .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
-            .when(constrained, |d| d.flex_none().h(px(200.)));
+            .when(constrained, |d| d.flex_none())
+            .when(constrained && header.is_none(), |d| d.h(px(200.)));
         if self.selected().is_none() {
             return body;
         }
@@ -843,14 +974,19 @@ impl Desktop {
             .as_ref()
             .is_some_and(|p| p.older.is_some())
         {
-            body = body.child(self.button(
+            let older = self.button(
                 "load-older",
                 "Ältere Nachrichten laden",
                 ButtonStyle::Quiet,
                 true,
                 LocalAction::Message(Action::Command(MessageAction::Older)),
                 cx,
-            ));
+            );
+            if let Some(top) = header.take() {
+                header = Some(top.child(older.bg(t.surface)));
+            } else {
+                body = body.child(older);
+            }
         }
         match self.snapshot.content {
             ContentState::Loading => {
@@ -891,118 +1027,16 @@ impl Desktop {
                         "Hier erscheinen die Nachrichten dieses Gesprächs.",
                     )));
                 } else {
-                    let layout_arrival = self.message_ui.arrival.clone();
-                    let wheel_arrival = self.message_ui.arrival.clone();
-                    let keyboard_arrival = self.message_ui.arrival.clone();
-                    let layout_list = self.message_ui.list.clone();
-                    let keyboard_list = self.message_ui.list.clone();
-                    let keyboard_focus = self.navigation.history_focus();
-                    let reduced = self.reduced_motion;
-                    let layout_geometry = self.message_ui.geometry.clone();
-                    self.message_ui.geometry.borrow_mut().painted.clear();
-                    body = body.child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .track_focus(&keyboard_focus.clone().tab_stop(!self.background_inert))
-                            .on_scroll_wheel(move |event, _, _| {
-                                if event.delta.pixel_delta(px(20.)).y > px(0.) {
-                                    wheel_arrival.borrow_mut().manual_scroll();
-                                }
-                            })
-                            .on_key_down(move |event, window, cx| {
-                                if !keyboard_focus.is_focused(window) {
-                                    return;
-                                }
-                                let page = keyboard_list.viewport_bounds().size.height * 0.85;
-                                match event.keystroke.key.as_str() {
-                                    "pageup" => keyboard_list.scroll_by(-page),
-                                    "pagedown" => keyboard_list.scroll_by(page),
-                                    "home" => keyboard_list.scroll_to(ListOffset {
-                                        item_ix: 0,
-                                        offset_in_item: px(0.),
-                                    }),
-                                    "end" => keyboard_list.scroll_to(ListOffset {
-                                        item_ix: keyboard_list.item_count(),
-                                        offset_in_item: px(0.),
-                                    }),
-                                    _ => return,
-                                }
-                                keyboard_arrival.borrow_mut().manual_scroll();
-                                cx.stop_propagation();
-                                window.refresh();
-                            })
-                            .on_children_prepainted(move |_, window, _| {
-                                let viewport = layout_list.viewport_bounds();
-                                let mut geometry = layout_geometry.borrow_mut();
-                                geometry.anchor = geometry
-                                    .painted
-                                    .iter()
-                                    .find(|(_, bounds)| bounds.bottom() > viewport.top())
-                                    .map(|(id, bounds)| (*id, viewport.top() - bounds.top()));
-                                geometry.painted.clear();
-                                drop(geometry);
-                                let mut arrival = layout_arrival.borrow_mut();
-                                let now = Instant::now();
-                                let followed = arrival.after_layout(now, reduced);
-                                if followed {
-                                    layout_list.scroll_to(ListOffset {
-                                        item_ix: layout_list.item_count(),
-                                        offset_in_item: px(0.),
-                                    });
-                                }
-                                if followed
-                                    || arrival.following()
-                                    || arrival.animate_next_frame(now)
-                                {
-                                    window.request_animation_frame();
-                                }
-                            })
-                            .child(
-                                list(
-                                    self.message_ui.list.clone(),
-                                    cx.processor(|this, index, _, cx| {
-                                        this.snapshot
-                                            .messages
-                                            .as_slice()
-                                            .get(index)
-                                            .map(|m: &MessageView| {
-                                                let geometry = this.message_ui.geometry.clone();
-                                                let id = m.local_id;
-                                                let row = this
-                                                    .message_row(m, cx)
-                                                    .on_children_prepainted(move |bounds, _, _| {
-                                                        let mut geometry = geometry.borrow_mut();
-                                                        if geometry.painted.len() < 100
-                                                            && let Some(bounds) =
-                                                                bounds.first().copied()
-                                                        {
-                                                            geometry.painted.push((id, bounds));
-                                                        }
-                                                    });
-                                                let progress = this
-                                                    .message_ui
-                                                    .arrival
-                                                    .borrow()
-                                                    .progress(m.local_id, Instant::now());
-                                                if let Some(progress) = progress {
-                                                    let frames = this.motion_frame_counter();
-                                                    super::motion::count_frame(&frames);
-                                                    row.opacity(
-                                                        0.6 + 0.4
-                                                            * gpui::ease_out_quint()(progress),
-                                                    )
-                                                    .into_any_element()
-                                                } else {
-                                                    row.into_any_element()
-                                                }
-                                            })
-                                            .unwrap_or_else(|| div().into_any_element())
-                                    }),
-                                )
-                                .size_full(),
-                            ),
-                    );
+                    body = body.child(if let Some(header) = header.take() {
+                        super::shell::chat_header::scroll_under_header(
+                            header,
+                            constrained,
+                            cx.processor(|this, inset, _, cx| this.message_history(inset, cx)),
+                        )
+                        .into_any_element()
+                    } else {
+                        self.message_history(px(0.), cx).into_any_element()
+                    });
                 }
             }
         }
@@ -1040,6 +1074,149 @@ impl Desktop {
         }
         body
     }
+    fn message_history(&self, header_inset: gpui::Pixels, cx: &Context<Self>) -> Div {
+        let previous = self.message_ui.geometry.borrow().header_inset;
+        if previous != header_inset {
+            let mut anchor = self.message_ui.list.logical_scroll_top();
+            self.message_ui.geometry.borrow_mut().header_inset = header_inset;
+            // The first real row owns the top clearance, so it scrolls away.
+            // List padding in GPUI 0.2.2 is a fixed gutter and omits preceding
+            // rows there; it also disagrees with bounds_for_item.
+            if self.message_ui.list.item_count() > 0 {
+                self.message_ui.list.splice(0..1, 1);
+                if anchor.item_ix > 0 && anchor.item_ix < self.message_ui.list.item_count() {
+                    anchor.offset_in_item -= header_inset - previous;
+                }
+                self.message_ui.list.scroll_to(anchor);
+            }
+        }
+        let layout_arrival = self.message_ui.arrival.clone();
+        let wheel_arrival = self.message_ui.arrival.clone();
+        let keyboard_arrival = self.message_ui.arrival.clone();
+        let layout_list = self.message_ui.list.clone();
+        let keyboard_list = self.message_ui.list.clone();
+        let keyboard_focus = self.navigation.history_focus();
+        let layout_focus = keyboard_focus.clone();
+        let reveal = self.navigation.reveal.clone();
+        let reduced = self.reduced_motion;
+        let layout_geometry = self.message_ui.geometry.clone();
+        self.message_ui.geometry.borrow_mut().painted.clear();
+        div()
+            .flex_1()
+            .min_h_0()
+            .track_focus(&keyboard_focus.clone().tab_stop(!self.background_inert))
+            .on_scroll_wheel(move |event, _, _| {
+                if event.delta.pixel_delta(px(20.)).y > px(0.) {
+                    wheel_arrival.borrow_mut().manual_scroll();
+                }
+            })
+            .on_key_down(move |event, window, cx| {
+                if !keyboard_focus.is_focused(window) {
+                    return;
+                }
+                let page =
+                    (keyboard_list.viewport_bounds().size.height - header_inset).max(px(0.)) * 0.85;
+                match event.keystroke.key.as_str() {
+                    "pageup" => keyboard_list.scroll_by(-page),
+                    "pagedown" => keyboard_list.scroll_by(page),
+                    "home" => keyboard_list.scroll_to(ListOffset {
+                        item_ix: 0,
+                        offset_in_item: px(0.),
+                    }),
+                    "end" => keyboard_list.scroll_to(ListOffset {
+                        item_ix: keyboard_list.item_count(),
+                        offset_in_item: px(0.),
+                    }),
+                    _ => return,
+                }
+                keyboard_arrival.borrow_mut().manual_scroll();
+                cx.stop_propagation();
+                window.refresh();
+            })
+            .on_children_prepainted(move |_, window, cx| {
+                let viewport = layout_list.viewport_bounds();
+                let mut geometry = layout_geometry.borrow_mut();
+                let painted_anchor = geometry
+                    .painted
+                    .iter()
+                    .find(|(_, _, bounds)| bounds.bottom() > viewport.top())
+                    .map(|(index, id, bounds)| (*index, *id, viewport.top() - bounds.top()));
+                geometry.anchor = painted_anchor.map(|(_, id, offset)| (id, offset));
+                geometry.painted.clear();
+                drop(geometry);
+                let mut arrival = layout_arrival.borrow_mut();
+                if layout_focus.contains_focused(window, cx)
+                    && reveal.reveal_history(
+                        &layout_list,
+                        header_inset,
+                        painted_anchor.map(|(index, _, offset)| ListOffset {
+                            item_ix: index,
+                            offset_in_item: offset,
+                        }),
+                        window,
+                    )
+                {
+                    arrival.manual_scroll();
+                }
+                let now = Instant::now();
+                let followed = arrival.after_layout(now, reduced);
+                if followed {
+                    layout_list.scroll_to(ListOffset {
+                        item_ix: layout_list.item_count(),
+                        offset_in_item: px(0.),
+                    });
+                }
+                if followed || arrival.following() || arrival.animate_next_frame(now) {
+                    window.request_animation_frame();
+                }
+            })
+            .child(
+                list(
+                    self.message_ui.list.clone(),
+                    cx.processor(move |this, index, _, cx| {
+                        this.snapshot
+                            .messages
+                            .as_slice()
+                            .get(index)
+                            .map(|m: &MessageView| {
+                                let geometry = this.message_ui.geometry.clone();
+                                let id = m.local_id;
+                                let row = this
+                                    .message_row(m, cx)
+                                    .when(index == 0, |d| d.pt(header_inset))
+                                    .on_children_prepainted(move |bounds, _, _| {
+                                        let mut geometry = geometry.borrow_mut();
+                                        if geometry.painted.len() < 100
+                                            && let Some(mut bounds) = bounds.first().copied()
+                                        {
+                                            if index == 0 {
+                                                bounds.origin.y -= header_inset;
+                                                bounds.size.height += header_inset;
+                                            }
+                                            geometry.painted.push((index, id, bounds));
+                                        }
+                                    });
+                                let progress = this
+                                    .message_ui
+                                    .arrival
+                                    .borrow()
+                                    .progress(m.local_id, Instant::now());
+                                if let Some(progress) = progress {
+                                    let frames = this.motion_frame_counter();
+                                    super::motion::count_frame(&frames);
+                                    row.opacity(0.6 + 0.4 * gpui::ease_out_quint()(progress))
+                                        .into_any_element()
+                                } else {
+                                    row.into_any_element()
+                                }
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    }),
+                )
+                .size_full(),
+            )
+    }
+
     fn message_row(&self, m: &MessageView, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let context = self.snapshot.selected.expect("message context");
@@ -1113,18 +1290,34 @@ impl Desktop {
                 "user" | "guest" | "group" | "email" | "call"
             )
         }) {
-            content = content.child(
-                div()
-                    .p_3()
-                    .rounded_lg()
-                    .bg(t.subtle)
-                    .child(object.name.as_str().to_owned())
-                    .child(self.hint(self.l(match object.kind.as_str() {
-                        "file" => "Datei",
-                        "poll" => "Umfrage",
-                        _ => "Anhang",
-                    }))),
-            );
+            content = if object.kind.as_str() == "file" {
+                content.child(self.attachment_card(
+                    talk_core::ui::content::AttachmentRef {
+                        context,
+                        message: m.local_id,
+                        placeholder: object.placeholder.clone(),
+                    },
+                    object,
+                    cx,
+                ))
+            } else if matches!(object.kind.as_str(), "poll" | "talk-poll")
+                && let Some(id) = object.id.as_ref().and_then(|id| id.as_str().parse().ok())
+            {
+                content.child(self.poll_card(id, cx))
+            } else {
+                content.child(
+                    div()
+                        .p_3()
+                        .rounded_lg()
+                        .bg(t.subtle)
+                        .child(object.name.as_str().to_owned())
+                        .child(self.hint(self.l(match object.kind.as_str() {
+                            "file" => "Datei",
+                            "poll" => "Umfrage",
+                            _ => "Anhang",
+                        }))),
+                )
+            };
         }
         if !m.metadata.reactions.as_slice().is_empty() {
             content = content.child(
@@ -1342,7 +1535,14 @@ impl Desktop {
                     self.highlighted_message == Some((context, m.local_id)),
                     |d| d.bg(t.selected),
                 )
-                .child(self.avatar(m.initials.as_str(), false))
+                .child(self.content_avatar(
+                    talk_core::ui::content::AssetTarget::MessageAvatar {
+                        context,
+                        message: m.local_id,
+                    },
+                    m.initials.as_str(),
+                    36.,
+                ))
                 .child(content)
                 .child(
                     div()
@@ -1398,7 +1598,7 @@ impl Desktop {
             .gap_4()
             .child(
                 div()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(row.title.as_str().to_owned()),
             )
             .child(
@@ -1534,7 +1734,15 @@ impl Desktop {
                             .flex()
                             .gap_3()
                             .items_center()
-                            .child(div().flex_1().child(object.name.as_str().to_owned()))
+                            .child(div().flex_1().child(self.attachment_card(
+                                talk_core::ui::content::AttachmentRef {
+                                    context,
+                                    message: message.local_id,
+                                    placeholder: object.placeholder.clone(),
+                                },
+                                object,
+                                cx,
+                            )))
                             .child(self.button(
                                 scoped_id(
                                     "download-shared",
@@ -1616,7 +1824,11 @@ impl Desktop {
             })
     }
     pub(super) fn composer_context(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_2();
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.download_status(cx));
         let Some(context) = self.snapshot.selected else {
             return body;
         };
@@ -1648,58 +1860,50 @@ impl Desktop {
                 ),
             );
         }
-        body = body.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .child(self.icon_button(
-                    "composer-mentions",
-                    ("at", "@"),
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Mentions),
-                    LocalAction::Message(Action::Command(MessageAction::Mentions(
-                        Text::new("").expect("empty query"),
-                    ))),
-                    cx,
-                ))
-                .child(self.icon_button(
-                    "composer-schedule",
-                    ("clock", "Nachricht planen"),
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Schedules),
-                    LocalAction::Message(Action::Schedule),
-                    cx,
-                ))
-                .child(self.icon_button(
-                    "composer-scheduled",
-                    ("inbox", "Geplante Nachrichten"),
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Schedules),
-                    LocalAction::Message(Action::Command(MessageAction::Scheduled)),
-                    cx,
-                ))
-                .child(self.icon_button(
-                    "composer-silent",
-                    ("moon", "Leise senden"),
-                    if target.silent {
-                        ButtonStyle::Primary
-                    } else {
-                        ButtonStyle::Quiet
-                    },
-                    self.message_available(MessageFeature::Silent),
-                    LocalAction::Message(Action::Silent),
-                    cx,
-                ))
-                .child(self.icon_button(
-                    "composer-reminders",
-                    ("bell", "Erinnerungen"),
-                    ButtonStyle::Quiet,
-                    self.message_available(MessageFeature::Reminders),
-                    LocalAction::Message(Action::Command(MessageAction::Reminders)),
-                    cx,
-                )),
-        );
+        body = body.when(self.composer_active, |d| {
+            d.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(self.icon_button(
+                        "composer-schedule",
+                        ("clock", "Nachricht planen"),
+                        ButtonStyle::Quiet,
+                        self.message_available(MessageFeature::Schedules),
+                        LocalAction::Message(Action::Schedule),
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        "composer-scheduled",
+                        ("inbox", "Geplante Nachrichten"),
+                        ButtonStyle::Quiet,
+                        self.message_available(MessageFeature::Schedules),
+                        LocalAction::Message(Action::Command(MessageAction::Scheduled)),
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        "composer-silent",
+                        ("moon", "Leise senden"),
+                        if target.silent {
+                            ButtonStyle::Primary
+                        } else {
+                            ButtonStyle::Quiet
+                        },
+                        self.message_available(MessageFeature::Silent),
+                        LocalAction::Message(Action::Silent),
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        "composer-reminders",
+                        ("bell", "Erinnerungen"),
+                        ButtonStyle::Quiet,
+                        self.message_available(MessageFeature::Reminders),
+                        LocalAction::Message(Action::Command(MessageAction::Reminders)),
+                        cx,
+                    )),
+            )
+        });
         if let Some(panel) = &self.snapshot.message_panel {
             if let Some(file) = &panel.uploaded {
                 body = body.child(
@@ -1732,7 +1936,19 @@ impl Desktop {
             if panel.file_saved.is_some() {
                 body = body.child(self.hint(self.l("Datei gespeichert.")));
             }
-            for (index, mention) in panel.mentions.as_slice().iter().take(8).enumerate() {
+            let show_mentions = self.composer_active
+                && self
+                    .message_ui
+                    .mention_ready
+                    .as_deref()
+                    .is_some_and(|q| self.composer.read(cx).mention_query() == Some(q));
+            for (index, mention) in panel
+                .mentions
+                .as_slice()
+                .iter()
+                .take(if show_mentions { 8 } else { 0 })
+                .enumerate()
+            {
                 body = body.child(self.button(
                     ("mention-choice", index),
                     mention.label.as_str().to_owned(),
@@ -1744,7 +1960,12 @@ impl Desktop {
                     cx,
                 ));
             }
-            for scheduled in panel.scheduled.as_slice().iter().take(8) {
+            for scheduled in panel
+                .scheduled
+                .as_slice()
+                .iter()
+                .take(if self.composer_active { 8 } else { 0 })
+            {
                 body = body.child(
                     div()
                         .flex()
@@ -1763,7 +1984,12 @@ impl Desktop {
                         )),
                 );
             }
-            for reminder in panel.reminders.as_slice().iter().take(8) {
+            for reminder in panel
+                .reminders
+                .as_slice()
+                .iter()
+                .take(if self.composer_active { 8 } else { 0 })
+            {
                 body = body.child(
                     div()
                         .flex()
@@ -1884,6 +2110,22 @@ fn parse_time(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prepend_and_eviction_preserve_the_visible_row_when_header_clearance_moves() {
+        for inset in [px(0.), px(74.), px(158.)] {
+            for was_first in [false, true] {
+                for is_first in [false, true] {
+                    for offset in [px(-30.), px(0.), px(17.)] {
+                        let next = preserved_row_offset(offset, was_first, is_first, inset);
+                        let before = -offset + if was_first { inset } else { px(0.) };
+                        let after = -next + if is_first { inset } else { px(0.) };
+                        assert_eq!(before, after);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn quick_reply_revalidates_canonical_message_and_current_send_state() {
         let mut message = MessageView {

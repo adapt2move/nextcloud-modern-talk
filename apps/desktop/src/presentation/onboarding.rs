@@ -30,7 +30,7 @@ impl Desktop {
                     .child(
                         div()
                             .text_size(self.sp(12.))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(t.muted)
                             .child(self.l("WILLKOMMEN BEI TALK")),
                     )
@@ -56,7 +56,7 @@ impl Desktop {
                             .child(
                                 div()
                                     .text_size(self.sp(12.))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .font_weight(FontWeight::MEDIUM)
                                     .child(self.l("Serveradresse")),
                             )
                             .child(
@@ -362,7 +362,7 @@ impl Desktop {
                     .mt(px(80.))
                     .text_size(self.sp(35.))
                     .line_height(self.sp(43.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l("Euer Team."))
                     .child(div().child(self.l("Eure Cloud."))),
             )
@@ -389,7 +389,7 @@ was ihr miteinander besprecht.")),
                                 .gap_3()
                                 .text_size(self.sp(13.))
                                 .font_weight(if current {
-                                    FontWeight::SEMIBOLD
+                                    FontWeight::MEDIUM
                                 } else {
                                     FontWeight::NORMAL
                                 })

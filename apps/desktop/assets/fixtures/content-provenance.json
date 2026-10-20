@@ -1,0 +1,38 @@
+{
+  "purpose": "Clearly fictional development-only content. Never represents a server read, write or production identity.",
+  "license": "EUPL-1.2; project fixture assets",
+  "assets": [
+    {
+      "file": "content-avatar.png",
+      "sha256": "274dbb6883e2533855792cb3d6d230944f08b91ea396f62e20b9e918db2e7d0c",
+      "bytes": 40517,
+      "source": "OpenAI built-in imagegen",
+      "prompt": "Use case: photorealistic-natural. Asset type: fictional person avatar for a native team chat software development fixture. Generate a square, friendly natural editorial head-and-shoulders portrait of a fictional adult woman around 35, with shoulder-length dark brown hair, brown eyes, light olive skin and a warm subtle smile, wearing a simple muted blue sweater. Neutral soft beige studio background, diffused daylight, face centered and large enough for a tiny circular avatar crop. Real skin texture, professional but informal. Do not resemble any celebrity or known person. No logos, text, objects, or watermark.",
+      "processing": "Pillow 11.3.0 Lanczos downsample; optimized RGB PNG"
+    },
+    {
+      "file": "content-document.png",
+      "sha256": "205368af70fbd467c42a39396269ec3e7c6a73a3e8d8a4c4b6f60477453e1067",
+      "bytes": 37642,
+      "source": "Project-authored SVG document example",
+      "prompt": null,
+      "processing": "CairoSVG 2.8.2; bundled Google Sans static fonts"
+    },
+    {
+      "file": "content-document.svg",
+      "sha256": "443ce818f7bf2efb526786323ffd164ab89f93fd0d7bd2bf7fa998d16134923c",
+      "bytes": 2230,
+      "source": "Project-authored SVG document example",
+      "prompt": null,
+      "processing": "Original vector source"
+    },
+    {
+      "file": "content-photo.png",
+      "sha256": "c2547e2636575c4e577449a26956b5f94be4ab895365a833cf5813ba135aa5ca",
+      "bytes": 190313,
+      "source": "OpenAI built-in imagegen",
+      "prompt": "Use case: photorealistic-natural. Asset type: fictional image attachment for a native team chat software development fixture. Generate a landscape editorial photograph of a welcoming modern office meeting corner with a round oak table, two muted blue upholstered chairs, a green indoor plant and soft morning light from tall windows. Eye-level composition, real material texture, warm neutral walls, calm natural colors. No people, logos, readable text, brand names, or watermark. This is sample fictional content, not an interface screenshot.",
+      "processing": "Pillow 11.3.0 Lanczos downsample; optimized RGB PNG"
+    }
+  ]
+}

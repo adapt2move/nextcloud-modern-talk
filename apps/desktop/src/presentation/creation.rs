@@ -7,6 +7,36 @@ use talk_core::ui::{
     presentation::{Completion, RequestId, UiIntent},
 };
 impl Desktop {
+    pub(super) fn find_search_people(&mut self, cx: &Context<Self>) {
+        let Some(account) = self.snapshot.active_account else {
+            return;
+        };
+        let query = self.search.read(cx).content.trim();
+        let Ok(bounded) = talk_core::ui::Text::new(query) else {
+            return;
+        };
+        if query.is_empty()
+            || self
+                .snapshot
+                .create_panel
+                .as_ref()
+                .is_some_and(|p| p.state.pending())
+        {
+            return;
+        }
+        let requested = query.to_lowercase();
+        let Some(request) = self.room_ui.request.checked_add(1) else {
+            return;
+        };
+        self.room_ui.request = request;
+        if self.submit(UiIntent::Create {
+            account,
+            request: RequestId(request),
+            action: CreateAction::FindPeople(bounded),
+        }) {
+            self.directory_query = Some((account, requested));
+        }
+    }
     pub(super) fn open_creation(&mut self, cx: &mut Context<Self>) {
         if self.room_ui.create_account != self.snapshot.active_account {
             self.room_ui.create_account = self.snapshot.active_account;
@@ -38,7 +68,7 @@ impl Desktop {
         {
             let account = panel.account;
             if Some(account) == self.snapshot.active_account
-                && self.overlay == Some(Overlay::Create)
+                && matches!(self.overlay, Some(Overlay::Create | Overlay::Search))
             {
                 self.overlay = None;
                 self.conversation_name.update(cx, |i, _| i.reset());
@@ -117,6 +147,11 @@ impl Desktop {
                             .items_center()
                             .gap_3()
                             .py_2()
+                            .child(self.content_avatar(
+                                talk_core::ui::content::AssetTarget::PersonAvatar(person.id),
+                                "?",
+                                32.,
+                            ))
                             .child(
                                 div()
                                     .flex_1()

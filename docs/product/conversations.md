@@ -8,7 +8,9 @@ This document defines conversation, discovery and membership behavior. Use the [
 
 Acceptance: changing views preserves the room identity and draft. Opening a list row never starts microphone/camera capture. A room removed by the server disappears from live navigation after reconciliation; stale offline content is visibly stale and follows the cache policy.
 
-The conversation header has one compact action area. A favorite star sits beside the title, revealed on hover or keyboard focus; the confirmed favorite also appears in the sidebar. The adjacent search action opens the scoped search field below the header. Clicking the title opens shared media/items in a dialog. Keep member management, call entry and conversation settings as their distinct actions, without a second redundant icon strip.
+The conversation header has one compact action area. A confirmed favorite has a persistent, clickable filled star beside its title; an unselected star appears on header hover or keyboard focus. The search action also appears on header hover or keyboard focus and opens the scoped search field below the header. Clicking the title opens shared media/items in a dialog. Keep member management, call entry and conversation settings as distinct actions, without a second redundant icon strip. The Huddle/headphone action uses the same unframed icon treatment as adjacent actions.
+
+Use authoritative user avatars and conversation images or emoji icons when available, with clear initials/icon fallbacks during loading or failure. The bottom of navigation shows the current user's profile image and name, with the organization on a second line. It does not add an organization switcher.
 
 ## CONV-002
 
@@ -78,7 +80,9 @@ Acceptance: a permission/role change arriving while an action is pending blocks/
 
 Acceptance: a failed favorite/archive/tag update rolls back visibly. A room may be archived yet have a live call or new activity; follow returned policy without losing it permanently. Sensitive presentation applies across list, search, switcher, and OS notifications. Tags on one account never organize another account's rooms.
 
-The compact sidebar gives Inbox and Archive their own destinations. Direct conversations and Note to self precede Channels, Conferences and Huddles; other or unknown types remain explicit. Existing-conversation categories come from typed metadata, with conference presets and classified status represented separately. Names never imply room types. Rows stay single-line, with small unread counts for personal conversations and dots elsewhere; pinning prioritizes a row within its group.
+The compact sidebar gives Inbox and Archive their own unindented top-level destinations. Only the Conversations hierarchy is indented. Its add action belongs inside the section highlight, with a small visual separation; routine reconciliation needs no redundant refresh button. Confirmed favorites appear in a separate Favorites group with filled stars. Direct conversations and Note to self precede Channels, Conferences and Huddles; other or unknown types remain explicit. Existing-conversation categories come from typed metadata, with conference presets and classified status represented separately. Names never imply room types. Rows stay single-line, with small unread counts for personal conversations and dots elsewhere.
+
+The primary navigation search can find conversations and people. Keep scoped room filtering separate from authenticated directory results, and open or create a direct conversation only after deliberate selection of a returned person.
 
 Custom groups support creation, rename, removal, ordering, collapse and room assignment. Supported server tags/favorites use admitted server requests and confirmed replies. Only an explicitly unsupported feature permits account-scoped local fallback; Unknown never does. Local persistence uses owner-issued durable account/room keys and bounded per-item edits, retaining unseen layout entries after refresh. Server tag handles remain scoped to the current account runtime. Failed or uncertain edits keep the last confirmed layout and offer reload; no automatic replay follows uncertainty.
 

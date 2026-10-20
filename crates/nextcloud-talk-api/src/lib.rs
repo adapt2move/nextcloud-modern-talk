@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 pub mod chat;
+pub mod content;
 pub mod conversation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
@@ -15,6 +16,7 @@ mod json;
 pub mod meeting;
 pub mod models;
 pub mod notifications;
+pub mod poll;
 pub mod presence;
 pub mod scope;
 pub mod signaling;
@@ -183,6 +185,7 @@ pub struct Client {
     creation_uncertain: bool,
     tag_creation_uncertain: bool,
     schedule_uncertain: Vec<RoomToken>,
+    poll_creation_uncertain: Vec<RoomToken>,
     hpb: Option<hpb::Owner>,
     hpb_route: Option<hpb::Route>,
     live_settings_at: Option<scope::Moment>,
@@ -234,6 +237,7 @@ impl Client {
             creation_uncertain: false,
             tag_creation_uncertain: false,
             schedule_uncertain: Vec::new(),
+            poll_creation_uncertain: Vec::new(),
             hpb: None,
             hpb_route: None,
             live_settings_at: None,

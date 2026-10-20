@@ -10,10 +10,17 @@ separates implemented paths from remaining parity work.
 - System-browser login uses NextCloud Login Flow v2. Accounts persist through
   native storage or an explicitly selected unencrypted private-file fallback.
   Restoration, logout suppression and cleanup share one account owner.
-- Compact grouped navigation includes favorites and active/archive views.
+- Compact grouped navigation includes a dedicated favorites group and active/archive views.
   Header actions open members and conversation settings; the title opens shared
   content. Messaging includes history, replies, edits/deletes, reactions, threads,
   pins, reminders, schedules, room search and explicit file upload/share/download.
+  The main search includes the local-user directory. Scoped user avatars, room
+  avatars and emoji icons supplement names; the footer identifies the current user.
+- Shared content includes bounded image and document thumbnails, enlarged image
+  previews, explicit Cloud web handoff and byte-based download progress. Published
+  polls support creation, voting, permitted results and closure from chat and
+  conversation settings. Server poll drafts and native PDF/office viewers remain
+  separate unfinished work.
 - Account scheduling reconciles room lists, nonselected-room messages and
   incoming calls. Authenticated live events invalidate observations; current
   server reads remain authoritative. Startup baselines do not replay old alerts
@@ -31,8 +38,10 @@ separates implemented paths from remaining parity work.
   Background downloads become installable only after integrity and route checks.
   The user initiates installation outside calls; workers drain before complete
   package replacement and restart. Windows installation remains unavailable.
-- Lucide actions, contextual tooltips, system emoji entry and finite control/dialog
-  transitions are integrated. Newly appended messages animate once and follow the
+- Google Sans, Lucide actions, contextual tooltips, system emoji entry and finite
+  control/dialog transitions are integrated. The chat header uses renderer-backed
+  backdrop blur on Metal/Linux Blade; Windows uses an opaque white header with
+  dark controls. Newly appended messages animate once and follow the
   end after a short delay only when the reader was already there. Reduce Motion,
   including an unknown observation, suppresses decorative animation without
   delaying input or focus.
@@ -44,6 +53,10 @@ Talk 24.0.6 and 35.0.2 / Talk 25.0.6 servers. Ordinary Linux desktop checks cove
 system-browser login, durable private-file storage, restoration, conversation
 actions and messaging. Background discovery includes a real Talk 24 sequence
 with nonselected-account messages, room creation/removal and incoming dismissal.
+Focused content checks on both families cover authenticated avatars, published
+polls with hidden/public results and denied closure, image/document previews or
+Cloud fallback, and byte-exact downloads with progress, cancellation and
+non-overwriting publication.
 
 The media engine exchanged bidirectional VP8/Opus and SCTP between native peers,
 with Chromium in both SDP roles, and through ordinary calls on both server
@@ -62,7 +75,7 @@ installation are not established by compilation or package fixtures.
 Full Talk parity is unfinished. Required call E2EE, guest/federated media,
 screen/system-audio sharing in either direction, durable offline content and
 outgoing-message replay remain absent. Typing, provider translation/summaries,
-voice messages, richer file previews, account-wide search and parts of moderation
+voice messages, video/native document viewers, account-wide content search and parts of moderation
 and integrations remain incomplete.
 
 The pinned Rust engine supports UDP TURN but not TCP/TLS TURN or live credential

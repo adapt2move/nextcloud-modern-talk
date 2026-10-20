@@ -8,7 +8,25 @@ Original project code, documentation and original design artifacts are licensed 
 
 SHA-256 of the included license text: `57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4`.
 
+## Google Sans and GPUI
+
+The runtime embeds unmodified Google Sans v14.000 Regular, Medium and Bold from
+the [Google Sans Project](https://github.com/googlefonts/googlesans/tree/5c8f512c5fb42a7be099b951a7c097f96209c78e),
+under SIL Open Font License 1.1. Preserve the
+[font license](apps/desktop/assets/fonts/GoogleSans-LICENSE.txt),
+[trademark guidance](apps/desktop/assets/fonts/GoogleSans-TRADEMARKS.txt) and
+[release provenance](apps/desktop/assets/fonts/googlesans-provenance.json).
+The fonts retain their separate license.
+
+The patched GPUI 0.2.2 dependency remains Apache-2.0. Its
+[upstream license](vendor/gpui/LICENSE-APACHE) and
+[original source and patch inventory](vendor/gpui/UPSTREAM.json) accompany the
+source. Binary notice collection keeps this attribution separate from EUPL
+project code.
+
 ## Manrope
+
+Historical design assets retain Manrope; the runtime now uses Google Sans.
 
 The bundled [Manrope variable font](docs/design/assets/fonts/Manrope-Variable.ttf), including the font data embedded in the two editable UI mockups, is separately licensed under **SIL Open Font License 1.1**, SPDX identifier `OFL-1.1`.
 

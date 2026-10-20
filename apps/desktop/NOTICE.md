@@ -15,23 +15,28 @@ UTF-8 admission, privacy-gated user-entry clipboard, native focus/appearance,
 horizontal caret scrolling, corrected IME replacement offsets and grapheme tests.
 Preserve this attribution and license when redistributing the derived source.
 
-Manrope is Copyright 2018 The Manrope Project Authors
-(https://github.com/googlefonts/manrope), under SIL OFL-1.1. The unchanged original
-and notice are in [assets/fonts](assets/fonts). Regular (400), SemiBold (600) and
-Bold (700) are static instances generated from that original; their hashes and
-generation method are recorded in `static-manrope-provenance.json` and
-`tools/ui/instantiate-manrope.py`. The OFL has no reserved font name in this copy.
-The original font remains unchanged. The three instances are embedded in the
-executable with `include_bytes!`; no development-machine font path is required.
+The runtime embeds unmodified Google Sans v14.000 static Regular (400), Medium
+(500) and Bold (700) fonts from the Google Sans Project, under SIL OFL-1.1.
+Preserve [the OFL notice](assets/fonts/GoogleSans-LICENSE.txt),
+[trademark guidance](assets/fonts/GoogleSans-TRADEMARKS.txt) and
+[exact release provenance](assets/fonts/googlesans-provenance.json). These fonts
+are not relicensed under EUPL. No development-machine font installation is needed.
+Historical design mockups retain their separately attributed Manrope fonts.
 
-Distributors must include the project license, this notice, the Manrope notice,
-and applicable dependency notices. The dependency evidence in
-`docs/design/native-ui` is a provenance record, not release/license approval.
+The patched GPUI 0.2.2 renderer remains Apache-2.0. Its original license,
+published archive identity and modified-file inventory are retained in
+[the vendored source](../../vendor/gpui/UPSTREAM.json). Distribution notices
+include its upstream license and patch provenance, separately from project code.
+
+Distributors must include the project license, this notice, the font notices,
+and applicable dependency notices.
 Synthetic people and organization data are available only through an explicit
 `--ui-scenario` development option and labeled in every application view.
 
-Functional SVG icons are unmodified Lucide 0.468.0, pinned to commit
-`f12b0de177fbc2a6795e99be065887e72b237123`. Preserve the unchanged
+Functional SVG icons use Lucide 0.468.0, pinned to commit
+`f12b0de177fbc2a6795e99be065887e72b237123`. Their bytes are unchanged except for
+the filled favorite-star variant: its fill is `currentColor` and its upstream
+geometry is unchanged. Preserve the unchanged
 [Lucide notice](assets/icons/LUCIDE-LICENSE), which includes the ISC license and
 Cole Bemis / Feather MIT attribution. The three brand SVGs remain original
 project artwork under EUPL-1.2. [Icon provenance](assets/icons/PROVENANCE.md) and

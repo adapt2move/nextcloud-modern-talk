@@ -313,6 +313,19 @@ impl NextcloudClient {
         let mut rich = Page::empty();
         for r in &message.rich {
             rich.try_push(RichObject {
+                id: r
+                    .id
+                    .as_deref()
+                    .map(Text::new)
+                    .transpose()
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                mime_type: r
+                    .mime_type
+                    .as_deref()
+                    .map(Text::new)
+                    .transpose()
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                size: r.size,
                 placeholder: Text::new(&r.placeholder)
                     .map_err(|_| self.error(ErrorKind::TooLarge))?,
                 kind: Text::new(&r.kind).map_err(|_| self.error(ErrorKind::TooLarge))?,
@@ -380,7 +393,7 @@ impl NextcloudClient {
             },
         })
     }
-    async fn target(
+    pub(super) async fn target(
         &mut self,
         c: &OperationContext,
         id: MessageId,
@@ -648,10 +661,11 @@ impl NextcloudClient {
             message,
             placeholder,
             destination,
+            progress,
         } = &command
         {
             self.message_scope(*message, id)?;
-            if room.classified {
+            if room.classified || room.sensitive {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
             let target = self.target(c, *message).await?;
@@ -684,7 +698,22 @@ impl NextcloudClient {
             self.transport.validate(c)?;
             self.admit_action(id, operation)?;
             let result = async {
-                let length = self.transport.download_file(c, path, &mut file).await?;
+                let progress_copy = progress.clone();
+                let cancellation = c.cancellation.clone();
+                let observe = move |received, total| {
+                    progress_copy.update(received, total);
+                    if progress_copy.is_cancelled() {
+                        cancellation.cancel();
+                    }
+                };
+                let length = self
+                    .transport
+                    .download_file(c, path, &mut file, &observe)
+                    .await?;
+                if progress.is_cancelled() {
+                    return Err(self.error(ErrorKind::Cancelled));
+                }
+                progress.committing();
                 file.sync_all()
                     .await
                     .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
@@ -699,6 +728,7 @@ impl NextcloudClient {
                             ErrorKind::StorageUnavailable
                         })
                     })?;
+                progress.published();
                 Ok(R::FileSaved {
                     bytes: length as u32,
                 })
@@ -943,12 +973,56 @@ impl NextcloudClient {
         if mutation && response.is_err() {
             self.settle_action(operation, response.as_ref().err())
         }
-        let response = match response {
+        let mut response = match response {
             Err(e) if matches!(command, C::ReadReminder(_)) && e.kind == ErrorKind::NotFound => {
                 return Ok(R::Reminder(None));
             }
             r => r?,
         };
+        if let C::SharedFiles { before } = &command {
+            // Talk indexes images/videos as `media`, separately from documents.
+            // Merge the two bounded pages so the native Files surface includes both.
+            let media = self
+                .transport
+                .api_request(
+                    c,
+                    api::Request::Chat {
+                        room: api::models::RoomToken::parse(self.check_room(id)?)
+                            .map_err(|kind| self.error(transport::kind(kind)))?,
+                        command: WireCommand::SharedObjects {
+                            object_type: "media".into(),
+                            before: before
+                                .map(|message| self.message_scope(message, id))
+                                .transpose()?,
+                        },
+                    },
+                )
+                .await?;
+            let (
+                api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                },
+                api::Reply::History {
+                    messages: images, ..
+                },
+            ) = (&mut response, media)
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            let maybe_more =
+                messages.len() == 50 || images.len() == 50 || messages.len() + images.len() > 50;
+            messages.extend(images);
+            messages.sort_by_key(|message| std::cmp::Reverse(message.id));
+            messages.dedup_by_key(|message| message.id);
+            messages.truncate(50);
+            *last_given = if maybe_more {
+                messages.last().map(|message| message.id)
+            } else {
+                None
+            };
+        }
         // Observe presence only for a nonempty eligible future poll. Status errors
         // suppress notifications without losing an otherwise valid message page.
         // The same caller deadline/cancellation bounds this additional read.

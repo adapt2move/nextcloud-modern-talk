@@ -25,7 +25,7 @@ Linux screen-sharing capability checks use ashpd over the session bus, without t
 
 On Apple Silicon macOS, install the official GStreamer runtime and development framework as recorded in [prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py), full Xcode and its macOS/Metal toolchain, select its developer directory, and verify `xcrun --sdk macosx --find metal` and `metallib`. Command Line Tools alone may be insufficient. No macOS runtime qualification is established.
 
-For a local macOS Cargo build, set `RUSTFLAGS="-C link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"`. The official framework's pkg-config files supply link-time paths; this additional path lets the built app find its runtime libraries after launch. CI and the package builder set it explicitly and packaging checks the resolved library locations.
+For a local macOS Cargo build, set `RUSTFLAGS="-C link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"`. The official framework's pkg-config files supply link-time paths; this additional path lets an unbundled development binary find its runtime libraries. Release packaging copies the required libraries and plugins into the app and rewrites their paths to be bundle-relative. The SDK is a developer prerequisite, not an end-user installation step.
 
 [rust-toolchain.toml](../rust-toolchain.toml) pins Rust 1.99.1, Clippy and rustfmt. Keep [Cargo.lock](../Cargo.lock) and use `--locked` for Cargo build/check/test/run commands. Coordinate dependency changes with the affected module owners. The toolchain helper reads the pin:
 

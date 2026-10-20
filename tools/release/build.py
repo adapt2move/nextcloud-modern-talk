@@ -11,10 +11,15 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 
 from package import TARGETS, assemble, sha, relative, regular, media_metadata
+import macos_runtime
+import macos_dmg
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from vendor import GPUI_ARCHIVE, verify_gpui
 
 MAC_GSTREAMER_LIB = Path("/Library/Frameworks/GStreamer.framework/Versions/1.0/lib")
 
@@ -145,6 +150,17 @@ def dependency_notices(root, stage, target, env):
         if not p.get("license"):
             raise ValueError("Missing declared license: " + p["name"])
         package_dir = Path(p["manifest_path"]).parent.resolve()
+        vendored = None
+        if not p.get("source"):
+            if package_dir == (root / "vendor/gpui").resolve():
+                vendored = verify_gpui(root)
+                if (p["name"], p["version"], p["license"]) != ("gpui", "0.2.2", "Apache-2.0"):
+                    raise ValueError("Vendored GPUI metadata differs from its source")
+                checksum = GPUI_ARCHIVE
+            else:
+                workspace = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]
+                if package_dir not in {(root / member).resolve() for member in workspace["members"]}:
+                    raise ValueError("Unqualified local dependency: " + p["name"])
         notice_files = set()
         for path in package_dir.rglob("*"):
             rel = path.relative_to(package_dir)
@@ -155,7 +171,7 @@ def dependency_notices(root, stage, target, env):
                 notice_files.add(path)
         if p.get("license_file"):
             notice_files.add(package_dir / p["license_file"])
-        if not p.get("source"):
+        if not p.get("source") and not vendored:
             notice_files.add(root / "LICENSE")
         supplement = None
         supplement_files = set()
@@ -177,6 +193,10 @@ def dependency_notices(root, stage, target, env):
             notices.append(dest.as_posix())
         entry = {"name": p["name"], "version": p["version"], "license": p["license"], "source": p.get("source"),
                  "archive_sha256": checksum, "features": features, "notices": notices}
+        if vendored:
+            dest = Path("licenses/dependencies/gpui-0.2.2/UPSTREAM.json")
+            shutil.copyfile(package_dir / "UPSTREAM.json", stage / dest)
+            entry["vendored_source"] = {"provenance": dest.as_posix(), "sha256": sha(stage / dest)}
         if supplement:
             entry["notice_supplement"] = supplement
         inventory["packages"].append(entry)
@@ -214,9 +234,10 @@ def build(root, output, target, version):
             if run(["uname", "-sm"], root) != "Darwin arm64":
                 raise ValueError("macOS arm64 package must be built on native macOS arm64")
             env["MACOSX_DEPLOYMENT_TARGET"] = "15.7"
-            # pkg-config supplies -L for linking but not the runtime search path.
-            # Pin the same external framework location documented by the bundle.
-            env["RUSTFLAGS"] = "-C link-arg=-Wl,-rpath," + str(MAC_GSTREAMER_LIB)
+            # Build against the pinned SDK, then replace all non-system loads
+            # with paths into the private bundle. Reserve space for longer names.
+            env["RUSTFLAGS"] = ("-C link-arg=-Wl,-headerpad_max_install_names "
+                                "-C link-arg=-Wl,-rpath," + str(MAC_GSTREAMER_LIB))
             for tool in ("metal", "metallib"):
                 run(["xcrun", "--sdk", "macosx", "--find", tool], root)
         elif run(["uname", "-sm"], root) != "Linux x86_64":
@@ -236,7 +257,8 @@ def build(root, output, target, version):
                  str(stage / "bin/talk-native-helper")], root, env, 300)
         copies = {"LICENSE": "licenses/project/LICENSE", "NOTICE.md": "licenses/project/NOTICE.md",
                   "apps/desktop/NOTICE.md": "licenses/desktop/NOTICE.md",
-                  "apps/desktop/assets/fonts/Manrope-LICENSE.txt": "licenses/manrope/Manrope-LICENSE.txt",
+                  "apps/desktop/assets/fonts/GoogleSans-LICENSE.txt": "licenses/google-sans/GoogleSans-LICENSE.txt",
+                  "apps/desktop/assets/fonts/GoogleSans-TRADEMARKS.txt": "licenses/google-sans/GoogleSans-TRADEMARKS.txt",
                   "apps/desktop/assets/GPUI-LICENSE-APACHE": "licenses/gpui/GPUI-LICENSE-APACHE"}
         for src, dest in copies.items():
             (stage / dest).parent.mkdir(parents=True, exist_ok=True)
@@ -271,17 +293,15 @@ def build(root, output, target, version):
                 "sha256": sha(stage / "bin/talk-native-helper"),
                 "minimum_system_version": "15.7",
             }
-            build_info["native_linkage"] = {}
+            build_info["sdk_linkage"] = {}
             for binary in (executable, stage / "bin/talk-native-helper"):
                 linked = run(["otool", "-L", str(binary)], root).splitlines()[1:]
                 commands = run(["otool", "-l", str(binary)], root)
-                build_info["native_linkage"][binary.name] = macos_linkage(linked, commands)
+                build_info["sdk_linkage"][binary.name] = macos_linkage(linked, commands)
             build_info["rustflags"] = env["RUSTFLAGS"]
-            build_info["required_runtime"] = {
-                "name": "GStreamer official runtime framework", "version": "1.28.4",
-                "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.4/gstreamer-1.0-1.28.4-universal.pkg",
-                "sha256": "9f9ae8ba1a25eb42d6740c4e5f15b09ee6b9127b7359e9662c45a2b9a5029f85",
-            }
+            build_info["bundled_runtime"] = macos_runtime.prepare(root, stage, tmp)
+            build_info["native_helper"]["sha256"] = sha(stage / "bin/talk-native-helper")
+            macos_dmg.artwork(root, stage, tmp)
         if before != snapshot(root):
             raise ValueError("Source changed while building")
         spec = {"schema": 1, "version": version, "kind": "development", "target": target, "source": source,

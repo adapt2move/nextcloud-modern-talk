@@ -18,6 +18,8 @@ use std::{
 };
 use talk_core::lifecycle::Cancellation;
 
+type TreeVerifier = fn(&Path, InstallKind, &str, &Cancellation) -> Result<String, UpdateError>;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum InstallKind {
     Portable,
@@ -99,7 +101,10 @@ impl Target {
         }
     }
     pub fn previous_usable(&self, current: &Version) -> bool {
-        archive::verify_tree(
+        self.previous_usable_with(current, archive::verify_tree)
+    }
+    fn previous_usable_with(&self, current: &Version, verify: TreeVerifier) -> bool {
+        verify(
             &self.root,
             self.kind,
             &current.to_string(),
@@ -292,6 +297,23 @@ fn install_bundle(
     binary_digest: String,
     cancel: Cancellation,
 ) -> Result<(), UpdateError> {
+    install_bundle_with(
+        path,
+        stage,
+        current,
+        binary_digest,
+        cancel,
+        archive::verify_tree,
+    )
+}
+fn install_bundle_with(
+    path: &Path,
+    stage: &Staged,
+    current: &Version,
+    binary_digest: String,
+    cancel: Cancellation,
+    verify: TreeVerifier,
+) -> Result<(), UpdateError> {
     let selection = &stage.selection;
     let release = Release::builder()
         .version(selection.info.version.as_str())
@@ -319,8 +341,7 @@ fn install_bundle(
         .bundle_install_path(&stage.target.root)
         .verify_checksum(self_update::Checksum::Sha256(selection.sha256.clone()))
         .verify_binary(move |root| {
-            if archive::verify_tree(root, kind, &version, &verify_cancel)
-                .is_ok_and(|hash| hash == binary_digest)
+            if verify(root, kind, &version, &verify_cancel).is_ok_and(|hash| hash == binary_digest)
             {
                 Ok(())
             } else {
@@ -341,7 +362,7 @@ fn install_bundle(
         _ => {
             // The standard swap attempts rollback; never misreport success if the
             // filesystem prevented that rollback. The original app remains running.
-            let preserved = stage.target.previous_usable(current);
+            let preserved = stage.target.previous_usable_with(current, verify);
             Err(if preserved {
                 UpdateError::InstallFailed
             } else {
@@ -404,21 +425,22 @@ impl HttpResponse for OfflineResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::updates::tests::{write_archive, write_bundle};
+    use crate::updates::tests::{
+        fixture_files, verify_fixture_tree, write_archive, write_archive_files, write_bundle,
+    };
     use std::fs;
 
-    fn stage_fixture(temporary: &Path) -> (PathBuf, Staged, Version) {
-        let kind = InstallKind::Portable;
+    fn stage_fixture(temporary: &Path, kind: InstallKind) -> (PathBuf, Staged, Version) {
         let root = temporary.join("installed");
         write_bundle(&root, kind, "0.0.1", b"OLD-SYNTHETIC");
         let current = Version::parse("0.0.1").unwrap();
         let old_digest =
-            installed_identity(&root, kind, "0.0.1", &Cancellation::default()).unwrap();
-        let path = temporary.join("release.tar.gz");
+            verify_fixture_tree(&root, kind, "0.0.1", &Cancellation::default()).unwrap();
+        let path = temporary.join(kind.asset_name("0.0.2").unwrap());
         let selection = write_archive(&path, kind, "0.0.2", b"NEW-SYNTHETIC");
         let target = Target {
             kind,
-            executable: root.join("bin/talk-desktop"),
+            executable: root.join(format!("{}talk-desktop", kind.binary_directory())),
             root,
             old_digest,
         };
@@ -434,8 +456,13 @@ mod tests {
     }
     #[test]
     fn offline_standard_bundle_swap_preserves_resources_and_rejects_bad_identity() {
+        for kind in [InstallKind::Portable, InstallKind::MacBundle] {
+            standard_bundle_swap(kind);
+        }
+    }
+    fn standard_bundle_swap(kind: InstallKind) {
         let temporary = tempfile::tempdir().unwrap();
-        let (path, stage, current) = stage_fixture(temporary.path());
+        let (path, stage, current) = stage_fixture(temporary.path(), kind);
         let before = fs::read(stage.target.executable.clone()).unwrap();
         let new_hash = archive::inspect(
             &path,
@@ -445,27 +472,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            install_bundle(
+            install_bundle_with(
                 &path,
                 &stage,
                 &current,
                 "0".repeat(64),
-                Cancellation::default()
+                Cancellation::default(),
+                verify_fixture_tree
             ),
             Err(UpdateError::InstallFailed)
         );
         assert_eq!(fs::read(&stage.target.executable).unwrap(), before);
-        assert!(stage.target.previous_usable(&current));
-        install_bundle(
+        assert!(
+            stage
+                .target
+                .previous_usable_with(&current, verify_fixture_tree)
+        );
+        assert_bundle_files(&stage.target.root, kind, "0.0.1", b"OLD-SYNTHETIC");
+        install_bundle_with(
             &path,
             &stage,
             &current,
             new_hash.clone(),
             Cancellation::default(),
+            verify_fixture_tree,
         )
         .unwrap();
         assert_eq!(
-            archive::verify_tree(
+            verify_fixture_tree(
                 &stage.target.root,
                 stage.target.kind,
                 "0.0.2",
@@ -474,21 +508,104 @@ mod tests {
             .unwrap(),
             new_hash
         );
+        let installed = fs::read(&stage.target.executable).unwrap();
+        let canonical = installed
+            .strip_suffix(crate::updates::tests::MAC_SIGNATURE_FIXTURE)
+            .unwrap_or(&installed);
+        assert!(canonical.ends_with(b"NEW-SYNTHETIC"));
+        // This executes the standard filesystem transaction for the Mac ZIP on
+        // Linux too. Every runtime member, icon, notice and metadata file must
+        // survive the complete bundle replacement; synthetic code is not run.
+        assert_bundle_files(&stage.target.root, kind, "0.0.2", b"NEW-SYNTHETIC");
         assert!(
-            fs::read(&stage.target.executable)
-                .unwrap()
-                .ends_with(b"NEW-SYNTHETIC")
+            !stage
+                .target
+                .previous_usable_with(&current, verify_fixture_tree)
         );
-        assert!(!stage.target.previous_usable(&current));
         assert_eq!(
             stage.target.revalidate(&current, &Cancellation::default()),
             Err(UpdateError::UnsupportedInstall)
         );
     }
     #[test]
-    fn standard_updater_rolls_back_a_failure_after_the_old_bundle_is_stashed() {
+    fn mac_canonical_code_and_native_signature_failures_cannot_commit_a_bundle() {
         let temporary = tempfile::tempdir().unwrap();
-        let (path, stage, current) = stage_fixture(temporary.path());
+        let (path, mut stage, current) = stage_fixture(temporary.path(), InstallKind::MacBundle);
+        let before = fs::read(&stage.target.executable).unwrap();
+        let mut changed = fixture_files(InstallKind::MacBundle, "0.0.2", b"NEW-SYNTHETIC");
+        changed.get_mut("Contents/MacOS/talk-desktop").unwrap().0[64] ^= 1;
+        fs::remove_file(&path).unwrap();
+        stage.selection = write_archive_files(&path, InstallKind::MacBundle, "0.0.2", changed);
+        let raw_main = archive::inspect(
+            &path,
+            &stage.selection,
+            InstallKind::MacBundle,
+            &Cancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            install_bundle_with(
+                &path,
+                &stage,
+                &current,
+                raw_main,
+                Cancellation::default(),
+                verify_fixture_tree
+            ),
+            Err(UpdateError::InstallFailed)
+        );
+        assert_eq!(fs::read(&stage.target.executable).unwrap(), before);
+        assert!(
+            stage
+                .target
+                .previous_usable_with(&current, verify_fixture_tree)
+        );
+
+        // Reject an otherwise intact new bundle at the injected native boundary.
+        fs::remove_file(&path).unwrap();
+        stage.selection = write_archive(&path, InstallKind::MacBundle, "0.0.2", b"NEW-SYNTHETIC");
+        let raw_main = archive::inspect(
+            &path,
+            &stage.selection,
+            InstallKind::MacBundle,
+            &Cancellation::default(),
+        )
+        .unwrap();
+        let reject_new: TreeVerifier = |root, kind, version, cancel| {
+            if version == "0.0.2" {
+                Err(UpdateError::Integrity)
+            } else {
+                verify_fixture_tree(root, kind, version, cancel)
+            }
+        };
+        assert_eq!(
+            install_bundle_with(
+                &path,
+                &stage,
+                &current,
+                raw_main,
+                Cancellation::default(),
+                reject_new
+            ),
+            Err(UpdateError::InstallFailed)
+        );
+        assert_eq!(fs::read(&stage.target.executable).unwrap(), before);
+        assert_bundle_files(
+            &stage.target.root,
+            InstallKind::MacBundle,
+            "0.0.1",
+            b"OLD-SYNTHETIC",
+        );
+    }
+    #[test]
+    fn standard_updater_rolls_back_a_failure_after_the_old_bundle_is_stashed() {
+        for kind in [InstallKind::Portable, InstallKind::MacBundle] {
+            standard_bundle_rollback(kind);
+        }
+    }
+    fn standard_bundle_rollback(kind: InstallKind) {
+        let temporary = tempfile::tempdir().unwrap();
+        let (path, stage, current) = stage_fixture(temporary.path(), kind);
         let before = fs::read(&stage.target.executable).unwrap();
         let release = Release::builder()
             .version("0.0.2")
@@ -521,12 +638,22 @@ mod tests {
             .unwrap();
         assert!(updater.update().is_err());
         assert_eq!(fs::read(&stage.target.executable).unwrap(), before);
-        assert!(stage.target.previous_usable(&current));
+        assert!(
+            stage
+                .target
+                .previous_usable_with(&current, verify_fixture_tree)
+        );
+        assert_bundle_files(&stage.target.root, kind, "0.0.1", b"OLD-SYNTHETIC");
+    }
+    fn assert_bundle_files(root: &Path, kind: InstallKind, version: &str, label: &[u8]) {
+        for (path, (bytes, _)) in fixture_files(kind, version, label) {
+            assert_eq!(fs::read(root.join(&path)).unwrap(), bytes, "{path}");
+        }
     }
     #[test]
     fn offline_transport_refuses_any_unselected_request() {
         let temporary = tempfile::tempdir().unwrap();
-        let (path, stage, _) = stage_fixture(temporary.path());
+        let (path, stage, _) = stage_fixture(temporary.path(), InstallKind::Portable);
         let client = OfflineClient {
             path,
             size: stage.selection.info.bytes,

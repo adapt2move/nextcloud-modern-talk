@@ -1,6 +1,7 @@
 //! One composition-owned account facade; the renderer receives bounded, scoped data only.
 mod background;
 mod calls;
+pub(super) mod content;
 mod conversations;
 mod creation;
 pub(super) mod files;
@@ -40,6 +41,7 @@ use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIn
 
 #[derive(Clone, Copy)]
 enum Purpose {
+    Content(OperationId),
     Create(RequestId, AccountScope, creation::Work),
     Room(RequestId, ConversationRef, OperationId, bool),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
@@ -75,6 +77,7 @@ struct Unresolved {
 }
 
 pub struct Accounts {
+    content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
     call_poll_at: Instant,
@@ -107,6 +110,7 @@ impl Accounts {
         let mut snapshot = super::fixtures::snapshot(None);
         snapshot.content = ContentState::Loading;
         Rc::new(RefCell::new(Self {
+            content_owner: content::ContentOwner::default(),
             connection: AccountConnection::start(
                 RuntimeConfig::platform().with_media(media.clone()),
             ),
@@ -195,6 +199,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.clear_content_assets();
         self.picker = None;
         self.room_invite = None;
         self.message_search = None;
@@ -322,6 +327,7 @@ impl Accounts {
                 }
             }
         }
+        self.tick_content();
         self.tick_background();
         self.tick_calls();
         self.poll_messages();
@@ -386,6 +392,7 @@ impl Accounts {
                 done.result.clone()
             };
         match purpose {
+            Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Room(request, context, operation, read) => self.complete_room(request, context, operation, read, result),
             Purpose::Message(request, context, operation, work) => self.complete_message(request, context, operation, work, result),
@@ -571,6 +578,8 @@ impl Accounts {
         self.clear_content();
         self.snapshot.selected = Some(context);
         self.start_messages(context)?;
+        self.snapshot.content_panel.context = Some(context);
+        let _ = self.start_poll(RequestId(0), protocol::content::PollCommand::Capabilities);
         self.touch();
         Ok(())
     }
@@ -579,6 +588,11 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::Content {
+                request,
+                account,
+                action,
+            } => self.content_action(request, account, action)?,
             UiIntent::Create {
                 account,
                 request,

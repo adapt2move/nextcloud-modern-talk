@@ -248,7 +248,7 @@ impl Desktop {
                 .pb_4()
                 .border_b_1()
                 .border_color(self.theme.border)
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(self.l(title)));
+                .child(div().font_weight(FontWeight::MEDIUM).child(self.l(title)));
             let selected_label = match chosen {
                 DeviceSelection::SystemDefault => self.l("Systemstandard"),
                 DeviceSelection::Specific(id) => snapshot

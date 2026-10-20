@@ -20,6 +20,13 @@ const MAX_ENTRIES: usize = 30_000;
 const MAX_PATH: usize = 1024;
 const MAX_PROVENANCE: u64 = 2 * 1024 * 1024;
 const VERIFY_DEADLINE: Duration = Duration::from_secs(180);
+#[cfg(target_os = "macos")]
+const MAX_MAC_MAIN_BYTES: u64 = 256 * 1024 * 1024;
+const GSTREAMER_MANIFEST: &str = "assets/gstreamer-runtime.json";
+const GSTREAMER_CORE: &str = "runtime/gstreamer/lib/libgstreamer-1.0.0.dylib";
+const GSTREAMER_SCANNER: &str = "runtime/gstreamer/libexec/gstreamer-1.0/gst-plugin-scanner";
+const MAC_PROVENANCE: &str = "Contents/Resources/provenance.json";
+pub(super) const MAC_MAIN_IDENTITY: &str = "codesign-remove-signature-sha256-v1";
 
 struct Budget<'a> {
     cancel: &'a Cancellation,
@@ -146,8 +153,13 @@ impl Inventory {
             return Err(UpdateError::UnsafeArchive);
         }
         budget.entry(size)?;
-        let collect = name == provenance;
-        if collect && size > MAX_PROVENANCE {
+        let collect = name == provenance
+            || provenance.strip_suffix(MAC_PROVENANCE).is_some_and(|root| {
+                name.strip_prefix(root) == Some("Contents/Resources/assets/gstreamer-runtime.json")
+            });
+        if (collect || name.ends_with("/Contents/_CodeSignature/CodeResources"))
+            && size > MAX_PROVENANCE
+        {
             return Err(UpdateError::TooLarge);
         }
         let mut content = collect.then(Vec::new);
@@ -265,7 +277,7 @@ pub(super) fn inspect(
     cancel: &Cancellation,
 ) -> Result<String, UpdateError> {
     let root = kind.archive_root(selection.info.version.as_str())?;
-    let provenance = format!("{root}/{}provenance.json", kind.resources());
+    let provenance = provenance_path(&root, kind);
     let mut inventory = Inventory::new();
     let mut budget = Budget::new(cancel);
     match kind {
@@ -277,7 +289,23 @@ pub(super) fn inspect(
         }
         InstallKind::Debian => return Err(UpdateError::UnsupportedInstall),
     }
-    identity(&inventory, &root, kind, selection.info.version.as_str())
+    // The ZIP digest binds every delivered byte. Preflight returns the actual
+    // signed main hash; its canonical identity and the native resource seal are
+    // mandatory checks on the extracted tree before the updater may swap it.
+    identity(
+        &inventory,
+        &root,
+        kind,
+        selection.info.version.as_str(),
+        None,
+    )
+}
+fn provenance_path(root: &str, kind: InstallKind) -> String {
+    if kind == InstallKind::MacBundle {
+        format!("{root}/{MAC_PROVENANCE}")
+    } else {
+        format!("{root}/{}provenance.json", kind.resources())
+    }
 }
 fn inspect_tar(
     path: &Path,
@@ -466,11 +494,12 @@ fn identity(
     root: &str,
     kind: InstallKind,
     version: &str,
+    canonical_main: Option<&str>,
 ) -> Result<String, UpdateError> {
     let resources = format!("{root}/{}", kind.resources());
     let provenance = inventory
         .files
-        .get(&format!("{resources}provenance.json"))
+        .get(&provenance_path(root, kind))
         .and_then(|r| r.content.as_deref())
         .ok_or(UpdateError::UnsafeArchive)?;
     let value: serde_json::Value =
@@ -496,6 +525,26 @@ fn identity(
                 kind.binary_directory(),
                 name.trim_start_matches("bin/")
             )
+        } else if name.starts_with("runtime/") {
+            if kind != InstallKind::MacBundle {
+                return Err(UpdateError::UnsafeArchive);
+            }
+            let path = format!("{root}/{}", mac_runtime_path(name)?);
+            let record = inventory.files.get(&path).ok_or(UpdateError::Integrity)?;
+            native_header(&record.head, kind)?;
+            // native_header established the 32-byte arm64 Mach-O header above.
+            let file_type = u32::from_le_bytes([
+                record.head[12],
+                record.head[13],
+                record.head[14],
+                record.head[15],
+            ]);
+            let scanner = name == GSTREAMER_SCANNER;
+            let expected_type = if scanner { 2 } else { 6 }; // MH_EXECUTE / MH_DYLIB
+            if file_type != expected_type || (scanner && record.mode != 0o755) {
+                return Err(UpdateError::UnsafeArchive);
+            }
+            path
         } else {
             if !(name.starts_with("licenses/")
                 || name.starts_with("assets/")
@@ -503,7 +552,9 @@ fn identity(
             {
                 return Err(UpdateError::UnsafeArchive);
             }
-            if kind == InstallKind::MacBundle
+            if kind == InstallKind::MacBundle && name == "assets/macos/AppIcon.icns" {
+                format!("{resources}AppIcon.icns")
+            } else if kind == InstallKind::MacBundle
                 && name.starts_with("assets/sounds/")
                 && name.ends_with(".wav")
             {
@@ -515,21 +566,48 @@ fn identity(
                 format!("{resources}{name}")
             }
         };
-        if !expected.insert(path.clone())
-            || inventory.files.get(&path).is_none_or(|r| r.sha256 != hash)
-        {
+        let record = inventory.files.get(&path).ok_or(UpdateError::Integrity)?;
+        let matches = if kind == InstallKind::MacBundle && name == "bin/talk-desktop" {
+            // Only archive preflight defers this comparison. verify_tree always
+            // obtains the native signature-removed identity before accepting.
+            canonical_main.is_none_or(|digest| digest == hash)
+        } else {
+            record.sha256 == hash
+        };
+        if !expected.insert(path) || !matches {
             return Err(UpdateError::Integrity);
         }
     }
-    for extra in ["provenance.json", "INSTALL.txt"] {
-        expected.insert(format!("{resources}{extra}"));
-    }
+    expected.insert(provenance_path(root, kind));
+    expected.insert(format!("{resources}INSTALL.txt"));
     if kind == InstallKind::MacBundle {
+        mac_runtime_identity(inventory, root, &value, files)?;
         expected.insert(format!("{root}/Contents/Info.plist"));
+        // The native signature binds this generated seal and all resources,
+        // including provenance. No supplemental signature-directory file is
+        // admitted. Strict native verification is mandatory for installed trees.
+        let seal = format!("{root}/Contents/_CodeSignature/CodeResources");
+        let record = inventory.files.get(&seal).ok_or(UpdateError::Integrity)?;
+        if record.mode != 0o644 {
+            return Err(UpdateError::UnsafeArchive);
+        }
+        expected.insert(seal);
     }
     if inventory.files.keys().any(|path| !expected.contains(path))
         || expected.len() != inventory.files.len()
     {
+        return Err(UpdateError::UnsafeArchive);
+    }
+    // Every directory must be an ancestor of a declared file. Empty extra paths,
+    // including a second top-level app member, are not part of a closed bundle.
+    if inventory.paths.iter().any(|(path, directory)| {
+        let prefix = format!("{path}/");
+        *directory
+            && expected
+                .range(prefix.clone()..)
+                .next()
+                .is_none_or(|file| !file.starts_with(&prefix))
+    }) {
         return Err(UpdateError::UnsafeArchive);
     }
     for required in [
@@ -553,6 +631,89 @@ fn identity(
     }
     Ok(executable.sha256.clone())
 }
+fn mac_runtime_identity(
+    inventory: &Inventory,
+    root: &str,
+    provenance: &serde_json::Value,
+    files: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), UpdateError> {
+    let bundled = &provenance["build"]["bundled_runtime"];
+    if bundled["name"].as_str() != Some("GStreamer")
+        || bundled["manifest"].as_str() != Some(GSTREAMER_MANIFEST)
+        || bundled["manifest_sha256"].as_str()
+            != files.get(GSTREAMER_MANIFEST).and_then(|v| v.as_str())
+        || !files.contains_key(GSTREAMER_CORE)
+        || !files.contains_key(GSTREAMER_SCANNER)
+    {
+        return Err(UpdateError::UnsafeArchive);
+    }
+    let version = bundled["version"]
+        .as_str()
+        .filter(|v| !v.is_empty() && v.len() <= 64)
+        .ok_or(UpdateError::UnsafeArchive)?;
+    let content = inventory
+        .files
+        .get(&format!("{root}/Contents/Resources/{GSTREAMER_MANIFEST}"))
+        .and_then(|r| r.content.as_deref())
+        .ok_or(UpdateError::UnsafeArchive)?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(content).map_err(|_| UpdateError::UnsafeArchive)?;
+    if manifest["schema"].as_u64() != Some(1) || manifest["version"].as_str() != Some(version) {
+        return Err(UpdateError::UnsafeArchive);
+    }
+    let runtime_files = manifest["files"]
+        .as_object()
+        .filter(|v| v.len() <= 20_000)
+        .ok_or(UpdateError::UnsafeArchive)?;
+    let mut count = 0;
+    let mut has_plugin = false;
+    for (name, digest) in files {
+        if let Some(suffix) = name.strip_prefix("runtime/gstreamer/") {
+            let entry = runtime_files.get(suffix).ok_or(UpdateError::Integrity)?;
+            let path = mac_runtime_path(name)?;
+            if entry["sha256"].as_str() != digest.as_str()
+                || entry["bundle_path"].as_str() != Some(path.as_str())
+                || !entry["source_sha256"].as_str().is_some_and(valid_digest)
+            {
+                return Err(UpdateError::Integrity);
+            }
+            count += 1;
+            has_plugin |= suffix.starts_with("lib/gstreamer-1.0/");
+        }
+    }
+    // The packager owns the codec selection and dependency closure. The updater
+    // requires their entire declared inventory, without fixing future releases
+    // to today's plugin set. A runtime-free replacement is never installable.
+    if count != runtime_files.len() || !has_plugin {
+        return Err(UpdateError::UnsafeArchive);
+    }
+    Ok(())
+}
+/// The packaged runtime uses flat macOS code directories and regular files.
+/// Never map a generic runtime suffix into the bundle: that would admit code in
+/// Resources, nested frameworks or an unreviewed helper/extraction layout.
+fn mac_runtime_path(name: &str) -> Result<String, UpdateError> {
+    let (directory, basename, prefix) =
+        if let Some(basename) = name.strip_prefix("runtime/gstreamer/lib/gstreamer-1.0/") {
+            ("Contents/PlugIns", basename, "libgst")
+        } else if let Some(basename) = name.strip_prefix("runtime/gstreamer/lib/") {
+            ("Contents/Frameworks", basename, "lib")
+        } else if name == GSTREAMER_SCANNER {
+            return Ok("Contents/Helpers/gst-plugin-scanner".to_owned());
+        } else {
+            return Err(UpdateError::UnsafeArchive);
+        };
+    if !basename.starts_with(prefix)
+        || !basename.ends_with(".dylib")
+        || basename.len() <= prefix.len() + ".dylib".len()
+        || !basename
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(UpdateError::UnsafeArchive);
+    }
+    Ok(format!("{directory}/{basename}"))
+}
 pub(super) fn validate_provenance(
     value: &serde_json::Value,
     kind: InstallKind,
@@ -567,6 +728,8 @@ pub(super) fn validate_provenance(
         || value["build"]["features"]
             .as_array()
             .is_none_or(|v| !v.is_empty())
+        || (kind == InstallKind::MacBundle
+            && value["build"]["macos_main_identity"].as_str() != Some(MAC_MAIN_IDENTITY))
     {
         return Err(UpdateError::UnsupportedInstall);
     }
@@ -596,13 +759,185 @@ pub(super) fn verify_tree(
     version: &str,
     cancel: &Cancellation,
 ) -> Result<String, UpdateError> {
+    verify_tree_with_mac_identity(root, kind, version, cancel, native_mac_identity)
+}
+/// A narrow native-inspection seam lets Linux fixtures exercise the entire
+/// filesystem transaction without pretending their synthetic bytes are signed.
+/// Production callers always use verify_tree and its fixed native verifier.
+pub(super) fn verify_tree_with_mac_identity(
+    root: &Path,
+    kind: InstallKind,
+    version: &str,
+    cancel: &Cancellation,
+    mac_identity: impl FnOnce(&Path, &str, &Cancellation, Instant) -> Result<String, UpdateError>,
+) -> Result<String, UpdateError> {
     let name = "bundle";
-    let provenance = format!("{name}/{}provenance.json", kind.resources());
+    let provenance = provenance_path(name, kind);
     let mut inventory = Inventory::new();
     let mut budget = Budget::new(cancel);
     walk(root, name, &provenance, &mut inventory, &mut budget, 0)?;
-    identity(&inventory, name, kind, version)
+    let raw_main = identity(&inventory, name, kind, version, None)?;
+    if kind == InstallKind::MacBundle {
+        let canonical = mac_identity(root, &raw_main, cancel, budget.until)?;
+        budget.check()?;
+        identity(&inventory, name, kind, version, Some(&canonical))?;
+    }
+    Ok(raw_main)
 }
+
+#[cfg(not(target_os = "macos"))]
+fn native_mac_identity(
+    _: &Path,
+    _: &str,
+    _: &Cancellation,
+    _: Instant,
+) -> Result<String, UpdateError> {
+    Err(UpdateError::UnsupportedInstall)
+}
+
+#[cfg(target_os = "macos")]
+fn native_mac_identity(
+    root: &Path,
+    raw_main: &str,
+    cancel: &Cancellation,
+    until: Instant,
+) -> Result<String, UpdateError> {
+    use std::process::Command;
+    // Inspect code only; neither the app nor any packaged helper is executed.
+    let mut verify = Command::new("/usr/bin/codesign");
+    verify.args(["--verify", "--deep", "--strict"]).arg(root);
+    run_native_inspection(verify, cancel, until)?;
+
+    let source = root.join("Contents/MacOS/talk-desktop");
+    let metadata = fs::symlink_metadata(&source).map_err(|_| UpdateError::Storage)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(UpdateError::Integrity);
+    }
+    let mut input = File::open(&source).map_err(|_| UpdateError::Storage)?;
+    // A private directory also confines any temporary files codesign creates.
+    // Every return path removes it; no installed file is modified.
+    let private = tempfile::Builder::new()
+        .prefix(".nmt-code-identity-")
+        .tempdir()
+        .map_err(|_| UpdateError::Storage)?;
+    let mut copied = tempfile::Builder::new()
+        .prefix("main-")
+        .tempfile_in(private.path())
+        .map_err(|_| UpdateError::Storage)?;
+    if copy_main_identity(
+        &mut input,
+        copied.as_file_mut(),
+        cancel,
+        until,
+        MAX_MAC_MAIN_BYTES,
+    )? != raw_main
+    {
+        return Err(UpdateError::Integrity);
+    }
+    let mut remove = Command::new("/usr/bin/codesign");
+    remove.arg("--remove-signature").arg(copied.path());
+    run_native_inspection(remove, cancel, until)?;
+    let mut normalized = File::open(copied.path()).map_err(|_| UpdateError::Storage)?;
+    copy_main_identity(
+        &mut normalized,
+        &mut std::io::sink(),
+        cancel,
+        until,
+        MAX_MAC_MAIN_BYTES,
+    )
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn inspection_budget(cancel: &Cancellation, until: Instant) -> Result<(), UpdateError> {
+    if cancel.is_cancelled() {
+        Err(UpdateError::Cancelled)
+    } else if Instant::now() >= until {
+        Err(UpdateError::TooLarge)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn copy_main_identity(
+    input: &mut impl Read,
+    output: &mut impl std::io::Write,
+    cancel: &Cancellation,
+    until: Instant,
+    limit: u64,
+) -> Result<String, UpdateError> {
+    // Production uses the native packager's per-Mach-O limit, inside the 1 GiB
+    // tree budget. A smaller injected limit exercises the exact boundary in tests.
+    let mut total = 0u64;
+    let mut digest = Sha256::new();
+    let mut bytes = [0u8; 64 * 1024];
+    loop {
+        inspection_budget(cancel, until)?;
+        let count = input.read(&mut bytes).map_err(|_| UpdateError::Storage)?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > limit {
+            return Err(UpdateError::TooLarge);
+        }
+        output
+            .write_all(&bytes[..count])
+            .map_err(|_| UpdateError::Storage)?;
+        digest.update(&bytes[..count]);
+    }
+    Ok(super::digest_hex(digest.finalize()))
+}
+
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+fn run_native_inspection(
+    mut command: std::process::Command,
+    cancel: &Cancellation,
+    until: Instant,
+) -> Result<(), UpdateError> {
+    use std::process::Stdio;
+    // No output is accumulated, stdin is closed, and every child has a finite
+    // lifetime within the existing total tree-verification deadline.
+    let until = until.min(Instant::now() + Duration::from_secs(30));
+    inspection_budget(cancel, until)?;
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| UpdateError::UnsupportedInstall)?;
+    wait_native_inspection(child, cancel, until)
+}
+
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+fn wait_native_inspection(
+    mut child: std::process::Child,
+    cancel: &Cancellation,
+    until: Instant,
+) -> Result<(), UpdateError> {
+    let result = loop {
+        if let Err(error) = inspection_budget(cancel, until) {
+            break Err(error);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                break if status.success() {
+                    Ok(())
+                } else {
+                    Err(UpdateError::Integrity)
+                };
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(_) => break Err(UpdateError::Integrity),
+        }
+    };
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
+}
+
 fn walk(
     path: &Path,
     name: &str,
@@ -665,4 +1000,84 @@ fn walk(
         return Err(UpdateError::UnsafeArchive);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod native_inspection_tests {
+    use super::*;
+
+    #[test]
+    fn private_identity_copy_checks_bytes_cancellation_deadline_and_capacity() {
+        let cancel = Cancellation::default();
+        let until = Instant::now() + Duration::from_secs(10);
+        let mut copied = Vec::new();
+        assert_eq!(
+            copy_main_identity(&mut &b"synthetic"[..], &mut copied, &cancel, until, 9).unwrap(),
+            super::super::digest_hex(Sha256::digest(b"synthetic"))
+        );
+        assert_eq!(copied, b"synthetic");
+        assert_eq!(
+            copy_main_identity(
+                &mut &b"synthetic"[..],
+                &mut std::io::sink(),
+                &cancel,
+                Instant::now(),
+                9
+            ),
+            Err(UpdateError::TooLarge)
+        );
+        let mut oversized = std::io::repeat(0).take(10);
+        assert_eq!(
+            copy_main_identity(&mut oversized, &mut std::io::sink(), &cancel, until, 9),
+            Err(UpdateError::TooLarge)
+        );
+        cancel.cancel();
+        assert_eq!(
+            copy_main_identity(
+                &mut &b"synthetic"[..],
+                &mut std::io::sink(),
+                &cancel,
+                until,
+                9
+            ),
+            Err(UpdateError::Cancelled)
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn inspection_children_are_killed_and_reaped_on_cancellation_and_timeout() {
+        use std::process::{Command, Stdio};
+        for cancelled in [false, true] {
+            let child = Command::new("/bin/sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            let cancel = Cancellation::default();
+            if cancelled {
+                cancel.cancel();
+            }
+            assert_eq!(
+                wait_native_inspection(child, &cancel, Instant::now() + Duration::from_millis(50)),
+                Err(if cancelled {
+                    UpdateError::Cancelled
+                } else {
+                    UpdateError::TooLarge
+                })
+            );
+            assert!(!Path::new(&format!("/proc/{pid}")).exists());
+        }
+        assert_eq!(
+            run_native_inspection(
+                Command::new("/bin/false"),
+                &Cancellation::default(),
+                Instant::now() + Duration::from_secs(10)
+            ),
+            Err(UpdateError::Integrity)
+        );
+    }
 }

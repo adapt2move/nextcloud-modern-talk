@@ -87,7 +87,7 @@ impl Desktop {
             .child(self.hint(self.l("Wähle, wie du beitreten möchtest.")))
             .child(div().h(px(304.)).w_full().rounded(px(12.)).bg(t.stage_panel).text_color(t.stage_text).flex().flex_col().items_center().justify_center().gap_4()
                 .child(self.avatar(self.snapshot.accounts.as_slice().iter().find(|a|Some(a.scope)==self.snapshot.active_account).map_or("?",|a|a.initials.as_str()),true))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(self.l("Deine Kamera ist nicht aktiv")))
+                .child(div().font_weight(FontWeight::MEDIUM).child(self.l("Deine Kamera ist nicht aktiv")))
                 .child(div().text_size(self.sp(13.)).text_color(t.stage_muted).child(self.l("Noch keine Vorschau verfügbar"))))
             .child(div().flex().flex_wrap().gap_3()
                 .child(self.button_with_icon("mic-intent",(if self.microphone_intent{"Mikrofon beim Beitritt an"}else{"Mikrofon beim Beitritt aus"},if self.microphone_intent{"mic"}else{"mic-off"}),ButtonStyle::Secondary,true,LocalAction::ToggleMicIntent,cx))
@@ -102,7 +102,7 @@ impl Desktop {
             .gap_4()
             .child(
                 div()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .text_size(self.sp(16.))
                     .child(self.l("Deine Geräte")),
             );
@@ -193,7 +193,7 @@ impl Desktop {
                                 .min_w_0()
                                 .child(
                                     div()
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .font_weight(FontWeight::MEDIUM)
                                         .text_ellipsis()
                                         .child(title.to_owned()),
                                 )
@@ -317,7 +317,7 @@ impl Desktop {
                     .text_color(t.stage_text)
                     .child(
                         div()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .child(self.l("Bildschirmfreigabe")),
                     )
                     .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."))),
@@ -401,7 +401,7 @@ impl Desktop {
                                     .min_w_0()
                                     .text_ellipsis()
                                     .text_size(self.sp(12.))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .font_weight(FontWeight::MEDIUM)
                                     .child(format!(
                                         "{}{}",
                                         participant.name.as_str(),
@@ -618,7 +618,7 @@ impl Desktop {
                                 .child(
                                     div()
                                         .text_size(self.sp(16.))
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .font_weight(FontWeight::MEDIUM)
                                         .text_ellipsis()
                                         .child(call.title.as_str().to_owned()),
                                 )
@@ -672,7 +672,7 @@ impl Desktop {
                 .child(
                     div()
                         .text_size(self.sp(18.))
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .font_weight(FontWeight::MEDIUM)
                         .child(self.l("Verbindung fehlgeschlagen")),
                 )
                 .child(
@@ -691,7 +691,7 @@ impl Desktop {
             div().size_full().rounded(px(13.)).bg(t.surface).text_color(t.text)
                 .flex().flex_col()
                 .child(div().flex_none().px_6().py_4().border_b_1().border_color(t.border)
-                    .font_weight(FontWeight::SEMIBOLD).child(call.title.as_str().to_owned()))
+                    .font_weight(FontWeight::MEDIUM).child(call.title.as_str().to_owned()))
                 .child(self.scroll_area(super::navigation::Region::Call).flex_1().min_h_0().p_6()
                     .child(div().max_w(px(520.)).mx_auto().py_6().flex().flex_col().gap_4()
                         .child(self.reveal(("call-outcome", usize::from(failed)), outcome))
@@ -721,7 +721,7 @@ impl Desktop {
                 .py_4()
                 .border_b_1()
                 .border_color(t.border)
-                .font_weight(FontWeight::SEMIBOLD)
+                .font_weight(FontWeight::MEDIUM)
                 .child(self.l("Chat")),
         );
         if let Some(row) = row {

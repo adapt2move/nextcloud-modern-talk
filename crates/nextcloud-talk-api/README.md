@@ -38,6 +38,16 @@ The identifiers above are caller-allocated equality-only lease keys. Production 
 
 `Request::Conversation` covers metadata and emoji avatars, notification preferences, restrictions, lifecycle, membership and roles, directory invitations, bots/bans and bounded breakout basics. The application refreshes capabilities and room policy before dispatch. Provider translation/summaries and typing emission are explicitly unconfigured; unsupported/missing functionality is not reported as successful. The operation inventory remains partial rather than claiming a complete SDK.
 
+`Client::poll` provides typed published-poll create/read/vote/close operations.
+It preserves hidden results, vote limits and uncertain creation without automatic
+replay. Closing retains the published poll; server draft management and export
+are not part of this interface.
+
+`Client::image` reads bounded authenticated user/room avatars and file previews
+through known installation-relative routes. It accepts no arbitrary URL. Native
+decoding, cache scope, access expiry and display belong to the application owner;
+an available rich-object reference alone does not authorize downloading its file.
+
 `Request::FindPeople` queries the server-filtered local-user directory without a room; `Request::CreateDirect` creates or returns a direct room. The application accepts only current, account-scoped directory selections and retains uncertain creation operations without replay. Group creation keeps its separate server permission.
 
 `Client::own_user_status` reads the current user's account-correlated status through the existing bounded transport. Fresh chat-poll notification eligibility requires known non-silent incoming content, an explicit supported personal notification mode and known non-DND status. Omitted `silent` is decoded according to the pinned Talk response contract; malformed values remain unknown. Group defaults, broader mention types, thread subscription policy and unknown status remain suppressed until authoritative data is available.

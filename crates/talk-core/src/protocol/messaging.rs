@@ -13,6 +13,9 @@ pub struct Reaction {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
+    pub id: Option<Text<1024>>,
+    pub mime_type: Option<Text<256>>,
+    pub size: Option<u64>,
     pub placeholder: Text<128>,
     pub kind: Text<128>,
     pub name: Text<1024>,
@@ -204,6 +207,7 @@ pub enum MessagingCommand {
         message: MessageId,
         placeholder: Text<128>,
         destination: Text<16384>,
+        progress: super::content::TransferProgress,
     },
     ShareFile {
         path: Text<16384>,

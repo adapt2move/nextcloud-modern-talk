@@ -33,6 +33,8 @@ impl Desktop {
             Overlay::Create => ("Neues Gespräch", 716.),
             Overlay::Discover => ("Offene Gespräche", 760.),
             Overlay::Organize => ("Eigene Gruppen", 520.),
+            Overlay::ContentPreview => ("Dateivorschau", 820.),
+            Overlay::CreatePoll => ("Umfrage erstellen", 620.),
             _ => unreachable!("settings handled above"),
         };
         let body = match overlay {
@@ -54,6 +56,8 @@ impl Desktop {
             Overlay::Create => self.creation_body(cx),
             Overlay::Discover => self.discover_body(cx),
             Overlay::Organize => self.organization_body(cx),
+            Overlay::ContentPreview => self.preview_body(cx),
+            Overlay::CreatePoll => self.poll_creation_body(cx),
             _ => unreachable!(),
         };
         let content = if overlay == Overlay::CallChat {
@@ -159,7 +163,7 @@ impl Desktop {
                     .min_w_0()
                     .child(
                         div()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_ellipsis()
                             .child(format!(
                                 "{}{}",
@@ -326,7 +330,7 @@ impl Desktop {
             .child(
                 div()
                     .min_w_0()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l(value).to_owned()),
             )
     }
@@ -353,7 +357,7 @@ impl Desktop {
             .child(
                 div()
                     .text_size(self.sp(18.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(FontWeight::MEDIUM)
                     .child(self.l(title).to_owned()),
             )
             .child(self.hint(self.l(detail)))
@@ -395,7 +399,7 @@ impl Desktop {
                     .gap_2()
                     .child(
                         div()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .child(message.author.as_str().to_owned()),
                     )
                     .child(if message.metadata.deleted {
@@ -441,10 +445,26 @@ impl Desktop {
                         .min_h(px(48.))
                         .child(self.field_ring(self.search.focus_handle(cx), 8.))
                         .child(self.scaled_icon("search", 20., t.muted))
-                        .child(div().flex_1().min_w_0().child(self.search.clone())),
+                        .child(div().flex_1().min_w_0().child(self.search.clone()))
+                        .child(
+                            self.button(
+                                "search-people",
+                                "Personen suchen",
+                                ButtonStyle::Secondary,
+                                !q.is_empty()
+                                    && self.snapshot.active_account.is_some()
+                                    && self
+                                        .snapshot
+                                        .create_panel
+                                        .as_ref()
+                                        .is_none_or(|p| !p.state.pending()),
+                                LocalAction::FindSearchPeople,
+                                cx,
+                            ),
+                        ),
                 )
                 .child(self.hint(self.l(
-                    "Nur geladene Gespräche sowie Nachrichten und Dateien des offenen Gesprächs.",
+                    "Geladene Inhalte sofort filtern oder Personen im Serververzeichnis suchen.",
                 )))
                 .child(
                     div().flex().flex_wrap().gap_3().children(
@@ -453,6 +473,7 @@ impl Desktop {
                             (SearchKind::Messages, "Nachrichten"),
                             (SearchKind::Files, "Dateien"),
                             (SearchKind::Conversations, "Gespräche"),
+                            (SearchKind::People, "Personen"),
                         ]
                         .into_iter()
                         .enumerate()
@@ -460,7 +481,7 @@ impl Desktop {
                             self.chip(
                                 ("search-tab", i),
                                 l,
-                                (self.search_kind == k, i, 4),
+                                (self.search_kind == k, i, 5),
                                 LocalAction::SearchKind(k),
                                 cx,
                             )
@@ -470,11 +491,76 @@ impl Desktop {
         if q.is_empty() {
             return body.child(self.state_note(
                 "search",
-                "In geladenen Inhalten suchen",
+                "Gespräche und Personen suchen",
                 "Gib einen Namen oder einen Suchbegriff ein.",
             ));
         }
         let mut count = 0;
+        if matches!(self.search_kind, SearchKind::All | SearchKind::People) {
+            let requested = self
+                .directory_query
+                .as_ref()
+                .is_some_and(|(account, query)| {
+                    Some(*account) == self.snapshot.active_account && query == &q
+                });
+            if requested {
+                if let Some(panel) = self
+                    .snapshot
+                    .create_panel
+                    .as_ref()
+                    .filter(|p| Some(p.account) == self.snapshot.active_account)
+                {
+                    body = body.child(self.title(self.l("Personen")));
+                    for person in panel.people.as_slice() {
+                        count += 1;
+                        body = body.child(
+                            self.button(
+                                gpui::SharedString::from(format!(
+                                    "search-person-{}",
+                                    person.id.local
+                                )),
+                                "",
+                                ButtonStyle::Quiet,
+                                !panel.state.pending(),
+                                LocalAction::CreateDirect(person.id),
+                                cx,
+                            )
+                            .w_full()
+                            .justify_start()
+                            .gap_3()
+                            .child(self.content_avatar(
+                                talk_core::ui::content::AssetTarget::PersonAvatar(person.id),
+                                "?",
+                                32.,
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(person.name.as_str().to_owned())
+                                    .child(self.hint(person.label.as_str())),
+                            ),
+                        );
+                    }
+                    if panel.state.pending() {
+                        body = body.child(self.hint(self.l("Personen werden gesucht …")));
+                    } else if matches!(
+                        panel.state,
+                        talk_core::ui::conversation::RemoteState::Failed(_, _)
+                    ) {
+                        body = body.child(
+                            self.hint(self.l("Personensuche fehlgeschlagen. Erneut versuchen.")),
+                        );
+                    } else if panel.people_loaded && panel.people.as_slice().is_empty() {
+                        body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
+                    }
+                }
+            } else {
+                body = body.child(self.hint(
+                    self.l("Mit „Personen suchen“ das freigegebene Serververzeichnis durchsuchen."),
+                ));
+            }
+        }
         if matches!(
             self.search_kind,
             SearchKind::All | SearchKind::Conversations
@@ -548,7 +634,7 @@ impl Desktop {
                 }
             }
         }
-        if count == 0 {
+        if count == 0 && self.search_kind != SearchKind::People {
             body=body.child(self.state_note("search","Keine lokalen Treffer","In den geladenen Inhalten wurde nichts gefunden. Eine vollständige Serversuche ist hier noch nicht verfügbar."));
         }
         body

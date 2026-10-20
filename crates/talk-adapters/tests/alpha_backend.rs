@@ -819,6 +819,7 @@ async fn released_server_messaging_and_room_controls() {
         304,
         "file-download",
         M::DownloadFile {
+            progress: talk_core::protocol::content::TransferProgress::default(),
             message: shared.message.id,
             placeholder: object.placeholder.clone(),
             destination: text(saved.to_str().unwrap()),
@@ -833,6 +834,7 @@ async fn released_server_messaging_and_room_controls() {
                 conversation: id,
                 operation: OperationId::from_local(306),
                 command: M::DownloadFile {
+                    progress: talk_core::protocol::content::TransferProgress::default(),
                     message: shared.message.id,
                     placeholder: object.placeholder.clone(),
                     destination: text(root.join("download.txt").to_str().unwrap()),

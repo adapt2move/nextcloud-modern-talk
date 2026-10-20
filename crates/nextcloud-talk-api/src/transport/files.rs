@@ -2,6 +2,10 @@
 use super::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 const FILE_LIMIT: Duration = Duration::from_secs(60);
+pub(super) enum StreamRead<'a> {
+    File(Option<&'a (dyn Fn(u64, Option<u64>) + Send + Sync)>),
+    Image,
+}
 impl Transport {
     pub(crate) async fn file<W: AsyncWrite + Unpin + Send>(
         &mut self,
@@ -10,15 +14,6 @@ impl Transport {
         upload: Option<(reqwest::Body, u64)>,
         sink: &mut W,
     ) -> Result<u64, PortError> {
-        self.validate(c)?;
-        let shared = self.begin_shared_cookies()?;
-        let _permit = self
-            .runtime
-            .0
-            .requests
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| self.error(ErrorKind::Busy))?;
         let mut url = self
             .binding
             .origin
@@ -34,6 +29,55 @@ impl Transport {
                 parts.push(segment);
             }
         }
+        self.stream(c, url, upload, sink, StreamRead::File(None))
+            .await
+    }
+    pub(crate) async fn file_progress<W: AsyncWrite + Unpin + Send>(
+        &mut self,
+        c: &OperationContext,
+        path: crate::files::FilePath,
+        sink: &mut W,
+        progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
+    ) -> Result<u64, PortError> {
+        let mut url = self
+            .binding
+            .origin
+            .endpoint("remote.php/dav/files/")
+            .map_err(|k| self.error(k))?;
+        {
+            let mut parts = url
+                .path_segments_mut()
+                .map_err(|_| self.error(ErrorKind::Malformed))?;
+            parts.pop_if_empty();
+            parts.push(self.binding.user.as_str());
+            for segment in path.as_str().split('/').skip(1) {
+                parts.push(segment);
+            }
+        }
+        self.stream(c, url, None, sink, StreamRead::File(Some(progress)))
+            .await
+    }
+    pub(super) async fn stream<W: AsyncWrite + Unpin + Send>(
+        &mut self,
+        c: &OperationContext,
+        url: url::Url,
+        upload: Option<(reqwest::Body, u64)>,
+        sink: &mut W,
+        read: StreamRead<'_>,
+    ) -> Result<u64, PortError> {
+        let (read_limit, progress, image) = match read {
+            StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
+            StreamRead::Image => (crate::content::MAX_IMAGE_BYTES as u64, None, true),
+        };
+        self.validate(c)?;
+        let shared = self.begin_shared_cookies()?;
+        let _permit = self
+            .runtime
+            .0
+            .requests
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| self.error(ErrorKind::Busy))?;
         let writing = upload.is_some();
         let mut request = self
             .client
@@ -121,10 +165,28 @@ impl Transport {
             let limit = if writing {
                 BODY_LIMIT as u64
             } else {
-                crate::files::MAX_FILE_BYTES
+                read_limit
             };
             if response.content_length().is_some_and(|n| n > limit) {
                 return Err(self.error(ErrorKind::TooLarge));
+            }
+            if image {
+                let mime = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.split(';').next())
+                    .unwrap_or("");
+                if !matches!(
+                    mime,
+                    "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml"
+                ) {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+            }
+            let total = response.content_length();
+            if let Some(progress) = progress {
+                progress(0, total);
             }
             let mut length = 0u64;
             while let Some(chunk) = response
@@ -142,6 +204,9 @@ impl Transport {
                             .await
                             .map_err(|_| self.error(ErrorKind::Transport))?
                     }
+                }
+                if let Some(progress) = progress {
+                    progress(length, total);
                 }
             }
             sink.flush()

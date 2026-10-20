@@ -205,7 +205,8 @@ pub(crate) fn rich(v: Option<&Value>) -> Result<Vec<RichObject>, ErrorKind> {
             Ok(RichObject {
                 placeholder: key.clone(),
                 kind: string(v.get("type"), 128)?.unwrap_or_else(|| "unknown".into()),
-                id: string(v.get("id"), 1024)?,
+                id: string(v.get("id"), 1024)?
+                    .or_else(|| integer(v.get("id")).map(|n| n.to_string())),
                 name: string(v.get("name"), 1024)?.unwrap_or_else(|| "[unknown object]".into()),
                 link: string(v.get("link"), 2048)?,
                 path: string(v.get("path"), 16384)?,

@@ -1,9 +1,13 @@
 [workspace]
 members = ["crates/nextcloud-talk-api", "crates/talk-core", "crates/talk-adapters", "apps/bootstrap", "apps/desktop"]
+exclude = ["vendor/gpui"]
 resolver = "3"
 
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }
+
 [workspace.package]
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 rust-version = "1.99"
 license = "EUPL-1.2"
@@ -47,7 +51,7 @@ cpal = { version = "=0.18.2", default-features = false, features = ["pulseaudio"
 gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
 gstreamer-app = { version = "=0.25.2", default-features = false, features = ["v1_24"] }
 gstreamer-video = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
-image = { version = "=0.25.10", default-features = false }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 # Windows' documented native emoji shortcut; OS calls stay behind safe bindings.
 enigo = { version = "=0.6.1", default-features = false }
 windows = { version = "=0.61.3", default-features = false, features = ["UI_ViewManagement"] }

@@ -17,6 +17,8 @@ import zipfile
 
 from build import dependency_notices, macos_linkage, notice_supplement
 from package import REQUIRED_NOTICES, assemble, sha, validate
+from macos_tests import MacRuntimeTests, MacPackageTests
+from vendor import GPUI_ARCHIVE, verify_gpui
 
 
 def fixture(path, target="x86_64-unknown-linux-gnu"):
@@ -29,7 +31,7 @@ def fixture(path, target="x86_64-unknown-linux-gnu"):
         header[:4] = b"\xcf\xfa\xed\xfe"
         struct.pack_into("<I", header, 4, 0x0100000C)
     files = {"bin/talk-desktop": bytes(header), **{n: b"SYNTHETIC packaging test notice, not a project license" for n in REQUIRED_NOTICES}}
-    files.update({"assets/fonts/Manrope-" + weight + ".ttf": b"SYNTHETIC font fixture" for weight in ("Regular", "SemiBold", "Bold")})
+    files.update({"assets/fonts/GoogleSans-" + weight + ".ttf": b"SYNTHETIC font fixture" for weight in ("Regular", "Medium", "Bold")})
     files["source-manifest.json"] = json.dumps({"Cargo.lock": "1" * 64, "rust-toolchain.toml": "2" * 64}).encode()
     files["dependencies.json"] = json.dumps({"target": target, "lock_sha256": "1" * 64, "packages": [{"name": "synthetic-fixture", "license": "fixture-only", "features": [], "notices": [REQUIRED_NOTICES[0]]}]}).encode()
     for name, body in files.items():
@@ -172,6 +174,77 @@ class DependencyNoticeFixtures(unittest.TestCase):
             self.collect("backend-test")
 
 
+class VendoredNotices(unittest.TestCase):
+    """Exercise source admission and shipped attribution against the real pin."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="nmt-vendor-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.stage = self.root / "stage"
+        self.stage.mkdir()
+        source = Path(__file__).resolve().parents[2]
+        self.package_dir = self.root / "vendor/gpui"
+        shutil.copytree(source / "vendor/gpui", self.package_dir)
+        # A project license must never be inserted into this upstream package.
+        (self.root / "LICENSE").write_text("SYNTHETIC project license sentinel")
+        (self.root / "Cargo.lock").write_text('[[package]]\nname = "gpui"\nversion = "0.2.2"\n')
+        self.package = {"id": "gpui", "name": "gpui", "version": "0.2.2",
+                        "source": None, "license": "Apache-2.0",
+                        "manifest_path": str(self.package_dir / "Cargo.toml")}
+
+    def collect(self):
+        with patch("build.run", side_effect=[
+            json.dumps({"packages": [self.package]}), "gpui v0.2.2 (vendor/gpui)|x11",
+        ]):
+            dependency_notices(self.root, self.stage, "x86_64-unknown-linux-gnu", {})
+        return json.loads((self.stage / "dependencies.json").read_text())["packages"][0]
+
+    def test_upstream_license_and_modified_source_identity_are_shipped(self):
+        item = self.collect()
+        self.assertEqual(item["archive_sha256"], GPUI_ARCHIVE)
+        bodies = [(self.stage / name).read_bytes() for name in item["notices"]]
+        self.assertIn((self.package_dir / "LICENSE-APACHE").read_bytes(), bodies)
+        self.assertNotIn((self.root / "LICENSE").read_bytes(), bodies)
+        provenance = item["vendored_source"]
+        self.assertEqual(sha(self.stage / provenance["provenance"]), provenance["sha256"])
+        self.assertEqual((self.stage / provenance["provenance"]).read_bytes(),
+                         (self.package_dir / "UPSTREAM.json").read_bytes())
+
+    def test_unrecorded_source_and_symlink_are_not_admitted(self):
+        unexpected = self.package_dir / "unrecorded.rs"
+        unexpected.write_text("// absent from published source and patch inventory\n")
+        with self.assertRaisesRegex(ValueError, "Unrecorded"):
+            verify_gpui(self.root)
+        unexpected.unlink()
+        source = self.package_dir / "src/window.rs"
+        source.write_text(source.read_text() + "\n// unrecorded mutation\n")
+        with self.assertRaisesRegex(ValueError, "Unrecorded"):
+            self.collect()
+        source.unlink()
+        source.symlink_to(self.root / "LICENSE")
+        with self.assertRaisesRegex(ValueError, "Symlink"):
+            self.collect()
+
+    def test_patch_cannot_replace_original_identity_or_package_manifest(self):
+        path = self.package_dir / "UPSTREAM.json"
+        original = json.loads(path.read_text())
+        changed = json.loads(path.read_text())
+        changed["original_files"]["Cargo.toml"] = "0" * 64
+        path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(ValueError, "Original GPUI inventory"):
+            self.collect()
+        changed = original
+        manifest = self.package_dir / "Cargo.toml"
+        manifest.write_text(manifest.read_text() + "\n# manifest mutation\n")
+        changed["files"].append({"path": "Cargo.toml",
+                                 "original_sha256": changed["original_files"]["Cargo.toml"],
+                                 "sha256": sha(manifest)})
+        path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(ValueError, "manifest or upstream license"):
+            self.collect()
+
+
 class DeliveryFixtures(unittest.TestCase):
     def setUp(self):
         self.old_umask = os.umask(0o077)
@@ -195,9 +268,9 @@ class DeliveryFixtures(unittest.TestCase):
             validate(self.stage)
 
     def test_tamper_and_extra_file_are_rejected(self):
-        (self.stage / "assets/fonts/Manrope-Regular.ttf").write_bytes(b"changed")
+        (self.stage / "assets/fonts/GoogleSans-Regular.ttf").write_bytes(b"changed")
         self.rejects()
-        self.spec["files"]["assets/fonts/Manrope-Regular.ttf"] = sha(self.stage / "assets/fonts/Manrope-Regular.ttf")
+        self.spec["files"]["assets/fonts/GoogleSans-Regular.ttf"] = sha(self.stage / "assets/fonts/GoogleSans-Regular.ttf")
         save(self.stage, self.spec)
         (self.stage / "secret.txt").write_text("synthetic forbidden payload")
         self.rejects()

@@ -1,6 +1,7 @@
 //! Native lifetime/composition. No renderer owns network, credentials or media I/O.
 mod accounts;
 mod assets;
+mod content_images;
 mod files;
 mod fixtures;
 mod preferences;
@@ -43,10 +44,11 @@ fn options() -> Result<Option<Options>, &'static str> {
         match arg.as_str() {
             "--licenses" => {
                 println!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("../../../LICENSE"),
                     include_str!("../NOTICE.md"),
-                    include_str!("../assets/fonts/Manrope-LICENSE.txt"),
+                    include_str!("../assets/fonts/GoogleSans-LICENSE.txt"),
+                    include_str!("../assets/fonts/GoogleSans-TRADEMARKS.txt"),
                     include_str!("../assets/GPUI-LICENSE-APACHE"),
                     include_str!("../assets/icons/LUCIDE-LICENSE"),
                     include_str!("../assets/sounds/Apache-2.0.txt"),
@@ -185,11 +187,11 @@ pub fn run() {
 
 fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, cx: &mut App) {
     if let Err(error) = cx.text_system().add_fonts(vec![
-        Cow::Borrowed(include_bytes!("../assets/fonts/Manrope-Regular.ttf")),
-        Cow::Borrowed(include_bytes!("../assets/fonts/Manrope-SemiBold.ttf")),
-        Cow::Borrowed(include_bytes!("../assets/fonts/Manrope-Bold.ttf")),
+        Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Regular.ttf")),
+        Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Medium.ttf")),
+        Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Bold.ttf")),
     ]) {
-        eprintln!("Bundled Manrope unavailable; using native font fallback: {error}");
+        eprintln!("Bundled Google Sans unavailable; using native font fallback: {error}");
     }
     input::bind_keys(cx);
     let saved = services.preferences.snapshot();
@@ -219,6 +221,11 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("chat-motion") => Probe::Messages,
         _ => Probe::None,
     };
+    let fixture_images = if services.accounts.is_none() {
+        fixtures::content_images(options.scenario.as_deref())
+    } else {
+        Vec::new()
+    };
     let port: Box<dyn talk_core::ui::presentation::NativeDesktopPort> =
         if let Some(accounts) = &services.accounts {
             Box::new(accounts::Port(accounts.clone()))
@@ -244,8 +251,8 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             ..Default::default()
         },move|window,cx|{
         if options.font_metrics {
-            for weight in [gpui::FontWeight::NORMAL,gpui::FontWeight::SEMIBOLD,gpui::FontWeight::BOLD] {
-                let mut font=gpui::font("Manrope");font.weight=weight;
+            for weight in [gpui::FontWeight::NORMAL,gpui::FontWeight::MEDIUM,gpui::FontWeight::BOLD] {
+                let mut font=gpui::font("Google Sans");font.weight=weight;
                 let id=cx.text_system().resolve_font(&font);
                 let sample="Produktteam — Grüße 09:41";
                 let run=gpui::TextRun{len:sample.len(),font,color:gpui::rgb(0x26354b).into(),background_color:None,underline:None,strikethrough:None};
@@ -267,6 +274,18 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             // Otherwise use 10 Hz; this never dispatches capture or I/O directly.
             let preview_services = services.clone();
             cx.spawn(async move |cx| {
+                // Only explicit disconnected development scenarios supply these
+                // authored rasters. The same bounded decoder runs off the UI thread.
+                for job in fixture_images {
+                    let account=job.account;
+                    let key=job.key;
+                    if let Some((image,_))=cx.background_executor().spawn(async move {content_images::decode(&job)}).await {
+                        let _=view.update(cx,|view,cx| {
+                            view.refresh(cx);
+                            view.set_content_images(Some(account),vec![(key,gpui::ImageSource::Render(image))],cx);
+                        });
+                    }
+                }
                 let mut dialogs = files::Dialogs::new();
                 let mut surface = None;
                 let mut sequence = 0;
@@ -276,6 +295,23 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                     gpui::Timer::after(interval).await;
                     if let Some(accounts) = &preview_services.accounts {
                         let _ = cx.update(|cx| dialogs.poll(accounts, cx));
+                    }
+                    if let Some(accounts) = &preview_services.accounts {
+                        let job=accounts.borrow_mut().take_content_image();
+                        if let Some(job)=job {
+                            let copy=job.clone();
+                            let decoded=cx.background_executor().spawn(async move { content_images::decode(&copy) }).await;
+                            let accepted=accounts.borrow_mut().finish_content_image(&job,decoded.as_ref().map(|(_,bytes)|*bytes));
+                            if accepted && let Some((image,_))=decoded {
+                                let _=view.update(cx,|view,cx| {
+                                    view.refresh(cx);
+                                    view.set_content_images(Some(job.account),vec![(job.key,gpui::ImageSource::Render(image))],cx);
+                                });
+                            }
+                        }
+                        if let Some(link)=accounts.borrow_mut().take_cloud_link() {
+                            let _=cx.update(|cx|cx.open_url(link.as_str()));
+                        }
                     }
                     let (requested, devices_open, background) =
                         match window.update(cx, |view, window, cx| {

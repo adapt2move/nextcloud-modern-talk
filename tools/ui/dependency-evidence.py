@@ -10,7 +10,11 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tomllib
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from vendor import GPUI_ARCHIVE, verify_gpui
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output',required=True)
@@ -33,6 +37,12 @@ for i in sorted(selected,key=lambda k:(packages[k]['name'],packages[k]['version'
     x=packages[i]
     checksum=checksums.get((x['name'],x['version']))
     item={'name':x['name'],'version':x['version'],'license':x['license'],'repository':x['repository'],'source':x['source'],'features':nodes[i]['features'],'archive_sha256':checksum}
+    if x['source'] is None and x['name']=='gpui':
+        verify_gpui(root)
+        if Path(x['manifest_path']).resolve() != root/'vendor/gpui/Cargo.toml':
+            raise RuntimeError('Unqualified local GPUI path')
+        item['archive_sha256']=GPUI_ARCHIVE
+        item['vendored_source']={'path':'vendor/gpui', 'provenance_sha256':hashlib.sha256((root/'vendor/gpui/UPSTREAM.json').read_bytes()).hexdigest()}
     if checksum:
         archives=list((Path.home()/'.cargo/registry/cache').glob(f"*/{x['name']}-{x['version']}.crate"))
         item['cached_archive_verified']=bool(archives)

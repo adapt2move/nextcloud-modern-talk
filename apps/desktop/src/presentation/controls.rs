@@ -311,7 +311,7 @@ impl gpui::RenderOnce for ReasonTip {
                     .flex_col()
                     .gap_1()
                     .when_some(self.action_name, |d, name| {
-                        d.child(div().font_weight(FontWeight::SEMIBOLD).child(name))
+                        d.child(div().font_weight(FontWeight::MEDIUM).child(name))
                     })
                     .when(!self.label.is_empty(), |d| {
                         d.child(div().font_weight(FontWeight::NORMAL).child(self.label))
@@ -448,6 +448,19 @@ impl gpui::Element for MeasuredHint {
     }
 }
 impl Desktop {
+    fn control_theme(&self, id: &ElementId) -> super::Theme {
+        // Header controls use the same opaque Windows fallback as their host.
+        // Keep this on the shared control path so icon, disabled and focus
+        // colors resolve together instead of inheriting dark-theme foregrounds.
+        if matches!(id, ElementId::Name(name) if matches!(name.as_ref(),
+            "conversation-title" | "favorite-conversation" | "history-search"
+            | "call" | "room-info" | "room-members" | "install-update"))
+        {
+            self.theme.chat_header_theme(self.palette)
+        } else {
+            self.theme
+        }
+    }
     /// Passive status with the same single hint surface as controls. Its own
     /// retained key is never a tab stop; keyboard explanation follows the row.
     pub(super) fn status_icon(
@@ -583,10 +596,10 @@ impl Desktop {
         geometry: (f32, f32),
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let t = self.theme;
         let (border_width, corner_radius) = geometry;
         let availability = availability.into();
         let id = id.into();
+        let t = self.control_theme(&id);
         let hover_id = id.clone();
         let anchor_id = id.clone();
         let click_id = id.clone();
@@ -648,7 +661,7 @@ impl Desktop {
             .rounded(px(corner_radius))
             .text_size(self.sp(13.))
             .line_height(self.sp(20.))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .bg(bg)
             .text_color(fg)
             .border_1()
@@ -1005,7 +1018,7 @@ impl Desktop {
         let (style, extent, radius) = geometry;
         let id = id.into();
         let (name, label) = symbol;
-        let t = self.theme;
+        let t = self.control_theme(&id);
         let color = icon_color(t, style, availability.enabled);
         let mut availability = availability;
         availability.hover_hint = true;
@@ -1059,7 +1072,7 @@ impl Desktop {
                 t.sidebar_secondary
             })
             .font_weight(if selected {
-                FontWeight::SEMIBOLD
+                FontWeight::MEDIUM
             } else {
                 FontWeight::NORMAL
             });
@@ -1086,7 +1099,7 @@ impl Desktop {
             .text_color(fg)
             .text_size(px(extent * 0.36))
             .line_height(px(extent * 0.5))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .child(initials.to_owned())
     }
     pub fn avatar(&self, initials: &str, large: bool) -> Div {

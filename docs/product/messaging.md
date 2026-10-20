@@ -18,6 +18,8 @@ When the reader was already at the end before an append, follow the new end afte
 
 The composer offers the installed system emoji picker on deliberate activation. Keep the current input target and IME state intact. On systems whose picker copies instead of inserting, explain the paste step and retain the ordinary clipboard permission check. Missing system support is explicit; opening a picker does not imply that an emoji was selected or inserted.
 
+Show the Enter-to-send hint and secondary options, including scheduling, only while the composer is active. Keep its primary actions discoverable; place an additional-content `+` action beside emoji, including the supported poll flow. Mentions are entered through `@` in the text itself, without a duplicate standalone mention button. Moving focus into a composer action must not destroy the draft, selection or active editing context.
+
 Acceptance: formatting preview and sent text preserve meaning, Unicode, and line breaks. Links display their destination and open only on deliberate activation under the security policy. Copying code preserves its contents. A permission change disables send while retaining the draft; a read-only timeline does not show a writable composer.
 
 ## MSG-003

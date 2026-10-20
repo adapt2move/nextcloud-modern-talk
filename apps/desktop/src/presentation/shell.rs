@@ -1,8 +1,10 @@
+pub(super) mod chat_header;
+
 use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::Decision;
-use talk_core::ui::messaging::{MessageAction, MessageFeature};
+use talk_core::ui::messaging::MessageFeature;
 use talk_core::ui::presentation::{
     ContentState, ConversationKind, ConversationView, Presence, UiIntent,
 };
@@ -10,28 +12,35 @@ use talk_core::ui::presentation::{
 impl Desktop {
     pub(super) fn conversation_avatar(&self, row: &ConversationView) -> Div {
         let t = self.theme;
-        let mut avatar = if row.kind == ConversationKind::Direct {
-            self.person_avatar(row.initials.as_str(), 36.)
-        } else {
-            div()
-                .flex_none()
-                .size(px(36.))
-                .rounded(px(12.))
-                .bg(t.selected)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(self.scaled_icon(
-                    match row.kind {
-                        ConversationKind::Group => "users",
-                        ConversationKind::GuestAccessible => "link",
-                        ConversationKind::NoteToSelf => "file",
-                        _ => "chat",
-                    },
-                    20.,
-                    t.selected_text,
-                ))
-        };
+        let mut avatar = self
+            .projected_avatar(
+                talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
+                36.,
+            )
+            .unwrap_or_else(|| {
+                if row.kind == ConversationKind::Direct {
+                    self.person_avatar(row.initials.as_str(), 36.)
+                } else {
+                    div()
+                        .flex_none()
+                        .size(px(36.))
+                        .rounded(px(12.))
+                        .bg(t.selected)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self.scaled_icon(
+                            match row.kind {
+                                ConversationKind::Group => "users",
+                                ConversationKind::GuestAccessible => "link",
+                                ConversationKind::NoteToSelf => "file",
+                                _ => "chat",
+                            },
+                            20.,
+                            t.selected_text,
+                        ))
+                }
+            });
         if row.kind == ConversationKind::Direct && row.presence != Presence::Unknown {
             avatar = avatar.relative().child(
                 div()
@@ -60,6 +69,8 @@ impl Desktop {
         let narrow = window.viewport_size().width < px(880.) || self.scale >= 150;
         let sidebar = self.sidebar(narrow, cx);
         let content = div()
+            .tab_group()
+            .tab_index(1)
             .flex_1()
             .min_w_0()
             .h_full()
@@ -72,6 +83,8 @@ impl Desktop {
             .when(narrow, |d| {
                 d.child(
                     div()
+                        .tab_group()
+                        .tab_index(0)
                         .flex()
                         .items_center()
                         .justify_between()
@@ -93,7 +106,7 @@ impl Desktop {
                         )),
                 )
             })
-            .child(div().flex_1().min_h_0().child(
+            .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
                 if self.destination == super::SidebarDestination::Inbox {
                     self.inbox(cx)
                 } else {
@@ -129,7 +142,9 @@ impl Desktop {
         } else if narrow {
             layout.child(content)
         } else {
-            layout.child(sidebar).child(content)
+            layout
+                .child(sidebar.tab_group().tab_index(0))
+                .child(content)
         };
         layout.when(
             self.snapshot.call.as_ref().is_some_and(|c| {
@@ -139,6 +154,8 @@ impl Desktop {
             |d| {
                 d.child(
                     div()
+                        .tab_group()
+                        .tab_index(2)
                         .occlude()
                         .absolute()
                         .top_4()
@@ -208,9 +225,12 @@ impl Desktop {
             "Favoriten sind für dieses Gespräch nicht verfügbar.",
         );
         let search_availability = self.message_available(MessageFeature::Search);
+        let h = t.chat_header_theme(self.palette);
         let header = div()
             .id("conversation-header")
             .group("conversation-header")
+            .bg(h.chat_header_surface())
+            .text_color(h.text)
             .flex_none()
             .flex()
             .flex_wrap()
@@ -220,7 +240,7 @@ impl Desktop {
             .py(px(14.))
             .min_h(px(74.))
             .border_b_1()
-            .border_color(t.border)
+            .border_color(h.border)
             .child(self.conversation_avatar(row))
             .child(
                 div()
@@ -246,7 +266,7 @@ impl Desktop {
                                 .justify_start()
                                 .p_0()
                                 .min_h(px(28.))
-                                .text_color(t.text)
+                                .text_color(h.text)
                                 .text_size(self.sp(18.))
                                 .font_weight(FontWeight::BOLD)
                                 .child(row.title.as_str().to_owned()),
@@ -254,12 +274,15 @@ impl Desktop {
                             .child(
                                 self.icon_button(
                                     "favorite-conversation",
-                                    ("star", favorite_name),
-                                    if self.favorite_value(row) == Some(true) {
-                                        ButtonStyle::Primary
-                                    } else {
-                                        ButtonStyle::Quiet
-                                    },
+                                    (
+                                        if self.favorite_value(row) == Some(true) {
+                                            "star-filled"
+                                        } else {
+                                            "star"
+                                        },
+                                        favorite_name,
+                                    ),
+                                    ButtonStyle::Quiet,
                                     favorite_availability.explained_elsewhere(),
                                     LocalAction::Favorite(
                                         row.context,
@@ -268,30 +291,42 @@ impl Desktop {
                                     cx,
                                 )
                                 .flex_none()
-                                .opacity(0.)
+                                .opacity(if self.favorite_value(row) == Some(true) {
+                                    1.
+                                } else {
+                                    0.
+                                })
                                 .group_hover("conversation-header", |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
                             )
-                            .child(self.icon_button(
-                                "history-search",
-                                ("search", "Im Gespräch suchen"),
-                                ButtonStyle::Quiet,
-                                search_availability.explained_elsewhere(),
-                                LocalAction::MessageIn(
-                                    row.context,
-                                    super::messaging::Action::ToggleSearch,
-                                ),
-                                cx,
-                            )),
+                            .child(
+                                self.icon_button(
+                                    "history-search",
+                                    ("search", "Im Gespräch suchen"),
+                                    ButtonStyle::Quiet,
+                                    search_availability.explained_elsewhere(),
+                                    LocalAction::MessageIn(
+                                        row.context,
+                                        super::messaging::Action::ToggleSearch,
+                                    ),
+                                    cx,
+                                )
+                                .opacity(0.)
+                                .group_hover("conversation-header", |s| s.opacity(1.))
+                                .focus(|s| s.opacity(1.)),
+                            ),
                     )
-                    .child(self.hint(&format!(
-                        "{}{}",
-                        self.l(kind),
-                        row.participants.map_or(String::new(), |n| format!(
-                            " · {}",
-                            self.count(super::localization::Count::Participants, u64::from(n))
+                    .child(
+                        self.hint(&format!(
+                            "{}{}",
+                            self.l(kind),
+                            row.participants.map_or(String::new(), |n| format!(
+                                " · {}",
+                                self.count(super::localization::Count::Participants, u64::from(n))
+                            ))
                         ))
-                    ))),
+                        .text_color(h.sidebar_secondary),
+                    ),
             )
             .when(row.organization.classified == Some(true), |d| {
                 d.child(
@@ -300,8 +335,8 @@ impl Desktop {
                         .items_center()
                         .gap_1()
                         .text_size(self.sp(12.))
-                        .text_color(t.muted)
-                        .child(self.scaled_icon("lock", 14., t.muted))
+                        .text_color(h.sidebar_secondary)
+                        .child(self.scaled_icon("lock", 14., h.sidebar_secondary))
                         .child(self.l("Vertraulich")),
                 )
             })
@@ -339,7 +374,7 @@ impl Desktop {
             .child(self.icon_button(
                 "call",
                 (call_icon, call_name),
-                ButtonStyle::Secondary,
+                ButtonStyle::Quiet,
                 call_availability.explained_elsewhere(),
                 LocalAction::Call,
                 cx,
@@ -357,6 +392,7 @@ impl Desktop {
         let header = div()
             .relative()
             .flex_none()
+            .when(cfg!(target_os = "windows"), |d| d.bg(gpui::rgb(0xffffff)))
             .child(header)
             .when(self.snapshot.content == ContentState::Offline, |d| {
                 d.child(div().px_6().pt_5().child(
@@ -374,7 +410,13 @@ impl Desktop {
                         d.child(self.reason_tip("room-members".into(), Availability::available().below_control(), Some("Mitglieder"), cx))
                     })
             });
-        let timeline = self.message_timeline(constrained, cx);
+        let header = div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .child(header)
+            .child(self.conversation_search(cx).bg(t.surface));
+        let timeline = self.conversation_timeline(header, constrained, cx);
         let composer =
             if self.snapshot.content == ContentState::Denied || row.send == Decision::Denied {
                 div()
@@ -397,10 +439,8 @@ impl Desktop {
             .flex()
             .flex_col()
             .bg(t.surface)
-            .child(header)
-            .child(self.conversation_search(cx))
-            .child(timeline)
-            .child(composer);
+            .child(timeline.tab_group().tab_index(0))
+            .child(composer.tab_group().tab_index(1));
         div()
             .size_full()
             .rounded(px(13.))
@@ -427,15 +467,7 @@ impl Desktop {
         let ready = self.snapshot.content == ContentState::Ready && row.send == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
         let emoji_availability = self.emoji_availability(cx).above_composer();
-        let attachment_availability = Availability::when(
-            self.snapshot.content == ContentState::Ready
-                && self.snapshot.message_panel.as_ref().is_some_and(|p| {
-                    p.availability(talk_core::ui::messaging::MessageFeature::Files)
-                        .enabled()
-                }),
-            "Dateien anhängen ist derzeit nicht verfügbar.",
-        )
-        .above_composer();
+        let options_availability = Availability::available().above_composer();
         let send_availability = Availability::when(
             ready && !pending,
             if self.drafts.uncertain(row.context) {
@@ -448,6 +480,7 @@ impl Desktop {
         )
         .above_composer();
         div()
+            .track_focus(&self.composer_focus)
             .flex_none()
             .px(if compact { px(12.) } else { px(24.) })
             .pb_4()
@@ -456,6 +489,7 @@ impl Desktop {
             .flex_col()
             .gap_2()
             .child(self.composer_context(cx))
+            .child(self.composer_more_menu(cx))
             .child(
                 div()
                     .min_h(px(96.))
@@ -493,8 +527,8 @@ impl Desktop {
                     .when(!self.background_inert, |d| {
                         d.child(self.reason_tip(
                             "attach".into(),
-                            attachment_availability,
-                            Some("Datei anhängen"),
+                            options_availability,
+                            Some("Weitere Optionen"),
                             cx,
                         ))
                         .child(self.reason_tip(
@@ -523,15 +557,10 @@ impl Desktop {
                                     .gap_1()
                                     .child(self.icon_button(
                                         "attach",
-                                        ("paperclip", "Datei anhängen"),
+                                        ("plus", "Weitere Optionen"),
                                         ButtonStyle::Quiet,
-                                        attachment_availability,
-                                        LocalAction::MessageIn(
-                                            row.context,
-                                            super::messaging::Action::Command(
-                                                MessageAction::PickUpload,
-                                            ),
-                                        ),
+                                        options_availability,
+                                        LocalAction::Content(super::content::Action::Menu),
                                         cx,
                                     ))
                                     .child(self.icon_button(
@@ -548,19 +577,21 @@ impl Desktop {
                                     .flex()
                                     .items_center()
                                     .gap_3()
-                                    .child(self.hint(self.l(
-                                        if self.drafts.uncertain(row.context) {
-                                            "Status unklar"
-                                        } else if pending {
-                                            "Ergebnis ausstehend"
-                                        } else if !ready {
-                                            "Senden nicht verfügbar"
-                                        } else if compact {
-                                            "Enter senden"
-                                        } else {
-                                            "Enter senden · ⇧ Enter neue Zeile"
-                                        },
-                                    )))
+                                    .when(self.composer_active || !ready || pending, |d| {
+                                        d.child(self.hint(self.l(
+                                            if self.drafts.uncertain(row.context) {
+                                                "Status unklar"
+                                            } else if pending {
+                                                "Ergebnis ausstehend"
+                                            } else if !ready {
+                                                "Senden nicht verfügbar"
+                                            } else if compact {
+                                                "Enter senden"
+                                            } else {
+                                                "Enter senden · ⇧ Enter neue Zeile"
+                                            },
+                                        )))
+                                    })
                                     .child(self.icon_button(
                                         "send",
                                         ("arrow-up", "Senden"),

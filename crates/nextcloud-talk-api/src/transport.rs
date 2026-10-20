@@ -19,6 +19,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::json;
+mod content;
 mod files;
 mod meeting;
 pub(crate) use meeting::MeetingLifetime;

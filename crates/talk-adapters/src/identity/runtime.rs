@@ -1555,6 +1555,16 @@ impl Worker {
                     }
                 ) {
                     context.deadline.millis = self.network.now().millis.saturating_add(60_000);
+                } else if matches!(
+                    request,
+                    ProtocolRequest::Content {
+                        command: talk_core::protocol::content::ContentCommand::Asset(_),
+                        ..
+                    }
+                ) {
+                    // Server document thumbnails may require a cold bounded render.
+                    // This keeps the admitted account and caller cancellation unchanged.
+                    context.deadline.millis = self.network.now().millis.saturating_add(15_000);
                 }
                 if self.probe.as_ref().is_none_or(|p| p.scope != *scope) {
                     return Err(ErrorKind::WrongScope.into());

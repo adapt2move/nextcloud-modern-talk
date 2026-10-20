@@ -275,5 +275,6 @@ pub struct CallObservation {
     pub native_media: Decision,
 }
 
+pub mod content;
 pub mod conversation;
 pub mod messaging;

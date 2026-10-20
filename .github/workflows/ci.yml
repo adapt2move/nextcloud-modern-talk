@@ -113,3 +113,14 @@ jobs:
         run: |
           otool -L target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper"
           otool -l target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper" | awk '/cmd LC_RPATH/ { remaining=3 } remaining > 0 { print; remaining-- }'
+      - name: Assemble and verify the self-contained app and DMG
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          env -u RUSTFLAGS python3 tools/release/build.py --target aarch64-apple-darwin --version "$version" --output "$RUNNER_TEMP/macos-package"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-package-${{ github.sha }}
+          path: ${{ runner.temp }}/macos-package/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

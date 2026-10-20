@@ -1,7 +1,7 @@
 //! Compact navigation over bounded, typed conversation projections.
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
-use gpui::{Context, Div, Focusable, FontWeight, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::preferences::navigation::{
     AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport,
 };
@@ -241,36 +241,24 @@ impl Desktop {
         }
         sidebar = sidebar
             .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .rounded(px(7.))
-                    .bg(t.subtle)
-                    .relative()
-                    .child(self.field_ring(self.sidebar_filter.focus_handle(cx), 7.))
-                    .min_h(self.sp(28.).max(px(34.)))
-                    .mb_2()
-                    .child(self.scaled_icon("search", 15., t.muted))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .child(self.sidebar_filter.clone()),
-                    )
-                    .when(!self.sidebar_filter.read(cx).content.is_empty(), |d| {
-                        d.child(self.icon_button(
-                            "clear-filter",
-                            ("x", "Filter leeren"),
-                            ButtonStyle::Quiet,
-                            Availability::available(),
-                            LocalAction::ClearFilter,
-                            cx,
-                        ))
-                    }),
+                self.button_with_leading_icon(
+                    "global-search",
+                    ("Suchen", "search"),
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Search,
+                    cx,
+                )
+                .w_full()
+                .justify_start()
+                .bg(t.subtle)
+                .mb_2()
+                .child(div().flex_1())
+                .child(self.hint(if cfg!(target_os = "macos") {
+                    "⌘ K"
+                } else {
+                    self.l("Strg K")
+                })),
             )
             .child(self.sidebar_destination(
                 "nav-inbox",
@@ -279,11 +267,22 @@ impl Desktop {
                 SidebarDestination::Inbox,
                 cx,
             ))
+            .child(self.sidebar_destination(
+                "nav-archive",
+                "Archiv",
+                "file",
+                SidebarDestination::Archive,
+                cx,
+            ))
             .child(
                 div()
                     .flex_none()
                     .flex()
                     .items_center()
+                    .rounded(px(8.))
+                    .when(self.destination == SidebarDestination::Conversations, |d| {
+                        d.bg(t.selected)
+                    })
                     .child(
                         self.sidebar_destination(
                             "nav-active",
@@ -292,47 +291,60 @@ impl Desktop {
                             SidebarDestination::Conversations,
                             cx,
                         )
-                        .flex_1(),
+                        .flex_1()
+                        .min_w_0(),
                     )
-                    .child(self.icon_button(
-                        "reload-conversations",
-                        ("refresh", "Gespräche neu laden"),
-                        ButtonStyle::Quiet,
-                        self.snapshot.active_account.is_some().into(),
-                        self.snapshot.active_account.map_or(
-                            LocalAction::Destination(SidebarDestination::Conversations),
-                            |scope| {
-                                LocalAction::Intent(
-                                    talk_core::ui::presentation::UiIntent::ReloadConversations(
-                                        scope,
-                                    ),
-                                )
-                            },
-                        ),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        "new-conversation",
-                        ("plus", "Neues Gespräch"),
-                        ButtonStyle::Quiet,
-                        Availability::available().beside_control(),
-                        LocalAction::Open(Overlay::Create),
-                        cx,
-                    )),
-            )
-            .child(self.sidebar_destination(
-                "nav-archive",
-                "Archiv",
-                "file",
-                SidebarDestination::Archive,
-                cx,
-            ));
+                    .child(div().w(px(1.)).h(px(14.)).bg(t.border).mx_1())
+                    .child(
+                        self.icon_button(
+                            "new-conversation",
+                            ("plus", "Neues Gespräch"),
+                            ButtonStyle::Quiet,
+                            Availability::available().beside_control(),
+                            LocalAction::Open(Overlay::Create),
+                            cx,
+                        )
+                        .mr_1(),
+                    ),
+            );
 
         let query = self.sidebar_filter.read(cx).content.to_lowercase();
         let archived = self.destination == SidebarDestination::Archive;
-        let mut list = div().flex_none().flex().flex_col().pt_2();
+        let mut list = div().flex_none().flex().flex_col().pt_2().pl_3();
         let mut visible = 0;
         let mut grouped = Vec::new();
+        // Favorites have one explicit group, independent of room category and
+        // server tags. Every row is rendered once so focus identity is stable.
+        let favorites: Vec<_> = self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .filter(|r| {
+                r.archived == Some(archived)
+                    && self.favorite_value(r) == Some(true)
+                    && r.title.as_str().to_lowercase().contains(&query)
+            })
+            .collect();
+        if !favorites.is_empty() {
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_2()
+                    .text_size(self.sp(12.))
+                    .text_color(t.sidebar_secondary)
+                    .child(self.scaled_icon("star-filled", 13., t.accent))
+                    .child(self.l("Favoriten")),
+            );
+            visible += favorites.len();
+            for row in favorites {
+                grouped.push(row.context);
+                list = list.child(self.compact_room(row, "room", cx));
+            }
+        }
         if self.snapshot.tag_state == ContentState::Ready {
             let mut tags: Vec<_> = self.snapshot.tags.as_slice().iter().collect();
             tags.sort_by_key(|t| t.order);
@@ -347,9 +359,9 @@ impl Desktop {
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
+                            && !grouped.contains(&r.context)
                             && r.title.as_str().to_lowercase().contains(&query)
                             && r.organization.tags == FeatureSupport::Supported
-                            && !grouped.contains(&r.context)
                             && r.tags
                                 .as_ref()
                                 .is_some_and(|ids| ids.as_slice().contains(&tag.id))
@@ -416,6 +428,7 @@ impl Desktop {
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
+                            && !grouped.contains(&r.context)
                             && r.title.as_str().to_lowercase().contains(&query)
                             && self.placement(r).is_some_and(|p| p.group == Some(group.id))
                     })
@@ -484,13 +497,7 @@ impl Desktop {
             if rows.is_empty() {
                 continue;
             }
-            // Stable sort changes only favorite priority inside this section.
-            rows.sort_by_key(|r| {
-                (
-                    self.favorite_value(r) != Some(true),
-                    self.placement(r).map_or(0, |p| p.order),
-                )
-            });
+            rows.sort_by_key(|r| self.placement(r).map_or(0, |p| p.order));
             visible += rows.len();
             let collapsed = self.section_collapsed(section) && query.is_empty();
             list = list.child(
@@ -567,24 +574,60 @@ impl Desktop {
                 .mt_2()
                 .border_t_1()
                 .border_color(t.border)
-                .child(self.icon_button(
-                    "discover",
-                    ("compass", "Offene Gespräche entdecken"),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    LocalAction::Open(Overlay::Discover),
-                    cx,
-                ))
+                .when_some(account, |d, a| {
+                    d.child(self.content_avatar(
+                        talk_core::ui::content::AssetTarget::SelfAvatar,
+                        a.initials.as_str(),
+                        32.,
+                    ))
+                })
                 .child(
                     div()
                         .min_w_0()
                         .flex_1()
-                        .text_size(self.sp(12.))
-                        .text_ellipsis()
-                        .child(account.map_or_else(
-                            || self.l("Noch kein Konto verbunden.").to_owned(),
-                            |a| self.account_name(a),
-                        )),
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_size(self.sp(13.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_ellipsis()
+                                .child(account.map_or_else(
+                                    || self.l("Noch kein Konto verbunden.").to_owned(),
+                                    |a| {
+                                        self.snapshot
+                                            .content_panel
+                                            .self_name
+                                            .as_ref()
+                                            .filter(|name| {
+                                                self.snapshot.content_panel.account == Some(a.scope)
+                                                    && !name.as_str().trim().is_empty()
+                                            })
+                                            .map_or(a.self_name.as_str(), |name| name.as_str())
+                                            .to_owned()
+                                    },
+                                )),
+                        )
+                        .when_some(account, |d, a| {
+                            d.child(
+                                div()
+                                    .text_size(self.sp(11.))
+                                    .text_color(t.sidebar_secondary)
+                                    .text_ellipsis()
+                                    .child(
+                                        self.snapshot
+                                            .content_panel
+                                            .organization
+                                            .as_ref()
+                                            .filter(|name| {
+                                                self.snapshot.content_panel.account == Some(a.scope)
+                                                    && !name.as_str().trim().is_empty()
+                                            })
+                                            .map_or(a.server_label.as_str(), |name| name.as_str())
+                                            .to_owned(),
+                                    ),
+                            )
+                        }),
                 )
                 .child(self.icon_button(
                     "settings",
@@ -654,38 +697,45 @@ impl Desktop {
             .py_1()
             .min_h(self.sp(24.).max(px(if self.compact { 32. } else { 38. })))
             .when(selected, |d| d.bg(t.selected).text_color(t.selected_text))
-            .child(if row.kind == ConversationKind::Direct {
-                self.person_avatar(row.initials.as_str(), 22.)
-            } else {
-                div()
-                    .flex_none()
-                    .size(px(22.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(self.scaled_icon(
-                        if row.organization.classified == Some(true) {
-                            "lock"
-                        } else {
-                            match (row.kind, row.organization.category) {
-                                (ConversationKind::NoteToSelf, _) => "file",
-                                (_, ConversationCategory::Channel) => "megaphone",
-                                (_, ConversationCategory::Conference(_)) => "video",
-                                (_, ConversationCategory::Huddle) => "headphones",
-                                _ => "chat",
-                            }
-                        },
-                        16.,
-                        t.sidebar_secondary,
-                    ))
-            })
+            .child(
+                if let Some(avatar) = self.projected_avatar(
+                    talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
+                    22.,
+                ) {
+                    avatar
+                } else if row.kind == ConversationKind::Direct {
+                    self.person_avatar(row.initials.as_str(), 22.)
+                } else {
+                    div()
+                        .flex_none()
+                        .size(px(22.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self.scaled_icon(
+                            if row.organization.classified == Some(true) {
+                                "lock"
+                            } else {
+                                match (row.kind, row.organization.category) {
+                                    (ConversationKind::NoteToSelf, _) => "file",
+                                    (_, ConversationCategory::Channel) => "megaphone",
+                                    (_, ConversationCategory::Conference(_)) => "video",
+                                    (_, ConversationCategory::Huddle) => "headphones",
+                                    _ => "chat",
+                                }
+                            },
+                            16.,
+                            t.sidebar_secondary,
+                        ))
+                },
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .text_size(self.sp(13.))
                     .font_weight(if row.unread > 0 {
-                        FontWeight::SEMIBOLD
+                        FontWeight::MEDIUM
                     } else {
                         FontWeight::NORMAL
                     })
@@ -699,7 +749,7 @@ impl Desktop {
             .when(self.favorite_value(row) == Some(true), |d| {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 1),
-                    ("star", "Favorit"),
+                    ("star-filled", "Favorit"),
                     (13., t.accent),
                     row_focus,
                     cx,

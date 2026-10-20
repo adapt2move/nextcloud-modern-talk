@@ -1,0 +1,216 @@
+{
+  "moltenvk_dependency_source": "https://github.com/KhronosGroup/MoltenVK/tree/v1.2.9/ExternalRevisions",
+  "moltenvk_sdk": "1.3.283.0",
+  "recipe_source": "https://github.com/GStreamer/cerbero/tree/1.28.4/recipes",
+  "runtime_version": "1.28.4",
+  "schema": 1,
+  "sources": [
+    {
+      "filename": "cerbero-1.28.4.tar.gz",
+      "name": "cerbero",
+      "runtime_files": [],
+      "sha256": "8521da3722dd4b04be8defa6de0be4f8f442280e0fb64e7993a1558fbf010a96",
+      "url": "https://codeload.github.com/GStreamer/cerbero/tar.gz/refs/tags/1.28.4",
+      "version": "1.28.4"
+    },
+    {
+      "filename": "gstreamer-1.28.4.tar.xz",
+      "name": "gstreamer",
+      "runtime_files": [
+        "lib/gstreamer-1.0/libgstcoreelements.dylib",
+        "lib/libgstbase-1.0.0.dylib",
+        "lib/libgstreamer-1.0.0.dylib",
+        "libexec/gstreamer-1.0/gst-plugin-scanner"
+      ],
+      "sha256": "f5adc7e8f448c10260b3b25aa101c9d540674c8d9a54c2b77a86d04f2b3b50dd",
+      "url": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.4.tar.xz",
+      "version": "1.28.4"
+    },
+    {
+      "filename": "gst-plugins-base-1.28.4.tar.xz",
+      "name": "gst-plugins-base",
+      "runtime_files": [
+        "lib/gstreamer-1.0/libgstapp.dylib",
+        "lib/gstreamer-1.0/libgstaudioconvert.dylib",
+        "lib/gstreamer-1.0/libgstaudioresample.dylib",
+        "lib/gstreamer-1.0/libgstopus.dylib",
+        "lib/gstreamer-1.0/libgstvideoconvertscale.dylib",
+        "lib/gstreamer-1.0/libgstvideorate.dylib",
+        "lib/libgstapp-1.0.0.dylib",
+        "lib/libgstaudio-1.0.0.dylib",
+        "lib/libgstgl-1.0.0.dylib",
+        "lib/libgstpbutils-1.0.0.dylib",
+        "lib/libgstrtp-1.0.0.dylib",
+        "lib/libgsttag-1.0.0.dylib",
+        "lib/libgstvideo-1.0.0.dylib"
+      ],
+      "sha256": "a898afd5766172b0049e6781558e0689098bf87b9d82b846c652e571c01d60d8",
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.4.tar.xz",
+      "version": "1.28.4"
+    },
+    {
+      "filename": "gst-plugins-good-1.28.4.tar.xz",
+      "name": "gst-plugins-good",
+      "runtime_files": [
+        "lib/gstreamer-1.0/libgstrtp.dylib",
+        "lib/gstreamer-1.0/libgstvpx.dylib"
+      ],
+      "sha256": "c825ea737c59cea0e4a0c41da2388045ff5dd32d162220ac93a7a82ee4a04e61",
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.4.tar.xz",
+      "version": "1.28.4"
+    },
+    {
+      "filename": "gst-plugins-bad-1.28.4.tar.xz",
+      "name": "gst-plugins-bad",
+      "runtime_files": [
+        "lib/gstreamer-1.0/libgstapplemedia.dylib",
+        "lib/libgstcodecparsers-1.0.0.dylib",
+        "lib/libgstvulkan-1.0.0.dylib"
+      ],
+      "sha256": "332b7320f30c60f2d5941446d03b9d05e3781f2c2561befbe88718bd777f0e47",
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.4.tar.xz",
+      "version": "1.28.4"
+    },
+    {
+      "filename": "glib-2.82.4.tar.xz",
+      "name": "glib",
+      "runtime_files": [
+        "lib/libgio-2.0.0.dylib",
+        "lib/libglib-2.0.0.dylib",
+        "lib/libgmodule-2.0.0.dylib",
+        "lib/libgobject-2.0.0.dylib"
+      ],
+      "sha256": "37dd0877fe964cd15e9a2710b044a1830fb1bd93652a6d0cb6b8b2dff187c709",
+      "url": "https://download.gnome.org/sources/glib/2.82/glib-2.82.4.tar.xz",
+      "version": "2.82.4"
+    },
+    {
+      "filename": "libffi-3.2.9999.5.tar.bz2",
+      "name": "libffi",
+      "runtime_files": [
+        "lib/libffi.7.dylib"
+      ],
+      "sha256": "b4d403932a8860589e571300e807e40bb4f7d9d2630c8ec19c29fb9e7b0fd227",
+      "url": "https://gstreamer.freedesktop.org/data/src/mirror/libffi/libffi-meson-3.2.9999.5.tar.bz2",
+      "version": "3.2.9999.5"
+    },
+    {
+      "filename": "proxy-libintl-0.5.tar.gz",
+      "name": "proxy-libintl",
+      "runtime_files": [
+        "lib/libintl.8.dylib"
+      ],
+      "sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+      "url": "https://codeload.github.com/frida/proxy-libintl/tar.gz/refs/tags/0.5",
+      "version": "0.5"
+    },
+    {
+      "filename": "pcre2-10.42.tar.bz2",
+      "name": "pcre2",
+      "runtime_files": [
+        "lib/libpcre2-8.0.dylib"
+      ],
+      "sha256": "8d36cd8cb6ea2a4c2bb358ff6411b0c788633a2a45dabbf1aeb4b701d1b5e840",
+      "url": "https://gstreamer.freedesktop.org/data/src/mirror/pcre2-10.42.tar.bz2",
+      "version": "10.42"
+    },
+    {
+      "filename": "orc-0.4.42.tar.xz",
+      "name": "orc",
+      "runtime_files": [
+        "lib/liborc-0.4.0.dylib"
+      ],
+      "sha256": "7ec912ab59af3cc97874c456a56a8ae1eec520c385ec447e8a102b2bd122c90c",
+      "url": "https://gstreamer.freedesktop.org/src/orc/orc-0.4.42.tar.xz",
+      "version": "0.4.42"
+    },
+    {
+      "filename": "opus-1.5.2.tar.gz",
+      "name": "opus",
+      "runtime_files": [
+        "lib/libopus.0.dylib"
+      ],
+      "sha256": "65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1",
+      "url": "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz",
+      "version": "1.5.2"
+    },
+    {
+      "filename": "libvpx-1.14.1.tar.gz",
+      "name": "libvpx",
+      "runtime_files": [
+        "lib/libvpx.9.dylib"
+      ],
+      "sha256": "901747254d80a7937c933d03bd7c5d41e8e6c883e0665fadcb172542167c7977",
+      "url": "https://codeload.github.com/webmproject/libvpx/tar.gz/refs/tags/v1.14.1",
+      "version": "1.14.1"
+    },
+    {
+      "filename": "zlib-1.3.1.tar.gz",
+      "name": "zlib",
+      "runtime_files": [
+        "lib/libz.1.dylib"
+      ],
+      "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+      "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+      "version": "1.3.1"
+    },
+    {
+      "filename": "MoltenVK-1.2.9.tar.gz",
+      "name": "MoltenVK",
+      "runtime_files": [
+        "lib/libMoltenVK.dylib"
+      ],
+      "sha256": "28817cb349ad2963d5572372ac0c3f8820b3f26c3d10a3bcc35233de834dd8fe",
+      "url": "https://codeload.github.com/KhronosGroup/MoltenVK/tar.gz/bf097edc74ec3b6dfafdcd5a38d3ce14b11952d6",
+      "version": "1.2.9"
+    },
+    {
+      "filename": "SPIRV-Cross-84cdc3b68e5ef5a15ecfacda77c61f24a9080cf9.tar.gz",
+      "name": "SPIRV-Cross",
+      "runtime_files": [],
+      "sha256": "ab6a6c980048b72b44c341ffea63d1e91c3e5387a8c30cb03016dac9bc02ece6",
+      "url": "https://codeload.github.com/KhronosGroup/SPIRV-Cross/tar.gz/84cdc3b68e5ef5a15ecfacda77c61f24a9080cf9",
+      "version": "84cdc3b68e5ef5a15ecfacda77c61f24a9080cf9"
+    },
+    {
+      "filename": "Vulkan-Headers-eaa319dade959cb61ed2229c8ea42e307cc8f8b3.tar.gz",
+      "name": "Vulkan-Headers",
+      "runtime_files": [],
+      "sha256": "700dcd2aeb3a7f7986998eae69a6a712bfaabf2524879328fe086c7132941411",
+      "url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/eaa319dade959cb61ed2229c8ea42e307cc8f8b3",
+      "version": "eaa319dade959cb61ed2229c8ea42e307cc8f8b3"
+    },
+    {
+      "filename": "glslang-e8dd0b6903b34f1879520b444634c75ea2deedf5.tar.gz",
+      "name": "glslang",
+      "runtime_files": [],
+      "sha256": "403e222deb50576fa6af5f72b8a506cd144863807144451f986d87d49b66def9",
+      "url": "https://codeload.github.com/KhronosGroup/glslang/tar.gz/e8dd0b6903b34f1879520b444634c75ea2deedf5",
+      "version": "e8dd0b6903b34f1879520b444634c75ea2deedf5"
+    },
+    {
+      "filename": "cereal-51cbda5f30e56c801c07fe3d3aba5d7fb9e6cca4.tar.gz",
+      "name": "cereal",
+      "runtime_files": [],
+      "sha256": "26361b539fe50eee308b564faa2742166d2922a7ab0bd4870ac55708581228c8",
+      "url": "https://codeload.github.com/USCiLab/cereal/tar.gz/51cbda5f30e56c801c07fe3d3aba5d7fb9e6cca4",
+      "version": "51cbda5f30e56c801c07fe3d3aba5d7fb9e6cca4"
+    },
+    {
+      "filename": "SPIRV-Tools-dd4b663e13c07fea4fbb3f70c1c91c86731099f7.tar.gz",
+      "name": "SPIRV-Tools",
+      "runtime_files": [],
+      "sha256": "03ee1a2c06f3b61008478f4abe9423454e53e580b9488b47c8071547c6a9db47",
+      "url": "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/dd4b663e13c07fea4fbb3f70c1c91c86731099f7",
+      "version": "dd4b663e13c07fea4fbb3f70c1c91c86731099f7"
+    },
+    {
+      "filename": "SPIRV-Headers-4f7b471f1a66b6d06462cd4ba57628cc0cd087d7.tar.gz",
+      "name": "SPIRV-Headers",
+      "runtime_files": [],
+      "sha256": "7ea8624762d0e217aced805d73d84b7ceb4d37439abd182c2714ad97d7fe3f13",
+      "url": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/4f7b471f1a66b6d06462cd4ba57628cc0cd087d7",
+      "version": "4f7b471f1a66b6d06462cd4ba57628cc0cd087d7"
+    }
+  ]
+}
