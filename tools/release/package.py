@@ -243,10 +243,11 @@ def assemble(stage, output, allow_fixture=False):
             dest.chmod(0o755 if name.startswith(("bin/", macos_runtime.PREFIX)) else 0o644)
             copied[name] = dest
         (resources / "INSTALL.txt").write_text(
-            "NextCloud Modern Talk development package. No product or platform acceptance.\n"
-            + ("Drag NextCloud Modern Talk to Applications. Its media runtime is included; no GStreamer installation is required. No Developer ID signature or notarization is supplied. Gatekeeper may block launch. Do not disable system protection.\n" if mac else
+            "NextCloud Modern Talk alpha\n"
+            + ("Drag NextCloud Modern Talk to Applications, eject the disk image, then open the installed app. Its media runtime is included; no GStreamer installation is required. The app is not Developer ID signed or notarized. If macOS cannot verify the developer, try opening the app once, then use System Settings > Privacy & Security > Open Anyway and confirm Open. On a German Mac: Systemeinstellungen > Datenschutz & Sicherheit > Dennoch öffnen. Do not disable Gatekeeper.\n" if mac else
                "Ubuntu 24.04 x86_64 candidate: install the matching .deb using sudo apt install ./FILE.deb; launch talk-desktop from the application menu. The tar archive needs the runtime libraries recorded in provenance.\n")
-            + "Media: " + ("Rust webrtc engine with GStreamer codecs; see release notes for supported server profiles.\n" if spec["media"]["enabled"] else "unavailable.\n")
+            + f"Installation: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/install.md\n"
+            + f"Known limitations: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/limitations.md\n"
         )
         if mac:
             plist = {"CFBundleName": "NextCloud Modern Talk", "CFBundleDisplayName": "NextCloud Modern Talk",

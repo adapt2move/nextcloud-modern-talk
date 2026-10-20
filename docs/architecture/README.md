@@ -1,6 +1,6 @@
 # Architecture
 
-The independent [NextCloud Talk API](../../crates/nextcloud-talk-api/README.md) owns origin-bound transport and typed protocol values, including the meeting/signaling seam. It has no dependency on application policy or native media. The app has three layers: a bounded core, cohesive adapters for consequential I/O and policy decisions, and native GPUI presentation/composition. Views consume typed snapshots and intents; they do not own networking, credentials, persistence or media. The [alpha scope](../alpha.md) distinguishes connected functionality from remaining compatibility and platform work.
+The independent [NextCloud Talk API](../../crates/nextcloud-talk-api/README.md) owns origin-bound transport and typed protocol values, including the meeting/signaling seam. It has no dependency on application policy or native media. The app has three layers: a bounded core, cohesive adapters for consequential I/O and policy decisions, and native GPUI presentation/composition. Views consume typed snapshots and intents; they do not own networking, credentials, persistence or media. The [known limitations](../limitations.md) distinguishes connected functionality from remaining compatibility and platform work.
 
 | Contract | Responsibility |
 | --- | --- |

@@ -661,7 +661,20 @@ impl Desktop {
             .rounded(px(corner_radius))
             .text_size(self.sp(13.))
             .line_height(self.sp(20.))
-            .font_weight(FontWeight::MEDIUM)
+            // Room titles set their own weight; unread badges inherit this emphasis.
+            .font_weight(
+                if selected
+                    || room_row
+                    || matches!(
+                        style,
+                        ButtonStyle::Primary | ButtonStyle::Danger | ButtonStyle::StageDanger
+                    )
+                {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::NORMAL
+                },
+            )
             .bg(bg)
             .text_color(fg)
             .border_1()

@@ -1607,6 +1607,7 @@ impl Desktop {
         div()
             .text_size(self.sp(12.))
             .line_height(self.sp(18.))
+            .font_weight(FontWeight::NORMAL)
             .text_color(self.theme.muted)
             .child(text.to_owned())
     }

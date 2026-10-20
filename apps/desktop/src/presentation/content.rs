@@ -686,14 +686,12 @@ impl Desktop {
                     cx,
                 )),
         );
-        body.child(self.download_status(cx))
+        body.children(self.download_status(cx))
     }
-    pub(super) fn download_status(&self, cx: &Context<Self>) -> Div {
-        let Some(transfer) = &self.snapshot.content_panel.transfer else {
-            return div();
-        };
+    pub(super) fn download_status(&self, cx: &Context<Self>) -> Option<Div> {
+        let transfer = self.snapshot.content_panel.transfer.as_ref()?;
         if Some(transfer.attachment.context) != self.snapshot.selected {
-            return div();
+            return None;
         }
         let label = match transfer.state {
             DownloadState::Transferring => "Datei wird heruntergeladen …",
@@ -710,7 +708,7 @@ impl Desktop {
             .total
             .filter(|total| *total > 0)
             .map(|total| (transfer.received.min(total) as f64 / total as f64) as f32);
-        div()
+        let status = div()
             .flex()
             .flex_col()
             .gap_2()
@@ -752,16 +750,20 @@ impl Desktop {
                                 .bg(self.theme.accent),
                         ),
                 )
-            })
+            });
+        Some(status)
     }
 
-    pub(super) fn composer_more_menu(&self, cx: &Context<Self>) -> Div {
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .when(self.content_ui.menu && self.composer_active, |d| {
-                d.child(self.button_with_icon(
+    pub(super) fn composer_more_menu(&self, cx: &Context<Self>) -> Option<Div> {
+        if !self.content_ui.menu || !self.composer_active {
+            return None;
+        }
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_2()
+                .child(self.button_with_icon(
                     "composer-add-file",
                     ("Datei anhängen", "paperclip"),
                     ButtonStyle::Quiet,
@@ -771,8 +773,8 @@ impl Desktop {
                     )),
                     cx,
                 ))
-                .child(self.create_poll_button("composer-create-poll", cx))
-            })
+                .child(self.create_poll_button("composer-create-poll", cx)),
+        )
     }
     pub(super) fn create_poll_button(
         &self,

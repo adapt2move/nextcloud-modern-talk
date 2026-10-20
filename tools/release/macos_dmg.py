@@ -15,7 +15,7 @@ from macos_runtime import inspect_bundle, run, sha
 APP_NAME = "NextCloud Modern Talk.app"
 VOLUME_NAME = "NextCloud Modern Talk"
 ICON = "assets/macos/AppIcon.icns"
-BACKGROUND = "assets/macos/dmg-background.png"
+BACKGROUND = "assets/macos/dmg-background.tiff"
 
 
 def artwork(root, stage, temporary):
@@ -32,7 +32,7 @@ def artwork(root, stage, temporary):
                  "--out", icons / filename])
     (stage / ICON).parent.mkdir(parents=True, exist_ok=True)
     run(["iconutil", "--convert", "icns", "--output", stage / ICON, icons])
-    shutil.copyfile(work / "background.png", stage / BACKGROUND)
+    shutil.copyfile(work / "background.tiff", stage / BACKGROUND)
 
 
 def file_inventory(root):
@@ -150,7 +150,7 @@ def create(app, output):
         shutil.copytree(app, contents / APP_NAME)
         (contents / "Applications").symlink_to("/Applications")
         (contents / ".background").mkdir()
-        shutil.copyfile(app / "Contents/Resources" / BACKGROUND, contents / ".background/background.png")
+        shutil.copyfile(app / "Contents/Resources" / BACKGROUND, contents / macos_layout.BACKGROUND)
         image = temporary / "writable.dmg"
         # HFS+ supports Finder metadata and the familiar drag-to-Applications
         # target; the delivered image is compressed read-only UDZO.
@@ -173,7 +173,7 @@ def create(app, output):
                 raise ValueError("Missing Applications drag target")
             if file_inventory(mount / APP_NAME) != expected:
                 raise ValueError("Disk-image application differs from updater ZIP input")
-            if sha(mount / ".background/background.png") != sha(app / "Contents/Resources" / BACKGROUND):
+            if sha(mount / macos_layout.BACKGROUND) != sha(app / "Contents/Resources" / BACKGROUND):
                 raise ValueError("Disk-image background differs from source-bound artwork")
             finder(mount)
             # Inspect the persisted layout and its native background identity

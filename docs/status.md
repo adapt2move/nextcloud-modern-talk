@@ -1,8 +1,8 @@
 # Current implementation and limits
 
 The native client connects accounts, conversations, messages, files, settings,
-background activity and audio/video calls. [Alpha notes](alpha.md) describe the
-installable profile; the [feature inventory](compatibility/feature-inventory.md)
+background activity and audio/video calls. The [installation guide](install.md)
+and [known limitations](limitations.md) describe the installable profile; the [feature inventory](compatibility/feature-inventory.md)
 separates implemented paths from remaining parity work.
 
 ## Connected application paths

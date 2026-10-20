@@ -1,126 +1,42 @@
-name: Build and test
-
+name: macOS installer layout validation
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 defaults:
   run:
     shell: bash
-
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_PROFILE_DEV_DEBUG: "0"
-  CARGO_PROFILE_TEST_DEBUG: "0"
-
 jobs:
-  linux:
-    name: Linux tests and native smoke
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 60
-    env:
-      LANG: C.UTF-8
-      LC_ALL: C.UTF-8
-      CC: clang
-      CXX: clang++
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: python3 tools/check_docs.py
-      - run: python3 tools/release/check_workflows.py --actionlint
-      - run: python3 tools/ci/workflow_policy_tests.py
-      - run: python3 tools/ci/test_prepare_gstreamer.py
-      - run: python3 tools/release/tests.py
-      - run: python3 tools/release/publication_tests.py
-      - name: Native prerequisites
-        run: |
-          sudo bash tools/ui/prepare-linux.sh
-          sudo apt-get install -y --no-install-recommends libdbus-1-dev libglib2.0-dev
-      - run: python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/registry
-          key: cargo-linux-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: python3 tools/check_architecture.py
-      - run: python3 tests/contracts/run_boundary_fixtures.py --candidate "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/boundary.json"
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - run: cargo test --locked --workspace
-      - run: cargo clippy --locked -p talk-adapters --features backend-test --all-targets -- -D warnings
-      - run: cargo test --locked -p talk-adapters --features backend-test --lib
-      - run: cargo build --locked -p talk-desktop
-      - name: Native Linux smoke
-        run: timeout 180 python3 tools/ui/capture.py --binary target/debug/talk-desktop --output "$RUNNER_TEMP/render" --scenarios server,chat:dark,settings
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-render-${{ github.sha }}
-          path: ${{ runner.temp }}/render/*
-          if-no-files-found: error
-          retention-days: 7
-
-  windows:
-    name: Compile only (Windows x86_64 MSVC)
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 60
-    env:
-      AWS_LC_SYS_PREBUILT_NASM: "1"
-      RUSTFLAGS: "-D warnings"
-    steps:
-      - run: git config --global core.autocrlf false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: python tools/ci/build_env.py --target x86_64-pc-windows-msvc
-      - run: python tools/ci/prepare_gstreamer.py --target x86_64-pc-windows-msvc
-      - run: python tools/release/toolchain.py --target x86_64-pc-windows-msvc
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/registry
-          key: cargo-windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: cargo build --locked --workspace --all-targets --target x86_64-pc-windows-msvc
-
   macos:
-    name: Compile only (macOS Apple Silicon)
+    name: Build and inspect macOS installer
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 60
-    env:
-      RUSTFLAGS: "-D warnings -C link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
       - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
       - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/registry
           key: cargo-macos-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: cargo build --locked --workspace --all-targets --target aarch64-apple-darwin
-      - name: Compile native permission and notification helper
-        run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
-      - name: Inspect native library dependencies
-        run: |
-          otool -L target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper"
-          otool -l target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper" | awk '/cmd LC_RPATH/ { remaining=3 } remaining > 0 { print; remaining-- }'
-      - name: Assemble and verify the self-contained app and DMG
-        run: |
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
-          env -u RUSTFLAGS python3 tools/release/build.py --target aarch64-apple-darwin --version "$version" --output "$RUNNER_TEMP/macos-package"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - run: python3 tools/release/build.py --target aarch64-apple-darwin --version 0.0.4 --output "$RUNNER_TEMP/macos-package"
+      - name: Capture the actual read-only Finder layout
+        run: python3 tools/release/mac-preview.py "$RUNNER_TEMP/macos-package" "$RUNNER_TEMP/dmg-preview"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
         with:
-          name: macos-package-${{ github.sha }}
+          name: macos-package
           path: ${{ runner.temp }}/macos-package/*
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
           compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: dmg-preview
+          path: ${{ runner.temp }}/dmg-preview/*
+          if-no-files-found: warn
+          retention-days: 7

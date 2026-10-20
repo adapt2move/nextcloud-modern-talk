@@ -4,7 +4,7 @@ A native desktop client for teams using NextCloud Talk, built in Rust with GPUI 
 
 The target server families are **NextCloud 34 / Talk 24** and **NextCloud 35 / Talk 25**. Availability depends on server capabilities, configuration and permissions. macOS is the first product target; Linux is a development and packaging target.
 
-**v0.0.3 alpha:** browser-based account connection, conversation settings, messaging, previews, polls, background activity, audio/video calls and automatic update downloads. The macOS DMG includes its media runtime; no separate GStreamer installation is needed. The native UI uses Lucide icons, contextual chat actions and subtle transitions that respect Reduce Motion. Download the [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases/tag/v0.0.3) and read its [installation instructions and limits](docs/alpha.md). Full official-client parity is still in progress.
+The alpha includes browser-based account connection, conversation settings, messaging, previews, polls, background activity, audio/video calls and automatic update downloads. The macOS DMG includes its media runtime; no separate GStreamer installation is needed. The native UI uses Lucide icons, contextual chat actions and subtle transitions that respect Reduce Motion. Download an [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases) and follow the [installation guide](docs/install.md), including the macOS first-launch approval. See the [changelog](docs/changelog.md) for recent changes and [known limitations](docs/limitations.md) for remaining gaps.
 
 ![Native chat with favorites, image previews and fictional team messages](docs/assets/chat.png)
 

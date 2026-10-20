@@ -2,7 +2,7 @@
 
 Target families are NextCloud 34.x / Talk 24.x and NextCloud 35.x / Talk 25.x. Account and messaging integration has been exercised against 34.0.5 / 24.0.6 and 35.0.2 / 25.0.6. This establishes the tested operations on those deployments, not full client parity or support for every optional backend. The [research baseline](baselines-and-sources.md) and executable tests have different purposes.
 
-Read the [feature inventory](feature-inventory.md) for implementation scope, the [alpha notes](../alpha.md) for user-facing limits and the [test matrix](test-matrix.md) for required scenarios. Product behavior is canonical in [product/README.md](../product/README.md).
+Read the [feature inventory](feature-inventory.md) for implementation scope, the [known limitations](../limitations.md) for user-facing limits and the [test matrix](test-matrix.md) for required scenarios. Product behavior is canonical in [product/README.md](../product/README.md).
 
 ## COMP-001
 

@@ -488,8 +488,8 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.composer_context(cx))
-            .child(self.composer_more_menu(cx))
+            .children(self.composer_context(cx))
+            .children(self.composer_more_menu(cx))
             .child(
                 div()
                     .min_h(px(96.))

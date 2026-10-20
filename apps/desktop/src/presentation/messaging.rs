@@ -1254,7 +1254,7 @@ impl Desktop {
                     .child(
                         div()
                             .text_size(self.sp(13.))
-                            .font_weight(FontWeight::BOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .child(m.author.as_str().to_owned()),
                     )
                     .when(m.own, |d| d.child(self.hint(self.l("Du"))))
@@ -1823,14 +1823,15 @@ impl Desktop {
                     .map(|id| scoped_id("compose-mode", context, 2, id))
             })
     }
-    pub(super) fn composer_context(&self, cx: &Context<Self>) -> Div {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(self.download_status(cx));
+    pub(super) fn composer_context(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+        // The composer owns row spacing; absent context must not leave empty flex items.
+        let mut rows: Vec<_> = self
+            .download_status(cx)
+            .into_iter()
+            .map(|status| status.into_any_element())
+            .collect();
         let Some(context) = self.snapshot.selected else {
-            return body;
+            return rows;
         };
         let target = self.drafts.target(context);
         if let Some(motion_id) = self.compose_motion_id(context) {
@@ -1841,7 +1842,7 @@ impl Desktop {
             } else {
                 "Antwort auf eine Nachricht"
             };
-            body = body.child(
+            rows.push(
                 self.reveal_from_action(
                     motion_id,
                     div()
@@ -1857,11 +1858,12 @@ impl Desktop {
                             LocalAction::Message(Action::CancelCompose),
                             cx,
                         )),
-                ),
+                )
+                .into_any_element(),
             );
         }
-        body = body.when(self.composer_active, |d| {
-            d.child(
+        if self.composer_active {
+            rows.push(
                 div()
                     .flex()
                     .flex_wrap()
@@ -1901,12 +1903,13 @@ impl Desktop {
                         self.message_available(MessageFeature::Reminders),
                         LocalAction::Message(Action::Command(MessageAction::Reminders)),
                         cx,
-                    )),
-            )
-        });
+                    ))
+                    .into_any_element(),
+            );
+        }
         if let Some(panel) = &self.snapshot.message_panel {
             if let Some(file) = &panel.uploaded {
-                body = body.child(
+                rows.push(
                     div()
                         .p_3()
                         .rounded_lg()
@@ -1930,11 +1933,12 @@ impl Desktop {
                             true,
                             LocalAction::Message(Action::Command(MessageAction::DismissUpload)),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
             }
             if panel.file_saved.is_some() {
-                body = body.child(self.hint(self.l("Datei gespeichert.")));
+                rows.push(self.hint(self.l("Datei gespeichert.")).into_any_element());
             }
             let show_mentions = self.composer_active
                 && self
@@ -1949,16 +1953,19 @@ impl Desktop {
                 .take(if show_mentions { 8 } else { 0 })
                 .enumerate()
             {
-                body = body.child(self.button(
-                    ("mention-choice", index),
-                    mention.label.as_str().to_owned(),
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::Message(Action::InsertMention(
-                        mention.identifier.as_str().to_owned(),
-                    )),
-                    cx,
-                ));
+                rows.push(
+                    self.button(
+                        ("mention-choice", index),
+                        mention.label.as_str().to_owned(),
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Message(Action::InsertMention(
+                            mention.identifier.as_str().to_owned(),
+                        )),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
             }
             for scheduled in panel
                 .scheduled
@@ -1966,7 +1973,7 @@ impl Desktop {
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
             {
-                body = body.child(
+                rows.push(
                     div()
                         .flex()
                         .items_center()
@@ -1981,7 +1988,8 @@ impl Desktop {
                                 scheduled.id,
                             ))),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
             }
             for reminder in panel
@@ -1990,7 +1998,7 @@ impl Desktop {
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
             {
-                body = body.child(
+                rows.push(
                     div()
                         .flex()
                         .items_center()
@@ -2006,27 +2014,34 @@ impl Desktop {
                                 timestamp: None,
                             })),
                             cx,
-                        )),
+                        ))
+                        .into_any_element(),
                 );
             }
         }
         if self.message_ui.time_target.is_some() {
-            body = body
-                .child(self.hint(self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM")))
-                .child(self.message_ui.time_input.clone())
-                .child(self.button(
+            rows.extend([
+                self.hint(self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM"))
+                    .into_any_element(),
+                self.message_ui.time_input.clone().into_any_element(),
+                self.button(
                     "submit-message-time",
                     "Auf dem Server speichern",
                     ButtonStyle::Secondary,
                     true,
                     LocalAction::Message(Action::SubmitTime),
                     cx,
-                ))
-                .when(self.message_ui.time_error, |d| {
-                    d.child(self.hint(self.l("Datum und Zeitzonenversatz sind ungültig.")))
-                });
+                )
+                .into_any_element(),
+            ]);
+            if self.message_ui.time_error {
+                rows.push(
+                    self.hint(self.l("Datum und Zeitzonenversatz sind ungültig."))
+                        .into_any_element(),
+                );
+            }
         }
-        body
+        rows
     }
 }
 fn message_actions_allowed(message: &MessageView) -> bool {

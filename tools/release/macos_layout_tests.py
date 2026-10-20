@@ -64,12 +64,12 @@ class PersistedLayoutTests(unittest.TestCase):
     def test_canonical_writer_roundtrips_real_library_records_and_serialized_alias(self):
         from ds_store import DSStore
         from mac_alias import Alias, VolumeInfo, TargetInfo
-        background = self.root / ".background/background.png"
+        background = self.root / ".background/background.tiff"
         background.parent.mkdir()
         background.write_bytes(b"SYNTHETIC background")
         created = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
         alias = Alias(volume=VolumeInfo("SYNTHETIC", created, b"H+", 0, 0, b"\0\0"),
-                      target=TargetInfo(0, "background.png", 2, 3, created, b"\0" * 4, b"\0" * 4))
+                      target=TargetInfo(0, "background.tiff", 2, 3, created, b"\0" * 4, b"\0" * 4))
         # Only filesystem metadata discovery is native. Both serialization and
         # the DS_Store writer/reader are the actual pinned libraries.
         with patch.object(Alias, "for_file", return_value=alias) as discover:
@@ -77,10 +77,10 @@ class PersistedLayoutTests(unittest.TestCase):
         discover.assert_called_once_with(str(background))
         reply = layout.read_layout(self.path)
         saved_alias = Alias.from_bytes(base64.b64decode(reply["background_alias"]))
-        self.assertEqual(saved_alias.target.filename, "background.png")
+        self.assertEqual(saved_alias.target.filename, "background.tiff")
         self.assertEqual(saved_alias.volume.name, "SYNTHETIC")
         with DSStore.open(str(self.path), "r") as store:
-            self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{120, 120}, {780, 480}}")
+            self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{120, 120}, {780, 544}}")
             for name in ("ShowToolbar", "ShowSidebar", "ShowStatusBar", "ShowTabView", "ShowPathbar"):
                 self.assertIs(store["."]["bwsp"][name], False)
             self.assertEqual(store["."]["icvl"], (b"type", b"icnv"))
@@ -98,7 +98,7 @@ class PersistedLayoutTests(unittest.TestCase):
                 layout.write_layout(self.root)
             discover.assert_not_called()
         (self.root / ".background").mkdir()
-        (self.root / ".background/background.png").write_bytes(b"SYNTHETIC background")
+        (self.root / ".background/background.tiff").write_bytes(b"SYNTHETIC background")
         victim = self.root / "victim"
         victim.write_bytes(b"must remain unchanged")
         self.path.symlink_to(victim)

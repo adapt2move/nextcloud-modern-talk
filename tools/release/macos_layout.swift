@@ -3,10 +3,38 @@
 // https://developer.apple.com/documentation/corefoundation/cfurlcreatebyresolvingbookmarkdata(_:_:_:_:_:_:_:)
 import Foundation
 import CoreFoundation
+import ImageIO
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((String(message.prefix(1000)) + "\n").utf8))
     exit(1)
+}
+
+func inspectBackground(_ url: URL) -> [String: Any] {
+    // Inspect the file reached by the persisted alias, after UDZO conversion
+    // and read-only remount. Pixel count alone cannot establish Retina sizing:
+    // both TIFF representations must describe the same 780×480-point canvas.
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let type = CGImageSourceGetType(source), type as String == "public.tiff",
+          CGImageSourceGetCount(source) == 2 else {
+        fail("DMG background must be a TIFF with exactly 1x and 2x representations")
+    }
+    var representations = [[String: Any]]()
+    for index in 0..<2 {
+        let scale = index + 1
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as NSDictionary?,
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              let dpiX = properties[kCGImagePropertyDPIWidth] as? Double,
+              let dpiY = properties[kCGImagePropertyDPIHeight] as? Double,
+              width == 780 * scale, height == 480 * scale,
+              abs(dpiX - Double(72 * scale)) < 0.01,
+              abs(dpiY - Double(72 * scale)) < 0.01 else {
+            fail("DMG background has incorrect pixels or logical size at scale \(scale)")
+        }
+        representations.append(["pixels": [width, height], "dpi": [dpiX, dpiY]])
+    }
+    return ["format": "TIFF", "points": [780, 480], "representations": representations]
 }
 
 guard CommandLine.arguments.count == 2 else { fail("Expected mounted image directory") }
@@ -40,7 +68,8 @@ do {
         fail("Resolved background is not a bounded file URL")
     }
     let reply = try JSONSerialization.data(withJSONObject: [
-        "url": resolved.absoluteString, "stale": stale.boolValue
+        "url": resolved.absoluteString, "stale": stale.boolValue,
+        "background_image": inspectBackground(resolved)
     ], options: [.sortedKeys])
     guard reply.count <= 16384 else { fail("Resolved background reply is too large") }
     FileHandle.standardOutput.write(reply)

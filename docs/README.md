@@ -5,7 +5,9 @@ Read [current state](status.md) for limitations and [development](development.md
 | Read | Purpose |
 | --- | --- |
 | [Development](development.md) | Prerequisites, pinned toolchain, native UI entrypoint and scoped checks |
-| [Alpha notes](alpha.md) | Installation, included functionality and known limitations |
+| [Installation](install.md) | Install, approve the first macOS launch and update |
+| [Changelog](changelog.md) | Changes in the current release |
+| [Known limitations](limitations.md) | Platform and feature gaps |
 | [Backend lab](backend-lab.md) | Disposable pinned servers, synthetic accounts and cleanup |
 | [Product](product/README.md) | Intended user outcomes and stable requirement IDs |
 | [Compatibility](compatibility/README.md) | Server families, runtime conditions, inventory and scenarios |
