@@ -47,7 +47,7 @@ def append(root, path, text):
 
 with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     scratch = Path(temporary)
-    env = dict(os.environ, CARGO_TARGET_DIR=str(scratch / 'target'), PYTHONDONTWRITEBYTECODE='1')
+    env = dict(os.environ, CARGO_TARGET_DIR=str(scratch / 'target'), PYTHONDONTWRITEBYTECODE='1', CARGO_TERM_COLOR='never')
 
     def run(root, argv):
         result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True, timeout=180)
@@ -75,6 +75,14 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
         record['lock_unchanged'] = lock_before == digest(root / 'Cargo.lock')
         record['pass'] = record['pass'] and record['lock_unchanged']
         records.append(record)
+        if not record['pass']:
+            # Keep the actionable failure in CI logs even when later artifact
+            # upload steps cannot run. The JSON receipt retains the full output.
+            print('FAILED fixture:', name, flush=True)
+            for command in (checker, record.get('compiler')):
+                if command:
+                    print('command:', command['argv'], 'exit:', command['exit_code'], flush=True)
+                    print(command['stdout'][-12000:], command['stderr'][-12000:], flush=True)
 
     case('baseline')
     case('positive-consumer', lambda root: (root / 'apps/bootstrap/src/presentation.rs').write_text(positive), compile_positive=True)

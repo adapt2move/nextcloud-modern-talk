@@ -29,7 +29,16 @@ def install(target):
     mac = target == "aarch64-apple-darwin"
     if platform.system() != ("Darwin" if mac else "Windows"):
         raise ValueError("Install only on the matching native build host")
-    destination = Path("/Library/Frameworks/GStreamer.framework/Versions/1.0") if mac else Path(os.environ["RUNNER_TEMP"]) / "gstreamer"
+    install_dir = Path("/Library/Frameworks/GStreamer.framework/Versions/1.0") if mac else Path(os.environ["RUNNER_TEMP"]) / "gstreamer"
+    # Cerbero 1.26.11 adds Version/Architecture below INSTALLDIR; SDKROOTDIR
+    # is the resulting SDK prefix, not INSTALLDIR itself. See upstream:
+    # https://gitlab.freedesktop.org/gstreamer/cerbero/-/blob/1.26.11/cerbero/packages/wix.py#L581
+    destination = install_dir if mac else install_dir / "1.0" / "msvc_x86_64"
+    log_dir = None
+    if not mac:
+        # Keep MSI logs outside the temporary download directory on failure.
+        log_dir = Path(os.environ["RUNNER_TEMP"]) / "gstreamer-installer-logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
     url, packages = PACKAGES[target]
     with tempfile.TemporaryDirectory(prefix="gstreamer-sdk-") as temp:
         for name, expected in packages:
@@ -46,13 +55,19 @@ def install(target):
             if mac:
                 command = ["sudo", "installer", "-pkg", str(path), "-target", "/"]
             else:
-                command = ["msiexec", "/i", str(path), "/qn", "/norestart", "ADDLOCAL=ALL", "INSTALLDIR=" + str(destination)]
+                log_path = log_dir / (name + ".log")
+                command = ["msiexec", "/i", str(path), "/qn", "/norestart", "/L*v", str(log_path),
+                           "ADDLOCAL=ALL", "INSTALLDIR=" + str(install_dir)]
+                print(f"Installing {name}; SDK root: {destination}; MSI log: {log_path}", flush=True)
             result = subprocess.run(command, timeout=900)
             if result.returncode not in (0, 3010):
-                raise RuntimeError("GStreamer SDK installer failed")
+                detail = "" if mac else f"; MSI log: {log_path}"
+                raise RuntimeError(f"GStreamer SDK installer {name} exited {result.returncode}{detail}")
     binary = destination / "bin"
-    if not (destination / "lib/pkgconfig/gstreamer-1.0.pc").is_file():
-        raise ValueError("Installed SDK has no GStreamer pkg-config file")
+    pkg_config = destination / "lib/pkgconfig/gstreamer-1.0.pc"
+    if not pkg_config.is_file():
+        detail = "" if mac else f"; MSI logs: {log_dir}"
+        raise ValueError(f"Installed SDK has no GStreamer pkg-config file at {pkg_config}{detail}")
     with Path(os.environ["GITHUB_PATH"]).open("a") as output:
         output.write(str(binary) + "\n")
     with Path(os.environ["GITHUB_ENV"]).open("a") as output:

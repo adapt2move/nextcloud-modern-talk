@@ -312,6 +312,7 @@ pub(super) mod faults {
         pub settled: std::sync::atomic::AtomicUsize,
         gates: Mutex<std::collections::VecDeque<Arc<Gate>>>,
         replies: Mutex<Option<Arc<ReplyGate>>>,
+        #[cfg(target_os = "linux")]
         preflight: Mutex<Option<Arc<Gate>>>,
         suppression: Mutex<Option<Arc<Gate>>>,
     }
@@ -360,6 +361,7 @@ pub(super) mod faults {
                 gate.wait().await;
             }
         }
+        #[cfg(target_os = "linux")]
         pub fn arm_preflight(&self) -> Arc<Gate> {
             let gate = Arc::new(Gate::default());
             assert!(
@@ -371,6 +373,7 @@ pub(super) mod faults {
             );
             gate
         }
+        #[cfg(target_os = "linux")]
         pub fn after_preflight(&self) -> Option<Completion> {
             let gate = self.preflight.lock().unwrap().take();
             gate.map(Gate::wait)
