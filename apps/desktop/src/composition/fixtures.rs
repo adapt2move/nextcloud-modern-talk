@@ -812,6 +812,7 @@ pub struct DevelopmentPort {
     uncertain: bool,
     pending: bool,
     intents: u8,
+    chat_ux_send_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
     probe_step: u8,
@@ -848,6 +849,7 @@ impl DevelopmentPort {
             uncertain: matches!(scenario, Some("uncertain" | "history-uncertain")),
             pending: matches!(scenario, Some("pending" | "history-pending")),
             intents: 0,
+            chat_ux_send_diagnostics: 0,
         }
     }
 }
@@ -858,7 +860,7 @@ impl NativeDesktopPort for DevelopmentPort {
         }
         // This sink consumes synchronously; a bounded counter is diagnostic, no intent backlog/log.
         self.intents = self.intents.saturating_add(1);
-        // At most 32 diagnostics in explicit development mode: only local IDs
+        // At most 32 generic admission diagnostics: only local IDs
         // and input lengths, never draft content, credentials or backend data.
         if self.intents <= 32 {
             // Explicit fixture-only observation of every port admission attempt.
@@ -892,17 +894,6 @@ impl NativeDesktopPort for DevelopmentPort {
                     body.as_str().len(),
                     body.as_str().split('\n').count()
                 ),
-                UiIntent::Message {
-                    context,
-                    action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
-                    ..
-                } if self.chat_ux => println!(
-                    "UI_CHAT_UX send room={} bytes={} reply={:?} thread={:?}",
-                    context.conversation.local,
-                    body.as_str().len(),
-                    target.reply_to,
-                    target.thread,
-                ),
                 UiIntent::Legacy(UserIntent::AcceptDirect { call, .. }) => {
                     println!("UI_INTENT accept-direct room={}", call.conversation.local)
                 }
@@ -923,6 +914,25 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
                 _ => (),
             }
+        }
+        // Content probes can exhaust the general quota before a user sends.
+        // Reserve four send diagnostics for the explicit chat interaction fixture.
+        if self.chat_ux
+            && self.chat_ux_send_diagnostics < 4
+            && let UiIntent::Message {
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
+                ..
+            } = &intent
+        {
+            self.chat_ux_send_diagnostics += 1;
+            println!(
+                "UI_CHAT_UX send room={} bytes={} reply={:?} thread={:?}",
+                context.conversation.local,
+                body.as_str().len(),
+                target.reply_to,
+                target.thread,
+            );
         }
         match intent {
             UiIntent::Content {

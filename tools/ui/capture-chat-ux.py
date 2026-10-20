@@ -165,6 +165,18 @@ def main():
             events.append({'wheel': button, 'count': count})
             move()
 
+        def scroll_history_to_end(data):
+            # The attachment preview can put row 4 below the initial viewport.
+            # Named focus diagnostics identify the action, not its message.
+            for _ in range(4):
+                if 'at_bottom=true' in data['motion']:
+                    break
+                wheel(data, 5, 8)
+                data = diagnostic()
+            check('history-at-end-before-canonical-message-actions',
+                  'at_bottom=true' in data['motion'], data)
+            return data
+
         try:
             move()
             initial = image('initial-no-hover')
@@ -290,19 +302,30 @@ def main():
                       [pixels(first), pixels(settled), settled['diagnostics']['hover']])
                 move()
                 click_composer(settled['diagnostics'])
+                scroll_history_to_end(diagnostic())
                 menu = focus_named('message-menu', backwards=True)
                 image('message-menu-focus', menu)
                 key('Return')
                 expanded = image('message-menu-open')
                 check('message-menu-opens-for-canonical-message',
-                      'menu=Some(' in expanded['diagnostics']['chat'], expanded['diagnostics'])
+                      'menu=Some(4)' in expanded['diagnostics']['chat'], expanded['diagnostics'])
                 key('Return')
                 reply = focus_named('message-reply', backwards=True)
                 image('reply-focus', reply)
                 x, y, width, height = bounds(reply, 'focus')
-                click_composer(reply)
+                # Clear action focus without opening the composer's focused
+                # toolbar, which moves this bottom-anchored message upwards.
+                left, top, _, inset, _ = header_bounds(reply)
+                move(left + 4, top + inset + 12)
+                run(['xdotool', 'click', '1'], env)
                 move()
                 hidden = image('message-controls-no-hover')
+                check('clearing-message-focus-preserves-target-geometry',
+                      'history_focused=true' in hidden['diagnostics']['state']
+                      and bounds(reply, 'composer_bounds')
+                      == bounds(hidden['diagnostics'], 'composer_bounds')
+                      and reply['history'] == hidden['diagnostics']['history'],
+                      [reply, hidden['diagnostics']])
                 move(x+width/2, y+height/2)
                 hovered = image('message-controls-hover')
                 check('hover-keeps-message-and-composer-layout',

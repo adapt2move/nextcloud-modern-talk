@@ -2,6 +2,7 @@
 // Run only by the native release builder; never part of the shipped runtime.
 import AppKit
 import CoreText
+import ImageIO
 
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else { fatalError("Expected output directory and Google Sans font") }
@@ -53,8 +54,7 @@ func bitmap(_ width: Int, _ height: Int, _ scale: Int = 1,
                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                  isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
                                  bitsPerPixel: 0)!
-    // AppKit scales this context from points to pixels. Setting the point size
-    // before creating it also writes 72/144 dpi into the two TIFF representations.
+    // AppKit scales this context from points to pixels using the point size.
     // Do not scale the context again or enlarge an already rasterized 1x image.
     // https://developer.apple.com/library/archive/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/CapturingScreenContents/CapturingScreenContents.html
     bitmap.size = NSSize(width: CGFloat(width), height: CGFloat(height))
@@ -115,8 +115,30 @@ func drawBackground() {
     text("Drag the app into Applications to install.", 214, 105, 15, 0x44536B)
     text("macOS · Apple Silicon", 315, 77, 11, 0x8C97A7)
 }
-// Both representations describe the same 780×480-point canvas. Finder chooses
-// the appropriate pixels for the display; a lone 2x PNG would change its size.
-let backgrounds = [1, 2].map { bitmap(780, 480, $0, drawBackground) }
-try NSBitmapImageRep.tiffRepresentationOfImageReps(in: backgrounds, using: .lzw, factor: 1)!
-    .write(to: output.appendingPathComponent("background.tiff"))
+// Both representations describe the same 780×480-point canvas. AppKit's TIFF
+// writer omits the resolution tags for a 72-dpi representation. Write explicit
+// ImageIO properties so the on-disk size is verifiable for both 1x and 2x.
+let backgroundURL = output.appendingPathComponent("background.tiff")
+guard let destination = CGImageDestinationCreateWithURL(
+    backgroundURL as CFURL, "public.tiff" as CFString, 2, nil
+) else { fatalError("Could not create DMG background TIFF") }
+for scale in [1, 2] {
+    guard let pixels = bitmap(780, 480, scale, drawBackground).cgImage else {
+        fatalError("Could not render DMG background at scale \(scale)")
+    }
+    let dpi = 72 * scale
+    let properties: [String: Any] = [
+        kCGImagePropertyDPIWidth as String: dpi,
+        kCGImagePropertyDPIHeight as String: dpi,
+        kCGImagePropertyTIFFDictionary as String: [
+            kCGImagePropertyTIFFXResolution as String: dpi,
+            kCGImagePropertyTIFFYResolution as String: dpi,
+            kCGImagePropertyTIFFResolutionUnit as String: 2, // inches
+            kCGImagePropertyTIFFCompression as String: 5 // lossless LZW
+        ]
+    ]
+    CGImageDestinationAddImage(destination, pixels, properties as CFDictionary)
+}
+guard CGImageDestinationFinalize(destination) else {
+    fatalError("Could not finalize DMG background TIFF")
+}

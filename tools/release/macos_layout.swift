@@ -22,15 +22,20 @@ func inspectBackground(_ url: URL) -> [String: Any] {
     var representations = [[String: Any]]()
     for index in 0..<2 {
         let scale = index + 1
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as NSDictionary?,
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              let dpiX = properties[kCGImagePropertyDPIWidth] as? Double,
-              let dpiY = properties[kCGImagePropertyDPIHeight] as? Double,
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as NSDictionary? else {
+            fail("DMG background metadata is unavailable at scale \(scale)")
+        }
+        let width = properties[kCGImagePropertyPixelWidth] as? Int
+        let height = properties[kCGImagePropertyPixelHeight] as? Int
+        let dpiX = properties[kCGImagePropertyDPIWidth] as? Double
+        let dpiY = properties[kCGImagePropertyDPIHeight] as? Double
+        guard let width, let height, let dpiX, let dpiY,
               width == 780 * scale, height == 480 * scale,
               abs(dpiX - Double(72 * scale)) < 0.01,
               abs(dpiY - Double(72 * scale)) < 0.01 else {
-            fail("DMG background has incorrect pixels or logical size at scale \(scale)")
+            fail("DMG background has incorrect pixels or logical size at scale \(scale): "
+                 + "pixels \(String(describing: width)) × \(String(describing: height)), "
+                 + "dpi \(String(describing: dpiX)) × \(String(describing: dpiY))")
         }
         representations.append(["pixels": [width, height], "dpi": [dpiX, dpiY]])
     }
