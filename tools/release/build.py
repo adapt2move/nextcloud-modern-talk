@@ -17,6 +17,33 @@ import tomllib
 
 from package import TARGETS, assemble, sha, relative, regular
 
+MAC_GSTREAMER_LIB = Path("/Library/Frameworks/GStreamer.framework/Versions/1.0/lib")
+
+
+def macos_linkage(linked, load_commands, runtime_lib=MAC_GSTREAMER_LIB):
+    """Resolve non-system install names against the declared runtime, not Homebrew.
+
+    The official GStreamer pkg-config libraries use @rpath/lib*.dylib rather
+    than the framework install name. A matching name alone is insufficient:
+    the executable must carry the runtime search path and the library must
+    exist inside that verified framework installation.
+    https://gstreamer.freedesktop.org/documentation/installing/on-mac-osx.html
+    """
+    rpaths = re.findall(r"\bcmd LC_RPATH\s+cmdsize \d+\s+path (.+?) \(offset \d+\)", load_commands)
+    libraries = [line.strip() for line in linked]
+    for line in libraries:
+        name = line.split(" (compatibility version ", 1)[0]
+        if ".." not in Path(name).parts and name.startswith(("/System/Library/", "/usr/lib/")):
+            continue
+        if name.startswith("@rpath/") and str(runtime_lib) in rpaths:
+            basename = name.removeprefix("@rpath/")
+            if re.fullmatch(r"lib[a-zA-Z0-9_.+-]+\.dylib", basename):
+                library = runtime_lib / basename
+                if library.is_file() and library.resolve().is_relative_to(runtime_lib.resolve()):
+                    continue
+        raise ValueError("Undeclared or unresolved macOS dynamic library: " + line)
+    return {"libraries": libraries, "rpaths": rpaths}
+
 
 def run(argv, root, env=None, timeout=60):
     try:
@@ -206,6 +233,9 @@ def build(root, output, target, version):
             if run(["uname", "-sm"], root) != "Darwin arm64":
                 raise ValueError("macOS arm64 package must be built on native macOS arm64")
             env["MACOSX_DEPLOYMENT_TARGET"] = "15.7"
+            # pkg-config supplies -L for linking but not the runtime search path.
+            # Pin the same external framework location documented by the bundle.
+            env["RUSTFLAGS"] = "-C link-arg=-Wl,-rpath," + str(MAC_GSTREAMER_LIB)
             for tool in ("metal", "metallib"):
                 run(["xcrun", "--sdk", "macosx", "--find", tool], root)
         elif run(["uname", "-sm"], root) != "Linux x86_64":
@@ -260,13 +290,12 @@ def build(root, output, target, version):
                 "sha256": sha(stage / "bin/talk-native-helper"),
                 "minimum_system_version": "15.7",
             }
-            linked = run(["otool", "-L", str(executable)], root).splitlines()[1:]
-            linked += run(["otool", "-L", str(stage / "bin/talk-native-helper")], root).splitlines()[1:]
-            allowed = ("/System/Library/", "/usr/lib/", "/Library/Frameworks/GStreamer.framework/", "@rpath/GStreamer.framework/")
-            undeclared = [line.strip() for line in linked if not line.strip().startswith(allowed)]
-            if undeclared:
-                raise ValueError("Undeclared macOS dynamic libraries:\n" + "\n".join(undeclared))
-            build_info["linked_libraries"] = [line.strip() for line in linked]
+            build_info["native_linkage"] = {}
+            for binary in (executable, stage / "bin/talk-native-helper"):
+                linked = run(["otool", "-L", str(binary)], root).splitlines()[1:]
+                commands = run(["otool", "-l", str(binary)], root)
+                build_info["native_linkage"][binary.name] = macos_linkage(linked, commands)
+            build_info["rustflags"] = env["RUSTFLAGS"]
             build_info["required_runtime"] = {
                 "name": "GStreamer official runtime framework", "version": "1.28.4",
                 "url": "https://gstreamer.freedesktop.org/data/pkg/osx/1.28.4/gstreamer-1.0-1.28.4-universal.pkg",

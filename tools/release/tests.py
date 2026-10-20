@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from build import dependency_notices, notice_supplement
+from build import dependency_notices, macos_linkage, notice_supplement
 from package import REQUIRED_NOTICES, assemble, sha, validate
 
 
@@ -45,6 +45,42 @@ def fixture(path, target="x86_64-unknown-linux-gnu"):
 
 def save(path, spec):
     (path / "input.json").write_text(json.dumps(spec, indent=2) + "\n")
+
+
+class MacLinkageFixtures(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="nmt-mac-link-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.runtime = Path(self.temp.name) / "GStreamer.framework/lib"
+        self.runtime.mkdir(parents=True)
+        self.library = self.runtime / "libgstapp-1.0.0.dylib"
+        self.library.write_bytes(b"Synthetic library, not a Mach-O executable")
+        self.linked = ["\t@rpath/libgstapp-1.0.0.dylib (compatibility version 2805.0.0, current version 2805.0.0)",
+                       "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"]
+        self.commands = f"Load command 1\n          cmd LC_RPATH\n      cmdsize 112\n         path {self.runtime} (offset 12)\n"
+
+    def test_runtime_library_requires_both_installed_file_and_executable_runpath(self):
+        result = macos_linkage(self.linked, self.commands, self.runtime)
+        self.assertEqual(result["rpaths"], [str(self.runtime)])
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            macos_linkage(self.linked, "", self.runtime)
+        self.library.unlink()
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            macos_linkage(self.linked, self.commands, self.runtime)
+
+    def test_other_installations_and_path_escapes_are_rejected(self):
+        for name in ("/opt/homebrew/lib/libgstapp-1.0.0.dylib", "@rpath/../libgstapp-1.0.0.dylib",
+                     "@rpath/libunknown.dylib", "/usr/lib/../../tmp/libunknown.dylib"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "unresolved"):
+                macos_linkage([name + " (compatibility version 1.0.0, current version 1.0.0)"], self.commands, self.runtime)
+
+    def test_library_symlink_cannot_leave_the_declared_runtime(self):
+        outside = Path(self.temp.name) / "outside.dylib"
+        outside.write_bytes(b"Synthetic external library")
+        self.library.unlink()
+        self.library.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            macos_linkage(self.linked, self.commands, self.runtime)
 
 
 class DependencyNoticeFixtures(unittest.TestCase):
