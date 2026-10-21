@@ -531,6 +531,206 @@ fn denial_and_logout_retire_tickets_without_changing_other_accounts() {
 }
 
 #[test]
+fn obsolete_room_denial_cannot_erase_a_newer_successful_observation() {
+    for error in [ErrorKind::PermissionDenied, ErrorKind::NotFound] {
+        let mut model = super::super::tests::model();
+        let key = context(1, 1, 1, 1);
+        select(&mut model, key);
+        let old = admit(&mut model.history, key, 1, Work::History);
+        let current = admit(&mut model.history, key, 2, Work::Poll);
+        model.apply_message(
+            RequestId(2),
+            key,
+            current,
+            Work::Poll,
+            reply(
+                key,
+                current,
+                messages(
+                    key,
+                    [message(key, 7, "Current authorized content")],
+                    Some(7),
+                ),
+            ),
+        );
+        model.apply_message(
+            RequestId(1),
+            key,
+            old,
+            Work::History,
+            Err(IdentityError::Request(error)),
+        );
+        assert_eq!(model.snapshot.content, ContentState::Ready);
+        assert_eq!(
+            model.snapshot.messages.as_slice()[0].body.as_str(),
+            "Current authorized content"
+        );
+        assert_eq!(
+            model.snapshot.message_panel.as_ref().unwrap().history,
+            RemoteState::Idle
+        );
+        assert!(model.history.get(key).is_some());
+    }
+}
+
+#[test]
+fn denied_thread_or_message_context_does_not_revoke_conversation_history() {
+    for work in [Work::Thread, Work::Context(9)] {
+        let mut model = super::super::tests::model();
+        let key = context(1, 1, 1, 1);
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Readable conversation")], Some(7)),
+        );
+        model.project_history(key);
+        let operation = admit(&mut model.history, key, 2, work);
+        if work == Work::Thread {
+            model.snapshot.message_panel.as_mut().unwrap().thread_state =
+                RemoteState::Loading(RequestId(2));
+        }
+        model.apply_message(
+            RequestId(2),
+            key,
+            operation,
+            work,
+            Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+        );
+        assert_eq!(model.snapshot.content, ContentState::Ready);
+        assert_eq!(
+            model.snapshot.messages.as_slice()[0].body.as_str(),
+            "Readable conversation"
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.history, RemoteState::Idle);
+        assert_eq!(
+            panel.state,
+            RemoteState::Failed(RequestId(2), UnavailableReason::PermissionDenied)
+        );
+    }
+}
+
+#[test]
+fn thread_completion_settles_only_its_current_request_and_retains_retry_content() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_state = RemoteState::Loading(RequestId(1));
+    let operation = admit(&mut model.history, key, 1, Work::Thread);
+    model.apply_message(
+        RequestId(1),
+        key,
+        operation,
+        Work::Thread,
+        reply(
+            key,
+            operation,
+            messages(key, [message(key, 8, "Thread reply")], None),
+        ),
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_state,
+        RemoteState::Idle
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .len(),
+        1
+    );
+    model.snapshot.message_panel.as_mut().unwrap().thread_state =
+        RemoteState::Loading(RequestId(2));
+    let failure = admit(&mut model.history, key, 2, Work::Thread);
+    model.apply_message(
+        RequestId(2),
+        key,
+        failure,
+        Work::Thread,
+        Err(IdentityError::Request(ErrorKind::ServerUnavailable)),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert!(matches!(
+        panel.thread_state,
+        RemoteState::Failed(RequestId(2), _)
+    ));
+    assert_eq!(panel.thread_messages.as_slice().len(), 1);
+    let stale = admit(&mut model.history, key, 3, Work::Thread);
+    model.snapshot.message_panel.as_mut().unwrap().thread_state =
+        RemoteState::Loading(RequestId(4));
+    model.apply_message(
+        RequestId(3),
+        key,
+        stale,
+        Work::Thread,
+        Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_state, RemoteState::Loading(RequestId(4)));
+    assert_eq!(panel.thread_messages.as_slice().len(), 1);
+    let deny = admit(&mut model.history, key, 4, Work::Thread);
+    model.apply_message(
+        RequestId(4),
+        key,
+        deny,
+        Work::Thread,
+        Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+    );
+    assert!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .is_empty()
+    );
+}
+
+#[test]
+fn selected_room_retry_preserves_loaded_panel_and_reopens_a_denied_read() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Retained content")], Some(7)),
+    );
+    model.project_history(key);
+    model.snapshot.message_panel.as_mut().unwrap().thread_root = Some(7);
+    // This state fixture has no worker: admission failure must still settle the
+    // retry, retain loaded content and preserve the current panel's local scope.
+    assert!(model.refresh_messages(key).is_err());
+    assert_eq!(model.snapshot.content, ContentState::Ready);
+    assert_eq!(
+        model.snapshot.messages.as_slice()[0].body.as_str(),
+        "Retained content"
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_root,
+        Some(7)
+    );
+    model.invalidate_history(key, ContentState::Denied);
+    assert!(model.refresh_messages(key).is_err());
+    assert_eq!(model.snapshot.content, ContentState::Failed);
+    assert!(model.snapshot.messages.as_slice().is_empty());
+    assert!(model.history.get(key).is_some());
+}
+
+#[test]
 fn mismatched_payload_scope_cannot_enter_an_admitted_room() {
     let mut model = super::super::tests::model();
     let a = context(1, 1, 1, 1);

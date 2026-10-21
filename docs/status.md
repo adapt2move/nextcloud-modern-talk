@@ -22,6 +22,10 @@ separates implemented paths from remaining parity work.
   incrementally; temporary network failures leave those messages readable.
   Older pages load at the upper scroll boundary. Logout, confirmed access loss
   and message expiry remove retained content.
+- Shared collection feedback distinguishes initial loading, refresh, offline,
+  failure and confirmed empty results. Refresh keeps the retained timeline
+  mounted, and explicit retry reloads the selected history. Stale failures
+  cannot erase a newer successful read; thread failures remain thread-scoped.
 - Shared content includes bounded image and document thumbnails, enlarged image
   previews, explicit Cloud web handoff and byte-based download progress. File-share
   system messages retain their attachment cards. Supported raster images can
@@ -55,6 +59,10 @@ separates implemented paths from remaining parity work.
   end after a short delay only when the reader was already there. Reduce Motion,
   including an unknown observation, suppresses decorative animation without
   delaying input or focus.
+- Text entry uses GPUI's native UTF-16 selection and marked-text contract,
+  bounded composition undo and grapheme-aware display offsets. Dialogs keep
+  deferred virtualized controls inert. Native macOS input-method and cursor
+  behavior still requires runtime qualification on macOS.
 
 ## Verification scope
 

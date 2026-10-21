@@ -77,6 +77,7 @@ impl Transport {
         });
         self.meeting_lifetime = Arc::downgrade(&lifetime);
         let fork = || Transport {
+            request_dispatched: false,
             binding: AuthenticatedBinding {
                 scope: self.binding.scope,
                 host: self.binding.host,

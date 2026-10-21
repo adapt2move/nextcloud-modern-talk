@@ -261,13 +261,15 @@ impl Client {
         self.transport.error(kind)
     }
     fn mutation_error(&self, error: Error) -> Error {
-        if matches!(
-            error.kind,
-            ErrorKind::PermissionDenied
-                | ErrorKind::NotFound
-                | ErrorKind::Conflict
-                | ErrorKind::RateLimited
-        ) {
+        if !self.transport.request_dispatched()
+            || matches!(
+                error.kind,
+                ErrorKind::PermissionDenied
+                    | ErrorKind::NotFound
+                    | ErrorKind::Conflict
+                    | ErrorKind::RateLimited
+            )
+        {
             error
         } else {
             self.error(ErrorKind::Uncertain)
@@ -430,11 +432,11 @@ impl Client {
                     ErrorKind::Uncertain
                 }));
             }
-            self.call_remote_pending = true;
             self.next_call = self
                 .next_call
                 .checked_add(1)
                 .ok_or_else(|| self.error(ErrorKind::Busy))?;
+            self.call_remote_pending = true;
         }
         if matches!(request, Request::UpdateCallFlags { .. }) && self.call_generation.is_none() {
             return Err(self.error(ErrorKind::WrongScope));
@@ -459,6 +461,15 @@ impl Client {
         if leaving_active_room {
             self.room_session = None;
         }
+        let previous_active = if matches!(request, Request::ActivateRoom(_)) {
+            Some((
+                self.active_room.clone(),
+                self.call_generation,
+                self.room_session.clone(),
+            ))
+        } else {
+            None
+        };
         if let Request::ActivateRoom(room) = &request {
             self.active_room = Some(room.clone());
             self.call_generation = None;
@@ -494,6 +505,14 @@ impl Client {
                     error
                 };
                 if error.kind != ErrorKind::Uncertain {
+                    if let Some((active_room, call_generation, room_session)) = previous_active {
+                        self.active_room = active_room;
+                        self.call_generation = call_generation;
+                        self.room_session = room_session;
+                    }
+                    if matches!(request, Request::JoinCall { .. }) {
+                        self.call_remote_pending = false;
+                    }
                     if let Request::Chat {
                         room,
                         command: chat::Command::Schedule { .. },
@@ -599,12 +618,14 @@ impl Client {
             {
                 return Err(self.error(ErrorKind::WrongScope));
             }
+        }
+        self.validate(context)
+            .map_err(|e| if mutation { self.mutation_error(e) } else { e })?;
+        if let Reply::Account(ref account) = decoded {
             self.transport
                 .bind_canonical_user(Zeroizing::new(account.id.clone()));
             self.expected_user = Some(Zeroizing::new(account.id.clone()));
         }
-        self.validate(context)
-            .map_err(|e| if mutation { self.mutation_error(e) } else { e })?;
         self.observe_rooms(&decoded)
             .map_err(|e| if mutation { self.mutation_error(e) } else { e })?;
         if create_room {

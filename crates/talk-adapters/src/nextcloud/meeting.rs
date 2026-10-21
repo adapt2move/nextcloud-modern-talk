@@ -350,6 +350,7 @@ impl NextcloudClient {
             stop,
             self.transport.network(),
             self.cancellation(),
+            self.account_rejection.clone(),
         )
         .map(CallOwner::Live)
         .map_err(|k| self.error(transport::kind(k)))

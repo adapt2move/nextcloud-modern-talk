@@ -1,18 +1,27 @@
 // Adapted from GPUI 0.2.2 examples/input.rs, Zed Industries, Apache-2.0.
 // See assets/GPUI-LICENSE-APACHE and docs/design/native-ui/dependencies.md.
 // Changes: finite UTF-8 input budget, local error, appearance/focus, corrected IME
-// replacement offsets, no key logging, bounded clipboard admission.
+// replacement/history transitions, source/display geometry, platform shortcuts,
+// no key logging, bounded clipboard admission.
 use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, SharedString, Style,
-    Subscription, Task, TextRun, Timer, UTF16Selection, UnderlineStyle, Window, WrappedLine,
-    actions, div, fill, point, prelude::*, px, relative, size,
+    App, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
+    Pixels, Point, SharedString, Style, Subscription, Task, TextRun, Timer, UTF16Selection,
+    UnderlineStyle, Window, WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
+
+mod edit;
+#[cfg(test)]
+use super::input::edit::from_utf16;
+use super::input::edit::{
+    ConcealedText, EditHistory, EditSnapshot, Insertion, range_from_utf16, replacement,
+    replacement_fits, to_utf16, word_boundary,
+};
 
 actions!(
     text_input,
@@ -43,44 +52,16 @@ actions!(
         SelectDocumentEnd,
         Undo,
         Redo,
+        WordLeft,
+        WordRight,
+        SelectWordLeft,
+        SelectWordRight,
+        DeleteWordLeft,
+        DeleteWordRight,
+        DeleteToHome,
+        DeleteToEnd,
     ]
 );
-
-// Two finite histories per user-entry widget: <= 16 × its byte limit each.
-// No history crosses set_value/reset (account/conversation projection changes).
-#[derive(Clone)]
-struct EditSnapshot {
-    text: SharedString,
-    selection: Range<usize>,
-    reversed: bool,
-}
-#[derive(Default)]
-struct EditHistory {
-    undo: Vec<EditSnapshot>,
-    redo: Vec<EditSnapshot>,
-}
-impl EditHistory {
-    fn push(list: &mut Vec<EditSnapshot>, state: EditSnapshot) {
-        if list.len() == 16 {
-            list.remove(0);
-        }
-        list.push(state);
-    }
-    fn record(&mut self, state: EditSnapshot) {
-        Self::push(&mut self.undo, state);
-        self.redo.clear();
-    }
-    fn travel(&mut self, current: EditSnapshot, redo: bool) -> Option<EditSnapshot> {
-        let (from, to) = if redo {
-            (&mut self.redo, &mut self.undo)
-        } else {
-            (&mut self.undo, &mut self.redo)
-        };
-        let previous = from.pop()?;
-        Self::push(to, current);
-        Some(previous)
-    }
-}
 
 const CARET_INTERVAL: Duration = Duration::from_millis(500);
 const CARET_TICKS: u8 = 20;
@@ -159,7 +140,7 @@ impl CaretBlink {
 }
 
 pub struct TextInput {
-    /// Ephemeral password entry. Masking preserves byte offsets used by the input contract.
+    /// Ephemeral password entry. The painted mask maps back to source graphemes.
     pub concealed: bool,
     pub interactive: bool,
     history: EditHistory,
@@ -179,6 +160,7 @@ pub struct TextInput {
     visible_rows: usize,
     pub max_visible_rows: usize,
     desired_x: Option<Pixels>,
+    prefer_previous_row: bool,
     placeholder: SharedString,
     selected_range: Range<usize>,
     selection_reversed: bool,
@@ -193,6 +175,130 @@ pub struct TextInput {
 }
 
 impl TextInput {
+    /// Draft synchronization excludes unfinished platform preedit text. A context
+    /// change may retire composition, but cannot persist its tentative spelling.
+    pub fn committed_value(&self) -> &str {
+        self.history.committed_value(&self.content)
+    }
+
+    fn apply_replacement(
+        &mut self,
+        range_utf16: Option<Range<usize>>,
+        insertion: Insertion<'_>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.interactive {
+            return;
+        }
+        let marking = matches!(insertion, Insertion::Mark { .. });
+        let before = self.edit_snapshot();
+        let Some(next) = replacement(
+            &before,
+            self.marked_range.as_ref(),
+            range_utf16,
+            insertion,
+            self.limit,
+            self.multiline,
+        ) else {
+            self.rejected = true;
+            self.rejection = None;
+            cx.notify();
+            return;
+        };
+        if marking {
+            self.history.begin_composition(before);
+        } else if !self.composing() && before.text != next.state.text {
+            self.history.record(before);
+        }
+        self.content = next.state.text;
+        self.selected_range = next.state.selection;
+        self.selection_reversed = next.state.reversed;
+        self.marked_range = next.marked;
+        if self.marked_range.is_none() {
+            self.history.finish_composition(&self.content);
+        }
+        self.desired_x = None;
+        self.prefer_previous_row = false;
+        self.rejected = false;
+        self.rejection = None;
+        self.invalidate_geometry();
+        cx.notify();
+    }
+
+    fn word_move(&mut self, forward: bool, select: bool, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        let offset = word_boundary(&self.content, self.cursor_offset(), forward);
+        if select {
+            self.select_to(offset, cx);
+        } else {
+            self.move_to(offset, cx);
+        }
+    }
+    fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.word_move(false, false, cx);
+    }
+    fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.word_move(true, false, cx);
+    }
+    fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.word_move(false, true, cx);
+    }
+    fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.word_move(true, true, cx);
+    }
+
+    fn delete_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        let cursor = self.cursor_offset();
+        let range = if self.selected_range.is_empty() {
+            cursor.min(offset)..cursor.max(offset)
+        } else {
+            self.selected_range.clone()
+        };
+        // Do not expand the live selection before recording undo: undo restores
+        // the original caret, including for a deleted multi-codepoint grapheme.
+        self.apply_replacement(Some(self.range_to_utf16(&range)), Insertion::Commit(""), cx);
+    }
+    fn delete_word_left(&mut self, _: &DeleteWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(
+            word_boundary(&self.content, self.cursor_offset(), false),
+            cx,
+        );
+    }
+    fn delete_word_right(&mut self, _: &DeleteWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(word_boundary(&self.content, self.cursor_offset(), true), cx);
+    }
+    fn delete_to_home(&mut self, _: &DeleteToHome, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(self.line_boundary(false), cx);
+    }
+    fn delete_to_end(&mut self, _: &DeleteToEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(self.line_boundary(true), cx);
+    }
+
+    fn line_boundary(&self, end: bool) -> usize {
+        let cursor = self.cursor_offset();
+        if self.multiline {
+            if let Some(layout) = self.last_layout.as_ref() {
+                return layout.line_edge(cursor, end, self.prefer_previous_row);
+            }
+            if end {
+                self.content[cursor..]
+                    .find('\n')
+                    .map_or(self.content.len(), |i| cursor + i)
+            } else {
+                self.content[..cursor].rfind('\n').map_or(0, |i| i + 1)
+            }
+        } else if end {
+            self.content.len()
+        } else {
+            0
+        }
+    }
+
     fn restart_caret(&mut self) {
         self.caret_task.take();
         self.caret.reset(true);
@@ -263,6 +369,7 @@ impl TextInput {
                 }),
                 cx.on_blur(&self.focus_handle, window, |input, _, cx| {
                     input.stop_caret();
+                    input.is_selecting = false;
                     cx.notify();
                 }),
                 cx.observe_window_activation(window, |input, window, cx| {
@@ -291,7 +398,7 @@ impl TextInput {
     }
 
     pub(super) fn insert_mention(&mut self, identifier: &str, cx: &mut Context<Self>) {
-        if self.composing() || !self.selected_range.is_empty() {
+        if !self.interactive || self.composing() || !self.selected_range.is_empty() {
             return;
         }
         let Some(range) = mention_range(&self.content, self.cursor_offset()) else {
@@ -306,6 +413,7 @@ impl TextInput {
             self.multiline,
         ) {
             self.rejected = true;
+            self.rejection = None;
             cx.notify();
             return;
         }
@@ -321,6 +429,7 @@ impl TextInput {
         self.selected_range = cursor..cursor;
         self.selection_reversed = false;
         self.rejected = false;
+        self.rejection = None;
         self.invalidate_geometry();
         cx.notify();
     }
@@ -342,6 +451,7 @@ impl TextInput {
             self.selection_reversed = previous.reversed;
             self.invalidate_geometry();
             self.desired_x = None;
+            self.prefer_previous_row = false;
             self.rejected = false;
             self.rejection = None;
             cx.notify();
@@ -355,6 +465,9 @@ impl TextInput {
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
         } else {
@@ -363,6 +476,9 @@ impl TextInput {
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
         if self.selected_range.is_empty() {
             self.move_to(self.next_boundary(self.selected_range.end), cx);
         } else {
@@ -379,51 +495,32 @@ impl TextInput {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
         self.move_to(0, cx);
         self.select_to(self.content.len(), cx)
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        let start = if self.multiline {
-            self.content[..self.cursor_offset()]
-                .rfind('\n')
-                .map_or(0, |i| i + 1)
-        } else {
-            0
-        };
-        self.move_to(start, cx);
+        self.move_to(self.line_boundary(false), cx);
     }
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        let cursor = self.cursor_offset();
-        let end = if self.multiline {
-            self.content[cursor..]
-                .find('\n')
-                .map_or(self.content.len(), |i| cursor + i)
-        } else {
-            self.content.len()
-        };
-        self.move_to(end, cx);
+        if !self.interactive || self.composing() {
+            return;
+        }
+        self.move_to(self.line_boundary(true), cx);
+        self.prefer_previous_row = true;
     }
     fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
-        let start = if self.multiline {
-            self.content[..self.cursor_offset()]
-                .rfind('\n')
-                .map_or(0, |i| i + 1)
-        } else {
-            0
-        };
-        self.select_to(start, cx);
+        self.select_to(self.line_boundary(false), cx);
     }
     fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
-        let cursor = self.cursor_offset();
-        let end = if self.multiline {
-            self.content[cursor..]
-                .find('\n')
-                .map_or(self.content.len(), |i| cursor + i)
-        } else {
-            self.content.len()
-        };
-        self.select_to(end, cx);
+        if !self.interactive || self.composing() {
+            return;
+        }
+        self.select_to(self.line_boundary(true), cx);
+        self.prefer_previous_row = true;
     }
     fn select_document_start(
         &mut self,
@@ -448,25 +545,26 @@ impl TextInput {
         self.move_to(self.content.len(), cx);
     }
     fn vertical(&mut self, down: bool, select: bool, cx: &mut Context<Self>) {
-        if !self.multiline || self.composing() {
+        if !self.interactive || !self.multiline || self.composing() {
             return;
         }
         let Some(layout) = self.last_layout.as_ref() else {
             return;
         };
-        let position = layout.position(self.cursor_offset());
+        let position = layout.position(self.cursor_offset(), self.prefer_previous_row);
         let x = self.desired_x.unwrap_or(position.x);
-        let index = layout
-            .index(point(
-                x,
-                position.y + layout.line_height * if down { 1.5 } else { -0.5 },
-            ))
-            .min(self.content.len());
+        let target = point(
+            x,
+            position.y + layout.line_height * if down { 1.5 } else { -0.5 },
+        );
+        let index = closest_grapheme(&self.content, layout.index(target).min(self.content.len()));
+        let preceding = layout.position(index, false).y > target.y;
         if select {
-            self.select_to(index, cx)
+            self.select_to(index, cx);
         } else {
-            self.move_to(index, cx)
-        };
+            self.move_to(index, cx);
+        }
+        self.prefer_previous_row = preceding;
         self.desired_x = Some(x);
     }
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
@@ -482,23 +580,17 @@ impl TextInput {
         self.vertical(true, true, cx);
     }
     fn new_line(&mut self, _: &NewLine, window: &mut Window, cx: &mut Context<Self>) {
-        if self.multiline && !self.composing() {
+        if self.interactive && self.multiline && !self.composing() {
             self.replace_text_in_range(None, "\n", window, cx);
         }
     }
 
-    fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.previous_boundary(self.cursor_offset()), cx)
-        }
-        self.replace_text_in_range(None, "", window, cx)
+    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
-    fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.next_boundary(self.cursor_offset()), cx)
-        }
-        self.replace_text_in_range(None, "", window, cx)
+    fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
     fn on_mouse_down(
@@ -508,6 +600,9 @@ impl TextInput {
         cx: &mut Context<Self>,
     ) {
         if !self.interactive {
+            return;
+        }
+        if self.composing() {
             return;
         }
         self.focus_handle.focus(_window);
@@ -530,11 +625,14 @@ impl TextInput {
             return;
         }
 
+        let index = self.index_for_mouse_position(event.position);
+        let preceding = self.mouse_prefers_previous_row(index, event.position);
         if event.modifiers.shift {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+            self.select_to(index, cx);
         } else {
-            self.move_to(self.index_for_mouse_position(event.position), cx)
+            self.move_to(index, cx);
         }
+        self.prefer_previous_row = preceding;
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, _: &mut Context<Self>) {
@@ -542,8 +640,15 @@ impl TextInput {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.is_selecting {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.is_selecting = false;
+            return;
+        }
+        if self.interactive && !self.composing() && self.is_selecting {
+            let index = self.index_for_mouse_position(event.position);
+            let preceding = self.mouse_prefers_previous_row(index, event.position);
+            self.select_to(index, cx);
+            self.prefer_previous_row = preceding;
         }
     }
 
@@ -559,6 +664,9 @@ impl TextInput {
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
         if !self.clipboard_allowed {
             self.rejected = true;
             self.rejection = Some("Einfügen ist für diesen Entwurf nicht freigegeben.");
@@ -585,6 +693,9 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() || self.concealed {
+            return;
+        }
         if !self.clipboard_allowed {
             self.rejected = true;
             self.rejection = Some("Kopieren ist für diesen Entwurf nicht freigegeben.");
@@ -598,7 +709,10 @@ impl TextInput {
         }
     }
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.clipboard_allowed {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        if !self.clipboard_allowed || self.concealed {
             self.rejected = true;
             self.rejection = Some("Ausschneiden ist für diesen Entwurf nicht freigegeben.");
             cx.notify();
@@ -613,8 +727,12 @@ impl TextInput {
     }
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
         let offset = current_boundary(&self.content, offset);
         self.desired_x = None;
+        self.prefer_previous_row = false;
         self.selected_range = offset..offset;
         self.selection_reversed = false;
         self.restart_caret();
@@ -638,14 +756,32 @@ impl TextInput {
         else {
             return self.cursor_offset();
         };
-        line.index(point(
-            position.x - bounds.left() + self.scroll_x,
-            position.y - bounds.top() + self.scroll_y,
-        ))
-        .min(self.content.len())
+        let index = line
+            .index(point(
+                position.x - bounds.left() + self.scroll_x,
+                position.y - bounds.top() + self.scroll_y,
+            ))
+            .min(self.content.len());
+        // A shaped glyph may expose an interior scalar in a grapheme cluster.
+        // Pointer selection must not leave half a combining sequence selected.
+        closest_grapheme(&self.content, index)
+    }
+
+    fn mouse_prefers_previous_row(&self, index: usize, position: Point<Pixels>) -> bool {
+        match (&self.last_layout, self.last_bounds) {
+            (Some(layout), Some(bounds)) => {
+                layout.position(index, false).y > position.y - bounds.top() + self.scroll_y
+            }
+            _ => false,
+        }
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        self.desired_x = None;
+        self.prefer_previous_row = false;
         let offset = current_boundary(&self.content, offset);
         if self.selection_reversed {
             self.selected_range.start = offset
@@ -660,9 +796,6 @@ impl TextInput {
         cx.notify()
     }
 
-    fn offset_from_utf16(&self, offset: usize) -> usize {
-        from_utf16(&self.content, offset)
-    }
     // Hit-test positions belong to the exact painted text. An edit or undo
     // retires them until the next paint; stale byte positions are never sliced.
     fn invalidate_geometry(&mut self) {
@@ -677,9 +810,7 @@ impl TextInput {
         self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
     }
     fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        let start = self.offset_from_utf16(range.start);
-        let end = self.offset_from_utf16(range.end);
-        start.min(end)..start.max(end)
+        range_from_utf16(&self.content, range.clone())
     }
     fn previous_boundary(&self, offset: usize) -> usize {
         previous_grapheme(&self.content, offset)
@@ -697,6 +828,7 @@ impl TextInput {
         self.scroll_y = px(0.);
         self.visible_rows = 1;
         self.desired_x = None;
+        self.prefer_previous_row = false;
         self.content = "".into();
         self.selected_range = 0..0;
         self.selection_reversed = false;
@@ -738,10 +870,13 @@ impl EntityInputHandler for TextInput {
 
     fn selected_text_range(
         &mut self,
-        _ignore_disabled_input: bool,
+        ignore_disabled_input: bool,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        if !self.interactive && !ignore_disabled_input {
+            return None;
+        }
         Some(UTF16Selection {
             range: self.range_to_utf16(&self.selected_range),
             reversed: self.selection_reversed,
@@ -760,6 +895,7 @@ impl EntityInputHandler for TextInput {
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.history.finish_composition(&self.content);
         self.restart_caret();
         cx.notify();
     }
@@ -771,34 +907,7 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.interactive {
-            return;
-        }
-        let range = range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
-
-        if !replacement_fits(&self.content, &range, new_text, self.limit, self.multiline) {
-            self.rejected = true;
-            cx.notify();
-            return;
-        }
-        if self.marked_range.is_none() {
-            self.history.record(self.edit_snapshot());
-        }
-        self.rejected = false;
-        self.rejection = None;
-        self.desired_x = None;
-        self.content =
-            (self.content[0..range.start].to_owned() + new_text + &self.content[range.end..])
-                .into();
-        self.selected_range = range.start + new_text.len()..range.start + new_text.len();
-        self.invalidate_geometry();
-        self.marked_range.take();
-        self.selection_reversed = false;
-        cx.notify();
+        self.apply_replacement(range_utf16, Insertion::Commit(new_text), cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -809,45 +918,14 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.interactive {
-            return;
-        }
-        let range = range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
-
-        if !replacement_fits(&self.content, &range, new_text, self.limit, self.multiline) {
-            self.rejected = true;
-            cx.notify();
-            return;
-        }
-        if self.marked_range.is_none() {
-            self.history.record(self.edit_snapshot());
-        }
-        self.rejected = false;
-        self.rejection = None;
-        self.desired_x = None;
-        self.content =
-            (self.content[0..range.start].to_owned() + new_text + &self.content[range.end..])
-                .into();
-        self.invalidate_geometry();
-        if !new_text.is_empty() {
-            self.marked_range = Some(range.start..range.start + new_text.len());
-        } else {
-            self.marked_range = None;
-        }
-        self.selected_range = new_selected_range_utf16
-            .as_ref()
-            .map(|r| {
-                let start = from_utf16(new_text, r.start);
-                let end = from_utf16(new_text, r.end);
-                range.start + start.min(end)..range.start + start.max(end)
-            })
-            .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
-
-        cx.notify();
+        self.apply_replacement(
+            range_utf16,
+            Insertion::Mark {
+                text: new_text,
+                selection_utf16: new_selected_range_utf16,
+            },
+            cx,
+        );
     }
 
     fn bounds_for_range(
@@ -859,8 +937,8 @@ impl EntityInputHandler for TextInput {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
-        let start = layout.position(range.start);
-        let end = layout.position(range.end);
+        let start = layout.position(range.start, range.is_empty() && self.prefer_previous_row);
+        let end = layout.position(range.end, true);
         // IME candidate placement is on the first affected visual row; a range
         // crossing lines must not produce a reversed native rectangle.
         Some(Bounds::new(
@@ -908,9 +986,10 @@ struct TextLayout {
     tops: Vec<Pixels>,
     line_height: Pixels,
     height: Pixels,
+    concealed: Option<ConcealedText>,
 }
 impl TextLayout {
-    fn new(lines: Vec<WrappedLine>, line_height: Pixels) -> Self {
+    fn new(lines: Vec<WrappedLine>, line_height: Pixels, concealed: Option<ConcealedText>) -> Self {
         let mut starts = Vec::with_capacity(lines.len());
         let mut tops = Vec::with_capacity(lines.len());
         let mut start = 0;
@@ -927,18 +1006,50 @@ impl TextLayout {
             tops,
             line_height,
             height,
+            concealed,
         }
     }
-    fn position(&self, index: usize) -> Point<Pixels> {
+    fn display_offset(&self, source: usize) -> usize {
+        self.concealed
+            .as_ref()
+            .map_or(source, |c| c.display_offset(source))
+    }
+    fn source_offset(&self, display: usize) -> usize {
+        self.concealed
+            .as_ref()
+            .map_or(display, |c| c.source_offset(display))
+    }
+    fn position(&self, index: usize, preceding: bool) -> Point<Pixels> {
+        let index = self.display_offset(index);
         for (i, line) in self.lines.iter().enumerate() {
             if index <= self.starts[i] + line.len() {
-                let p = line
-                    .position_for_index(index.saturating_sub(self.starts[i]), self.line_height)
-                    .unwrap_or_default();
-                return point(p.x, self.tops[i] + p.y);
+                let relative = index.saturating_sub(self.starts[i]);
+                let boundaries = visual_row_boundaries(line);
+                let row = visual_row(&boundaries, relative, preceding);
+                return point(
+                    line.unwrapped_layout.x_for_index(relative)
+                        - line.unwrapped_layout.x_for_index(boundaries[row]),
+                    self.tops[i] + self.line_height * row,
+                );
             }
         }
         point(px(0.), (self.height - self.line_height).max(px(0.)))
+    }
+    fn line_edge(&self, index: usize, end: bool, preceding: bool) -> usize {
+        let index = self.display_offset(index);
+        for (i, line) in self.lines.iter().enumerate() {
+            if index <= self.starts[i] + line.len() {
+                let boundaries = visual_row_boundaries(line);
+                let row = visual_row(&boundaries, index.saturating_sub(self.starts[i]), preceding);
+                let edge = if end {
+                    boundaries.get(row + 1).copied().unwrap_or(line.len())
+                } else {
+                    boundaries[row]
+                };
+                return self.source_offset(self.starts[i] + edge);
+            }
+        }
+        self.source_offset(index)
     }
     fn index(&self, position: Point<Pixels>) -> usize {
         if position.y < px(0.) {
@@ -950,14 +1061,17 @@ impl TextLayout {
                     point(position.x, position.y - self.tops[i]),
                     self.line_height,
                 );
-                return self.starts[i] + result.unwrap_or_else(|near| near);
+                return self.source_offset(self.starts[i] + result.unwrap_or_else(|near| near));
             }
         }
-        self.lines
-            .last()
-            .map_or(0, |l| self.starts[self.lines.len() - 1] + l.len())
+        self.source_offset(
+            self.lines
+                .last()
+                .map_or(0, |l| self.starts[self.lines.len() - 1] + l.len()),
+        )
     }
     fn selections(&self, range: Range<usize>, width: Pixels) -> Vec<Bounds<Pixels>> {
+        let range = self.display_offset(range.start)..self.display_offset(range.end);
         let mut rectangles = Vec::new();
         for (i, line) in self.lines.iter().enumerate() {
             let mut boundaries = vec![0];
@@ -990,6 +1104,29 @@ impl TextLayout {
             }
         }
         rectangles
+    }
+}
+
+fn visual_row_boundaries(line: &WrappedLine) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(
+            line.wrap_boundaries()
+                .iter()
+                .map(|b| line.runs()[b.run_ix].glyphs[b.glyph_ix].index),
+        )
+        .collect()
+}
+
+// GPUI 0.2.2 position_for_index chooses the preceding row at a wrap boundary.
+// Use the following row so a hit on its first glyph and the painted caret agree.
+fn visual_row(boundaries: &[usize], index: usize, preceding: bool) -> usize {
+    let row = boundaries
+        .partition_point(|start| *start <= index)
+        .saturating_sub(1);
+    if preceding && row > 0 && boundaries[row] == index {
+        row - 1
+    } else {
+        row
     }
 }
 struct PrepaintState {
@@ -1045,10 +1182,12 @@ impl Element for TextElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let style = window.text_style();
+        let concealed = (input.concealed && !input.content.is_empty())
+            .then(|| ConcealedText::new(&input.content));
         let (text, color) = if input.content.is_empty() {
             (input.placeholder.clone(), input.theme.placeholder)
-        } else if input.concealed {
-            ("*".repeat(input.content.len()).into(), style.color)
+        } else if let Some(concealed) = concealed.as_ref() {
+            (concealed.text.clone(), style.color)
         } else {
             (input.content.clone(), style.color)
         };
@@ -1061,6 +1200,10 @@ impl Element for TextElement {
             strikethrough: None,
         };
         let runs = if let Some(marked) = input.marked_range.as_ref() {
+            let marked = concealed.as_ref().map_or_else(
+                || marked.clone(),
+                |c| c.display_offset(marked.start)..c.display_offset(marked.end),
+            );
             vec![
                 TextRun {
                     len: marked.start,
@@ -1102,8 +1245,8 @@ impl Element for TextElement {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let layout = TextLayout::new(lines, window.line_height());
-        let cursor = layout.position(input.cursor_offset());
+        let layout = TextLayout::new(lines, window.line_height(), concealed);
+        let cursor = layout.position(input.cursor_offset(), input.prefer_previous_row);
         let scroll_x = if input.multiline {
             px(0.)
         } else {
@@ -1183,6 +1326,14 @@ impl Element for TextElement {
     ) {
         let focus = self.input.read(cx).focus_handle.clone();
         if self.input.read(cx).interactive {
+            // Div::on_mouse_move is hover-only in 0.2.2. Retain selection while
+            // dragging outside the viewport through the frame's window handler.
+            let input = self.input.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && input.read(cx).is_selecting {
+                    input.update(cx, |input, cx| input.on_mouse_move(event, window, cx));
+                }
+            });
             window.handle_input(
                 &focus,
                 ElementInputHandler::new(bounds, self.input.clone()),
@@ -1246,6 +1397,14 @@ impl Render for TextInput {
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::delete_to_end))
+            .on_action(cx.listener(Self::delete_to_home))
+            .on_action(cx.listener(Self::delete_word_right))
+            .on_action(cx.listener(Self::delete_word_left))
+            .on_action(cx.listener(Self::select_word_right))
+            .on_action(cx.listener(Self::select_word_left))
+            .on_action(cx.listener(Self::word_right))
+            .on_action(cx.listener(Self::word_left))
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
@@ -1273,7 +1432,6 @@ impl Render for TextInput {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .w_full()
             .rounded_md()
             .border_1()
@@ -1351,6 +1509,7 @@ impl TextInput {
             visible_rows: 1,
             max_visible_rows: 5,
             desired_x: None,
+            prefer_previous_row: false,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -1414,8 +1573,23 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-down", SelectDown, context),
         KeyBinding::new("shift-home", SelectHome, context),
         KeyBinding::new("shift-end", SelectEnd, context),
-        KeyBinding::new("ctrl-shift-home", SelectDocumentStart, context),
-        KeyBinding::new("ctrl-shift-end", SelectDocumentEnd, context),
+        KeyBinding::new("backspace", Backspace, context),
+        KeyBinding::new("delete", Delete, context),
+        KeyBinding::new("left", Left, context),
+        KeyBinding::new("right", Right, context),
+        KeyBinding::new("shift-left", SelectLeft, context),
+        KeyBinding::new("shift-right", SelectRight, context),
+        KeyBinding::new("home", Home, context),
+        KeyBinding::new("end", End, context),
+    ]);
+    // Keep Command shortcuts and Cocoa's Control navigation distinct. Binding
+    // Control-A to Select All on macOS masks its native beginning-of-line command.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("cmd-a", SelectAll, context),
+        KeyBinding::new("cmd-c", Copy, context),
+        KeyBinding::new("cmd-v", Paste, context),
+        KeyBinding::new("cmd-x", Cut, context),
         KeyBinding::new("cmd-left", Home, context),
         KeyBinding::new("cmd-right", End, context),
         KeyBinding::new("cmd-shift-left", SelectHome, context),
@@ -1424,49 +1598,53 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-down", DocumentEnd, context),
         KeyBinding::new("cmd-shift-up", SelectDocumentStart, context),
         KeyBinding::new("cmd-shift-down", SelectDocumentEnd, context),
+        KeyBinding::new("cmd-backspace", DeleteToHome, context),
+        KeyBinding::new("cmd-delete", DeleteToEnd, context),
+        KeyBinding::new("alt-left", WordLeft, context),
+        KeyBinding::new("alt-right", WordRight, context),
+        KeyBinding::new("alt-shift-left", SelectWordLeft, context),
+        KeyBinding::new("alt-shift-right", SelectWordRight, context),
+        KeyBinding::new("alt-backspace", DeleteWordLeft, context),
+        KeyBinding::new("alt-delete", DeleteWordRight, context),
+        KeyBinding::new("ctrl-a", Home, context),
+        KeyBinding::new("ctrl-e", End, context),
+        KeyBinding::new("ctrl-b", Left, context),
+        KeyBinding::new("ctrl-f", Right, context),
+        KeyBinding::new("ctrl-p", Up, context),
+        KeyBinding::new("ctrl-n", Down, context),
+        KeyBinding::new("ctrl-h", Backspace, context),
+        KeyBinding::new("ctrl-d", Delete, context),
+        KeyBinding::new("ctrl-k", DeleteToEnd, context),
+        KeyBinding::new("ctrl-shift-a", SelectHome, context),
+        KeyBinding::new("ctrl-shift-e", SelectEnd, context),
+        KeyBinding::new("ctrl-shift-b", SelectLeft, context),
+        KeyBinding::new("ctrl-shift-f", SelectRight, context),
+        KeyBinding::new("ctrl-shift-p", SelectUp, context),
+        KeyBinding::new("ctrl-shift-n", SelectDown, context),
+        KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, context),
+    ]);
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-a", SelectAll, context),
+        KeyBinding::new("ctrl-c", Copy, context),
+        KeyBinding::new("ctrl-v", Paste, context),
+        KeyBinding::new("ctrl-x", Cut, context),
+        KeyBinding::new("ctrl-left", WordLeft, context),
+        KeyBinding::new("ctrl-right", WordRight, context),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, context),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, context),
+        KeyBinding::new("ctrl-backspace", DeleteWordLeft, context),
+        KeyBinding::new("ctrl-delete", DeleteWordRight, context),
         KeyBinding::new("ctrl-home", DocumentStart, context),
         KeyBinding::new("ctrl-end", DocumentEnd, context),
-        KeyBinding::new("backspace", Backspace, context),
-        KeyBinding::new("delete", Delete, context),
-        KeyBinding::new("left", Left, context),
-        KeyBinding::new("right", Right, context),
-        KeyBinding::new("shift-left", SelectLeft, context),
-        KeyBinding::new("shift-right", SelectRight, context),
-        KeyBinding::new("cmd-a", SelectAll, context),
-        KeyBinding::new("ctrl-a", SelectAll, context),
-        KeyBinding::new("cmd-c", Copy, context),
-        KeyBinding::new("ctrl-c", Copy, context),
-        KeyBinding::new("cmd-v", Paste, context),
-        KeyBinding::new("ctrl-v", Paste, context),
-        KeyBinding::new("cmd-x", Cut, context),
-        KeyBinding::new("ctrl-x", Cut, context),
-        KeyBinding::new("home", Home, context),
-        KeyBinding::new("end", End, context),
+        KeyBinding::new("ctrl-shift-home", SelectDocumentStart, context),
+        KeyBinding::new("ctrl-shift-end", SelectDocumentEnd, context),
+        KeyBinding::new("ctrl-insert", Copy, context),
+        KeyBinding::new("shift-insert", Paste, context),
+        KeyBinding::new("shift-delete", Cut, context),
     ]);
-    #[cfg(target_os = "macos")]
-    cx.bind_keys([KeyBinding::new(
-        "ctrl-cmd-space",
-        ShowCharacterPalette,
-        context,
-    )]);
 }
 
-fn from_utf16(text: &str, offset: usize) -> usize {
-    let mut units = 0;
-    for (i, c) in text.char_indices() {
-        if units >= offset {
-            return i;
-        }
-        units += c.len_utf16();
-    }
-    text.len()
-}
-fn to_utf16(text: &str, offset: usize) -> usize {
-    text.char_indices()
-        .take_while(|(i, _)| *i < offset)
-        .map(|(_, c)| c.len_utf16())
-        .sum()
-}
 fn previous_grapheme(text: &str, offset: usize) -> usize {
     text.grapheme_indices(true)
         .rev()
@@ -1485,29 +1663,50 @@ fn current_boundary(text: &str, offset: usize) -> usize {
     }
     offset
 }
-fn replacement_fits(
-    current: &str,
-    range: &Range<usize>,
-    text: &str,
-    limit: usize,
-    multiline: bool,
-) -> bool {
-    range.start <= range.end
-        && range.end <= current.len()
-        && current.is_char_boundary(range.start)
-        && current.is_char_boundary(range.end)
-        && text.len() <= limit
-        && current.len() - (range.end - range.start) <= limit - text.len()
-        && !text.contains(['\r', '\0'])
-        && (multiline || !text.contains('\n'))
+fn closest_grapheme(text: &str, offset: usize) -> usize {
+    let offset = current_boundary(text, offset);
+    if text.grapheme_indices(true).any(|(i, _)| i == offset) || offset == text.len() {
+        return offset;
+    }
+    let previous = previous_grapheme(text, offset);
+    let next = next_grapheme(text, offset);
+    if offset - previous <= next - offset {
+        previous
+    } else {
+        next
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::{
-        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, caret_height, current_boundary,
-        from_utf16, horizontal_scroll, mention_range, next_grapheme, previous_grapheme,
-        replacement_fits, to_utf16,
+        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, caret_height, closest_grapheme,
+        current_boundary, from_utf16, horizontal_scroll, mention_range, next_grapheme,
+        previous_grapheme, replacement_fits, to_utf16, visual_row,
     };
+    use unicode_segmentation::UnicodeSegmentation;
+    #[test]
+    fn soft_wrap_affinity_distinguishes_row_start_from_previous_row_end() {
+        // One byte position represents both sides of a soft wrap. Pointer hits
+        // on the next row use downstream affinity; End retains the prior row.
+        let starts = [0, 8, 17];
+        assert_eq!(visual_row(&starts, 8, false), 1);
+        assert_eq!(visual_row(&starts, 8, true), 0);
+        assert_eq!(visual_row(&starts, 17, false), 2);
+        assert_eq!(visual_row(&starts, 17, true), 1);
+        assert_eq!(visual_row(&starts, 9, true), 1);
+        assert_eq!(visual_row(&starts, 0, true), 0);
+    }
+
+    #[test]
+    fn pointer_offsets_snap_to_complete_graphemes() {
+        let text = "e\u{301}👩‍👩‍👧‍👧x";
+        for offset in 0..=text.len() + 1 {
+            let snapped = closest_grapheme(text, offset);
+            assert!(
+                snapped == text.len() || text.grapheme_indices(true).any(|(i, _)| i == snapped)
+            );
+        }
+    }
     #[test]
     fn single_line_scroll_recovers_after_resize_or_replacement() {
         use gpui::px;

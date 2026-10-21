@@ -212,8 +212,8 @@ impl Transport {
             sink.flush()
                 .await
                 .map_err(|_| self.error(ErrorKind::Transport))?;
-            self.update_cookies(response.headers())?;
-            Ok(length)
+            let cookies = self.update_cookies(response.headers())?;
+            Ok((length, cookies))
         };
         let cancel = async {
             loop {
@@ -225,9 +225,13 @@ impl Transport {
         };
         let result = tokio::select! {biased;_=cancel=>Err(PortError{kind:ErrorKind::Cancelled,account:Some(c.scope.account),retry:Retry::Never}),r=tokio::time::timeout(deadline,work)=>r.unwrap_or(Err(PortError{kind:ErrorKind::Deadline,account:Some(c.scope.account),retry:Retry::UserAction}))};
         self.validate(c)?;
-        if result.is_ok() {
-            self.commit_shared_cookies(shared)?;
+        match result {
+            Ok((length, cookies)) => {
+                self.cookies = cookies;
+                self.commit_shared_cookies(shared)?;
+                Ok(length)
+            }
+            Err(error) => Err(error),
         }
-        result
     }
 }

@@ -105,6 +105,57 @@ fn login_retry_keeps_the_bound_reservation_through_rejected_admission() {
 }
 
 #[test]
+fn typed_login_retry_preserves_installation_and_replacement_after_repeated_worker_failure() {
+    let (mut model, _, account, _) = pending_login();
+    let server = model.login.as_ref().unwrap().server.clone();
+    model.login_failed(IdentityError::Request(ErrorKind::Transport));
+    for request in [RequestId(18), RequestId(19)] {
+        assert!(model.submit(UiIntent::RetryLogin { request }).is_err());
+        let target = model.replace.as_ref().unwrap();
+        assert_eq!(target.account, account);
+        assert_eq!(target.server.as_ref(), Some(&server));
+        assert_eq!(model.login_retry_server.as_ref(), Some(&server));
+        assert!(matches!(model.snapshot.login.phase, LoginPhase::Failed(_)));
+        assert_eq!(
+            model.snapshot.login.server_label.as_str(),
+            "https://cloud.example.test"
+        );
+    }
+    model.submit(UiIntent::NewLogin).unwrap();
+    assert!(model.login_retry_server.is_none());
+    assert_eq!(
+        model.submit(UiIntent::RetryLogin {
+            request: RequestId(20)
+        }),
+        Err(SubmitError::StaleScope)
+    );
+    assert!(model.replace.is_none());
+}
+
+#[test]
+fn new_login_retry_retains_full_address_without_inventing_a_replacement() {
+    let mut model = model();
+    let server = ServerInput::new("https://cloud.example.test/nextcloud").unwrap();
+    assert!(
+        model
+            .submit(UiIntent::BeginLogin {
+                request: RequestId(1),
+                server: server.clone()
+            })
+            .is_err()
+    );
+    assert!(
+        model
+            .submit(UiIntent::RetryLogin {
+                request: RequestId(2)
+            })
+            .is_err()
+    );
+    assert_eq!(model.login_retry_server, Some(server));
+    assert!(model.replace.is_none());
+}
+
+#[test]
 fn login_retry_never_reuses_another_installation_or_explicitly_cancelled_target() {
     for server in [
         "https://cloud.example.test/other-installation",
@@ -636,6 +687,7 @@ pub(super) fn model() -> Accounts {
         next_request: 0,
         pending: Vec::new(),
         login: None,
+        login_retry_server: None,
         removal: None,
         replace: None,
         snapshot: super::super::fixtures::snapshot(None),

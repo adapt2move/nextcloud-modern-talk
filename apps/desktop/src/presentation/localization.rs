@@ -4,6 +4,7 @@ mod chat;
 mod content;
 mod conversation;
 mod onboarding;
+mod recovery;
 mod resources;
 mod updates;
 use super::Desktop;
@@ -18,6 +19,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         content::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
+        recovery::MESSAGES,
         updates::MESSAGES,
         onboarding::MESSAGES,
     ] {
@@ -74,6 +76,7 @@ mod tests {
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
         for catalog in [
             resources::MESSAGES,
+            recovery::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,
             content::MESSAGES,

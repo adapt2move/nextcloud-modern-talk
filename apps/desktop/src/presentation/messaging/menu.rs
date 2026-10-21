@@ -185,7 +185,8 @@ impl Desktop {
         let edit = idle
             && message.metadata.edit == Decision::Allowed
             && !self.drafts.pending(target.context)
-            && self.message_ui.pending_edit.is_none();
+            && self.message_ui.pending_edit.is_none()
+            && self.message_ui.editing.is_none();
         let delete = idle && message.metadata.delete == Decision::Allowed;
         let forward = feature(MessageFeature::Forward);
         let back = || Item::new(Choice::Back, "Zurück", true, "");

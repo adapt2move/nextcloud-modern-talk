@@ -1,19 +1,18 @@
-# v0.0.6 — alpha
+# v0.0.7 — alpha
 
-- Complete account removal through credential retirement, cleanup and confirmed
-  local record removal. Explain storage failures and offer an explicit retry.
-- Reuse the same account reservation when retrying sign-in. Report an existing
-  account directly and allow safe, disconnected accounts without saved
-  credentials to authenticate again.
-- Distinguish storage refusal, pending writes and unresolved local account state.
-  Add bounded sign-in and removal diagnostics without credentials or server URLs.
-- Add a compact application title bar with native window actions. Move the
-  Update button there and keep it hidden during calls and call preparation.
-- Keep the server form and input width stable when validation appears or is
-  dismissed. Match the dismiss button to the error message and clear an obsolete
-  validation error after a corrected submission.
-- Scale the text caret with the font's full height and restore visible input text
-  after resizing a field or replacing a longer value.
+- Keep loaded conversations and messages visible during refreshes and temporary
+  outages. Distinguish loading, offline, failed and empty states with consistent
+  feedback and working retry actions.
+- Recover cleanly from gateway errors, temporary access failures and expired
+  signaling tokens. Reject obsolete history failures after a newer successful
+  read, and keep thread failures scoped to their thread.
+- Retry sign-in with the original server installation address. Restore focus
+  after asynchronous onboarding steps and browser return.
+- Keep dialog keyboard focus inside the active surface. Prevent reply actions
+  from accidentally submitting a draft as an edit to another message.
+- Improve native text entry, Unicode selection, composition undo, password
+  masking and wrapped-line cursor movement. Preserve committed drafts while
+  an input method is composing, and repair a nullable macOS input callback.
 
-[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.6/docs/install.md)
-· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.6/docs/limitations.md)
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.7/docs/install.md)
+· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.7/docs/limitations.md)

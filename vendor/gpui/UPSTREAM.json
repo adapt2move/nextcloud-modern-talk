@@ -28,6 +28,11 @@
       "sha256": "7eb58b2716d6221bc750bf499ecb8c40f08191aa216bbbe36abbb07900e17721"
     },
     {
+      "original_sha256": "c21da3de36159b51e62f02666b335359d5fff8c20ddf79c4fc9e3195047c3f35",
+      "path": "src/platform/mac/window.rs",
+      "sha256": "c3131654c07a5090b503beb364594096d5ef06a8b14d14902a229b6dbb36e236"
+    },
+    {
       "original_sha256": "b4b10b48cd3c31c1fa1390ca7eeb70c2c184db59ce1aeb387ca06563b342b010",
       "path": "src/platform/windows/directx_renderer.rs",
       "sha256": "37ad22a314826bf424ca7282b1ef245da25372c2ee2f634d9617075312e745c1"

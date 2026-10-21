@@ -210,6 +210,21 @@ impl Cache {
             };
         }
     }
+    pub(super) fn read_failure_is_current(
+        &self,
+        context: ConversationRef,
+        operation: OperationId,
+        work: Work,
+    ) -> bool {
+        self.get(context).is_some_and(|room| {
+            self.flights.iter().any(|flight| {
+                flight.context == context
+                    && flight.operation == operation
+                    && flight.work == work
+                    && flight.version >= room.common_version
+            })
+        })
+    }
     /// Returns false for cancelled/evicted tickets, even after the same room was
     /// opened again. The account owner separately checks current runtime authority.
     pub(super) fn complete(
@@ -288,9 +303,11 @@ impl Cache {
                     room.common_version = flight.version;
                 }
                 room.loaded = true;
-                if !work.background()
+                if (!work.background()
                     || room.state_owner.background()
-                    || room.state == RemoteState::Idle
+                    || room.state_owner == Work::History
+                    || room.state == RemoteState::Idle)
+                    && (!work.background() || flight.version >= room.common_version)
                 {
                     room.state = RemoteState::Idle;
                     room.state_owner = work;
@@ -307,6 +324,8 @@ impl Cache {
             }
             Err(completion)
                 if timeline
+                    && !matches!(work, Work::Context(_))
+                    && (work == Work::Older || flight.version >= room.connectivity_version)
                     && (!work.background()
                         || (room.state_owner.background() || room.state == RemoteState::Idle)
                             && flight.version >= room.common_version) =>

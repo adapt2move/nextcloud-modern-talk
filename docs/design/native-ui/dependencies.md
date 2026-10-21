@@ -1,6 +1,7 @@
 # Native UI dependency provenance
 
-The desktop uses **GPUI 0.2.2** with a source-bound local backdrop-renderer patch,
+The desktop uses **GPUI 0.2.2** with source-bound local backdrop-renderer and
+macOS text-input range output-pointer patches,
 default features disabled, `font-kit` and `x11`, plus
 **unicode-segmentation 1.12.0**. Exact versions and
 features live in the workspace manifests and `Cargo.lock`; the toolchain is
@@ -21,6 +22,9 @@ with **dirty=true**. Therefore the published archive/checksum is the implementat
 base; it must not be described as an identical clean Git commit.
 [UPSTREAM.json](../../../vendor/gpui/UPSTREAM.json) records the unchanged original
 inventory and exact local delta; the architecture and packaging checks verify both.
+The native input delta respects AppKit's nullable `actualRange` output pointer
+and reports the actual returned range when the caller supplies it. Linux tests
+cannot execute that macOS callback.
 Unpinned Zed main is not substituted. GPUI's source/build manifest selects Metal on macOS and Blade/
 Vulkan for the exercised Linux X11 path. Wayland, `macos-blade`, runtime shader
 switches and GPUI test-support are not enabled by the desktop manifest.

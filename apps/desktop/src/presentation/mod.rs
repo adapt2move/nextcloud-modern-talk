@@ -1,6 +1,7 @@
 mod account_removal;
 mod account_settings;
 mod call;
+mod collection;
 mod content;
 mod controls;
 mod conversation_dialog;
@@ -102,6 +103,7 @@ pub enum LocalAction {
     Archive(ConversationRef, bool),
     Send,
     BeginLogin,
+    RetryLogin,
     AddAccount,
     Reauthenticate(talk_core::ui::AccountId),
     RemoveAccount(
@@ -584,7 +586,7 @@ impl Desktop {
         if let Some(c) = previous
             && self.message_ui.editing.is_none()
         {
-            let body = self.composer.read(cx).content.as_ref();
+            let body = self.composer.read(cx).committed_value();
             let _ = self.drafts.save(c, body);
         }
         let mut reset_draft = false;
@@ -744,13 +746,25 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return true;
         };
-        match self.drafts.save(context, &self.composer.read(cx).content) {
+        match self
+            .drafts
+            .save(context, self.composer.read(cx).committed_value())
+        {
             Ok(()) => true,
             Err(e) => {
                 self.feedback = Some(Feedback::from_error(e));
                 false
             }
         }
+    }
+    // Deferred GPUI elements render after the surrounding surface has finished.
+    // Restore their captured interaction policy for every nested control.
+    fn in_surface<R>(&mut self, inert: bool, render: impl FnOnce(&Self) -> R) -> R {
+        let previous = self.background_inert;
+        self.background_inert = inert;
+        let result = render(self);
+        self.background_inert = previous;
+        result
     }
     pub fn selected(&self) -> Option<&ConversationView> {
         self.snapshot
@@ -833,8 +847,8 @@ impl Desktop {
             &action,
             LocalAction::Intent(UiIntent::DownloadFile { .. } | UiIntent::Refresh(_))
                 | LocalAction::BeginLogin
+                | LocalAction::RetryLogin
         );
-        let begin_login = matches!(&action, LocalAction::BeginLogin);
         self.hover_hints.cancel();
         let previous_feedback = self.feedback;
         let invoker = window.focused(cx);
@@ -936,15 +950,23 @@ impl Desktop {
             }
             LocalAction::Thread(context, id) => {
                 if Some(context) == self.snapshot.selected
-                    && self
-                        .snapshot
-                        .messages
-                        .as_slice()
-                        .iter()
-                        .any(|m| m.local_id == id || m.metadata.thread == Some(id))
+                    && ((self.thread_parent == Some((context, id))
+                        && self.overlay == Some(Overlay::Thread))
+                        || self
+                            .snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .any(|m| m.local_id == id || m.metadata.thread == Some(id)))
                 {
                     self.thread_parent = Some((context, id));
-                    self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
+                    let request =
+                        self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
+                    self.message_ui.thread_load = Some(messaging::ThreadLoad {
+                        context,
+                        root: id,
+                        request,
+                    });
                     self.handle(LocalAction::Open(Overlay::Thread), window, cx);
                 }
             }
@@ -1223,6 +1245,12 @@ impl Desktop {
                     ))
                 }
             },
+            LocalAction::RetryLogin => {
+                self.feedback = None;
+                self.submit(UiIntent::RetryLogin {
+                    request: RequestId(self.snapshot.revision.saturating_add(1)),
+                });
+            }
             LocalAction::Storage(choice) => {
                 if let Some(attempt) = self.snapshot.login.attempt {
                     self.submit(UiIntent::ChooseStorage { attempt, choice });
@@ -1398,13 +1426,6 @@ impl Desktop {
         }
         // Immediate fixture updates are projection changes, never invented backend outcomes.
         self.refresh(cx);
-        if begin_login
-            && self.snapshot.login.phase == talk_core::ui::presentation::LoginPhase::BrowserWaiting
-            && let Some(focus) = self.control_focus("reopen-browser", cx)
-        {
-            focus.focus(window);
-            self.navigation.reveal.request();
-        }
         if self.feedback.is_some() && self.feedback != previous_feedback {
             self.feedback_return_focus = invoker;
             self.pending_feedback_focus = reveal_result && self.overlay.is_none();
@@ -1458,6 +1479,25 @@ impl Desktop {
                 self.prejoin.is_some(),
                 self.highlighted_message.map(|(_, id)| id),
                 self.keyboard_navigation
+            );
+            let collection = collection::CollectionState::new(
+                self.snapshot.content,
+                !self.snapshot.messages.as_slice().is_empty(),
+            );
+            println!(
+                "UI_INTERACTION overlay_focus={} server_focus={} editing={:?} content={:?} retained={} history_visible={} confirmed_empty={} thread_state={:?}",
+                self.modal_focus.contains_focused(window, cx),
+                self.server.focus_handle(cx).is_focused(window),
+                self.message_ui.editing,
+                self.snapshot.content,
+                self.snapshot.messages.as_slice().len(),
+                collection.shows_content()
+                    && f32::from(self.message_ui.list.viewport_bounds().size.height) > 0.,
+                collection.confirmed_empty(),
+                self.message_ui
+                    .thread_load
+                    .as_ref()
+                    .map(|load| load.content_state(self.snapshot.message_panel.as_ref()))
             );
             println!(
                 "UI_SETTINGS revision={} durable={} locale={:?} palette={:?} appearance={:?} density={:?} tab={:?} load={:?} save={:?} startup={:?} background={} quick_switcher={:?}",
@@ -1782,6 +1822,12 @@ impl Render for Desktop {
         for input in [&self.server, &self.search, &self.sidebar_filter] {
             input.update(cx, |i, _| i.clipboard_allowed = true);
         }
+        self.server.update(cx, |i, _| {
+            i.interactive = self.overlay.is_none()
+                && !incoming
+                && self.snapshot.login.phase
+                    == talk_core::ui::presentation::LoginPhase::EnterServer;
+        });
         self.sidebar_filter.update(cx, |i, _| {
             i.theme.surface = t.subtle;
             i.borderless = true;
@@ -2098,6 +2144,7 @@ impl Render for Desktop {
                 });
             }
         }
+        self.finish_onboarding_focus(window, cx);
         self.finish_search_focus(window, cx);
         view
     }

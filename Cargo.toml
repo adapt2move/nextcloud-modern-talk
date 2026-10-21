@@ -7,7 +7,7 @@ resolver = "3"
 gpui = { path = "vendor/gpui" }
 
 [workspace.package]
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 rust-version = "1.99"
 license = "EUPL-1.2"

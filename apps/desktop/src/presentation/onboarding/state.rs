@@ -5,6 +5,35 @@ use talk_core::preferences::{
     permissions::{PermissionAction, PermissionKind, PermissionObservation, PermissionStatus},
 };
 use talk_core::ui::AccountScope;
+use talk_core::ui::presentation::{LoginFailure, LoginPhase, StorageStatus};
+
+/// A semantic step changes focus once, after its controls have been rendered.
+/// Snapshot polling, permission observations and locale changes do not re-enter it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum FocusStep {
+    Server,
+    Validating,
+    Browser,
+    Storage { pending: bool },
+    Permission(PermissionKind),
+    Done,
+    Failed(LoginFailure),
+}
+impl FocusStep {
+    pub fn control(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Server => return None,
+            Self::Validating => "cancel-validating",
+            Self::Browser => "reopen-browser",
+            Self::Storage { pending: true } => "cancel-storage",
+            Self::Storage { pending: false } => "retry-native",
+            Self::Permission(_) => "permission-setup-next",
+            Self::Done => "onboarding-done",
+            Self::Failed(LoginFailure::AccountExists) => "login-open-accounts",
+            Self::Failed(_) => "retry-login",
+        })
+    }
+}
 
 pub(super) fn index(kind: PermissionKind) -> usize {
     match kind {
@@ -22,6 +51,7 @@ pub(super) enum Advance {
 }
 
 pub(in crate::presentation) struct OnboardingUi {
+    pub(super) focused_step: Option<FocusStep>,
     pub scope: Option<AccountScope>,
     pub kind: PermissionKind,
     pub ready: bool,
@@ -41,6 +71,7 @@ pub(in crate::presentation) struct OnboardingUi {
 impl OnboardingUi {
     pub fn new() -> Self {
         Self {
+            focused_step: None,
             scope: None,
             kind: PermissionKind::Microphone,
             ready: false,
@@ -57,6 +88,40 @@ impl OnboardingUi {
             recheck_at: None,
             rechecks_left: 0,
         }
+    }
+
+    pub(super) fn focus_step(&self, phase: LoginPhase, storage: StorageStatus) -> FocusStep {
+        if self.resumed || phase == LoginPhase::Ready {
+            return if self.ready {
+                FocusStep::Done
+            } else {
+                FocusStep::Permission(self.kind)
+            };
+        }
+        match phase {
+            LoginPhase::EnterServer => FocusStep::Server,
+            LoginPhase::Validating => FocusStep::Validating,
+            LoginPhase::BrowserWaiting => FocusStep::Browser,
+            LoginPhase::ChooseStorage => FocusStep::Storage {
+                pending: matches!(
+                    storage,
+                    StorageStatus::Saving
+                        | StorageStatus::CleanupPending
+                        | StorageStatus::RecoveryRequired
+                ),
+            },
+            LoginPhase::Failed(failure) => FocusStep::Failed(failure),
+            LoginPhase::Ready => FocusStep::Done,
+        }
+    }
+
+    pub(super) fn pending_focus(
+        &self,
+        phase: LoginPhase,
+        storage: StorageStatus,
+    ) -> Option<FocusStep> {
+        let step = self.focus_step(phase, storage);
+        (self.focused_step != Some(step)).then_some(step)
     }
 
     pub(super) fn begin(&mut self, scope: AccountScope, resumed: bool) {
@@ -132,6 +197,80 @@ mod tests {
             account: AccountId::from_local(value.into()),
             runtime: RuntimeGeneration::from_local(1),
         }
+    }
+    #[test]
+    fn asynchronous_login_and_permission_steps_enter_focus_once() {
+        let mut ui = OnboardingUi::new();
+        for (phase, storage, expected) in [
+            (
+                LoginPhase::EnterServer,
+                StorageStatus::NotSaved,
+                FocusStep::Server,
+            ),
+            (
+                LoginPhase::Validating,
+                StorageStatus::NotSaved,
+                FocusStep::Validating,
+            ),
+            (
+                LoginPhase::BrowserWaiting,
+                StorageStatus::NotSaved,
+                FocusStep::Browser,
+            ),
+            (
+                LoginPhase::ChooseStorage,
+                StorageStatus::Saving,
+                FocusStep::Storage { pending: true },
+            ),
+            (
+                LoginPhase::ChooseStorage,
+                StorageStatus::NotSaved,
+                FocusStep::Storage { pending: false },
+            ),
+            (
+                LoginPhase::Failed(LoginFailure::Network),
+                StorageStatus::NotSaved,
+                FocusStep::Failed(LoginFailure::Network),
+            ),
+            (
+                LoginPhase::EnterServer,
+                StorageStatus::NotSaved,
+                FocusStep::Server,
+            ),
+        ] {
+            assert_eq!(ui.pending_focus(phase, storage), Some(expected));
+            ui.focused_step = Some(expected);
+            assert_eq!(
+                ui.pending_focus(phase, storage),
+                None,
+                "snapshot polling must not steal focus"
+            );
+        }
+        ui.begin(scope(1), false);
+        assert_eq!(
+            ui.pending_focus(LoginPhase::Ready, StorageStatus::NotSaved),
+            Some(FocusStep::Permission(PermissionKind::Microphone))
+        );
+        ui.focused_step = Some(FocusStep::Permission(PermissionKind::Microphone));
+        assert_eq!(
+            ui.pending_focus(LoginPhase::Ready, StorageStatus::NotSaved),
+            None
+        );
+        ui.enter(PermissionKind::Camera);
+        assert_eq!(
+            ui.pending_focus(LoginPhase::Ready, StorageStatus::NotSaved),
+            Some(FocusStep::Permission(PermissionKind::Camera))
+        );
+        ui.ready = true;
+        assert_eq!(
+            ui.pending_focus(LoginPhase::Ready, StorageStatus::NotSaved),
+            Some(FocusStep::Done)
+        );
+        ui.begin(scope(1), true);
+        assert_eq!(
+            ui.pending_focus(LoginPhase::EnterServer, StorageStatus::NotSaved),
+            Some(FocusStep::Done)
+        );
     }
     #[test]
     fn one_request_per_step_and_only_observed_grants_advance() {

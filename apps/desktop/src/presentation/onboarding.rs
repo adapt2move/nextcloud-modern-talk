@@ -11,6 +11,53 @@ use talk_core::ui::presentation::{
 };
 
 impl Desktop {
+    pub(super) fn finish_onboarding_focus(&mut self, window: &mut Window, cx: &Context<Self>) {
+        let visible = self.onboarding_open
+            || (self.snapshot.accounts.as_slice().is_empty()
+                && self.snapshot.saved_accounts.as_slice().is_empty());
+        if !visible {
+            self.onboarding_ui.focused_step = None;
+            return;
+        }
+        if !window.is_window_active()
+            || self.overlay.is_some()
+            || self.prejoin.is_some()
+            || self.snapshot.call.as_ref().is_some_and(|call| {
+                !matches!(
+                    call.stage,
+                    talk_core::ui::presentation::CallStage::Ended
+                        | talk_core::ui::presentation::CallStage::Failed
+                )
+            })
+            || self.update_restart_pending
+            || self.projection_blocked
+        {
+            return;
+        }
+        let Some(step) = self
+            .onboarding_ui
+            .pending_focus(self.snapshot.login.phase, self.snapshot.login.storage)
+        else {
+            return;
+        };
+        let focus = if let Some(id) = step.control() {
+            self.control_focus.current(&id.into())
+        } else {
+            Some(self.server.focus_handle(cx))
+        };
+        if let Some(focus) = focus {
+            self.onboarding_ui.focused_step = Some(step);
+            focus.focus(window);
+            let reveal = self.navigation.reveal.clone();
+            reveal.request();
+            // The new focus ancestry is established on this frame's prepaint.
+            window.on_next_frame(move |window, _| {
+                reveal.request();
+                window.refresh();
+            });
+        }
+    }
+
     pub fn onboarding(&self, window: &Window, cx: &Context<Self>) -> gpui::Stateful<Div> {
         let t = self.theme;
         let login = &self.snapshot.login;
@@ -377,7 +424,7 @@ impl Desktop {
                             ("Erneut anmelden", "refresh"),
                             ButtonStyle::Primary,
                             true,
-                            LocalAction::BeginLogin,
+                            LocalAction::RetryLogin,
                             cx,
                         )
                         .min_h(px(46.)),

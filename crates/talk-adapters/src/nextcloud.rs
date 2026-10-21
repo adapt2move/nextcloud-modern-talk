@@ -45,6 +45,11 @@ pub(crate) use transport::{AuthenticatedBinding, ServerOrigin};
 use wire::Capabilities;
 use zeroize::Zeroizing;
 
+/// Identity-owned notification for an authoritative autonomous account probe.
+/// The receiver checks the exact runtime before closing admission and suppression.
+pub(crate) type AccountRejection =
+    std::sync::Arc<dyn Fn(talk_core::ids::AccountScope) + Send + Sync>;
+
 /// Adapter-private browser grant intake. No ordinary authenticated client escapes
 /// while the canonical identity is unknown. This is not a primary-password API.
 #[allow(
@@ -95,6 +100,7 @@ struct ActiveConversation {
 /// `request` borrows the owner; dropping it cancels observation/I/O, but a dispatched
 /// mutation remains uncertain in its finite journal. This journal is memory-only.
 pub struct NextcloudClient {
+    account_rejection: Option<AccountRejection>,
     media_service: Option<std::sync::Arc<crate::media::MediaService>>,
     meeting_owner: Option<meeting::CallOwner>,
     incoming_invitation: Option<nextcloud_talk_api::meeting::CallInvitation>,
@@ -194,6 +200,7 @@ impl NextcloudClient {
     }
     fn with_transport(transport: Transport) -> Result<Self, PortError> {
         Ok(Self {
+            account_rejection: None,
             transport,
             media_service: None,
             meeting_owner: None,
@@ -224,6 +231,9 @@ impl NextcloudClient {
             #[cfg(any(test, feature = "backend-test"))]
             diagnostic_signaling: diagnostics::SignalingState::default(),
         })
+    }
+    pub(crate) fn set_account_rejection_handler(&mut self, handler: AccountRejection) {
+        self.account_rejection = Some(handler);
     }
     /// Closing the identity/runtime cancellation prevents all later dispatch and delivery.
     pub fn cancellation(&self) -> Cancellation {

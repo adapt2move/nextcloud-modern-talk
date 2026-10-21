@@ -12,7 +12,8 @@ The existing dependency license collection applies to this direct dependency too
 `examples/input.rs`, distributed under Apache-2.0. Its original license is
 [assets/GPUI-LICENSE-APACHE](assets/GPUI-LICENSE-APACHE). Changes implement finite
 UTF-8 admission, privacy-gated user-entry clipboard, native focus/appearance,
-horizontal caret scrolling, corrected IME replacement offsets and grapheme tests.
+horizontal caret scrolling, UTF-16 replacement/selection, composition undo,
+grapheme masking, wrapped-line caret affinity and bounded editing tests.
 Preserve this attribution and license when redistributing the derived source.
 
 The runtime embeds unmodified Google Sans v14.000 static Regular (400), Medium

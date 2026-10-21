@@ -116,6 +116,7 @@ pub struct Accounts {
     next_request: u64,
     pending: Vec<Pending>,
     login: Option<Login>,
+    login_retry_server: Option<ServerInput>,
     removal: Option<removal::Removal>,
     replace: Option<Replacement>,
     snapshot: PresentationSnapshot,
@@ -154,6 +155,7 @@ impl Accounts {
             next_request: 0,
             pending: Vec::new(),
             login: None,
+            login_retry_server: None,
             removal: None,
             replace: None,
             snapshot,
@@ -778,6 +780,7 @@ impl Accounts {
         Ok(())
     }
     fn cancel_login(&mut self) {
+        self.login_retry_server = None;
         if let Some(login) = self.login.take()
             && let Ok(connection) = &mut self.connection
         {
@@ -1016,16 +1019,24 @@ impl Accounts {
                     talk_adapters::identity::selected_server_origin(server.as_str())
                         .map_err(submit_error)?;
                 self.prepare_login(&server);
+                // Keep the full installation path even when worker admission fails.
+                // The renderer only receives an origin label and cannot reconstruct it.
+                self.login_retry_server = Some(server.clone());
                 let replacement = self.replace.as_ref().map(|target| target.account);
-                let id = self
-                    .admit(
-                        RuntimeCommand::Begin {
-                            server: text(server.as_str()),
-                            replace: replacement,
-                        },
-                        Purpose::Login(request, LoginWork::Begin),
-                    )
-                    .map_err(submit_error)?;
+                self.snapshot.login.server_label = selected_origin;
+                let id = match self.admit(
+                    RuntimeCommand::Begin {
+                        server: text(server.as_str()),
+                        replace: replacement,
+                    },
+                    Purpose::Login(request, LoginWork::Begin),
+                ) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        self.login_failed(error);
+                        return Err(submit_error(error));
+                    }
+                };
                 self.login = Some(Login {
                     request,
                     begin: id,
@@ -1047,8 +1058,22 @@ impl Accounts {
                 });
                 self.snapshot.login.phase = LoginPhase::Validating;
                 self.snapshot.login.attempt = Some(request);
-                self.snapshot.login.server_label = selected_origin;
                 self.snapshot.login.storage_failure = None;
+            }
+            UiIntent::RetryLogin { request } => {
+                if !matches!(self.snapshot.login.phase, LoginPhase::Failed(_)) {
+                    return Err(SubmitError::StaleScope);
+                }
+                let server = self
+                    .login
+                    .as_ref()
+                    .map(|login| &login.server)
+                    .or(self.login_retry_server.as_ref())
+                    .ok_or(SubmitError::StaleScope)?
+                    .clone();
+                // Use the same admission/replacement path as an explicit address.
+                // Never retry from the display label, which omits subpaths.
+                self.submit(UiIntent::BeginLogin { request, server })?;
             }
             UiIntent::CancelLogin(request) => {
                 if self.login.as_ref().is_some_and(|l| l.request == request) {
@@ -1108,6 +1133,8 @@ impl Accounts {
             }
             UiIntent::OpenConversation(context) => self.open(context)?,
             UiIntent::Refresh(context) => {
+                self.current(context.account)?;
+                let already_selected = self.snapshot.selected == Some(context);
                 if self.snapshot.submission.is_none()
                     && let Some(u) = self
                         .unresolved
@@ -1122,6 +1149,9 @@ impl Accounts {
                     )?;
                 }
                 self.open(context)?;
+                if already_selected {
+                    self.refresh_messages(context)?;
+                }
             }
             UiIntent::SetArchived {
                 request,

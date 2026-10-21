@@ -2290,9 +2290,10 @@ extern "C" fn attributed_substring_for_proposed_range(
         let mut adjusted: Option<Range<usize>> = None;
 
         let selected_text = input_handler.text_for_range(range.clone(), &mut adjusted)?;
-        if let Some(adjusted) = adjusted
-            && adjusted != range
-        {
+        // AppKit permits a null actualRange out pointer. Always report the
+        // returned substring's range when requested, including an exact match.
+        if !actual_range.is_null() {
+            let adjusted = adjusted.unwrap_or(range);
             unsafe { (actual_range as *mut NSRange).write(NSRange::from(adjusted)) };
         }
         unsafe {

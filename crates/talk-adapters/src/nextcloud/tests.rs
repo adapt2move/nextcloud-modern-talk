@@ -314,6 +314,168 @@ async fn probe_checks_origin_canonical_user_and_request_headers() {
 }
 
 #[tokio::test]
+async fn non_ocs_http_failures_preserve_account_admission_and_retry_guidance() {
+    for (status, expected) in [
+        (403, ErrorKind::PermissionDenied),
+        (429, ErrorKind::RateLimited),
+        (500, ErrorKind::ServerUnavailable),
+        (503, ErrorKind::ServerUnavailable),
+    ] {
+        let mut failed = Reply::data(json!({}));
+        failed.status = status;
+        failed.headers = "Content-Type: text/html\r\nRetry-After: 9999\r\n".into();
+        failed.body = if status == 429 {
+            vec![]
+        } else {
+            b"<html>proxy failure</html>".to_vec()
+        };
+        let server = Server::start(vec![failed, Reply::data(json!({"id":"fixture_user"}))]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let error = client
+            .request(context(&runtime), ProtocolRequest::ProbeAccount)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, expected);
+        if status == 429 {
+            assert_eq!(
+                error.retry,
+                talk_core::ports::Retry::AfterDelay { millis: 300_000 }
+            );
+        }
+        assert!(!client.cancellation().is_cancelled());
+        assert!(matches!(
+            client
+                .request(context(&runtime), ProtocolRequest::ProbeAccount)
+                .await,
+            Ok(ProtocolReply::AccountValid(_))
+        ));
+        assert_eq!(server.count(), 2, "no implicit replay");
+    }
+}
+
+#[tokio::test]
+async fn malformed_cookie_batch_cannot_change_the_next_request_session() {
+    let mut failed = Reply::data(json!({"id":"fixture_user"}));
+    failed.headers = "Set-Cookie: session=uncommitted; Path=/cloud/\r\nSet-Cookie: other=invalid; Domain=example.invalid; Path=/cloud/\r\n".into();
+    let server = Server::start(vec![failed, Reply::data(json!({"id":"fixture_user"}))]).await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    assert!(
+        client
+            .request(context(&runtime), ProtocolRequest::ProbeAccount)
+            .await
+            .is_err()
+    );
+    client
+        .request(context(&runtime), ProtocolRequest::ProbeAccount)
+        .await
+        .unwrap();
+    let seen = server.seen.lock().unwrap();
+    assert!(
+        !String::from_utf8_lossy(&seen[1])
+            .to_ascii_lowercase()
+            .contains("cookie:")
+    );
+}
+
+#[tokio::test]
+async fn autonomous_account_probe_reports_only_authoritative_rejection() {
+    use talk_core::ids::{CallGeneration, CallScope};
+    for (status, code, expected, rejected) in [
+        (
+            401,
+            997,
+            nextcloud_talk_api::ErrorKind::ReauthenticationRequired,
+            true,
+        ),
+        (
+            403,
+            403,
+            nextcloud_talk_api::ErrorKind::PermissionDenied,
+            false,
+        ),
+        (
+            500,
+            500,
+            nextcloud_talk_api::ErrorKind::ServerUnavailable,
+            false,
+        ),
+    ] {
+        let server = Server::start(vec![
+            Reply::data(room()),
+            Reply::data(json!({"sessionId":"own-session"})),
+            Reply::data(json!([])),
+            Reply::envelope(status, "failure", code, json!([])),
+            Reply::data(json!({"id":"fixture_user"})),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let call = CallScope {
+            account: scope(),
+            conversation,
+            call: CallGeneration::from_local(1),
+        };
+        let room = nextcloud_talk_api::models::RoomToken::parse("testroom").unwrap();
+        client
+            .transport
+            .api_request(
+                &context(&runtime),
+                nextcloud_talk_api::Request::Room(room.clone()),
+            )
+            .await
+            .unwrap();
+        client
+            .transport
+            .api_request(
+                &context(&runtime),
+                nextcloud_talk_api::Request::ActivateRoom(room.clone()),
+            )
+            .await
+            .unwrap();
+        let (_reader, mut writer, _stop) = client
+            .transport
+            .begin_meeting(
+                &context(&runtime),
+                room,
+                nextcloud_talk_api::models::ParticipantFlags::new(false, false),
+                false,
+                &nextcloud_talk_api::models::SignalingSettings {
+                    mode: nextcloud_talk_api::models::SignalingMode::Internal,
+                    ice_servers: vec![],
+                    external: None,
+                },
+            )
+            .await
+            .unwrap();
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let recorded = reports.clone();
+        let handler: super::AccountRejection =
+            Arc::new(move |scope| recorded.lock().unwrap().push(scope));
+        let cancel = client.cancellation();
+        let result =
+            super::meeting_runtime::refresh(&mut writer, call, &runtime, &cancel, Some(&handler))
+                .await;
+        assert!(matches!(result, Err(kind) if kind == expected));
+        assert_eq!(cancel.is_cancelled(), rejected);
+        assert_eq!(
+            *reports.lock().unwrap(),
+            if rejected { vec![scope()] } else { vec![] }
+        );
+        if !rejected {
+            assert!(matches!(
+                client
+                    .request(context(&runtime), ProtocolRequest::ProbeAccount)
+                    .await,
+                Ok(ProtocolReply::AccountValid(_))
+            ));
+        }
+    }
+}
+
+#[tokio::test]
 async fn errors_are_redacted_and_scope_specific() {
     for (status, code, expected) in [
         (401, 997, ErrorKind::ReauthenticationRequired),

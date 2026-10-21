@@ -33,6 +33,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat",
     "chat-ux",
     "chat-ux-call",
+    "chat-edit",
+    "thread-error",
     "chat-content",
     "chat-content-progress",
     "chat-motion",
@@ -78,7 +80,9 @@ pub const SCENARIOS: &[&str] = &[
     "voice-room",
     "prejoin-voice",
     "offline",
+    "offline-empty",
     "loading",
+    "loading-retained",
     "denied",
     "error",
     "empty",
@@ -172,6 +176,47 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(scenario, Some("chat-edit" | "thread-error")) {
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            use talk_core::ui::{
+                conversation::{Availability, RemoteState},
+                messaging::MessageFeature,
+            };
+            panel.features = page(
+                [
+                    MessageFeature::Reply,
+                    MessageFeature::Edit,
+                    MessageFeature::Threads,
+                ]
+                .map(|feature| {
+                    (
+                        feature,
+                        Availability {
+                            implemented: true,
+                            server: talk_core::ui::presentation::FeatureSupport::Supported,
+                            allowed: Decision::Allowed,
+                        },
+                    )
+                }),
+            );
+            if scenario == Some("thread-error") {
+                panel.thread_root = Some(3);
+                panel.thread_state =
+                    RemoteState::Failed(RequestId(1), UnavailableReason::PolicyUnknown);
+                panel.thread_messages = page(state.messages.as_slice().iter().take(1).cloned());
+            }
+        }
+        state.messages = page(state.messages.as_slice().iter().map(|row| {
+            let mut row = row.clone();
+            if row.local_id == 3 {
+                row.delivery = DeliveryState::Received;
+                row.metadata.edit = Decision::Allowed;
+            }
+            row
+        }));
+        return state;
+    }
     if scenario == Some("details-ready") {
         let mut state = snapshot(Some("chat"));
         dialog::configure(&mut state);
@@ -446,6 +491,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     );
     match scenario {
         "offline" => s.content = ContentState::Offline,
+        "offline-empty" => {
+            s.content = ContentState::Offline;
+            s.messages = Page::empty();
+        }
+        "loading-retained" => s.content = ContentState::Loading,
         "loading" => {
             s.content = ContentState::Loading;
             s.messages = Page::empty();
@@ -822,6 +872,7 @@ fn account_snapshot(step: u8) -> PresentationSnapshot {
 }
 
 pub struct DevelopmentPort {
+    thread_fixture: Option<bool>,
     snapshot: PresentationSnapshot,
     dirty: bool,
     enabled: bool,
@@ -854,10 +905,18 @@ impl DevelopmentPort {
             snapshot(scenario)
         };
         Self {
+            thread_fixture: match scenario {
+                Some("chat-edit") => Some(false),
+                Some("thread-error") => Some(true),
+                _ => None,
+            },
             account_probe,
             focus_probe,
             probe_step: 0,
-            chat_ux: matches!(scenario, Some("chat-ux" | "chat-ux-call")),
+            chat_ux: matches!(
+                scenario,
+                Some("chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error")
+            ),
             chat_motion: scenario == Some("chat-motion"),
             history_pagination: scenario == Some("history-pagination"),
             chat_content: matches!(scenario, Some("chat-content" | "chat-content-progress")),
@@ -1207,6 +1266,28 @@ impl NativeDesktopPort for DevelopmentPort {
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
+                    MessageAction::Thread(root) if self.thread_fixture.is_some() => {
+                        panel.thread_root = Some(root);
+                        panel.thread_state = if self.thread_fixture == Some(true) {
+                            talk_core::ui::conversation::RemoteState::Failed(
+                                request,
+                                UnavailableReason::PolicyUnknown,
+                            )
+                        } else {
+                            talk_core::ui::conversation::RemoteState::Idle
+                        };
+                        let mut row = message(
+                            40,
+                            "Mara Fischer",
+                            "MF",
+                            "10:00",
+                            "Fictional thread reply for native input checks.",
+                            false,
+                        );
+                        row.metadata.replyable = true;
+                        row.metadata.thread = Some(root);
+                        panel.thread_messages = page([row]);
+                    }
                     MessageAction::Search(query) => {
                         let query = query.as_str().to_lowercase();
                         panel.search = page(

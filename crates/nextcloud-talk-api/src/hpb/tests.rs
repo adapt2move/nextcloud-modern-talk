@@ -333,6 +333,37 @@ fn mapped_identity_cannot_change_and_media_queue_overflow_closes_route() {
 }
 
 #[tokio::test]
+async fn hello_token_validity_failure_is_scoped_to_signaling_admission() {
+    for code in ["token_expired", "token_not_valid_yet"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/signal", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut socket = accept(&listener).await;
+            send(
+                &mut socket,
+                json!({"type":"welcome","welcome":{"features":["hello-v2"]}}),
+            )
+            .await;
+            let hello = receive(&mut socket).await;
+            send(
+                &mut socket,
+                json!({"id":hello["id"],"type":"error","error":{"code":code}}),
+            )
+            .await;
+        });
+        let (client, binding, runtime) = account();
+        let owner = Owner::start(binding, settings(&endpoint)).unwrap();
+        let handle = owner.handle();
+        let context = context(&runtime, &handle.shared);
+        let result = handle.join(&context, room(), peer("talk-own")).await;
+        assert!(matches!(result, Err(ErrorKind::PermissionDenied)));
+        assert!(!client.cancellation().is_cancelled());
+        assert!(client.validate(&context).is_ok());
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/signal", listener.local_addr().unwrap());

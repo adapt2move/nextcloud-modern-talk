@@ -198,6 +198,9 @@ struct SessionCookie {
 }
 
 pub(crate) struct Transport {
+    // One serialized request owns this bit, reset before local admission. Error
+    // kinds alone cannot distinguish a rejected form from an interrupted write.
+    request_dispatched: bool,
     binding: AuthenticatedBinding,
     client: Client,
     runtime: NetworkRuntime,
@@ -390,6 +393,7 @@ impl Transport {
             _slot: slot,
         });
         Ok(Self {
+            request_dispatched: false,
             binding,
             client,
             runtime,
@@ -449,6 +453,9 @@ impl Transport {
                 _ => Retry::Never,
             },
         }
+    }
+    pub(crate) fn request_dispatched(&self) -> bool {
+        self.request_dispatched
     }
     pub(crate) fn validate(&self, context: &OperationContext) -> Result<(), PortError> {
         if context.scope != self.scope() {
@@ -535,6 +542,7 @@ impl Transport {
         form: &[(&str, String)],
         options: RequestOptions,
     ) -> Result<Response, PortError> {
+        self.request_dispatched = false;
         self.validate(context)?;
         let shared_cookies = self.begin_shared_cookies()?;
         if options.account_probe
@@ -625,6 +633,7 @@ impl Transport {
         .min(options.limit);
         let cancel = self.binding.cancellation.clone();
         let work = async {
+            self.request_dispatched = true;
             let mut response = self.client.execute(request).await.map_err(|e| {
                 self.error(if e.is_timeout() {
                     ErrorKind::Deadline
@@ -639,18 +648,44 @@ impl Transport {
             // Talk chat explicitly uses a bodyless 304 for an exhausted history page.
             // No other operation interprets 304 as success or follows its Location.
             if status == 304 && options.empty_history {
-                return Ok(Response {
-                    status,
-                    notification_allowed: None,
-                    data: serde_json::Value::Array(Vec::new()),
-                    last_given: None,
-                    common_read: header_number(response.headers(), "X-Chat-Last-Common-Read")
-                        .map_err(|k| self.error(k))?,
-                });
+                return Ok((
+                    Response {
+                        status,
+                        notification_allowed: None,
+                        data: serde_json::Value::Array(Vec::new()),
+                        last_given: None,
+                        common_read: header_number(response.headers(), "X-Chat-Last-Common-Read")
+                            .map_err(|k| self.error(k))?,
+                    },
+                    self.cookies.clone(),
+                ));
             }
             // Reject before reading, following or copying any redirect location.
             if (300..400).contains(&status) {
                 return Err(self.error(ErrorKind::RedirectRejected));
+            }
+            // Reverse proxies and maintenance pages need not return OCS JSON.
+            // These HTTP failures are scoped evidence only. Account rejection
+            // still requires the complete authoritative HTTP401/OCS997 probe below.
+            let http_failure = match status {
+                403 => Some(ErrorKind::PermissionDenied),
+                429 => Some(ErrorKind::RateLimited),
+                500..=599 => Some(ErrorKind::ServerUnavailable),
+                _ => None,
+            };
+            if let Some(kind) = http_failure {
+                let mut error = self.error(kind);
+                if kind == ErrorKind::RateLimited {
+                    let seconds = header_number(response.headers(), "Retry-After")
+                        .ok()
+                        .flatten()
+                        .map(|n| n.clamp(1, 300) as u32)
+                        .unwrap_or(30);
+                    error.retry = Retry::AfterDelay {
+                        millis: seconds * 1000,
+                    };
+                }
+                return Err(error);
             }
             if response
                 .headers()
@@ -715,22 +750,25 @@ impl Transport {
                 .ok_or_else(|| self.error(ErrorKind::Malformed))?;
             // Commit only a complete, successfully decoded OCS response. A
             // partial body or rejected response cannot advance shared cookies.
-            self.update_cookies(response.headers())?;
-            Ok(Response {
-                status,
-                notification_allowed: match response
-                    .headers()
-                    .get("X-Nextcloud-User-Status")
-                    .and_then(|h| h.to_str().ok())
-                {
-                    Some("online" | "away" | "offline" | "invisible") => Some(true),
-                    Some("dnd") => Some(false),
-                    _ => None,
+            let cookies = self.update_cookies(response.headers())?;
+            Ok((
+                Response {
+                    status,
+                    notification_allowed: match response
+                        .headers()
+                        .get("X-Nextcloud-User-Status")
+                        .and_then(|h| h.to_str().ok())
+                    {
+                        Some("online" | "away" | "offline" | "invisible") => Some(true),
+                        Some("dnd") => Some(false),
+                        _ => None,
+                    },
+                    data,
+                    last_given,
+                    common_read,
                 },
-                data,
-                last_given,
-                common_read,
-            })
+                cookies,
+            ))
         };
         // The existing core cancellation primitive is atomic, not waker based. Poll only
         // while an admitted request exists; at most 8 timers, no idle task or detached job.
@@ -748,13 +786,21 @@ impl Transport {
             result = tokio::time::timeout(deadline, work) => result.unwrap_or(Err(PortError { kind: ErrorKind::Deadline, account: Some(context.scope.account), retry: Retry::UserAction })),
         };
         self.validate(context)?;
-        if result.is_ok() {
-            self.commit_shared_cookies(shared_cookies)?;
+        match result {
+            Ok((response, cookies)) => {
+                self.cookies = cookies;
+                self.commit_shared_cookies(shared_cookies)?;
+                Ok(response)
+            }
+            Err(error) => Err(error),
         }
-        result
     }
 
-    fn update_cookies(&mut self, headers: &reqwest::header::HeaderMap) -> Result<(), PortError> {
+    fn update_cookies(
+        &self,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Result<Vec<SessionCookie>, PortError> {
+        let mut cookies = self.cookies.clone();
         for value in headers.get_all(SET_COOKIE) {
             if value.as_bytes().len() > 4096 {
                 return Err(self.error(ErrorKind::TooLarge));
@@ -784,8 +830,7 @@ impl Transport {
             {
                 return Err(self.error(ErrorKind::Malformed));
             }
-            self.cookies
-                .retain(|c| !(c.name == cookie.name() && c.path == path));
+            cookies.retain(|c| !(c.name == cookie.name() && c.path == path));
             if cookie.max_age().is_some_and(|d| d.whole_seconds() <= 0)
                 || cookie.expires_datetime().is_some_and(|d| {
                     d.unix_timestamp() <= cookie::time::OffsetDateTime::now_utc().unix_timestamp()
@@ -793,13 +838,13 @@ impl Transport {
             {
                 continue;
             }
-            if self.cookies.len() == 8 {
+            if cookies.len() == 8 {
                 return Err(self.error(ErrorKind::TooLarge));
             }
             let expires = cookie.max_age().map(|d| {
                 Instant::now() + Duration::from_secs(d.whole_seconds().clamp(0, 86400) as u64)
             });
-            self.cookies.push(SessionCookie {
+            cookies.push(SessionCookie {
                 name: cookie.name().to_owned(),
                 value: Zeroizing::new(cookie.value().to_owned()),
                 path: path.to_owned(),
@@ -807,7 +852,7 @@ impl Transport {
                 expires,
             });
         }
-        Ok(())
+        Ok(cookies)
     }
 }
 

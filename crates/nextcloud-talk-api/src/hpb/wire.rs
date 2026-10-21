@@ -38,7 +38,9 @@ pub(super) fn failure(v: &Value) -> ErrorKind {
         Some("not_allowed" | "auth_failed" | "invalid_ticket" | "invalid_token") => {
             ErrorKind::PermissionDenied
         }
-        Some("token_expired" | "token_not_valid_yet") => ErrorKind::ReauthenticationRequired,
+        // These describe the HPB hello token, not the account's app credential.
+        // Only the authoritative OCS user probe may require account reauthorization.
+        Some("token_expired" | "token_not_valid_yet") => ErrorKind::PermissionDenied,
         Some("no_such_room" | "no_such_session" | "client_not_found") => ErrorKind::NotFound,
         Some("too_many_requests") => ErrorKind::RateLimited,
         Some("processing_failed") => ErrorKind::ServerUnavailable,

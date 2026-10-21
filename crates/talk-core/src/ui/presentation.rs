@@ -570,6 +570,10 @@ pub enum UiIntent {
         request: RequestId,
         server: ServerInput,
     },
+    /// Retry the failed attempt's complete installation address, retained by its owner.
+    RetryLogin {
+        request: RequestId,
+    },
     CancelLogin(RequestId),
     ReopenBrowser(RequestId),
     ChooseStorage {

@@ -5,6 +5,7 @@ mod menu;
 
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
+    collection::CollectionState,
     controls::{Availability, scoped_id},
     input::TextInput,
 };
@@ -44,6 +45,7 @@ pub(crate) enum Action {
     InsertMention(String),
 }
 pub(super) struct MessageUi {
+    pub thread_load: Option<ThreadLoad>,
     pub list: ListState,
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
@@ -68,6 +70,41 @@ pub(super) struct MessageUi {
     mention_candidate: Option<(ConversationRef, String, Instant)>,
     mention_request: Option<(RequestId, String)>,
     mention_ready: Option<String>,
+}
+
+pub(super) struct ThreadLoad {
+    pub context: ConversationRef,
+    pub root: u128,
+    pub request: Option<RequestId>,
+}
+
+impl ThreadLoad {
+    pub fn content_state(
+        &self,
+        panel: Option<&talk_core::ui::messaging::MessagePanel>,
+    ) -> ContentState {
+        use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+        let Some(request) = self.request else {
+            return ContentState::Failed;
+        };
+        let Some(panel) =
+            panel.filter(|p| p.context == self.context && p.thread_root == Some(self.root))
+        else {
+            return ContentState::Loading;
+        };
+        match panel.thread_state {
+            RemoteState::Idle => ContentState::Ready,
+            RemoteState::Failed(id, reason) if id == request => match reason {
+                UnavailableReason::PermissionDenied => ContentState::Denied,
+                UnavailableReason::Unsupported | UnavailableReason::Unconfigured => {
+                    ContentState::Unconfigured
+                }
+                _ => ContentState::Failed,
+            },
+            RemoteState::Uncertain(id) if id == request => ContentState::Failed,
+            _ => ContentState::Loading,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -114,6 +151,7 @@ impl MessageUi {
             }
         });
         Self {
+            thread_load: None,
             list,
             arrival,
             geometry: Rc::new(RefCell::new(MessageGeometry::default())),
@@ -625,7 +663,8 @@ impl Desktop {
             self.snapshot
                 .selected
                 .is_some_and(|c| self.drafts.pending(c))
-                || self.message_ui.pending_edit.is_some(),
+                || self.message_ui.pending_edit.is_some()
+                || self.message_ui.editing.is_some(),
         )
     }
     pub(super) fn submit_message(&mut self, action: MessageAction) -> Option<RequestId> {
@@ -648,6 +687,17 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
+        if !may_replace_composer(
+            &action,
+            self.message_ui.editing,
+            self.message_ui.pending_edit.is_some(),
+        ) {
+            self.feedback = Some(
+                super::feedback::Feedback::info("Beende zuerst die aktuelle Bearbeitung.")
+                    .in_conversation(context),
+            );
+            return;
+        }
         let anchor = self.message_ui.list.logical_scroll_top();
         let prior_compose = self.compose_motion_id(context);
         match action {
@@ -984,10 +1034,11 @@ impl Desktop {
         constrained: bool,
         cx: &Context<Self>,
     ) -> Div {
-        if matches!(
+        if CollectionState::new(
             self.snapshot.content,
-            ContentState::Ready | ContentState::Offline
-        ) && !self.snapshot.messages.as_slice().is_empty()
+            !self.snapshot.messages.as_slice().is_empty(),
+        )
+        .shows_content()
         {
             self.message_timeline_with_header(constrained, Some(header), cx)
         } else {
@@ -1018,57 +1069,44 @@ impl Desktop {
         if self.selected().is_none() {
             return body;
         }
-        match self.snapshot.content {
-            ContentState::Loading => {
-                body = body.child(self.state_note(
-                    "chat",
-                    "Nachrichten werden geladen …",
-                    "Du kannst währenddessen ein anderes Gespräch öffnen.",
-                ))
-            }
-            ContentState::Denied => {
-                body = body.child(self.state_note(
-                    "lock",
-                    "Kein Zugriff auf dieses Gespräch.",
-                    "Deine Berechtigungen können sich geändert haben.",
-                ))
-            }
-            ContentState::Failed | ContentState::Unconfigured => {
-                body = body
-                    .child(self.state_note(
-                        "chat",
-                        "Nachrichten konnten nicht aktualisiert werden.",
-                        "Dein Entwurf bleibt erhalten.",
-                    ))
-                    .child(self.button(
-                        "retry-content",
-                        "Erneut laden",
-                        ButtonStyle::Secondary,
-                        true,
-                        LocalAction::Message(Action::Command(MessageAction::Refresh)),
-                        cx,
-                    ))
-            }
-            _ => {
-                if self.snapshot.messages.as_slice().is_empty() {
-                    body = body.child(div().flex_1().child(self.state_note(
-                        "chat",
-                        "Noch keine Nachrichten.",
-                        "Hier erscheinen die Nachrichten dieses Gesprächs.",
-                    )));
-                } else {
-                    body = body.child(if let Some(header) = header.take() {
-                        super::shell::chat_header::scroll_under_header(
-                            header,
-                            constrained,
-                            cx.processor(|this, inset, _, cx| this.message_history(inset, cx)),
-                        )
-                        .into_any_element()
-                    } else {
-                        self.message_history(px(0.), cx).into_any_element()
-                    });
-                }
-            }
+        let state = CollectionState::new(
+            self.snapshot.content,
+            !self.snapshot.messages.as_slice().is_empty(),
+        );
+        if state.shows_content() {
+            // Keep the same virtualized list and scroll anchor during refresh
+            // and temporary failures; retained rows confer no mutation rights.
+            body = body.child(if let Some(header) = header.take() {
+                let inert = self.background_inert;
+                super::shell::chat_header::scroll_under_header(
+                    header,
+                    constrained,
+                    cx.processor(move |this, inset, _, cx| {
+                        this.in_surface(inert, |this| this.message_history(inset, cx))
+                    }),
+                )
+                .into_any_element()
+            } else {
+                self.message_history(px(0.), cx).into_any_element()
+            });
+        } else if state.confirmed_empty() {
+            body = body.child(div().flex_1().child(self.state_note(
+                "chat",
+                "Noch keine Nachrichten.",
+                "Hier erscheinen die Nachrichten dieses Gesprächs.",
+            )));
+        } else {
+            body = body.child(div().flex_1());
+        }
+        if self.snapshot.content != ContentState::Ready
+            && let Some(context) = self.snapshot.selected
+        {
+            body = body.child(div().px_3().py_2().child(self.collection_feedback(
+                state,
+                "retry-content",
+                LocalAction::Intent(UiIntent::Refresh(context)),
+                cx,
+            )));
         }
         if let Some(panel) = self
             .snapshot
@@ -1138,6 +1176,7 @@ impl Desktop {
         let reduced = self.reduced_motion;
         let layout_geometry = self.message_ui.geometry.clone();
         self.message_ui.geometry.borrow_mut().painted.clear();
+        let inert = self.background_inert;
         div()
             .flex_1()
             .min_h_0()
@@ -1223,59 +1262,61 @@ impl Desktop {
                 list(
                     self.message_ui.list.clone(),
                     cx.processor(move |this, index, _, cx| {
-                        this.snapshot
-                            .messages
-                            .as_slice()
-                            .get(index)
-                            .map(|m: &MessageView| {
-                                let geometry = this.message_ui.geometry.clone();
-                                let id = m.local_id;
-                                let progress = this
-                                    .message_ui
-                                    .arrival
-                                    .borrow()
-                                    .progress(m.local_id, Instant::now())
-                                    .map(gpui::ease_out_quint());
-                                let mut bubble = this.message_row(m, cx);
-                                if let Some(progress) = progress {
-                                    // Paint-only rise: a relative offset inside the
-                                    // measured wrapper leaves row height, list
-                                    // measurement and the recorded anchor bounds intact.
-                                    // Own sends rise from the composer a little further.
-                                    let rise = this.sp(if m.own { 14. } else { 8. });
-                                    bubble = bubble
-                                        .relative()
-                                        .top(rise * (1. - progress))
-                                        .opacity(0.2 + 0.8 * progress);
-                                }
-                                let row = div()
-                                    .child(
-                                        div()
-                                            .when(index == 0, |d| {
-                                                d.child(this.history_boundary(cx))
-                                            })
-                                            .child(bubble),
-                                    )
-                                    .when(index == 0, |d| d.pt(header_inset))
-                                    .on_children_prepainted(move |bounds, _, _| {
-                                        let mut geometry = geometry.borrow_mut();
-                                        if geometry.painted.len() < 100
-                                            && let Some(mut bounds) = bounds.first().copied()
-                                        {
-                                            if index == 0 {
-                                                bounds.origin.y -= header_inset;
-                                                bounds.size.height += header_inset;
+                        this.in_surface(inert, |this| {
+                            this.snapshot
+                                .messages
+                                .as_slice()
+                                .get(index)
+                                .map(|m: &MessageView| {
+                                    let geometry = this.message_ui.geometry.clone();
+                                    let id = m.local_id;
+                                    let progress = this
+                                        .message_ui
+                                        .arrival
+                                        .borrow()
+                                        .progress(m.local_id, Instant::now())
+                                        .map(gpui::ease_out_quint());
+                                    let mut bubble = this.message_row(m, cx);
+                                    if let Some(progress) = progress {
+                                        // Paint-only rise: a relative offset inside the
+                                        // measured wrapper leaves row height, list
+                                        // measurement and the recorded anchor bounds intact.
+                                        // Own sends rise from the composer a little further.
+                                        let rise = this.sp(if m.own { 14. } else { 8. });
+                                        bubble = bubble
+                                            .relative()
+                                            .top(rise * (1. - progress))
+                                            .opacity(0.2 + 0.8 * progress);
+                                    }
+                                    let row = div()
+                                        .child(
+                                            div()
+                                                .when(index == 0, |d| {
+                                                    d.child(this.history_boundary(cx))
+                                                })
+                                                .child(bubble),
+                                        )
+                                        .when(index == 0, |d| d.pt(header_inset))
+                                        .on_children_prepainted(move |bounds, _, _| {
+                                            let mut geometry = geometry.borrow_mut();
+                                            if geometry.painted.len() < 100
+                                                && let Some(mut bounds) = bounds.first().copied()
+                                            {
+                                                if index == 0 {
+                                                    bounds.origin.y -= header_inset;
+                                                    bounds.size.height += header_inset;
+                                                }
+                                                geometry.painted.push((index, id, bounds));
                                             }
-                                            geometry.painted.push((index, id, bounds));
-                                        }
-                                    });
-                                if progress.is_some() {
-                                    let frames = this.motion_frame_counter();
-                                    super::motion::count_frame(&frames);
-                                }
-                                row.into_any_element()
-                            })
-                            .unwrap_or_else(|| div().into_any_element())
+                                        });
+                                    if progress.is_some() {
+                                        let frames = this.motion_frame_counter();
+                                        super::motion::count_frame(&frames);
+                                    }
+                                    row.into_any_element()
+                                })
+                                .unwrap_or_else(|| div().into_any_element())
+                        })
                     }),
                 )
                 .size_full(),
@@ -2084,6 +2125,13 @@ fn message_actions_allowed(message: &MessageView) -> bool {
                 | talk_core::ui::presentation::DeliveryState::ServerAccepted
         )
 }
+fn may_replace_composer(action: &Action, editing: Option<u128>, pending_edit: bool) -> bool {
+    !matches!(
+        action,
+        Action::Reply(_) | Action::ThreadReply(_) | Action::Edit(_)
+    ) || (editing.is_none() && !pending_edit)
+}
+
 fn reply_allowed(
     message: &MessageView,
     content: ContentState,
@@ -2156,6 +2204,72 @@ fn parse_time(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn thread_failure_and_rejected_admission_never_become_empty_success() {
+        use talk_core::ui::{
+            AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration, UnavailableReason,
+            conversation::RemoteState, messaging::MessagePanel,
+        };
+        let account = AccountId::from_local(1);
+        let context = ConversationRef {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let mut panel = MessagePanel::new(context);
+        panel.thread_root = Some(42);
+        let mut load = ThreadLoad {
+            context,
+            root: 42,
+            request: None,
+        };
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Failed);
+        load.request = Some(RequestId(7));
+        assert_eq!(load.content_state(None), ContentState::Loading);
+        panel.thread_state = RemoteState::Loading(RequestId(7));
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Loading);
+        for reason in [
+            UnavailableReason::PolicyUnknown,
+            UnavailableReason::PolicyStale,
+        ] {
+            panel.thread_state = RemoteState::Failed(RequestId(7), reason);
+            assert_eq!(load.content_state(Some(&panel)), ContentState::Failed);
+        }
+        panel.thread_state = RemoteState::Failed(RequestId(7), UnavailableReason::PermissionDenied);
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Denied);
+        load.request = Some(RequestId(8));
+        assert_eq!(
+            load.content_state(Some(&panel)),
+            ContentState::Loading,
+            "an old error cannot replace a retry"
+        );
+        panel.thread_state = RemoteState::Idle;
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Ready);
+        panel.thread_root = Some(99);
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Loading);
+        panel.thread_root = Some(42);
+        panel.context.account.runtime = RuntimeGeneration::from_local(2);
+        assert_eq!(load.content_state(Some(&panel)), ContentState::Loading);
+    }
+    #[test]
+    fn reply_thread_reply_and_new_edit_cannot_replace_an_unfinished_edit() {
+        for action in [Action::Reply(2), Action::ThreadReply(3), Action::Edit(4)] {
+            assert!(may_replace_composer(&action, None, false));
+            assert!(!may_replace_composer(&action, Some(1), false));
+            assert!(!may_replace_composer(&action, Some(1), true));
+            assert!(!may_replace_composer(&action, None, true));
+        }
+        // Resolving the edit stays available, including while its server result
+        // is pending. Its correlated receipt owns whether the editor restores.
+        assert!(may_replace_composer(&Action::CancelCompose, Some(1), true));
+        assert!(may_replace_composer(&Action::ToggleSearch, Some(1), false));
+    }
     #[test]
     fn system_file_share_uses_attachment_surface_while_activity_notice_stays_compact() {
         let mut message = MessageView {

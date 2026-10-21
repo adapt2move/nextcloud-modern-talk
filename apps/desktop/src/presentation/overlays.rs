@@ -1,3 +1,4 @@
+use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
@@ -372,60 +373,107 @@ impl Desktop {
         else {
             return body;
         };
-        let Some(panel) = self
+        let panel = self
             .snapshot
             .message_panel
             .as_ref()
-            .filter(|p| p.context == context && p.thread_root == Some(root))
-        else {
-            return body.child(self.hint(self.l("Nachrichten werden geladen …")));
+            .filter(|p| p.context == context && p.thread_root == Some(root));
+        let load = self
+            .message_ui
+            .thread_load
+            .as_ref()
+            .filter(|load| load.context == context && load.root == root);
+        let projected = super::messaging::ThreadLoad {
+            context,
+            root,
+            request: Some(talk_core::ui::presentation::RequestId(panel.map_or(
+                0,
+                |p| {
+                    use talk_core::ui::conversation::RemoteState;
+                    match p.thread_state {
+                        RemoteState::Idle => 0,
+                        RemoteState::Loading(id)
+                        | RemoteState::Saving(id)
+                        | RemoteState::Failed(id, _)
+                        | RemoteState::Uncertain(id) => id.0,
+                    }
+                },
+            ))),
         };
-        body = body.child(
-            self.hint(
-                &self.count(
-                    super::localization::Count::Replies,
-                    panel
-                        .thread_messages
-                        .as_slice()
-                        .iter()
-                        .filter(|m| m.local_id != root)
-                        .count() as u64,
-                ),
-            ),
+        let state = load.unwrap_or(&projected).content_state(panel);
+        let collection = CollectionState::new(
+            state,
+            panel.is_some_and(|panel| !panel.thread_messages.as_slice().is_empty()),
         );
-        for message in panel.thread_messages.as_slice() {
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(message.author.as_str().to_owned()),
-                    )
-                    .child(if message.metadata.deleted {
-                        self.l("Nachricht gelöscht.").to_owned()
-                    } else {
-                        message.body.as_str().to_owned()
-                    }),
-            );
-        }
-        body.child(
-            self.button(
-                "thread-reply",
-                "Im Thread antworten",
-                ButtonStyle::Secondary,
-                Availability::when(
-                    panel
-                        .availability(talk_core::ui::messaging::MessageFeature::Threads)
-                        .enabled(),
-                    "Du hast dafür keine Berechtigung.",
-                ),
-                LocalAction::Message(super::messaging::Action::ThreadReply(root)),
+        if state != ContentState::Ready {
+            body = body.child(self.collection_feedback(
+                collection,
+                "retry-thread",
+                LocalAction::Thread(context, root),
                 cx,
+            ));
+        }
+        if load.is_some_and(|load| load.request.is_none()) && self.feedback.is_some() {
+            body = body.child(self.feedback_view(cx));
+        }
+        if let Some(panel) =
+            panel.filter(|_| collection.shows_content() || collection.confirmed_empty())
+        {
+            body = body.child(
+                self.hint(
+                    &self.count(
+                        super::localization::Count::Replies,
+                        panel
+                            .thread_messages
+                            .as_slice()
+                            .iter()
+                            .filter(|m| m.local_id != root)
+                            .count() as u64,
+                    ),
+                ),
+            );
+            for message in panel.thread_messages.as_slice() {
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(message.author.as_str().to_owned()),
+                        )
+                        .child(if message.metadata.deleted {
+                            self.l("Nachricht gelöscht.").to_owned()
+                        } else {
+                            message.body.as_str().to_owned()
+                        }),
+                );
+            }
+        }
+        let editing = self.message_ui.editing.is_some() || self.message_ui.pending_edit.is_some();
+        body.child(self.button(
+            "thread-reply",
+            "Im Thread antworten",
+            ButtonStyle::Secondary,
+            Availability::when(
+                state == ContentState::Ready
+                    && !editing
+                    && !self.drafts.pending(context)
+                    && panel.is_some_and(|panel| {
+                        panel
+                            .availability(talk_core::ui::messaging::MessageFeature::Threads)
+                            .enabled()
+                    }),
+                if editing {
+                    "Beende zuerst die aktuelle Bearbeitung."
+                } else {
+                    "Du hast dafür keine Berechtigung."
+                },
             ),
-        )
+            LocalAction::Message(super::messaging::Action::ThreadReply(root)),
+            cx,
+        ))
     }
     fn search_body(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;

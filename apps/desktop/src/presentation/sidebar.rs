@@ -1,4 +1,5 @@
 //! Compact navigation over bounded, typed conversation projections.
+use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
 use gpui::{Context, Div, FontWeight, div, prelude::*, px};
@@ -310,15 +311,31 @@ impl Desktop {
 
         let query = self.sidebar_filter.read(cx).content.to_lowercase();
         let archived = self.destination == SidebarDestination::Archive;
+        let state = CollectionState::new(
+            self.snapshot.conversation_list.content,
+            !self.snapshot.conversations.as_slice().is_empty(),
+        );
+        let rooms = if state.shows_content() {
+            self.snapshot.conversations.as_slice()
+        } else {
+            &[]
+        };
         let mut list = div().flex_none().flex().flex_col().pt_2().pl_3();
+        if let Some(scope) = self.snapshot.active_account {
+            list = list.child(self.collection_feedback(
+                state,
+                "retry-conversations",
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::ReloadConversations(
+                    scope,
+                )),
+                cx,
+            ));
+        }
         let mut visible = 0;
         let mut grouped = Vec::new();
         // Favorites have one explicit group, independent of room category and
         // server tags. Every row is rendered once so focus identity is stable.
-        let favorites: Vec<_> = self
-            .snapshot
-            .conversations
-            .as_slice()
+        let favorites: Vec<_> = rooms
             .iter()
             .filter(|r| {
                 r.archived == Some(archived)
@@ -352,10 +369,7 @@ impl Desktop {
                 if tag.kind == TagKind::Unknown {
                     continue;
                 }
-                let rows: Vec<_> = self
-                    .snapshot
-                    .conversations
-                    .as_slice()
+                let rows: Vec<_> = rooms
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
@@ -372,44 +386,43 @@ impl Desktop {
                 }
                 visible += rows.len();
                 grouped.extend(rows.iter().map(|r| r.context));
-                list =
-                    list.child(
-                        self.button(
-                            gpui::SharedString::from(format!("sidebar-tag-{}", tag.id.local)),
-                            "",
-                            ButtonStyle::Quiet,
-                            self.snapshot.conversations.as_slice().iter().any(|r| {
-                                r.organization.tag_change == talk_core::ui::Decision::Allowed
-                            }),
-                            LocalAction::EditTag(TagEdit::Collapse {
-                                tag: tag.id,
-                                collapsed: !tag.collapsed,
-                            }),
-                            cx,
-                        )
-                        .justify_start()
-                        .gap_2()
-                        .mt_2()
-                        .min_h(px(28.))
-                        .py_1()
-                        .px_2()
-                        .text_size(self.sp(12.))
-                        .child(self.scaled_icon(
-                            if tag.collapsed && query.is_empty() {
-                                "chevron-left"
-                            } else {
-                                "chevron-down"
-                            },
-                            12.,
-                            t.muted,
-                        ))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_ellipsis()
-                                .child(tag.name.as_str().to_owned()),
-                        ),
-                    );
+                list = list.child(
+                    self.button(
+                        gpui::SharedString::from(format!("sidebar-tag-{}", tag.id.local)),
+                        "",
+                        ButtonStyle::Quiet,
+                        rooms
+                            .iter()
+                            .any(|r| r.organization.tag_change == talk_core::ui::Decision::Allowed),
+                        LocalAction::EditTag(TagEdit::Collapse {
+                            tag: tag.id,
+                            collapsed: !tag.collapsed,
+                        }),
+                        cx,
+                    )
+                    .justify_start()
+                    .gap_2()
+                    .mt_2()
+                    .min_h(px(28.))
+                    .py_1()
+                    .px_2()
+                    .text_size(self.sp(12.))
+                    .child(self.scaled_icon(
+                        if tag.collapsed && query.is_empty() {
+                            "chevron-left"
+                        } else {
+                            "chevron-down"
+                        },
+                        12.,
+                        t.muted,
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .child(tag.name.as_str().to_owned()),
+                    ),
+                );
                 if !tag.collapsed || !query.is_empty() {
                     for row in rows {
                         list = list.child(self.compact_room(row, "room", cx));
@@ -421,10 +434,7 @@ impl Desktop {
             let mut groups: Vec<_> = layout.groups().iter().collect();
             groups.sort_by_key(|g| g.order);
             for group in groups {
-                let mut rows: Vec<_> = self
-                    .snapshot
-                    .conversations
-                    .as_slice()
+                let mut rows: Vec<_> = rooms
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
@@ -481,10 +491,7 @@ impl Desktop {
             }
         }
         for section in Section::ALL {
-            let mut rows: Vec<_> = self
-                .snapshot
-                .conversations
-                .as_slice()
+            let mut rows: Vec<_> = rooms
                 .iter()
                 .filter(|r| {
                     r.archived == Some(archived)
@@ -534,23 +541,19 @@ impl Desktop {
                 }
             }
         }
-        if visible == 0 {
+        if visible == 0 && self.snapshot.conversation_list.content == ContentState::Ready {
             list = list.child(div().px_2().py_3().child(self.hint(self.l(if archived {
                 "Keine archivierten Gespräche geladen."
             } else {
                 "Keine Gespräche in diesem Filter."
             }))));
         }
-        if self
-            .snapshot
-            .conversations
-            .as_slice()
-            .iter()
-            .any(|r| r.archived.is_none())
-        {
+        if rooms.iter().any(|r| r.archived.is_none()) {
             list = list.child(self.hint(self.l("Archivstatus noch nicht bekannt.")));
         }
-        if !self.snapshot.conversation_list.complete {
+        if self.snapshot.conversation_list.content == ContentState::Ready
+            && !self.snapshot.conversation_list.complete
+        {
             list = list
                 .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
         }
@@ -795,6 +798,10 @@ impl Desktop {
             .gap_3()
             .child(self.title(self.l("Posteingang")))
             .child(self.hint(self.l("Ungelesene Gespräche in diesem Konto.")));
+        let state = CollectionState::new(
+            self.snapshot.conversation_list.content,
+            !self.snapshot.conversations.as_slice().is_empty(),
+        );
         let mut rows = div().flex().flex_col().gap_1();
         let mut count = 0;
         for row in self
@@ -802,17 +809,29 @@ impl Desktop {
             .conversations
             .as_slice()
             .iter()
-            .filter(|r| r.unread > 0 && r.archived == Some(false))
+            .filter(|r| state.shows_content() && r.unread > 0 && r.archived == Some(false))
         {
             rows = rows.child(self.compact_room(row, "inbox-room", cx));
             count += 1;
         }
-        if count == 0 {
+        if count == 0 && self.snapshot.conversation_list.content == ContentState::Ready {
             rows = rows.child(self.hint(self.l("Keine ungelesenen Gespräche geladen.")));
         }
-        if !self.snapshot.conversation_list.complete {
+        if self.snapshot.conversation_list.content == ContentState::Ready
+            && !self.snapshot.conversation_list.complete
+        {
             rows = rows
                 .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
+        }
+        if let Some(scope) = self.snapshot.active_account {
+            page = page.child(self.collection_feedback(
+                state,
+                "retry-inbox",
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::ReloadConversations(
+                    scope,
+                )),
+                cx,
+            ));
         }
         page = page.child(
             self.scroll_area(super::navigation::Region::Conversation)

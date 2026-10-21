@@ -143,6 +143,7 @@ impl LiveCall {
         stop: MeetingStop,
         network: NetworkRuntime,
         cancel: Cancellation,
+        account_rejection: Option<super::AccountRejection>,
     ) -> Result<Self, api::ErrorKind> {
         let scope = call.scope();
         let grant = call
@@ -193,6 +194,7 @@ impl LiveCall {
             session.clone(),
             network.clone(),
             cancel.clone(),
+            account_rejection,
         ));
         tokio::spawn(media_loop(
             call,
@@ -276,11 +278,12 @@ async fn read_loop(
     }
     session.close();
 }
-async fn refresh(
+pub(super) async fn refresh(
     writer: &mut MeetingWriter,
     scope: CallScope,
     network: &NetworkRuntime,
     cancel: &Cancellation,
+    account_rejection: Option<&super::AccountRejection>,
 ) -> Result<Bundle, api::ErrorKind> {
     let mut sources = Sources::new(scope, writer.own_session()?);
     for observation in OBSERVATIONS {
@@ -288,6 +291,17 @@ async fn refresh(
             .observe(&context(scope, network, cancel, 3000), observation)
             .await
             .map_err(|e| {
+                if matches!(observation, Observation::Account)
+                    && e.kind == api::ErrorKind::ReauthenticationRequired
+                {
+                    // This observation alone uses the authoritative user probe.
+                    // Close local admission immediately; durable suppression is
+                    // owned by identity and must not depend on another UI poll.
+                    if let Some(report) = account_rejection {
+                        report(scope.account);
+                    }
+                    cancel.cancel();
+                }
                 #[cfg(feature = "backend-test")]
                 {
                     let source = match observation {
@@ -314,6 +328,7 @@ async fn write_loop(
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
+    account_rejection: Option<super::AccountRejection>,
 ) {
     let mut refresh_at = Instant::now();
     let mut requested = 0;
@@ -366,7 +381,15 @@ async fn write_loop(
             }
         }
         if Instant::now() >= refresh_at {
-            match refresh(&mut writer, scope, &network, &cancel).await {
+            match refresh(
+                &mut writer,
+                scope,
+                &network,
+                &cancel,
+                account_rejection.as_ref(),
+            )
+            .await
+            {
                 Ok(bundle) => {
                     if policy
                         .try_send(PolicyUpdate {

@@ -159,6 +159,76 @@ pub(super) fn context(r: &NetworkRuntime) -> OperationContext {
         cancellation: Cancellation::default(),
     }
 }
+
+#[tokio::test]
+async fn definitive_activation_and_join_denials_retire_only_provisional_state() {
+    let denial = (
+        403,
+        "<html>temporary proxy denial</html>".into(),
+        Duration::ZERO,
+    );
+    let server = Server::start(vec![
+        denial.clone(),
+        reply(json!({"sessionId":"own-session"})),
+        denial,
+        reply(json!([])),
+    ])
+    .await;
+    let (mut client, runtime) = client(&server);
+    assert!(
+        matches!(client.request(&context(&runtime), Request::ActivateRoom(room())).await,
+        Err(error) if error.kind == ErrorKind::PermissionDenied)
+    );
+    assert!(client.active_room.is_none());
+    let other = RoomToken::parse("otherroom").unwrap();
+    client
+        .request(&context(&runtime), Request::ActivateRoom(other.clone()))
+        .await
+        .unwrap();
+    let join = || Request::JoinCall {
+        room: other.clone(),
+        flags: models::ParticipantFlags::new(false, false),
+        silent: true,
+        recording_consent: false,
+    };
+    assert!(matches!(client.request(&context(&runtime), join()).await,
+        Err(error) if error.kind == ErrorKind::PermissionDenied));
+    assert!(!client.call_remote_pending);
+    assert!(matches!(
+        client.request(&context(&runtime), join()).await,
+        Ok(Reply::CallJoined(_))
+    ));
+    assert_eq!(server.count(), 4);
+}
+
+#[tokio::test]
+async fn oversized_encoded_write_is_rejected_before_dispatch_without_uncertainty() {
+    let server = Server::start(vec![]).await;
+    let (mut client, runtime) = client(&server);
+    let error = client
+        .request(
+            &context(&runtime),
+            Request::Chat {
+                room: room(),
+                command: chat::Command::Send {
+                    message: "&".repeat(90_000),
+                    reference: "oversized-form".into(),
+                    options: Default::default(),
+                },
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, ErrorKind::TooLarge);
+    assert_eq!(server.count(), 0);
+    assert_eq!(
+        client.sends.len(),
+        1,
+        "wire-size rejection follows journal admission"
+    );
+    assert!(client.sends.iter().all(|attempt| !attempt.uncertain));
+}
 pub(super) fn room() -> RoomToken {
     RoomToken::parse("testroom").unwrap()
 }

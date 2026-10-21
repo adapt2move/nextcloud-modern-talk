@@ -83,6 +83,54 @@ impl Accounts {
         self.message_poll_at = Instant::now() + Duration::from_secs(1);
         Ok(())
     }
+    /// Retry selected history without replacing its panel or retained projection.
+    /// A denied room has no cache; a deliberate retry creates a new read ticket,
+    /// but never restores data discarded after access loss.
+    pub(super) fn refresh_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self.snapshot.selected != Some(context) {
+            return Err(SubmitError::StaleScope);
+        }
+        if self.history.get(context).is_none() {
+            self.restore_messages(context);
+            self.snapshot.content = ContentState::Loading;
+        }
+        let result = self.start_message(
+            RequestId(0),
+            context,
+            wire::MessagingCommand::History {
+                before: None,
+                thread: None,
+            },
+            Work::History,
+        );
+        if let Err(error) = result {
+            if error != SubmitError::Busy {
+                let reason = match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    _ => UnavailableReason::PolicyStale,
+                };
+                self.history.admission_failed(context, RequestId(0), reason);
+                self.project_history(context);
+                if !self.history.get(context).is_some_and(|h| h.loaded) {
+                    self.snapshot.content = ContentState::Failed;
+                }
+                self.touch();
+            }
+            return Err(error);
+        }
+        let _ = self.start_message(
+            RequestId(0),
+            context,
+            wire::MessagingCommand::Capabilities,
+            Work::Capabilities,
+        );
+        let _ = self.room_action(
+            RequestId(0),
+            context,
+            talk_core::ui::conversation::ConversationAction::Read,
+        );
+        Ok(())
+    }
     /// Background reconciliation never starts an explicit history baseline.
     /// A loaded empty room has no event cursor yet, but remains ready while its
     /// next newest-page read is outstanding. Existing event cursors are retained
@@ -196,6 +244,7 @@ impl Accounts {
         if let Some(panel) = self.snapshot.message_panel.as_mut() {
             match work {
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
+                Work::Thread => panel.thread_state = RemoteState::Loading(request),
                 Work::Action | Work::PinChange | Work::Share | Work::Send => {
                     panel.state = RemoteState::Saving(request)
                 }
@@ -431,8 +480,10 @@ impl Accounts {
         if let Some(root) = thread_root
             && let Some(panel) = self.snapshot.message_panel.as_mut()
         {
+            if panel.thread_root != Some(root) {
+                panel.thread_messages = Page::empty();
+            }
             panel.thread_root = Some(root);
-            panel.thread_messages = Page::empty();
         }
         Ok(())
     }
@@ -506,10 +557,23 @@ impl Accounts {
                 ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
             ))
         );
-        let missing_room = matches!(
+        let room_read = matches!(
             work,
             Work::History | Work::Latest | Work::Older | Work::Poll
-        ) && matches!(reply, Err(IdentityError::Request(ErrorKind::NotFound)));
+        );
+        // A denial is authoritative only for the current room observation.
+        // Context/thread endpoints can deny one target while the chat remains
+        // readable; an older read cannot erase newer successful history.
+        let access_lost = room_read
+            && matches!(
+                reply,
+                Err(IdentityError::Request(
+                    ErrorKind::NotFound | ErrorKind::PermissionDenied
+                ))
+            )
+            && self
+                .history
+                .read_failure_is_current(context, operation, work);
         let result = match reply {
             Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
                 conversation,
@@ -539,17 +603,7 @@ impl Accounts {
             }
             return;
         }
-        if missing_room
-            || matches!(
-                work,
-                Work::History
-                    | Work::Latest
-                    | Work::Older
-                    | Work::Poll
-                    | Work::Thread
-                    | Work::Context(_)
-            ) && result == Err(Completion::Failed(UnavailableReason::PermissionDenied))
-        {
+        if access_lost {
             self.invalidate_history(context, ContentState::Denied);
             return;
         }
@@ -559,6 +613,13 @@ impl Accounts {
             if work == Work::Send {
                 self.settle_retained_send(request, context, operation, &result);
             }
+            return;
+        }
+        if work == Work::Thread
+            && !self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context && panel.thread_state == RemoteState::Loading(request)
+            })
+        {
             return;
         }
         self.history.expire(history::now_unix());
@@ -743,8 +804,18 @@ impl Accounts {
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };
-        if matches!(work, Work::History | Work::Older) {
-            panel.history = state;
+        if work == Work::Thread {
+            panel.thread_state = state;
+            if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
+                panel.thread_messages = Page::empty();
+            }
+        }
+        // Timeline state is projected by the cache's versioned completion owner.
+        // Reapplying this raw result would let a stale failure undo recovery.
+        if matches!(work, Work::Thread | Work::Context(_))
+            && completion != Completion::ServerAccepted
+        {
+            panel.state = state;
         }
         if matches!(
             work,

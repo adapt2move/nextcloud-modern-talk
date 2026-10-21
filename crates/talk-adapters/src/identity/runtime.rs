@@ -324,6 +324,7 @@ struct Control {
     slots: Arc<Semaphore>,
     epoch: AtomicU64,
     close: AtomicBool,
+    rejected: AtomicBool,
     removed: AtomicBool,
     changed: Notify,
     inflight: Mutex<Option<InFlight>>,
@@ -335,6 +336,30 @@ struct Control {
     faults: Arc<provider::faults::Faults>,
 }
 impl Control {
+    fn rejection_handler(
+        self: &Arc<Self>,
+        wake: Arc<Notify>,
+    ) -> crate::nextcloud::AccountRejection {
+        let owner = Arc::downgrade(self);
+        Arc::new(move |scope| {
+            let Some(control) = owner.upgrade() else {
+                return;
+            };
+            // Serialize with activation/replacement. An obsolete call cannot
+            // reject a newly authorized runtime of the same account.
+            let Ok(runtime) = control.runtime.lock() else {
+                return;
+            };
+            let Some((_, cancel)) = runtime.as_ref().filter(|(current, _)| *current == scope)
+            else {
+                return;
+            };
+            control.rejected.store(true, Ordering::Release);
+            cancel.cancel();
+            drop(runtime);
+            wake.notify_one();
+        })
+    }
     fn suppress(&self, ledger: &Mutex<Ledger>, decision: Suppression) -> Result<()> {
         let mut pending = lock(&self.suppression)?;
         *pending = Some(match *pending {
@@ -756,6 +781,7 @@ async fn run(
                 slots: Arc::new(Semaphore::new(7)),
                 epoch: AtomicU64::new(0),
                 close: AtomicBool::new(false),
+                rejected: AtomicBool::new(false),
                 removed: AtomicBool::new(false),
                 changed: Notify::new(),
                 inflight: Mutex::new(None),
@@ -907,7 +933,8 @@ fn priority(shared: &Shared, ledger: &Mutex<Ledger>) -> Result<()> {
             .as_ref()
             .is_some_and(|(_, c)| c.is_cancelled());
         let explicitly_closed = control.close.swap(false, Ordering::AcqRel);
-        let close_account = explicitly_closed || runtime_cancelled;
+        let rejected = control.rejected.swap(false, Ordering::AcqRel);
+        let close_account = explicitly_closed || runtime_cancelled || rejected;
         let mut changed = close_account;
         if close_account {
             if !explicitly_closed {
@@ -945,7 +972,9 @@ fn priority(shared: &Shared, ledger: &Mutex<Ledger>) -> Result<()> {
                 if close_account {
                     v.scope = None;
                 }
-                if v.phase != AccountPhase::ReauthenticationRequired {
+                if rejected {
+                    v.phase = AccountPhase::ReauthenticationRequired;
+                } else if v.phase != AccountPhase::ReauthenticationRequired {
                     v.phase = if v.scope.is_some() {
                         AccountPhase::Active
                     } else {
@@ -2065,6 +2094,9 @@ impl Worker {
         )
         .map_err(|e| IdentityError::Request(e.kind))?;
         client.set_media_service(self.media.clone());
+        client.set_account_rejection_handler(
+            self.control.rejection_handler(self.shared.wake.clone()),
+        );
         let active_item = a
             .eligible
             .map(|id| {
@@ -2333,7 +2365,7 @@ fn ambiguous(kind: ErrorKind) -> bool {
 mod tests {
     use super::*;
 
-    fn closing_priority(cancelled: bool) {
+    fn closing_priority(cancelled: bool, rejected: bool) {
         let path = std::env::temp_dir().join(format!(
             "nmt-closing-priority-test-{:032x}",
             ledger::random().unwrap()
@@ -2366,44 +2398,116 @@ mod tests {
             slots: Arc::new(Semaphore::new(7)),
             epoch: AtomicU64::new(0),
             close: AtomicBool::new(false),
+            rejected: AtomicBool::new(false),
             removed: AtomicBool::new(false),
             changed: Notify::new(),
             inflight: Mutex::new(None),
-            runtime: Mutex::new(Some((scope, cancel))),
+            runtime: Mutex::new(Some((scope, cancel.clone()))),
             pending: Mutex::new(None),
             suppression: Mutex::new(None),
             faults: Arc::default(),
         });
+        let unrelated_cancel = Cancellation::default();
+        let unrelated = Arc::new(Control {
+            account: AccountId::from_local(account.id.as_local().wrapping_add(1)),
+            slots: Arc::new(Semaphore::new(7)),
+            epoch: AtomicU64::new(0),
+            close: AtomicBool::new(false),
+            rejected: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
+            changed: Notify::new(),
+            inflight: Mutex::new(None),
+            runtime: Mutex::new(Some((
+                AccountScope {
+                    account: AccountId::from_local(account.id.as_local().wrapping_add(1)),
+                    runtime: RuntimeGeneration::from_local(1),
+                },
+                unrelated_cancel.clone(),
+            ))),
+            pending: Mutex::new(None),
+            suppression: Mutex::new(None),
+            faults: Arc::default(),
+        });
+        let mut summaries = Page::empty();
+        summaries
+            .try_push(AccountSummary {
+                account: account.id,
+                navigation_key: ledger.account_key(account.id).unwrap(),
+                server_label: None,
+                account_label: None,
+                attempt: None,
+                scope: Some(scope),
+                phase: AccountPhase::Active,
+                display_name: Text::new("Synthetic").unwrap(),
+                storage: StoredState::Eligible(op.item),
+                cleanup_pending: false,
+                suppression_unconfirmed: false,
+                connection_degraded: false,
+                recovery: None,
+                revision: ledger.account(account.id).unwrap().revision,
+            })
+            .unwrap();
         let shared = Shared {
-            summaries: Mutex::new(Page::empty()),
-            controls: Mutex::new(vec![control.clone()]),
+            summaries: Mutex::new(summaries),
+            controls: Mutex::new(vec![control.clone(), unrelated.clone()]),
             failure: Mutex::new(None),
             closing: AtomicBool::new(true),
             wake: Arc::new(Notify::new()),
         };
+        if rejected {
+            let handler = control.rejection_handler(shared.wake.clone());
+            handler(AccountScope {
+                runtime: RuntimeGeneration::from_local(2),
+                ..scope
+            });
+            assert!(
+                !cancel.is_cancelled(),
+                "obsolete call cannot reject the current runtime"
+            );
+            handler(scope);
+            assert!(
+                cancel.is_cancelled(),
+                "local shutdown precedes durable suppression"
+            );
+            assert!(!unrelated_cancel.is_cancelled());
+        }
         let ledger = Mutex::new(ledger);
         priority(&shared, &ledger).unwrap();
-        assert_eq!(lock(&control.runtime).unwrap().is_none(), cancelled);
+        let closed = cancelled || rejected;
+        assert_eq!(lock(&control.runtime).unwrap().is_none(), closed);
         assert!(!control.suppression_pending().unwrap());
+        assert!(!unrelated_cancel.is_cancelled());
+        assert!(lock(&unrelated.runtime).unwrap().is_some());
+        if rejected {
+            let summaries = lock(&shared.summaries).unwrap();
+            assert_eq!(
+                summaries.as_slice()[0].phase,
+                AccountPhase::ReauthenticationRequired
+            );
+            assert_eq!(summaries.as_slice()[0].scope, None);
+            assert_eq!(summaries.as_slice()[0].storage, StoredState::Suppressed);
+        }
         drop(ledger);
         let reopened = Ledger::open(directory).unwrap();
         let persisted = reopened.account(account.id).unwrap();
-        assert_eq!(persisted.disposition, if cancelled { 0 } else { 2 });
-        assert_eq!(
-            persisted.eligible,
-            if cancelled { None } else { Some(op.id) }
-        );
+        assert_eq!(persisted.disposition, if closed { 0 } else { 2 });
+        assert_eq!(persisted.eligible, if closed { None } else { Some(op.id) });
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
     fn cancel_then_quit_durably_suppresses_before_worker_shutdown() {
-        closing_priority(true);
+        closing_priority(true, false);
     }
 
     #[test]
     fn ordinary_quit_preserves_accepted_restore_eligibility() {
-        closing_priority(false);
+        closing_priority(false, false);
+    }
+
+    #[test]
+    fn autonomous_rejection_closes_only_current_runtime_and_durably_suppresses() {
+        closing_priority(false, true);
     }
 }

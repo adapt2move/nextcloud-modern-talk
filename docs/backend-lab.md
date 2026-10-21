@@ -32,6 +32,23 @@ Use the exact printed `client_url`. The helper binds workstation IPv4 loopback a
 
 The explicit development-HTTP opt-in confines HTTP to the private bridge and workstation loopback, with SSH between machines. It grants no production TLS exception. Only the configured loopback authority is trusted; non-loopback origins, userinfo, subpaths, query strings and fragments are rejected. An HTTPS-only client cannot use this profile without an explicit development option.
 
+## Messaging recovery checks
+
+After building the `talk-adapters` tests with `backend-test`, the opt-in recovery
+runner provisions both pinned server families, exercises typed messaging and
+room controls, and injects gateway HTML 500/403 responses and dropped connections
+into history reads:
+
+```sh
+python3 tests/lab/resilience.py --profile all --output /absolute/new/recovery-results
+```
+
+The same authenticated client must recover, send and retrieve every accepted
+fixture message exactly once after each failure. The runner also verifies that
+each fault was actually injected and removes its owned containers and private
+credentials. This tests real server adapters and transport recovery; it does
+not establish native UI, macOS input, production TLS or media behavior.
+
 If needed, `access.py fetch --directory ... --file credentials.json` (or `fixtures.json`, `manifest.json`, `login-flow.json`, `app-password.json`) copies the named file privately without printing it. Never put secrets in command arguments, logs, screenshots or reports.
 
 ## Browser authorization preparation
