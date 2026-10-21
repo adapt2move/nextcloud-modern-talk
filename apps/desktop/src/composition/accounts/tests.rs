@@ -112,6 +112,76 @@ fn only_current_save_failure_exposes_fallback_and_no_session_only_login() {
 }
 
 #[test]
+fn login_activation_handoff_releases_only_the_current_save() {
+    let (mut model, request, account, attempt) = pending_login();
+    let save = ConnectionRequestId(9);
+    model.login.as_mut().unwrap().save_request = Some(save);
+    model.snapshot.login.phase = LoginPhase::ChooseStorage;
+    model.snapshot.login.storage = StorageStatus::Saving;
+    let scope = AccountScope {
+        account,
+        runtime: talk_core::ids::RuntimeGeneration::from_local(31),
+    };
+    let summary = AccountSummary {
+        account,
+        navigation_key: talk_core::preferences::navigation::NavigationAccountKey::new(
+            "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+        )
+        .unwrap(),
+        server_label: Some(text("cloud.example.test")),
+        account_label: Some(text("Synthetic")),
+        attempt: None,
+        scope: Some(scope),
+        phase: talk_adapters::identity::AccountPhase::Active,
+        display_name: text("Synthetic"),
+        storage: StoredState::Unknown,
+        cleanup_pending: false,
+        suppression_unconfirmed: false,
+        connection_degraded: false,
+        recovery: None,
+        revision: 1,
+    };
+    let mut done = ConnectionCompletion {
+        cursor: ConnectionCursor::default(),
+        request: save,
+        account: Some(account),
+        attempt: Some(attempt),
+        captured_scope: None,
+        cancel_requested: false,
+        scope_is_current: false,
+        result: Ok(RuntimeReply::Active {
+            summary,
+            probe: protocol::AccountProbe {
+                scope,
+                display_name: text("Synthetic"),
+                family: protocol::ServerFamily::Nextcloud35,
+                talk_available: true,
+                group_creation: talk_core::policy::Decision::Unknown,
+                message_limit: None,
+                reference_correlation: true,
+                channel_semantics: false,
+            },
+        }),
+    };
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.login.as_ref().unwrap().save_request, Some(save));
+    assert_ne!(model.snapshot.login.phase, LoginPhase::Ready);
+    done.scope_is_current = true;
+    done.request = ConnectionRequestId(8);
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.login.as_ref().unwrap().save_request, Some(save));
+    done.request = save;
+    model.complete(Purpose::Login(request, LoginWork::Save), &done);
+    assert_eq!(model.snapshot.login.phase, LoginPhase::Ready);
+    assert_eq!(model.login.as_ref().unwrap().save_request, None);
+    // The completed account is now owned by explicit logout/removal, rather
+    // than a later cancellation or replacement of this login screen.
+    model.cancel_login();
+    assert_eq!(model.snapshot.login.phase, LoginPhase::EnterServer);
+    assert!(model.login.is_none());
+}
+
+#[test]
 fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
     use talk_core::preferences::updates::UpdateError;
     use talk_core::ui::presentation::{CallStage, CallView, MediaState, RequiredGate};

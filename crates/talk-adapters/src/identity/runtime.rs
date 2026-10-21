@@ -900,10 +900,12 @@ async fn run(
 fn priority(shared: &Shared, ledger: &Mutex<Ledger>) -> Result<()> {
     let controls = lock(&shared.controls)?.clone();
     for control in &controls {
-        let runtime_cancelled = !shared.closing.load(Ordering::Acquire)
-            && lock(&control.runtime)?
-                .as_ref()
-                .is_some_and(|(_, c)| c.is_cancelled());
+        // The final priority pass runs before shutdown cancels live runtimes.
+        // A token already cancelled here still owns explicit suppression,
+        // including when Quit followed cancellation before the worker woke.
+        let runtime_cancelled = lock(&control.runtime)?
+            .as_ref()
+            .is_some_and(|(_, c)| c.is_cancelled());
         let explicitly_closed = control.close.swap(false, Ordering::AcqRel);
         let close_account = explicitly_closed || runtime_cancelled;
         let mut changed = close_account;
@@ -2311,4 +2313,83 @@ fn ambiguous(kind: ErrorKind) -> bool {
             | ErrorKind::TooLarge
             | ErrorKind::Uncertain
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn closing_priority(cancelled: bool) {
+        let path = std::env::temp_dir().join(format!(
+            "nmt-closing-priority-test-{:032x}",
+            ledger::random().unwrap()
+        ));
+        let directory = Arc::new(PrivateDir::open(&path, true).unwrap());
+        let mut ledger = Ledger::open(directory.clone()).unwrap();
+        let account = ledger.reserve("https://example.invalid/".into()).unwrap();
+        ledger.bind_user(account.id, "synthetic-user").unwrap();
+        let op = ledger
+            .stage(
+                account.id,
+                LoginAttemptId::from_local(ledger::random().unwrap()),
+                talk_core::identity::StorageBackend::PrivateFile,
+                "synthetic-user",
+            )
+            .unwrap();
+        ledger.settle(op, true).unwrap();
+        let revision = ledger.account(account.id).unwrap().revision;
+        ledger.activate(op, revision).unwrap();
+        let cancel = Cancellation::default();
+        if cancelled {
+            cancel.cancel();
+        }
+        let scope = AccountScope {
+            account: account.id,
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let control = Arc::new(Control {
+            account: account.id,
+            slots: Arc::new(Semaphore::new(7)),
+            epoch: AtomicU64::new(0),
+            close: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
+            changed: Notify::new(),
+            inflight: Mutex::new(None),
+            runtime: Mutex::new(Some((scope, cancel))),
+            pending: Mutex::new(None),
+            suppression: Mutex::new(None),
+            faults: Arc::default(),
+        });
+        let shared = Shared {
+            summaries: Mutex::new(Page::empty()),
+            controls: Mutex::new(vec![control.clone()]),
+            failure: Mutex::new(None),
+            closing: AtomicBool::new(true),
+            wake: Arc::new(Notify::new()),
+        };
+        let ledger = Mutex::new(ledger);
+        priority(&shared, &ledger).unwrap();
+        assert_eq!(lock(&control.runtime).unwrap().is_none(), cancelled);
+        assert!(!control.suppression_pending().unwrap());
+        drop(ledger);
+        let reopened = Ledger::open(directory).unwrap();
+        let persisted = reopened.account(account.id).unwrap();
+        assert_eq!(persisted.disposition, if cancelled { 0 } else { 2 });
+        assert_eq!(
+            persisted.eligible,
+            if cancelled { None } else { Some(op.id) }
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn cancel_then_quit_durably_suppresses_before_worker_shutdown() {
+        closing_priority(true);
+    }
+
+    #[test]
+    fn ordinary_quit_preserves_accepted_restore_eligibility() {
+        closing_priority(false);
+    }
 }

@@ -11,10 +11,15 @@ use std::sync::{
 
 pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Clone, Eq, PartialEq)]
-pub struct ImageBytes(Arc<[u8]>);
+pub struct ImageBytes {
+    bytes: Arc<[u8]>,
+    document_pages: Option<u32>,
+}
 impl std::fmt::Debug for ImageBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ImageBytes").field(&self.0.len()).finish()
+        f.debug_tuple("ImageBytes")
+            .field(&self.bytes.len())
+            .finish()
     }
 }
 impl ImageBytes {
@@ -22,10 +27,25 @@ impl ImageBytes {
         if bytes.len() > MAX_IMAGE_BYTES {
             return Err(LimitExceeded);
         }
-        Ok(Self(bytes.into()))
+        Ok(Self {
+            bytes: bytes.into(),
+            document_pages: None,
+        })
     }
     pub fn as_slice(&self) -> &[u8] {
-        &self.0
+        &self.bytes
+    }
+    /// The raster is the first page of a locally decoded PDF, not a full viewer.
+    pub fn first_pdf_page(bytes: Vec<u8>, pages: u32) -> Result<Self, LimitExceeded> {
+        if !(1..=10_000).contains(&pages) {
+            return Err(LimitExceeded);
+        }
+        let mut value = Self::new(bytes)?;
+        value.document_pages = Some(pages);
+        Ok(value)
+    }
+    pub fn document_pages(&self) -> Option<u32> {
+        self.document_pages
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

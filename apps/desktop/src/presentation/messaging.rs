@@ -38,6 +38,7 @@ pub(crate) enum Action {
     CloseSearch,
     Locate(u128),
     Schedule,
+    CancelTime,
     Remind(u128),
     SubmitTime,
     InsertMention(String),
@@ -49,7 +50,8 @@ pub(super) struct MessageUi {
     arrival: Rc<RefCell<arrival::Arrival>>,
     geometry: Rc<RefCell<MessageGeometry>>,
     pub editing: Option<u128>,
-    pub(super) pending_edit: Option<RequestId>,
+    edit_generation: u64,
+    pub(super) pending_edit: Option<super::state::PendingEdit>,
     request: u64,
     menu: menu::Menu,
     history: Rc<RefCell<history::History>>,
@@ -118,6 +120,7 @@ impl MessageUi {
             context: None,
             observed: Vec::new(),
             editing: None,
+            edit_generation: 0,
             pending_edit: None,
             request: 0,
             menu: menu::Menu::new(cx),
@@ -266,7 +269,7 @@ impl Desktop {
         // previously loaded conversation remains visible during the request.
         let live = self.snapshot.content == ContentState::Ready
             && self.snapshot.message_panel.as_ref().is_none_or(|panel| {
-                panel.history == talk_core::ui::conversation::RemoteState::Idle
+                !panel.history.pending()
                     && panel
                         .located
                         .is_none_or(|(request, _)| self.message_ui.last_located == Some(request))
@@ -402,17 +405,33 @@ impl Desktop {
             {
                 self.message_ui.mention_ready = Some(query.clone());
             }
-            if self.message_ui.pending_edit == Some(request)
-                && completion == Completion::ServerAccepted
-            {
-                self.message_ui.pending_edit = None;
-                self.message_ui.editing = None;
-                let body = self
-                    .snapshot
-                    .selected
-                    .map_or("", |c| self.drafts.text(c))
-                    .to_owned();
-                self.composer.update(cx, |i, _| i.set_context_value(&body));
+            if let Some(restore) = super::state::PendingEdit::complete(
+                &mut self.message_ui.pending_edit,
+                request,
+                completion,
+                self.message_ui
+                    .editing
+                    .map(|id| (id, self.message_ui.edit_generation)),
+                self.composer.read(cx).content.as_str(),
+            ) {
+                if restore {
+                    self.message_ui.editing = None;
+                    let body = self
+                        .snapshot
+                        .selected
+                        .map_or("", |c| self.drafts.text(c))
+                        .to_owned();
+                    self.composer.update(cx, |i, _| i.set_context_value(&body));
+                } else if completion != Completion::ServerAccepted
+                    && let Some(context) = self.snapshot.selected
+                {
+                    self.feedback = Some(
+                        super::feedback::Feedback::error(
+                            "Die Änderung konnte nicht bestätigt werden. Bitte neu laden.",
+                        )
+                        .in_conversation(context),
+                    );
+                }
             }
             if let Some(context) = self.snapshot.selected {
                 let _ = self
@@ -633,6 +652,7 @@ impl Desktop {
         let prior_compose = self.compose_motion_id(context);
         match action {
             Action::Silent => {
+                self.content_ui.menu = false;
                 let mut target = self.drafts.target(context);
                 target.silent = !target.silent;
                 self.drafts.set_target(context, target);
@@ -718,6 +738,10 @@ impl Desktop {
                     })
                 {
                     let value = message.body.as_str().to_owned();
+                    let Some(generation) = self.message_ui.edit_generation.checked_add(1) else {
+                        return;
+                    };
+                    self.message_ui.edit_generation = generation;
                     self.message_ui.editing = Some(id);
                     self.message_ui.menu.clear();
                     self.composer.update(cx, |i, _| i.set_context_value(&value));
@@ -734,6 +758,9 @@ impl Desktop {
                 self.message_ui.time_target = None;
             }
             Action::Command(command) => {
+                if matches!(command, MessageAction::Scheduled | MessageAction::Reminders) {
+                    self.content_ui.menu = false;
+                }
                 self.submit_message(command);
             }
             Action::Search => {
@@ -755,7 +782,17 @@ impl Desktop {
                     self.handle(LocalAction::Close, window, cx);
                 }
             }
-            Action::Schedule => self.message_ui.time_target = Some(None),
+            Action::Schedule => {
+                self.content_ui.menu = false;
+                self.message_ui.time_error = false;
+                self.message_ui.time_target = Some(None);
+                self.message_ui.time_input.focus_handle(cx).focus(window);
+            }
+            Action::CancelTime => {
+                self.message_ui.time_target = None;
+                self.message_ui.time_error = false;
+                self.composer.focus_handle(cx).focus(window);
+            }
             Action::Remind(id) => {
                 self.message_ui.time_target = Some(Some(id));
                 self.message_ui.menu.clear();
@@ -809,9 +846,21 @@ impl Desktop {
         let Some(message) = self.message_ui.editing else {
             return false;
         };
-        if let Ok(body) = Text::new(self.composer.read(cx).content.as_str()) {
-            self.message_ui.pending_edit =
-                self.submit_message(MessageAction::Edit { message, body });
+        if self.message_ui.pending_edit.is_some() {
+            return true;
+        }
+        if let Ok(body) = Text::new(self.composer.read(cx).content.as_str())
+            && let Some(request) = self.submit_message(MessageAction::Edit {
+                message,
+                body: body.clone(),
+            })
+        {
+            self.message_ui.pending_edit = Some(super::state::PendingEdit {
+                request,
+                message,
+                generation: self.message_ui.edit_generation,
+                body,
+            });
         }
         true
     }
@@ -1239,7 +1288,7 @@ impl Desktop {
         let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
             .to_string()
             .into();
-        if m.metadata.system {
+        if compact_system_message(m) {
             return div().child(
                 div()
                     .id(scoped_id("message", context, m.local_id, 0))
@@ -1614,7 +1663,7 @@ impl Desktop {
                                 ),
                                 "Herunterladen",
                                 ButtonStyle::Secondary,
-                                self.message_available(MessageFeature::Files),
+                                self.download_available(),
                                 LocalAction::MessageIn(
                                     context,
                                     Action::Command(MessageAction::Download {
@@ -1705,77 +1754,40 @@ impl Desktop {
             return rows;
         };
         let target = self.drafts.target(context);
+        // Explicit reply/edit context and silent sending are the only persistent
+        // composer states; each is one slim strip with its own dismissal.
         if let Some(motion_id) = self.compose_motion_id(context) {
-            let label = if self.message_ui.editing.is_some() {
-                "Nachricht bearbeiten"
+            let (icon, label) = if self.message_ui.editing.is_some() {
+                (None, "Nachricht bearbeiten")
             } else if target.thread.is_some() {
-                "Antwort im Thread"
+                (Some("chat"), "Antwort im Thread")
             } else {
-                "Antwort auf eine Nachricht"
+                (Some("reply"), "Antwort auf eine Nachricht")
             };
             rows.push(
                 self.reveal_from_action(
                     motion_id,
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(self.hint(self.l(label)))
-                        .child(self.button(
-                            "cancel-compose-mode",
-                            "Abbrechen",
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::Message(Action::CancelCompose),
-                            cx,
-                        )),
+                    self.composer_strip(
+                        icon,
+                        label,
+                        "cancel-compose-mode",
+                        LocalAction::Message(Action::CancelCompose),
+                        cx,
+                    ),
                 )
                 .into_any_element(),
             );
         }
-        if self.composer_active {
+        if target.silent {
             rows.push(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(self.icon_button(
-                        "composer-schedule",
-                        ("clock", "Nachricht planen"),
-                        ButtonStyle::Quiet,
-                        self.message_available(MessageFeature::Schedules),
-                        LocalAction::Message(Action::Schedule),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        "composer-scheduled",
-                        ("inbox", "Geplante Nachrichten"),
-                        ButtonStyle::Quiet,
-                        self.message_available(MessageFeature::Schedules),
-                        LocalAction::Message(Action::Command(MessageAction::Scheduled)),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        "composer-silent",
-                        ("moon", "Leise senden"),
-                        if target.silent {
-                            ButtonStyle::Primary
-                        } else {
-                            ButtonStyle::Quiet
-                        },
-                        self.message_available(MessageFeature::Silent),
-                        LocalAction::Message(Action::Silent),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        "composer-reminders",
-                        ("bell", "Erinnerungen"),
-                        ButtonStyle::Quiet,
-                        self.message_available(MessageFeature::Reminders),
-                        LocalAction::Message(Action::Command(MessageAction::Reminders)),
-                        cx,
-                    ))
-                    .into_any_element(),
+                self.composer_strip(
+                    Some("moon"),
+                    "Wird leise gesendet",
+                    "composer-silent-off",
+                    LocalAction::Message(Action::Silent),
+                    cx,
+                )
+                .into_any_element(),
             );
         }
         if let Some(panel) = &self.snapshot.message_panel {
@@ -1835,19 +1847,16 @@ impl Desktop {
                     .into_any_element(),
                 );
             }
-            for scheduled in panel
+            // Server lists requested from the + menu stay grouped in one card each.
+            let scheduled: Vec<_> = panel
                 .scheduled
                 .as_slice()
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
-            {
-                rows.push(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(self.hint(scheduled.body.as_str()))
-                        .child(self.button(
+                .map(|scheduled| {
+                    self.composer_list_row(
+                        scheduled.body.as_str().to_owned(),
+                        self.button(
                             ("schedule-cancel", scheduled.id as usize),
                             "Planung abbrechen",
                             ButtonStyle::Quiet,
@@ -1856,23 +1865,22 @@ impl Desktop {
                                 scheduled.id,
                             ))),
                             cx,
-                        ))
-                        .into_any_element(),
-                );
+                        ),
+                    )
+                })
+                .collect();
+            if !scheduled.is_empty() {
+                rows.push(self.composer_card().children(scheduled).into_any_element());
             }
-            for reminder in panel
+            let reminders: Vec<_> = panel
                 .reminders
                 .as_slice()
                 .iter()
                 .take(if self.composer_active { 8 } else { 0 })
-            {
-                rows.push(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(self.hint(self.l("Erinnerung auf dem Server bestätigt.")))
-                        .child(self.button(
+                .map(|reminder| {
+                    self.composer_list_row(
+                        self.l("Erinnerung auf dem Server bestätigt.").to_owned(),
+                        self.button(
                             ("reminder-cancel", reminder.message as usize),
                             "Erinnerung löschen",
                             ButtonStyle::Quiet,
@@ -1882,36 +1890,191 @@ impl Desktop {
                                 timestamp: None,
                             })),
                             cx,
-                        ))
-                        .into_any_element(),
-                );
+                        ),
+                    )
+                })
+                .collect();
+            if !reminders.is_empty() {
+                rows.push(self.composer_card().children(reminders).into_any_element());
             }
         }
         if self.message_ui.time_target.is_some() {
-            rows.extend([
-                self.hint(self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM"))
+            rows.push(
+                self.composer_card()
+                    .p_2()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().flex_1().min_w_0().child(self.hint(
+                                self.l("Datum, Uhrzeit und UTC-Versatz: JJJJ-MM-TT HH:MM +HH:MM"),
+                            )))
+                            .child(self.icon_button(
+                                "cancel-message-time",
+                                ("x", "Abbrechen"),
+                                ButtonStyle::Quiet,
+                                Availability::available(),
+                                LocalAction::Message(Action::CancelTime),
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(self.message_ui.time_input.clone()),
+                            )
+                            .child(self.button(
+                                "submit-message-time",
+                                "Auf dem Server speichern",
+                                ButtonStyle::Secondary,
+                                true,
+                                LocalAction::Message(Action::SubmitTime),
+                                cx,
+                            )),
+                    )
+                    .when(self.message_ui.time_error, |d| {
+                        d.child(
+                            self.hint(self.l("Datum und Zeitzonenversatz sind ungültig."))
+                                .text_color(self.theme.danger),
+                        )
+                    })
                     .into_any_element(),
-                self.message_ui.time_input.clone().into_any_element(),
-                self.button(
-                    "submit-message-time",
-                    "Auf dem Server speichern",
-                    ButtonStyle::Secondary,
-                    true,
-                    LocalAction::Message(Action::SubmitTime),
-                    cx,
-                )
-                .into_any_element(),
-            ]);
-            if self.message_ui.time_error {
-                rows.push(
-                    self.hint(self.l("Datum und Zeitzonenversatz sind ungültig."))
-                        .into_any_element(),
-                );
-            }
+            );
         }
         rows
     }
+    /// Scheduling, silent sending and reminders live in the composer's + menu
+    /// rather than as a permanent toolbar; silent state also shows as a strip.
+    pub(super) fn composer_send_options(&self, cx: &Context<Self>) -> [gpui::Stateful<Div>; 4] {
+        let silent = self
+            .snapshot
+            .selected
+            .is_some_and(|context| self.drafts.target(context).silent);
+        [
+            self.button_with_icon(
+                "composer-schedule",
+                ("Nachricht planen", "clock"),
+                ButtonStyle::Quiet,
+                self.message_available(MessageFeature::Schedules),
+                LocalAction::Message(Action::Schedule),
+                cx,
+            ),
+            self.button_with_icon(
+                "composer-scheduled",
+                ("Geplante Nachrichten", "inbox"),
+                ButtonStyle::Quiet,
+                self.message_available(MessageFeature::Schedules),
+                LocalAction::Message(Action::Command(MessageAction::Scheduled)),
+                cx,
+            ),
+            self.button_with_icon(
+                "composer-silent",
+                ("Leise senden", "moon"),
+                if silent {
+                    ButtonStyle::Primary
+                } else {
+                    ButtonStyle::Quiet
+                },
+                self.message_available(MessageFeature::Silent),
+                LocalAction::Message(Action::Silent),
+                cx,
+            ),
+            self.button_with_icon(
+                "composer-reminders",
+                ("Erinnerungen", "bell"),
+                ButtonStyle::Quiet,
+                self.message_available(MessageFeature::Reminders),
+                LocalAction::Message(Action::Command(MessageAction::Reminders)),
+                cx,
+            ),
+        ]
+    }
+    /// One slim, dismissible composer state line: icon, short label, close icon.
+    fn composer_strip(
+        &self,
+        icon: Option<&'static str>,
+        label: &'static str,
+        close_id: &'static str,
+        close: LocalAction,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .pl_3()
+            .pr_1()
+            .py_1()
+            .rounded(px(8.))
+            .bg(t.subtle)
+            .border_l_2()
+            .border_color(t.accent)
+            .when_some(icon, |d, icon| {
+                d.child(self.scaled_icon(icon, 16., t.muted))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(self.sp(13.))
+                    .text_color(t.text)
+                    .child(self.l(label).to_owned()),
+            )
+            .child(self.icon_button(
+                close_id,
+                ("x", "Abbrechen"),
+                ButtonStyle::Quiet,
+                Availability::available(),
+                close,
+                cx,
+            ))
+    }
+    fn composer_card(&self) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(self.theme.border)
+            .bg(self.theme.surface)
+            .overflow_hidden()
+    }
+    fn composer_list_row(&self, text: String, action: gpui::Stateful<Div>) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .pl_3()
+            .pr_1()
+            .py_1()
+            .child(div().flex_1().min_w_0().text_size(self.sp(13.)).child(text))
+            .child(action)
+    }
 }
+// Talk file_shared system messages still carry visible file content. Keep
+// ordinary activity notices compact without bypassing the attachment renderer.
+fn compact_system_message(message: &MessageView) -> bool {
+    message.metadata.system
+        && (message.metadata.deleted
+            || !message
+                .metadata
+                .rich
+                .as_slice()
+                .iter()
+                .any(|object| object.kind.as_str() == "file"))
+}
+
 fn message_actions_allowed(message: &MessageView) -> bool {
     !message.metadata.deleted
         && !message.metadata.system
@@ -1993,6 +2156,40 @@ fn parse_time(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn system_file_share_uses_attachment_surface_while_activity_notice_stays_compact() {
+        let mut message = MessageView {
+            local_id: 7,
+            author: Text::new("Fixture").unwrap(),
+            initials: Text::new("F").unwrap(),
+            time_label: Text::new("09:00").unwrap(),
+            body: Text::new("preview.png").unwrap(),
+            own: false,
+            delivery: talk_core::ui::presentation::DeliveryState::Received,
+            attachments: talk_core::ui::Page::empty(),
+            reply_count: 0,
+            metadata: talk_core::ui::messaging::MessageMetadata::default(),
+        };
+        message.metadata.system = true;
+        assert!(compact_system_message(&message));
+        message
+            .metadata
+            .rich
+            .try_push(talk_core::ui::messaging::RichObject {
+                placeholder: Text::new("file").unwrap(),
+                kind: Text::new("file").unwrap(),
+                id: Some(Text::new("42").unwrap()),
+                name: Text::new("preview.png").unwrap(),
+                link: None,
+                mime_type: Some(Text::new("image/png").unwrap()),
+                size: Some(100),
+            })
+            .unwrap();
+        assert!(!compact_system_message(&message));
+        message.metadata.deleted = true;
+        assert!(compact_system_message(&message));
+    }
+
     #[test]
     fn prepend_and_eviction_preserve_the_visible_row_when_header_clearance_moves() {
         for inset in [px(0.), px(74.), px(158.)] {

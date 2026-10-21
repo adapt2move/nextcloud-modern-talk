@@ -4,7 +4,7 @@ use crate::{Client, Error, ErrorKind, scope::OperationContext};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 pub const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FilePath(String);
 impl FilePath {
     pub fn parse(path: &str) -> Result<Self, ErrorKind> {

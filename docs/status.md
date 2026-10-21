@@ -23,9 +23,12 @@ separates implemented paths from remaining parity work.
   Older pages load at the upper scroll boundary. Logout, confirmed access loss
   and message expiry remove retained content.
 - Shared content includes bounded image and document thumbnails, enlarged image
-  previews, explicit Cloud web handoff and byte-based download progress. Published
+  previews, explicit Cloud web handoff and byte-based download progress. File-share
+  system messages retain their attachment cards. Supported raster images can
+  fall back to a bounded authenticated original when a server thumbnail is absent;
+  macOS additionally provides native first-page PDF previews. Published
   polls support creation, voting, permitted results and closure from chat and
-  conversation settings. Server poll drafts and native PDF/office viewers remain
+  conversation settings. Server poll drafts and complete PDF/office viewers remain
   separate unfinished work.
 - Account scheduling reconciles room lists, nonselected-room messages and
   incoming calls. Authenticated live events invalidate observations; current
@@ -82,7 +85,7 @@ installation are not established by compilation or package fixtures.
 Full Talk parity is unfinished. Required call E2EE, guest/federated media,
 screen/system-audio sharing in either direction, durable offline content and
 outgoing-message replay remain absent. Typing, provider translation/summaries,
-voice messages, video/native document viewers, account-wide content search and parts of moderation
+voice messages, video and complete native document viewers, account-wide content search and parts of moderation
 and integrations remain incomplete.
 
 The pinned Rust engine supports UDP TURN but not TCP/TLS TURN or live credential

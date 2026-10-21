@@ -43,6 +43,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No tienes acceso a esta vista previa.",
     ),
     (
+        "Ein Download läuft bereits.",
+        "A download is already in progress.",
+        "Ya hay una descarga en curso.",
+    ),
+    (
         "Ergebnis unklar. Prüfe das Gespräch vor erneutem Veröffentlichen.",
         "The outcome is uncertain. Check the conversation before publishing again.",
         "El resultado es incierto. Revisa la conversación antes de volver a publicar.",
@@ -56,6 +61,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ergebnisse werden nach Abschluss angezeigt.",
         "Results will be shown after the poll closes.",
         "Los resultados se mostrarán cuando termine la encuesta.",
+    ),
+    (
+        "Erste PDF-Seite · {pages} Seiten",
+        "First PDF page · {pages} pages",
+        "Primera página del PDF · {pages} páginas",
     ),
     (
         "Frage der Umfrage",
@@ -83,6 +93,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No native preview is available. Open the file in the Cloud web interface.",
         "No hay vista previa nativa. Abre el archivo en la interfaz web de la nube.",
     ),
+    ("Kleine Vorschau", "Small preview", "Vista previa pequeña"),
     (
         "Letzte Option entfernen",
         "Remove last option",
@@ -109,6 +120,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Buscar mensajes, conversaciones y personas…",
     ),
     ("Option hinzufügen", "Add option", "Añadir opción"),
+    (
+        "PDF-Vorschau · erste Seite",
+        "PDF preview · first page",
+        "Vista previa del PDF · primera página",
+    ),
     ("Personen", "People", "Personas"),
     ("Personen suchen", "Search people", "Buscar personas"),
     (
@@ -135,6 +151,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Guardando encuesta…",
     ),
     ("Umfrage öffnen", "Open poll", "Abrir encuesta"),
+    (
+        "Vorschau erneut laden",
+        "Reload preview",
+        "Volver a cargar la vista previa",
+    ),
     (
         "Vorschau nicht verfügbar",
         "Preview unavailable",

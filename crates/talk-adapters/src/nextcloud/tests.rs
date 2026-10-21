@@ -104,9 +104,14 @@ impl Server {
                 } else {
                     format!("Content-Length: {}", reply.body.len())
                 };
+                let mime = if reply.headers.to_ascii_lowercase().contains("content-type:") {
+                    ""
+                } else {
+                    "Content-Type: application/json\r\n"
+                };
                 let header = format!(
-                    "HTTP/1.1 {} Test\r\nContent-Type: application/json\r\n{}\r\nConnection: close\r\n{}\r\n",
-                    reply.status, framing, reply.headers
+                    "HTTP/1.1 {} Test\r\n{}{}\r\nConnection: close\r\n{}\r\n",
+                    reply.status, mime, framing, reply.headers
                 );
                 if stream.write_all(header.as_bytes()).await.is_ok() {
                     if reply.chunked {

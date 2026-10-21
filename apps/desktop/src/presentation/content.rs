@@ -549,6 +549,24 @@ impl Desktop {
             .iter()
             .find(|o| o.placeholder == reference.placeholder && o.kind.as_str() == "file")
     }
+    pub(super) fn download_available(&self) -> Availability {
+        if self
+            .snapshot
+            .content_panel
+            .transfer
+            .as_ref()
+            .is_some_and(|transfer| {
+                matches!(
+                    transfer.state,
+                    DownloadState::Transferring | DownloadState::Committing
+                )
+            })
+        {
+            Availability::when(false, "Ein Download läuft bereits.")
+        } else {
+            self.message_available(talk_core::ui::messaging::MessageFeature::Files)
+        }
+    }
     pub(super) fn attachment_card(
         &self,
         reference: AttachmentRef,
@@ -557,69 +575,97 @@ impl Desktop {
     ) -> Div {
         let target = AssetTarget::Thumbnail(reference.clone());
         let preview = self.asset_image(&target);
-        div().flex().flex_col().gap_2().max_w(px(400.)).child(
-            self.button(
-                scoped_id(
-                    "content-preview",
-                    reference.context,
-                    reference.message,
-                    placeholder_key(reference.placeholder.as_str()),
-                ),
-                "",
-                ButtonStyle::Quiet,
-                true,
-                LocalAction::Content(Action::Preview(reference.clone())),
-                cx,
-            )
-            .w_full()
-            .p_0()
-            .overflow_hidden()
+        div()
+            .flex()
             .flex_col()
-            .items_start()
+            .gap_2()
+            .w(px(360.))
+            .max_w_full()
             .child(
-                div()
-                    .w_full()
-                    .h(px(180.))
-                    .bg(self.theme.subtle)
-                    .rounded(px(8.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(if let Some(image) = preview {
-                        img(image)
-                            .size_full()
-                            .object_fit(ObjectFit::Cover)
-                            .into_any_element()
-                    } else {
-                        self.scaled_icon("file", 38., self.theme.muted)
-                            .into_any_element()
-                    }),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .p_3()
-                    .bg(self.theme.subtle)
-                    .child(self.scaled_icon("file", 20., self.theme.muted))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(div().text_ellipsis().child(object.name.as_str().to_owned()))
-                            .child(
-                                self.hint(
-                                    object
-                                        .mime_type
-                                        .as_ref()
-                                        .map_or(self.l("Datei"), |m| m.as_str()),
-                                ),
-                            ),
+                self.button(
+                    scoped_id(
+                        "content-preview",
+                        reference.context,
+                        reference.message,
+                        placeholder_key(reference.placeholder.as_str()),
                     ),
-            ),
-        )
+                    "",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Content(Action::Preview(reference.clone())),
+                    cx,
+                )
+                .w_full()
+                .p_0()
+                .overflow_hidden()
+                .flex_col()
+                .items_start()
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(180.))
+                        .bg(self.theme.subtle)
+                        .rounded(px(8.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(if let Some(image) = preview {
+                            img(image)
+                                .size_full()
+                                .object_fit(ObjectFit::Contain)
+                                .into_any_element()
+                        } else {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap_2()
+                                .child(self.scaled_icon("file", 38., self.theme.muted))
+                                .child(self.hint(self.l(
+                                    match self.asset(&target).map(|a| a.state) {
+                                        None
+                                        | Some(AssetState::Loading | AssetState::Ready { .. }) => {
+                                            "Vorschau wird geladen …"
+                                        }
+                                        Some(AssetState::Denied) => {
+                                            "Du hast keinen Zugriff auf diese Vorschau."
+                                        }
+                                        Some(AssetState::Failed) => {
+                                            "Die Vorschau konnte nicht geladen werden."
+                                        }
+                                        Some(AssetState::Missing | AssetState::Unsupported) => {
+                                            "Vorschau nicht verfügbar"
+                                        }
+                                    },
+                                )))
+                                .into_any_element()
+                        }),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .p_3()
+                        .bg(self.theme.subtle)
+                        .child(self.scaled_icon("file", 20., self.theme.muted))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(div().text_ellipsis().child(object.name.as_str().to_owned()))
+                                .child(
+                                    self.hint(
+                                        object
+                                            .mime_type
+                                            .as_ref()
+                                            .map_or(self.l("Datei"), |m| m.as_str()),
+                                    ),
+                                ),
+                        ),
+                ),
+            )
     }
 
     pub(super) fn preview_body(&self, cx: &Context<Self>) -> Div {
@@ -639,12 +685,42 @@ impl Desktop {
         let name = self
             .attachment_object(reference)
             .map_or(self.l("Datei"), |o| o.name.as_str());
+        let thumbnail = AssetTarget::Thumbnail(reference.clone());
+        let large_state = self.asset(&target).map(|asset| asset.state);
+        let large_image = self.asset_image(&target);
+        let using_thumbnail = large_image.is_none() && large_state != Some(AssetState::Denied);
+        let image = large_image.or_else(|| {
+            using_thumbnail
+                .then(|| self.asset_image(&thumbnail))
+                .flatten()
+        });
         let mut body = div().flex().flex_col().gap_4().child(self.title(name));
-        body = if let Some(image) = self.asset_image(&target) {
+        if image.is_some() && using_thumbnail {
+            body = body.child(self.hint(self.l("Kleine Vorschau")));
+        }
+        let pages = image.as_ref().and_then(|_| {
+            self.asset(&target)
+                .and_then(|a| a.document_pages)
+                .or_else(|| self.asset(&thumbnail).and_then(|a| a.document_pages))
+        });
+        if let Some(pages) = pages {
+            body = body.child(self.hint(&self.lf(
+                "Erste PDF-Seite · {pages} Seiten",
+                &[("pages", &pages.to_string())],
+            )));
+        } else if image.is_some()
+            && self
+                .attachment_object(reference)
+                .and_then(|o| o.mime_type.as_ref())
+                .is_some_and(|mime| mime.as_str() == "application/pdf")
+        {
+            body = body.child(self.hint(self.l("PDF-Vorschau · erste Seite")));
+        }
+        body = if let Some(image) = image {
             body.child(
                 img(image)
                     .w_full()
-                    .h(px(340.))
+                    .h(px(420.))
                     .object_fit(ObjectFit::Contain)
                     .rounded(px(8.)),
             )
@@ -671,6 +747,19 @@ impl Desktop {
                     .child(self.hint(self.l(status))),
             )
         };
+        if matches!(
+            large_state,
+            Some(AssetState::Failed | AssetState::Missing | AssetState::Unsupported)
+        ) {
+            body = body.child(self.button(
+                "preview-retry",
+                "Vorschau erneut laden",
+                ButtonStyle::Secondary,
+                true,
+                LocalAction::Content(Action::Command(ContentAction::Preview(reference.clone()))),
+                cx,
+            ));
+        }
         body = body.child(
             div()
                 .flex()
@@ -680,7 +769,7 @@ impl Desktop {
                     "preview-download",
                     ("Herunterladen", "download"),
                     ButtonStyle::Primary,
-                    self.message_available(talk_core::ui::messaging::MessageFeature::Files),
+                    self.download_available(),
                     LocalAction::Content(Action::Download(reference.clone())),
                     cx,
                 ))
@@ -767,11 +856,17 @@ impl Desktop {
         if !self.content_ui.menu || !self.composer_active {
             return None;
         }
+        // One compact menu card: content first, then message send options.
         Some(
             div()
                 .flex()
                 .flex_wrap()
-                .gap_2()
+                .gap_1()
+                .p_1()
+                .rounded(px(10.))
+                .border_1()
+                .border_color(self.theme.border)
+                .bg(self.theme.surface)
                 .child(self.button_with_icon(
                     "composer-add-file",
                     ("Datei anhängen", "paperclip"),
@@ -782,7 +877,8 @@ impl Desktop {
                     )),
                     cx,
                 ))
-                .child(self.create_poll_button("composer-create-poll", cx)),
+                .child(self.create_poll_button("composer-create-poll", cx))
+                .children(self.composer_send_options(cx)),
         )
     }
     pub(super) fn create_poll_button(

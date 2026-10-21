@@ -26,6 +26,8 @@ pub(super) struct ContentOwner {
     pub(super) transfer: Option<wire::TransferProgress>,
     link: Option<(AccountScope, Text<2048>)>,
     refresh_poll: Option<(ConversationRef, u64)>,
+    // One deliberate preview may wait behind the two admitted content jobs.
+    preview_request: Option<(RequestId, view::AttachmentRef)>,
     profile: Option<AccountScope>,
     profile_retry_at: Option<Instant>,
     poll_at: Option<Instant>,
@@ -62,6 +64,7 @@ impl Accounts {
                 }
             }
         }
+        self.content_owner.preview_request = None;
         self.content_owner.jobs.clear();
         self.content_owner.images.clear();
         self.content_owner.link = None;
@@ -118,32 +121,31 @@ impl Accounts {
                 Ok(())
             }
             A::ClosePreview => {
+                self.content_owner.preview_request = None;
                 self.snapshot.content_panel.preview = None;
                 self.touch();
                 Ok(())
             }
             A::CancelDownload => {
-                if let Some(progress) = &self.content_owner.transfer {
-                    progress.cancel();
-                }
-                if let (Ok(connection), Some(transfer)) =
-                    (&mut self.connection, &self.snapshot.content_panel.transfer)
-                {
-                    for pending in &self.pending {
-                        if matches!(pending.purpose,Purpose::Message(request,context,_,messaging::Work::Action) if request==transfer.request&&context==transfer.attachment.context)
-                        {
-                            let _ = connection.cancel_request(pending.id);
-                        }
-                    }
-                }
-                self.touch();
+                self.cancel_download();
                 Ok(())
             }
             A::Preview(attachment) => {
                 self.require_attachment(&attachment)?;
-                self.snapshot.content_panel.preview = Some(attachment.clone());
+                match self.load_asset(
+                    request,
+                    account,
+                    view::AssetTarget::Image(attachment.clone()),
+                ) {
+                    Ok(()) => self.content_owner.preview_request = None,
+                    Err(SubmitError::Busy) => {
+                        self.content_owner.preview_request = Some((request, attachment.clone()))
+                    }
+                    Err(error) => return Err(error),
+                }
+                self.snapshot.content_panel.preview = Some(attachment);
                 self.touch();
-                self.load_asset(request, account, view::AssetTarget::Image(attachment))
+                Ok(())
             }
             A::Load(target) => self.load_asset(request, account, target),
             A::OpenCloud(attachment) => {
@@ -181,6 +183,22 @@ impl Accounts {
             }
             A::ClosePoll(poll) => self.start_poll(request, wire::PollCommand::Close(poll)),
         }
+    }
+    pub(super) fn cancel_download(&mut self) {
+        if let Some(progress) = &self.content_owner.transfer {
+            progress.cancel();
+        }
+        if let (Ok(connection), Some(transfer)) =
+            (&mut self.connection, &self.snapshot.content_panel.transfer)
+        {
+            for pending in &self.pending {
+                if matches!(pending.purpose,Purpose::Message(request,context,_,messaging::Work::Action) if request==transfer.request&&context==transfer.attachment.context)
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
+        self.touch();
     }
     fn require_attachment(&self, attachment: &view::AttachmentRef) -> Result<(), SubmitError> {
         if self.snapshot.selected != Some(attachment.context) {
@@ -237,6 +255,7 @@ impl Accounts {
             state: view::AssetState::Loading,
             emoji: None,
             color: None,
+            document_pages: None,
         });
         self.touch();
         Ok(())
@@ -371,6 +390,7 @@ impl Accounts {
                             state: view::AssetState::Failed,
                             emoji: None,
                             color: None,
+                            document_pages: None,
                         });
                     } else {
                         self.content_owner.next_key = self.content_owner.next_key.saturating_add(1);
@@ -390,6 +410,7 @@ impl Accounts {
                         state: view::AssetState::Ready { key: 0 },
                         emoji: Some(text),
                         color,
+                        document_pages: None,
                     });
                 }
             }
@@ -448,6 +469,7 @@ impl Accounts {
                 state,
                 emoji: None,
                 color: None,
+                document_pages: None,
             });
         } else {
             let completion = completion_error(error);
@@ -563,6 +585,11 @@ impl Accounts {
             },
             emoji: None,
             color: None,
+            document_pages: if admitted {
+                job.bytes.document_pages()
+            } else {
+                None
+            },
         });
         self.touch();
         admitted
@@ -675,6 +702,31 @@ impl Accounts {
     }
     pub(super) fn tick_content(&mut self) {
         self.reconcile_content_assets();
+        if let Some((request, attachment)) = self.content_owner.preview_request.clone() {
+            if self.snapshot.content_panel.preview.as_ref() != Some(&attachment) {
+                self.content_owner.preview_request = None;
+            } else {
+                match self.load_asset(
+                    request,
+                    attachment.context.account,
+                    view::AssetTarget::Image(attachment.clone()),
+                ) {
+                    Err(SubmitError::Busy) => {}
+                    Ok(()) => self.content_owner.preview_request = None,
+                    Err(_) => {
+                        self.content_owner.preview_request = None;
+                        self.set_asset(view::AssetView {
+                            target: view::AssetTarget::Image(attachment),
+                            state: view::AssetState::Failed,
+                            emoji: None,
+                            color: None,
+                            document_pages: None,
+                        });
+                        self.touch();
+                    }
+                }
+            }
+        }
         if let Some(account) = self.snapshot.active_account
             && self.content_owner.profile != Some(account)
             && self

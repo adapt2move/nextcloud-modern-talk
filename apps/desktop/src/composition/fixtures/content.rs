@@ -81,12 +81,14 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
             state: AssetState::Ready { key: 1 },
             emoji: None,
             color: None,
+            document_pages: None,
         },
         AssetView {
             target: AssetTarget::ConversationAvatar(context),
             state: AssetState::Ready { key: 0 },
             emoji: Some(text("🎨")),
             color: Some(text("#55736A")),
+            document_pages: None,
         },
     ];
     for (id, placeholder, key) in [(101, "photo", 2), (102, "document", 3)] {
@@ -104,6 +106,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
                 state: AssetState::Ready { key },
                 emoji: None,
                 color: None,
+                document_pages: None,
             });
         }
     }
@@ -184,6 +187,7 @@ pub(super) fn action(
                     state: AssetState::Unsupported,
                     emoji: None,
                     color: None,
+                    document_pages: None,
                 })
                 .map_err(|_| SubmitError::Busy)?;
             Ok(())

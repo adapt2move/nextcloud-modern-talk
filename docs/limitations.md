@@ -18,9 +18,15 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
-- Typing indicators, voice messages, video/native document viewers, account-wide
+- Typing indicators, voice messages, video and complete document viewers, account-wide
   content search and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
+- Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
+  not a complete PDF reader. Linux and Windows use server-provided document
+  thumbnails. If the server's PDF preview provider is disabled, those platforms
+  offer the Cloud web view and download. Office document previews also depend on
+  the server's providers. Original-image fallback is limited to supported raster
+  files up to 4 MiB.
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
@@ -35,7 +41,7 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - The macOS app is ad-hoc signed and is not notarized. See the
   [first-launch instructions](install.md#first-launch-blocked-by-macos).
 - Mac CI checks compilation, package structure, native library paths and
-  signatures. Native login, permissions, devices and update installation still
+  signatures. Native login, permissions, devices, PDF rendering and update installation still
   need platform qualification. Windows is compile-checked only.
 - Native credential storage may be unavailable or report cleanup pending.
   The explicitly selected private-file fallback is persistent but unencrypted.

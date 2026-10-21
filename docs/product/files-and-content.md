@@ -22,6 +22,8 @@ Acceptance: one account's cached thumbnail cannot appear for another. Canceling 
 
 Images and documents show a thumbnail where the server or a bounded native decoder can supply one. Opening an image presents an enlarged, room-scoped preview dialog. PDF and office documents use a supported native inline view when available; otherwise show their preview and an explicit link to the authenticated Cloud web view. Every permitted item offers Download, with progress derived from transferred bytes and a clear pending/failed/cancelled state. Unknown totals stay indeterminate. A progress animation never implies successful publication of a partial file.
 
+File-share system messages retain their rich attachment cards. If a server preview is unavailable, a supported image may use its authenticated, size-limited original through the same account and origin checks. A permission or authentication denial must never trigger a fallback fetch. A PDF first-page preview is labelled as such and is not presented as a complete document viewer. Keep download progress and cancellation owned by the admitted transfer when a second download is rejected.
+
 ## CONTENT-004
 
 **Captions and rich objects (P1 safe rendering; P3 rich creation).** Render supported captions, references, file associations, locations, and other structured objects with source/actor identity. Preserve thread/reply/silent metadata only where that sharing API supports it. Unknown object types remain readable and never run executable content.

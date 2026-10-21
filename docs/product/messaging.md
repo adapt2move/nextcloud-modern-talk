@@ -8,6 +8,8 @@ These requirements define messaging behavior. Implemented paths and remaining pa
 
 Switching to a previously opened conversation restores its retained history immediately, then reconciles changes in the background. Retention is bounded and scoped to the account, host, runtime and conversation; logout, account removal and loss of access retire the corresponding content. A transient connection failure preserves already loaded history for offline reading. Persistence across restarts requires the approved content-storage policy; a memory cache must not promise durable offline history.
 
+Reconciliation after a send retains the event cursor and does not restart the initial-history loading state. An already loaded empty conversation remains ready during background reads. Older-page requests keep their own progress and failure state when a concurrent background read completes.
+
 Load an older page when the reader reaches the top of the loaded history, with one outstanding request per scoped cursor. Loading or retry controls belong at that boundary, not in a permanent bar above the timeline. Preserve the visible message anchor when prepending a page; avoid repeatedly requesting a failed or unchanged cursor.
 
 Acceptance: duplicate/out-of-order delivery produces one canonical message per ID without jumping the reader to the bottom. Unknown system events/rich objects show an intelligible fallback. A deleted/expired parent is identified as unavailable without exposing its cached text. The room-list preview is not assumed to contain complete reaction or parent data.
@@ -22,7 +24,7 @@ When the reader was already at the end before an append, follow the new end afte
 
 The composer offers the installed system emoji picker on deliberate activation. Keep the current input target and IME state intact. On systems whose picker copies instead of inserting, explain the paste step and retain the ordinary clipboard permission check. Missing system support is explicit; opening a picker does not imply that an emoji was selected or inserted.
 
-Keep the composer free of routine status and keyboard-instruction text. Show a small offline notice when disconnected, while preserving actionable send errors and explicit reply/edit context. Secondary options, including scheduling, appear while the composer is active. Keep its primary actions discoverable; place an additional-content `+` action beside emoji, including the supported poll flow. Mentions are entered through `@` in the text itself, without a duplicate standalone mention button. Moving focus into a composer action must not destroy the draft, selection or active editing context.
+Keep the composer free of routine status and keyboard-instruction text. Show a small offline notice when disconnected, while preserving actionable send errors and explicit reply/edit context. Keep one multiline message field with emoji, send and an additional-content `+` action. Secondary options, including scheduling, silent sending, reminders, attachments and the supported poll flow, are reachable through that compact `+` menu while the composer is active. Show explicit reply/edit or silent-send context in a slim dismissible strip. Closing the date/time form preserves the message and reply target. Mentions are entered through `@` in the text itself, without a duplicate standalone mention button. Moving focus into a composer action must not destroy the draft, selection or active editing context.
 
 Acceptance: formatting preview and sent text preserve meaning, Unicode, and line breaks. Links display their destination and open only on deliberate activation under the security policy. Copying code preserves its contents. A permission change disables send while retaining the draft; a read-only timeline does not show a writable composer.
 
@@ -63,6 +65,8 @@ Acceptance: chat denied plus reaction allowed still permits reactions; the rever
 **Edit and delete within actual policy (P1).** Offer edits and deletions according to message type, actor, moderator rights, capability, and current server limits. Show an edit mode and retained draft on failure. Distinguish delete message, delete rich-object share, and delete underlying file; never imply that deleting a chat share deletes the file everywhere. Honor note-to-self editing extensions only when supported.
 
 Acceptance: expired edit/delete windows or a concurrent deletion produce explicit failure and a refreshed message. A successful edit shows server edit metadata; a successful delete updates timeline, previews, local search, pins, and cached excerpts. Do not hard-code an unlimited deletion/edit window from the version number.
+
+Repeated Enter while an edit is pending retains the admitted request. Its completion can restore the prior draft only if the same editing context and submitted text are still present. Text typed in the meantime, or a cancelled and reopened edit, remains untouched; a failed edit keeps its text for deliberate recovery.
 
 ## MSG-009
 

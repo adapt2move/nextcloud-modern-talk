@@ -8,7 +8,9 @@ The alpha includes browser-based account connection, conversation settings, mess
 
 ![Native chat with favorites, image previews and fictional team messages](docs/assets/chat.png)
 
-The untouched screenshot shows the native Linux app with an English interface and fictional German messages in its built-in UI scenario.
+The untouched screenshot shows the native Linux app connected to a disposable
+NextCloud Talk server, with an English interface, fictional team members and
+German messages. The image card is an actual shared attachment.
 
 ## Contribute
 

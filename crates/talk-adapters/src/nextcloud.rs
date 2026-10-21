@@ -10,6 +10,8 @@ mod meeting;
 mod meeting_runtime;
 mod messaging;
 mod notifications;
+#[cfg(any(test, target_os = "macos"))]
+mod pdf_preview;
 mod people;
 mod preferences;
 mod projection;

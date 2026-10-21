@@ -59,6 +59,34 @@ pub fn call_unavailable_reason(row: &ConversationView, content: ContentState) ->
 }
 
 pub const MAX_DRAFTS: usize = 8;
+
+/// The admitted edit keeps its identity and text until its own receipt arrives.
+/// A repeated Enter or an unrelated result must not replace that ownership.
+pub struct PendingEdit {
+    pub request: RequestId,
+    pub message: u128,
+    pub generation: u64,
+    pub body: Text<4096>,
+}
+impl PendingEdit {
+    /// Some(true) restores the prior draft. Other correlated outcomes release
+    /// admission while retaining the current edit, including newer typed text.
+    pub fn complete(
+        pending: &mut Option<Self>,
+        request: RequestId,
+        result: Completion,
+        editing: Option<(u128, u64)>,
+        body: &str,
+    ) -> Option<bool> {
+        let submitted = pending.as_ref().filter(|edit| edit.request == request)?;
+        let restore = result == Completion::ServerAccepted
+            && editing == Some((submitted.message, submitted.generation))
+            && body == submitted.body.as_str();
+        *pending = None;
+        Some(restore)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Draft {
     context: ConversationRef,
@@ -383,6 +411,82 @@ fn same_draft_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn edit_receipts_only_restore_the_unchanged_admitted_editor() {
+        let pending = || {
+            Some(PendingEdit {
+                request: RequestId(7),
+                message: 42,
+                generation: 1,
+                body: Text::new("submitted edit").unwrap(),
+            })
+        };
+        let mut edit = pending();
+        assert_eq!(
+            PendingEdit::complete(
+                &mut edit,
+                RequestId(8),
+                Completion::ServerAccepted,
+                Some((42, 1)),
+                "submitted edit"
+            ),
+            None
+        );
+        assert!(
+            edit.is_some(),
+            "an unrelated receipt cannot release the admitted edit"
+        );
+        assert_eq!(
+            PendingEdit::complete(
+                &mut edit,
+                RequestId(7),
+                Completion::ServerAccepted,
+                Some((42, 1)),
+                "submitted edit"
+            ),
+            Some(true)
+        );
+        assert!(edit.is_none());
+        for (message, body) in [
+            (Some((42, 2)), "submitted edit"),
+            (Some((42, 1)), "newer edit"),
+            (Some((43, 1)), "submitted edit"),
+            (None, "submitted edit"),
+        ] {
+            let mut edit = pending();
+            assert_eq!(
+                PendingEdit::complete(
+                    &mut edit,
+                    RequestId(7),
+                    Completion::ServerAccepted,
+                    message,
+                    body
+                ),
+                Some(false)
+            );
+            assert!(edit.is_none());
+        }
+        for completion in [
+            Completion::Failed(UnavailableReason::PermissionDenied),
+            Completion::Uncertain,
+        ] {
+            let mut edit = pending();
+            assert_eq!(
+                PendingEdit::complete(
+                    &mut edit,
+                    RequestId(7),
+                    completion,
+                    Some((42, 1)),
+                    "submitted edit"
+                ),
+                Some(false)
+            );
+            assert!(
+                edit.is_none(),
+                "a settled failure retains text and permits a deliberate new edit"
+            );
+        }
+    }
     use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};
     fn context(n: u128) -> ConversationRef {
         ConversationRef {

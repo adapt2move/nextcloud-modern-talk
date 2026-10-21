@@ -597,7 +597,12 @@ impl Desktop {
                                     .child(self.icon_button(
                                         "attach",
                                         ("plus", "Weitere Optionen"),
-                                        ButtonStyle::Quiet,
+                                        // The open + menu keeps its trigger visibly pressed.
+                                        if self.content_ui.menu {
+                                            ButtonStyle::Secondary
+                                        } else {
+                                            ButtonStyle::Quiet
+                                        },
                                         options_availability,
                                         LocalAction::Content(super::content::Action::Menu),
                                         cx,

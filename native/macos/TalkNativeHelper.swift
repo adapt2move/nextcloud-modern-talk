@@ -213,9 +213,55 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
+// Native first-page raster only. CoreGraphics does not execute PDF document
+// actions, JavaScript, links or external resources. No source file is persisted.
+func previewPDF(large: Bool) {
+    let byteLimit = 4 * 1024 * 1024
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { exit(3) }
+    var data = Data()
+    do {
+        while let block = try FileHandle.standardInput.read(upToCount: min(65536, byteLimit + 1 - data.count)), !block.isEmpty {
+            guard data.count + block.count <= byteLimit else { exit(2) }
+            data.append(block)
+        }
+    } catch { exit(2) }
+    guard data.starts(with: Data("%PDF-".utf8)),
+          let provider = CGDataProvider(data: data as CFData),
+          let document = CGPDFDocument(provider), !document.isEncrypted,
+          (1...10000).contains(document.numberOfPages),
+          let page = document.page(at: 1) else { exit(2) }
+    let box = page.getBoxRect(.cropBox)
+    guard box.width.isFinite, box.height.isFinite, box.width > 0, box.height > 0,
+          box.width <= 144000, box.height <= 144000 else { exit(2) }
+    let rotated = page.rotationAngle % 180 == 90 || page.rotationAngle % 180 == -90
+    let pageWidth = rotated ? box.height : box.width
+    let pageHeight = rotated ? box.width : box.height
+    let scale = min((large ? 1600.0 : 400.0) / pageWidth, (large ? 1200.0 : 300.0) / pageHeight)
+    let width = max(1, Int((pageWidth * scale).rounded(.down)))
+    let height = max(1, Int((pageHeight * scale).rounded(.down)))
+    guard width <= 1600, height <= 1200,
+          let context = CGContext(data: nil, width: width, height: height,
+                                  bitsPerComponent: 8, bytesPerRow: width * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { exit(2) }
+    let destination = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
+    context.setFillColor(CGColor(gray: 1, alpha: 1))
+    context.fill(destination)
+    context.concatenate(page.getDrawingTransform(.cropBox, rect: destination, rotate: 0, preserveAspectRatio: true))
+    context.drawPDFPage(page)
+    guard let image = context.makeImage(),
+          let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+          png.count <= byteLimit else { exit(2) }
+    let header = Data("NMT-PDF-1 \(document.numberOfPages)\n".utf8)
+    FileHandle.standardOutput.write(header)
+    FileHandle.standardOutput.write(png)
+}
+
 let arguments = CommandLine.arguments
 guard Bundle.main.bundleIdentifier == "org.adapt2move.nextcloud-modern-talk" else { exit(2) }
-if arguments.count == 2 && arguments[1] == "reduce-motion" {
+if arguments.count == 3 && arguments[1] == "pdf-preview" && ["large", "thumbnail"].contains(arguments[2]) {
+    previewPDF(large: arguments[2] == "large")
+} else if arguments.count == 2 && arguments[1] == "reduce-motion" {
     emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
 } else if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
     checkPermission(kind: arguments[2], request: arguments[3] == "request")

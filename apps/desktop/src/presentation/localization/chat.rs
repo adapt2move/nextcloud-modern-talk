@@ -120,6 +120,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Reenviar no está disponible en este momento.",
     ),
     (
+        "Wird leise gesendet",
+        "Sending silently",
+        "Envío sin notificación",
+    ),
+    (
         "Wähle ein Emoji und füge es danach mit Strg+V in die Nachricht ein.",
         "Choose an emoji, then paste it into the message with Ctrl+V.",
         "Elige un emoji y pégalo en el mensaje con Ctrl+V.",

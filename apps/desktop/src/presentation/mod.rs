@@ -1130,6 +1130,11 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                // Enter follows the disabled Send button once a confirmed
+                // message has cleared the field; it is not a failed action.
+                if self.composer.read(cx).content.trim().is_empty() {
+                    return;
+                }
                 if self.save_draft(cx)
                     && let Some(row) = self.selected()
                 {

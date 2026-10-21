@@ -16,13 +16,27 @@ impl crate::transport::Transport {
             .content_endpoint(&format!("index.php/f/{file}"))?
             .into())
     }
+    pub(crate) async fn preview_pdf(
+        &mut self,
+        c: &OperationContext,
+        path: crate::files::FilePath,
+    ) -> Result<Vec<u8>, Error> {
+        let url = self.file_endpoint(&path)?;
+        let mut bytes = Vec::new();
+        self.stream(c, url, None, &mut bytes, super::files::StreamRead::Pdf)
+            .await?;
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        Ok(bytes)
+    }
     pub(crate) async fn image(
         &mut self,
         c: &OperationContext,
         request: ImageRequest,
     ) -> Result<Vec<u8>, Error> {
         self.validate(c)?;
-        let mut url = match request {
+        let url = match request {
             ImageRequest::UserAvatar { user } => {
                 if user.is_empty()
                     || user.len() > 512
@@ -54,11 +68,13 @@ impl crate::transport::Transport {
                     .append_pair("x", if large { "1600" } else { "400" })
                     .append_pair("y", if large { "1200" } else { "300" })
                     .append_pair("a", "1")
-                    .append_pair("mode", "cover");
+                    .append_pair("mode", "fill")
+                    .append_pair("forceIcon", "0")
+                    .append_pair("mimeFallback", "0");
                 url
             }
+            ImageRequest::FileImage(path) => self.file_endpoint(&path)?,
         };
-        url.query_pairs_mut().append_pair("format", "json");
         let mut bytes = Vec::new();
         self.stream(c, url, None, &mut bytes, super::files::StreamRead::Image)
             .await?;

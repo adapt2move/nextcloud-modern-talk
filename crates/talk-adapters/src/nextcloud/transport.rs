@@ -335,6 +335,14 @@ impl Transport {
     ) -> Result<Vec<u8>, PortError> {
         self.api.image(&context(c), request).await.map_err(error)
     }
+    #[cfg(any(test, target_os = "macos"))]
+    pub(super) async fn preview_pdf(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api.preview_pdf(&context(c), path).await.map_err(error)
+    }
     pub(super) async fn poll(
         &mut self,
         c: &OperationContext,

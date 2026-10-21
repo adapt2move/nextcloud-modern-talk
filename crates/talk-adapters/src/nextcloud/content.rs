@@ -178,14 +178,9 @@ impl NextcloudClient {
                         placeholder,
                         large,
                     } => {
-                        let object = self.attachment(c, message, &placeholder, caps).await?;
-                        let file = object
-                            .id
-                            .as_deref()
-                            .and_then(|s| s.parse::<u64>().ok())
-                            .filter(|n| *n > 0)
-                            .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
-                        I::FilePreview { file, large }
+                        return self
+                            .attachment_image(c, message, &placeholder, large, caps)
+                            .await;
                     }
                 };
                 let bytes = self.transport.image(c, image).await?;
@@ -210,6 +205,86 @@ impl NextcloudClient {
                     .await
             }
         }
+    }
+    async fn attachment_image(
+        &mut self,
+        c: &OperationContext,
+        message: MessageId,
+        placeholder: &Text<128>,
+        large: bool,
+        caps: &Capabilities,
+    ) -> Result<ContentResult, PortError> {
+        let object = self.attachment(c, message, placeholder, caps).await?;
+        let file = object
+            .id
+            .as_deref()
+            .and_then(|id| id.parse::<u64>().ok())
+            .filter(|id| *id > 0)
+            .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+        let result = self
+            .transport
+            .image(c, api::content::ImageRequest::FilePreview { file, large })
+            .await;
+        let bytes = match result {
+            Ok(bytes) => bytes,
+            Err(error)
+                if matches!(error.kind, ErrorKind::NotFound | ErrorKind::Unsupported)
+                    && matches!(
+                        object.mime_type.as_deref(),
+                        Some("image/png" | "image/jpeg" | "image/gif" | "image/webp")
+                    )
+                    && object
+                        .size
+                        .is_none_or(|bytes| bytes <= api::content::MAX_IMAGE_BYTES as u64) =>
+            {
+                // A disabled/missing preview provider must not hide an otherwise
+                // supported image. DAV still enforces the fresh account's file
+                // permissions; denial, redirects and cancellation never fallback.
+                let raw = object.path.as_deref().ok_or(error)?;
+                let path =
+                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                self.transport
+                    .image(c, api::content::ImageRequest::FileImage(path))
+                    .await?
+            }
+            #[cfg(target_os = "macos")]
+            Err(error)
+                if matches!(error.kind, ErrorKind::NotFound | ErrorKind::Unsupported)
+                    && object.mime_type.as_deref() == Some("application/pdf")
+                    && object
+                        .size
+                        .is_none_or(|bytes| bytes <= api::content::MAX_IMAGE_BYTES as u64) =>
+            {
+                let raw = object.path.as_deref().ok_or(error)?;
+                let path =
+                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                let bytes = self.transport.preview_pdf(c, path).await?;
+                self.transport.validate(c)?;
+                let timeout = std::time::Duration::from_millis(
+                    c.deadline
+                        .millis
+                        .saturating_sub(self.transport.now().millis),
+                )
+                .min(std::time::Duration::from_secs(5));
+                let image = super::pdf_preview::render(
+                    bytes,
+                    large,
+                    c.cancellation.clone(),
+                    self.transport.cancellation(),
+                    timeout,
+                )
+                .await
+                .map_err(|kind| self.error(kind))?;
+                self.transport.validate(c)?;
+                return Ok(ContentResult::Image(image));
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(ContentResult::Image(
+            ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+        ))
     }
     async fn poll_content(
         &mut self,

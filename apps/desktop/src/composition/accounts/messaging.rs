@@ -9,6 +9,7 @@ pub(super) enum Work {
     Thread,
     Capabilities,
     History,
+    Latest,
     Older,
     Poll,
     Action,
@@ -29,13 +30,19 @@ impl Work {
             Self::Older => DiagnosticOperation::Older,
             Self::Context(_) => DiagnosticOperation::Context,
             Self::Thread => DiagnosticOperation::Thread,
-            Self::Poll => DiagnosticOperation::Poll,
+            Self::Latest | Self::Poll => DiagnosticOperation::Poll,
             Self::Send => DiagnosticOperation::Send,
             _ => return None,
         })
     }
     fn backward(self) -> bool {
-        matches!(self, Self::History | Self::Older | Self::Context(_))
+        matches!(
+            self,
+            Self::History | Self::Latest | Self::Older | Self::Context(_)
+        )
+    }
+    pub(super) fn background(self) -> bool {
+        matches!(self, Self::Latest | Self::Poll)
     }
 }
 impl Accounts {
@@ -47,22 +54,7 @@ impl Accounts {
     }
     pub(super) fn start_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
         self.restore_messages(context);
-        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
-            Some(id) => (
-                wire::MessagingCommand::Poll {
-                    after: message_id(context, id)?,
-                    thread: None,
-                },
-                Work::Poll,
-            ),
-            None => (
-                wire::MessagingCommand::History {
-                    before: None,
-                    thread: None,
-                },
-                Work::History,
-            ),
-        };
+        let (command, work) = self.live_message_request(context)?;
         match self.start_message(RequestId(0), context, command, work) {
             Ok(()) | Err(SubmitError::Busy) => (),
             Err(error) => {
@@ -90,6 +82,36 @@ impl Accounts {
         );
         self.message_poll_at = Instant::now() + Duration::from_secs(1);
         Ok(())
+    }
+    /// Background reconciliation never starts an explicit history baseline.
+    /// A loaded empty room has no event cursor yet, but remains ready while its
+    /// next newest-page read is outstanding. Existing event cursors are retained
+    /// after a send so a long gap is not skipped by fetching only the newest page.
+    fn live_message_request(
+        &self,
+        context: ConversationRef,
+    ) -> Result<(wire::MessagingCommand, Work), SubmitError> {
+        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
+            Some(id) => (
+                wire::MessagingCommand::Poll {
+                    after: message_id(context, id)?,
+                    thread: None,
+                },
+                Work::Poll,
+            ),
+            None => (
+                wire::MessagingCommand::History {
+                    before: None,
+                    thread: None,
+                },
+                if self.history.get(context).is_some_and(|h| h.loaded) {
+                    Work::Latest
+                } else {
+                    Work::History
+                },
+            ),
+        };
+        Ok((command, work))
     }
     pub(super) fn project_history(&mut self, context: ConversationRef) {
         if self.snapshot.selected != Some(context) {
@@ -187,7 +209,9 @@ impl Accounts {
                 operation,
             });
         }
-        self.touch();
+        if !work.background() {
+            self.touch();
+        }
         Ok(())
     }
     pub(super) fn poll_messages(&mut self) {
@@ -203,24 +227,8 @@ impl Accounts {
         if self.snapshot.content == ContentState::Denied {
             return;
         }
-        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
-            Some(id) => match message_id(context, id) {
-                Ok(after) => (
-                    wire::MessagingCommand::Poll {
-                        after,
-                        thread: None,
-                    },
-                    Work::Poll,
-                ),
-                Err(_) => return,
-            },
-            None => (
-                wire::MessagingCommand::History {
-                    before: None,
-                    thread: None,
-                },
-                Work::History,
-            ),
+        let Ok((command, work)) = self.live_message_request(context) else {
+            return;
         };
         self.message_poll_request = self.message_poll_request.saturating_add(1);
         let _ = self.start_message(RequestId(self.message_poll_request), context, command, work);
@@ -462,7 +470,7 @@ impl Accounts {
                     event.error,
                     Some(ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable)
                 );
-            if work != Work::Poll && !idle_history
+            if !work.background() && !idle_history
                 || event.count > 0
                 || event.error.is_some() && !repeat_offline
             {
@@ -498,8 +506,10 @@ impl Accounts {
                 ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
             ))
         );
-        let missing_room = matches!(work, Work::History | Work::Older | Work::Poll)
-            && matches!(reply, Err(IdentityError::Request(ErrorKind::NotFound)));
+        let missing_room = matches!(
+            work,
+            Work::History | Work::Latest | Work::Older | Work::Poll
+        ) && matches!(reply, Err(IdentityError::Request(ErrorKind::NotFound)));
         let result = match reply {
             Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
                 conversation,
@@ -532,7 +542,12 @@ impl Accounts {
         if missing_room
             || matches!(
                 work,
-                Work::History | Work::Older | Work::Poll | Work::Thread | Work::Context(_)
+                Work::History
+                    | Work::Latest
+                    | Work::Older
+                    | Work::Poll
+                    | Work::Thread
+                    | Work::Context(_)
             ) && result == Err(Completion::Failed(UnavailableReason::PermissionDenied))
         {
             self.invalidate_history(context, ContentState::Denied);
@@ -552,7 +567,7 @@ impl Accounts {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
                     work,
-                    Work::History | Work::Older | Work::Poll | Work::Context(_)
+                    Work::History | Work::Latest | Work::Older | Work::Poll | Work::Context(_)
                 ) =>
             {
                 messages
@@ -785,16 +800,8 @@ impl Accounts {
             }
         }
         self.reconcile_content_assets();
-        if reload {
-            let _ = self.start_message(
-                request,
-                context,
-                wire::MessagingCommand::History {
-                    before: None,
-                    thread: None,
-                },
-                Work::History,
-            );
+        if reload && let Ok((command, work)) = self.live_message_request(context) {
+            let _ = self.start_message(request, context, command, work);
         }
         if work == Work::PinChange && completion == Completion::ServerAccepted {
             let _ = self.start_message(request, context, wire::MessagingCommand::Pins, Work::Pins);
@@ -1200,6 +1207,57 @@ fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_reconciliation_uses_initial_load_only_until_the_room_has_loaded() {
+        let mut model = super::super::tests::model();
+        let context = super::super::super::fixtures::context(1);
+        model.history.open(context);
+        assert_eq!(
+            model.live_message_request(context).unwrap().1,
+            Work::History
+        );
+        let operation = OperationId::from_local(1);
+        model
+            .history
+            .admitted(context, operation, Work::History, RequestId(1), 1);
+        assert!(model.history.complete(
+            context,
+            operation,
+            Work::History,
+            RequestId(1),
+            &Ok(wire::MessagingResult::Messages {
+                messages: Page::empty(),
+                cursor: None,
+                common_read: None
+            }),
+            false
+        ));
+        assert_eq!(model.live_message_request(context).unwrap().1, Work::Latest);
+        let operation = OperationId::from_local(2);
+        model
+            .history
+            .admitted(context, operation, Work::Poll, RequestId(2), 2);
+        assert!(model.history.complete(
+            context,
+            operation,
+            Work::Poll,
+            RequestId(2),
+            &Ok(wire::MessagingResult::Messages {
+                messages: Page::empty(),
+                cursor: Some(protocol::MessageId {
+                    conversation: context.conversation,
+                    sequence: 70
+                }),
+                common_read: None
+            }),
+            false
+        ));
+        let (command, work) = model.live_message_request(context).unwrap();
+        assert_eq!(work, Work::Poll);
+        assert!(
+            matches!(command, wire::MessagingCommand::Poll { after, thread: None } if after.sequence == 70)
+        );
+    }
     fn row(id: u128, body: &str) -> MessageView {
         MessageView {
             local_id: id,

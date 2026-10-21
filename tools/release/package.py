@@ -202,13 +202,15 @@ def tar_gz(root, output, epoch):
 def zip_bundle(root, output, epoch):
     import time
     with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        date_time = time.gmtime(epoch)[:6]
         for p in [root, *sorted(root.rglob("*"))]:
-            name = p.relative_to(root.parent).as_posix() + ("/" if p.is_dir() else "")
-            info = zipfile.ZipInfo(name, time.gmtime(epoch)[:6])
+            is_directory = p.is_dir()
+            name = p.relative_to(root.parent).as_posix() + ("/" if is_directory else "")
+            info = zipfile.ZipInfo(name, date_time)
             info.create_system = 3
-            mode = 0o755 if p.is_dir() or p.stat().st_mode & stat.S_IXUSR else 0o644
-            info.external_attr = ((stat.S_IFDIR if p.is_dir() else stat.S_IFREG) | mode) << 16
-            archive.writestr(info, b"" if p.is_dir() else p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            mode = 0o755 if is_directory or p.stat().st_mode & stat.S_IXUSR else 0o644
+            info.external_attr = ((stat.S_IFDIR if is_directory else stat.S_IFREG) | mode) << 16
+            archive.writestr(info, b"" if is_directory else p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
 def assemble(stage, output, allow_fixture=False):
@@ -230,10 +232,8 @@ def assemble(stage, output, allow_fixture=False):
         resources.mkdir(parents=True)
         copied = {}
         for name in spec["files"]:
-            if name == "bin/talk-desktop":
-                dest = binary_dir / "talk-desktop"
-            elif name == "bin/talk-native-helper":
-                dest = binary_dir / "talk-native-helper"
+            if name in ("bin/talk-desktop", "bin/talk-native-helper"):
+                dest = binary_dir / Path(name).name
             elif name.startswith(macos_runtime.PREFIX):
                 dest = root / macos_runtime.bundle_path(name)
             elif mac and name == macos_dmg.ICON:

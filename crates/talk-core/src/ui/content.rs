@@ -51,6 +51,8 @@ pub struct AssetView {
     pub state: AssetState,
     pub emoji: Option<Text<64>>,
     pub color: Option<Text<16>>,
+    /// Present only for the native PDF first-page renderer's observed page count.
+    pub document_pages: Option<u32>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {

@@ -101,6 +101,42 @@ fn reply(
 }
 
 #[test]
+fn empty_room_background_reads_remain_ready_and_preserve_explicit_history_ownership() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(&mut cache, key, 1, Work::History, messages(key, [], None));
+    assert!(cache.get(key).unwrap().loaded);
+    let latest = admit(&mut cache, key, 2, Work::Latest);
+    assert_eq!(cache.get(key).unwrap().state, RemoteState::Idle);
+    assert!(cache.complete(
+        key,
+        latest,
+        Work::Latest,
+        RequestId(2),
+        &Ok(messages(key, [message(key, 7, "First note")], Some(7))),
+        false,
+    ));
+    let room = cache.get(key).unwrap();
+    assert_eq!(room.state, RemoteState::Idle);
+    assert_eq!(room.latest, Some(7));
+    assert_eq!(room.older, Some(7));
+    let older = admit(&mut cache, key, 3, Work::Older);
+    complete(&mut cache, key, 4, Work::Latest, messages(key, [], None));
+    assert_eq!(
+        cache.get(key).unwrap().state,
+        RemoteState::Loading(RequestId(3))
+    );
+    let failure = Completion::Failed(UnavailableReason::Unconfigured);
+    assert!(cache.complete(key, older, Work::Older, RequestId(3), &Err(failure), false));
+    complete(&mut cache, key, 5, Work::Latest, messages(key, [], None));
+    assert_eq!(
+        cache.get(key).unwrap().state,
+        RemoteState::Failed(RequestId(3), UnavailableReason::Unconfigured)
+    );
+}
+
+#[test]
 fn actual_account_runtime_host_and_room_keys_are_isolated_and_retired() {
     let a = context(1, 1, 1, 7);
     let b = context(2, 1, 1, 7);

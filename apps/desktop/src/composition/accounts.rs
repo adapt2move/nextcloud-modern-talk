@@ -561,6 +561,9 @@ impl Accounts {
                     Ok(RuntimeReply::Active { summary, .. }) => {
                         if self.login.as_ref().and_then(|l| l.owner).is_none_or(|(account, _)| account != summary.account)
                             || !done.scope_is_current { return; }
+                        // The accepted activation now belongs to the account, not this
+                        // login screen. Starting another login must not cancel it.
+                        if let Some(login) = &mut self.login { login.save_request = None; }
                         self.snapshot.login.phase = LoginPhase::Ready; self.snapshot.login.storage = storage(&summary);
                         self.snapshot.login.storage_failure = None;
                         self.snapshot.login.account_label = summary.account_label.clone().unwrap_or_else(|| text(""));
@@ -705,6 +708,12 @@ impl Accounts {
         if let Some(login) = self.login.take()
             && let Ok(connection) = &mut self.connection
         {
+            // Save can activate between UI polls and retire the login attempt.
+            // Its retained observation still owns that unaccepted activation;
+            // cancelling only the attempt/Begin would leave the account active.
+            if let Some(save) = login.save_request {
+                let _ = connection.cancel_request(save);
+            }
             if let Some((account, attempt)) = login.owner {
                 let _ = connection.cancel_attempt(account, attempt);
             }

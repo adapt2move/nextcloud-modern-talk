@@ -235,7 +235,7 @@ impl Cache {
         };
         let timeline = matches!(
             work,
-            Work::History | Work::Older | Work::Poll | Work::Context(_)
+            Work::History | Work::Latest | Work::Older | Work::Poll | Work::Context(_)
         );
         // Retained content and reachability are independent. Only a newer
         // admitted timeline observation may change the offline projection;
@@ -261,7 +261,10 @@ impl Cache {
                         || matches!(work, Work::Context(id)
                         if room.messages.as_slice().first().is_some_and(|m| id < m.local_id)),
                 );
-                if work == Work::Older || work == Work::History && !was_loaded {
+                if work == Work::Older
+                    || work == Work::History && !was_loaded
+                    || work == Work::Latest && room.latest.is_none()
+                {
                     room.older = cursor.map(|id| u128::from(id.sequence));
                 } else if matches!(work, Work::Context(_)) {
                     room.older = room.messages.as_slice().first().map(|m| m.local_id);
@@ -270,7 +273,7 @@ impl Cache {
                 // retained message ID. Backward pages never rewind it.
                 let latest = if work == Work::Poll {
                     cursor.map(|id| u128::from(id.sequence))
-                } else if work == Work::History {
+                } else if matches!(work, Work::History | Work::Latest) {
                     messages
                         .as_slice()
                         .iter()
@@ -285,8 +288,8 @@ impl Cache {
                     room.common_version = flight.version;
                 }
                 room.loaded = true;
-                if work != Work::Poll
-                    || room.state_owner == Work::Poll
+                if !work.background()
+                    || room.state_owner.background()
                     || room.state == RemoteState::Idle
                 {
                     room.state = RemoteState::Idle;
@@ -304,8 +307,8 @@ impl Cache {
             }
             Err(completion)
                 if timeline
-                    && (work != Work::Poll
-                        || (room.state_owner == Work::Poll || room.state == RemoteState::Idle)
+                    && (!work.background()
+                        || (room.state_owner.background() || room.state == RemoteState::Idle)
                             && flight.version >= room.common_version) =>
             {
                 room.state = match *completion {

@@ -1,34 +1,23 @@
-# v0.0.4 — alpha
+# v0.0.5 — alpha
 
-- Automatically save new sign-ins in the system credential store, with explicit
-  recovery choices only when saving fails.
-- Request setup permissions one step at a time, advance after a grant and resume
-  at the ready screen after a macOS screen-permission restart.
-- Simplify device settings, keyboard selection and camera preview; add confirmed
-  account removal. Hide routine save notices and enable launch at login for new
-  preference files.
-- Use lighter secondary text, softer placeholders, a thin blinking text cursor
-  and rounded profile photos. Refine backgrounds, dialog corners and switch
-  hover contrast; remove empty spacing above the composer.
-- Align conversation settings with application settings, including tab icons,
-  page headings and related control groups.
-- Show control focus outlines for keyboard navigation without leaving them after
-  mouse clicks.
-- Soften new-message entry and keep the bottom position through message edits,
-  deletions and system events, while preserving the reader's place in history.
-- Replace inline message actions with a keyboard-accessible popup menu, load
-  older messages at the top of the history and simplify the composer footer.
-- Retain loaded conversation history during chat switches and temporary
-  connection failures; show the offline state during server maintenance and
-  recover without stale requests overwriting it. Fix access to Note to self and
-  hide its call control.
-- Add rotating local chat-event logs for connection changes, history requests
-  and send outcomes, without message contents or credentials.
-- Center setup step numbers with Google Sans Code and show the selected server
-  during browser sign-in.
-- Render the macOS disk-image background sharply on Retina displays, keep the
-  footer visible and use a curved installation arrow.
-- Document the macOS first-launch approval in a separate installation guide.
+- Show attachment cards for Talk file-share messages and display the available
+  thumbnail while an enlarged preview loads. Use a bounded authenticated image
+  fallback when the server cannot provide a thumbnail.
+- Add native first-page PDF previews on macOS when server previews are
+  unavailable, with explicit Cloud and download actions.
+- Reconcile sent messages without restarting the history loading state. Keep
+  loaded empty conversations ready during background reads and preserve the
+  reader's position and new-message feedback.
+- Preserve the submitted edit through repeated Enter presses, and retain newer
+  text when its earlier request completes. Ignore Enter in an empty composer
+  instead of showing an unrelated error after a successful send.
+- Simplify the composer to a message field, emoji, send and a compact `+` menu.
+  Group reply/edit context, silent sending and scheduling into dismissible
+  surfaces without discarding the draft.
+- Honor sign-in cancellation even when its background save has completed and
+  the app is closed immediately. Preserve the running transfer when another
+  download is rejected.
+- Simplify package archive assembly without changing its file layout.
 
-[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.4/docs/install.md)
-· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.4/docs/limitations.md)
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.5/docs/install.md)
+· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.5/docs/limitations.md)

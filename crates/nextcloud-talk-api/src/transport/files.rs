@@ -5,8 +5,29 @@ const FILE_LIMIT: Duration = Duration::from_secs(60);
 pub(super) enum StreamRead<'a> {
     File(Option<&'a (dyn Fn(u64, Option<u64>) + Send + Sync)>),
     Image,
+    Pdf,
 }
 impl Transport {
+    pub(super) fn file_endpoint(
+        &self,
+        path: &crate::files::FilePath,
+    ) -> Result<url::Url, PortError> {
+        let mut url = self
+            .binding
+            .origin
+            .endpoint("remote.php/dav/files/")
+            .map_err(|kind| self.error(kind))?;
+        {
+            let mut parts = url
+                .path_segments_mut()
+                .map_err(|_| self.error(ErrorKind::Malformed))?;
+            parts.pop_if_empty().push(self.binding.user.as_str());
+            for segment in path.as_str().split('/').skip(1) {
+                parts.push(segment);
+            }
+        }
+        Ok(url)
+    }
     pub(crate) async fn file<W: AsyncWrite + Unpin + Send>(
         &mut self,
         c: &OperationContext,
@@ -14,21 +35,7 @@ impl Transport {
         upload: Option<(reqwest::Body, u64)>,
         sink: &mut W,
     ) -> Result<u64, PortError> {
-        let mut url = self
-            .binding
-            .origin
-            .endpoint("remote.php/dav/files/")
-            .map_err(|k| self.error(k))?;
-        {
-            let mut parts = url
-                .path_segments_mut()
-                .map_err(|_| self.error(ErrorKind::Malformed))?;
-            parts.pop_if_empty();
-            parts.push(self.binding.user.as_str());
-            for segment in path.as_str().split('/').skip(1) {
-                parts.push(segment);
-            }
-        }
+        let url = self.file_endpoint(&path)?;
         self.stream(c, url, upload, sink, StreamRead::File(None))
             .await
     }
@@ -39,21 +46,7 @@ impl Transport {
         sink: &mut W,
         progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
     ) -> Result<u64, PortError> {
-        let mut url = self
-            .binding
-            .origin
-            .endpoint("remote.php/dav/files/")
-            .map_err(|k| self.error(k))?;
-        {
-            let mut parts = url
-                .path_segments_mut()
-                .map_err(|_| self.error(ErrorKind::Malformed))?;
-            parts.pop_if_empty();
-            parts.push(self.binding.user.as_str());
-            for segment in path.as_str().split('/').skip(1) {
-                parts.push(segment);
-            }
-        }
+        let url = self.file_endpoint(&path)?;
         self.stream(c, url, None, sink, StreamRead::File(Some(progress)))
             .await
     }
@@ -65,9 +58,11 @@ impl Transport {
         sink: &mut W,
         read: StreamRead<'_>,
     ) -> Result<u64, PortError> {
+        let pdf = matches!(read, StreamRead::Pdf);
         let (read_limit, progress, image) = match read {
             StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
             StreamRead::Image => (crate::content::MAX_IMAGE_BYTES as u64, None, true),
+            StreamRead::Pdf => (crate::content::MAX_IMAGE_BYTES as u64, None, false),
         };
         self.validate(c)?;
         let shared = self.begin_shared_cookies()?;
@@ -170,17 +165,22 @@ impl Transport {
             if response.content_length().is_some_and(|n| n > limit) {
                 return Err(self.error(ErrorKind::TooLarge));
             }
-            if image {
+            if image || pdf {
                 let mime = response
                     .headers()
                     .get(CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.split(';').next())
                     .unwrap_or("");
-                if !matches!(
-                    mime,
-                    "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml"
-                ) {
+                let accepted = if pdf {
+                    mime == "application/pdf"
+                } else {
+                    matches!(
+                        mime,
+                        "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml"
+                    )
+                };
+                if !accepted {
                     return Err(self.error(ErrorKind::Unsupported));
                 }
             }
