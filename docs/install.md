@@ -86,7 +86,10 @@ Windows is compile-checked only; no Windows installer is supplied. See
 
 The app keeps a small local event log to help diagnose chat and backend failures.
 It records timestamps, app version, connection changes, history requests and send
-outcomes. Process-local request numbers connect an operation to its result.
+outcomes. Sign-in records its start, browser result and storage outcome.
+Account removal also records credential retirement, cleanup and local
+record removal, including allowlisted storage-backend and failure categories.
+Process-local request numbers connect an operation to its result.
 Message text, account and conversation names, server addresses, credentials and
 raw backend responses are excluded. Nothing is uploaded automatically.
 

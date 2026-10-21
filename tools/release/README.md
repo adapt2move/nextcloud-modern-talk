@@ -5,7 +5,7 @@ Build from a clean committed checkout using the repository toolchain and lockfil
 ```sh
 python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
 python3 tools/release/build.py --target x86_64-unknown-linux-gnu \
-  --version 0.0.5 --output /absolute/new/package-directory
+  --version 0.0.6 --output /absolute/new/package-directory
 ```
 
 Use `aarch64-apple-darwin` on Apple Silicon. Prepare native prerequisites as described in [CI](../../docs/ci.md). Output belongs outside the checkout. The builder records source/toolchain/dependency identities and collects license notices. The assembler checks the closed file inventory, executable architecture and checksums, then writes Linux `.deb`/`.tar.gz` or a self-contained macOS app ZIP and styled DMG, plus source and provenance.

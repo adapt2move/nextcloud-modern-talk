@@ -18,6 +18,21 @@ pub(super) struct Feedback {
     pub context: Option<ConversationRef>,
 }
 impl Feedback {
+    pub(super) fn dismiss_theme(self, theme: super::Theme) -> super::Theme {
+        let foreground = match self.tone {
+            Tone::Info => theme.muted,
+            Tone::Warning => theme.warning,
+            Tone::Error => theme.danger,
+        };
+        super::Theme {
+            sidebar_secondary: foreground,
+            hover: gpui::Hsla {
+                a: 0.10,
+                ..foreground
+            },
+            ..theme
+        }
+    }
     pub fn info(text: &'static str) -> Self {
         Self {
             text,

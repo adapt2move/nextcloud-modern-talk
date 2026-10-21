@@ -41,6 +41,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El almacén seguro informa de datos dañados. Repáralo o elige el archivo privado.",
     ),
     (
+        "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Bitte warte kurz und versuche es erneut.",
+        "Saving has not been confirmed and may still finish. Wait a moment and try again.",
+        "El guardado no se ha confirmado y aún puede completarse. Espera un momento y vuelve a intentarlo.",
+    ),
+    (
         "Der Speicherzustand hat sich geändert. Bitte erneut versuchen.",
         "The storage state changed. Please try again.",
         "El estado del almacenamiento ha cambiado. Vuelve a intentarlo.",
@@ -49,6 +54,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Zugriff auf den lokalen Speicher wurde verweigert. Prüfe die Dateirechte und versuche es erneut.",
         "Access to local storage was denied. Check file permissions and try again.",
         "Se denegó el acceso al almacenamiento local. Revisa los permisos de los archivos y reinténtalo.",
+    ),
+    (
+        "Der lokale Kontozustand konnte nicht sicher bestätigt werden. Deine Anmeldung gilt noch nicht als gespeichert.",
+        "The local account state could not be safely confirmed. Your sign-in is not yet confirmed as saved.",
+        "No se pudo confirmar con seguridad el estado local de la cuenta. Aún no se ha confirmado que tu inicio de sesión esté guardado.",
     ),
     (
         "Der lokale Speicher ist beschädigt oder unsicher. Repariere ihn, bevor du die Anmeldung speicherst.",
@@ -61,14 +71,30 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El almacenamiento local no está disponible. Revisa su ubicación y reinténtalo.",
     ),
     (
+        "Die Abmeldung konnte noch nicht dauerhaft bestätigt werden. Der lokale Speicherstatus muss zuerst geklärt werden.",
+        "Sign-out could not yet be confirmed as persistent. The local storage state must be resolved first.",
+        "Aún no se pudo confirmar que el cierre de sesión sea permanente. Primero debe resolverse el estado del almacenamiento local.",
+    ),
+    (
         "Die Anmeldung konnte nicht sicher gespeichert werden. Bitte erneut versuchen oder die private Datei wählen.",
         "The sign-in could not be saved securely. Retry or choose the private file.",
         "No se pudo guardar el inicio de sesión de forma segura. Reintenta o elige el archivo privado.",
     ),
     (
+        "Dieses Konto ist bereits auf diesem Gerät eingetragen. Öffne die Konten und verbinde es dort erneut.",
+        "This account is already registered on this device. Open accounts and reconnect it there.",
+        "Esta cuenta ya está registrada en este dispositivo. Abre las cuentas y vuelve a conectarla allí.",
+    ),
+    (
         "Einrichtungsfortschritt wird gespeichert …",
         "Saving setup progress…",
         "Guardando el progreso de la configuración…",
+    ),
+    ("Konten öffnen", "Open accounts", "Abrir cuentas"),
+    (
+        "Konto bereits vorhanden.",
+        "Account already exists.",
+        "La cuenta ya existe.",
     ),
     (
         "Sicheres Speichern erneut versuchen",

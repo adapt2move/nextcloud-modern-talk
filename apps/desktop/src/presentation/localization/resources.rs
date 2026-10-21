@@ -399,6 +399,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El sistema ha rechazado la notificación.",
     ),
     (
+        "Das Entfernen dauert länger als erwartet. Es wurde noch nicht als abgeschlossen bestätigt. Warte kurz und versuche es erneut.",
+        "Removal is taking longer than expected and has not been confirmed complete. Wait briefly and try again.",
+        "La eliminación tarda más de lo esperado y todavía no se ha confirmado. Espera un momento e inténtalo de nuevo.",
+    ),
+    (
+        "Das Entfernen wurde unterbrochen. Bitte versuche es erneut.",
+        "Removal was interrupted. Please try again.",
+        "Se interrumpió la eliminación. Inténtalo de nuevo.",
+    ),
+    (
         "Das Ergebnis ist unklar. Bitte lade die Kontoeinstellungen neu, bevor du erneut änderst.",
         "The outcome is uncertain. Reload account settings before making another change.",
         "El resultado es incierto. Recarga los ajustes de la cuenta antes de volver a cambiarlos.",
@@ -560,6 +570,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El acceso al dispositivo se comprueba al abrirlo.",
     ),
     (
+        "Der Kontospeicher wird gerade verwendet. Warte kurz und versuche das Entfernen erneut.",
+        "Account storage is busy. Wait briefly and try removing the account again.",
+        "El almacenamiento de la cuenta está ocupado. Espera un momento y vuelve a eliminar la cuenta.",
+    ),
+    (
         "Der Link ist abgelaufen.",
         "The link has expired.",
         "El enlace ha caducado.",
@@ -568,6 +583,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Mikrofonpegel wird hier nach Freigabe automatisch gemessen. Kamera und Klingelton starten auf deinen Wunsch.",
         "The microphone meter starts here after access is allowed. Start the camera and ringtone when you want.",
         "El medidor del micrófono se inicia aquí al permitir el acceso. Inicia la cámara y el tono cuando quieras.",
+    ),
+    (
+        "Der Schlüsselspeicher des Betriebssystems ist nicht verfügbar. Stelle den Zugriff wieder her und versuche das Entfernen erneut.",
+        "The system credential store is unavailable. Restore access and try removing the account again.",
+        "El almacén de credenciales del sistema no está disponible. Restablece el acceso y vuelve a eliminar la cuenta.",
+    ),
+    (
+        "Der Schlüsselspeicher ist gesperrt. Entsperre ihn und versuche das Entfernen erneut.",
+        "The credential store is locked. Unlock it, then try removing the account again.",
+        "El almacén de credenciales está bloqueado. Desbloquéalo y vuelve a eliminar la cuenta.",
     ),
     (
         "Der Server erlaubt diese Änderung nicht.",
@@ -600,6 +625,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El texto es demasiado largo. Se conserva el borrador.",
     ),
     (
+        "Der Zugriff auf den Schlüsselspeicher wurde verweigert. Erlaube der App den Zugriff und versuche das Entfernen erneut.",
+        "Access to the credential store was denied. Allow the app access, then try removing the account again.",
+        "Se ha denegado el acceso al almacén de credenciales. Permite el acceso a la app y vuelve a eliminar la cuenta.",
+    ),
+    (
         "Der Zugriff auf den sicheren Schlüsselspeicher wurde abgelehnt.",
         "Access to the secure credential store was denied.",
         "Se ha denegado el acceso al almacén seguro.",
@@ -628,6 +658,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der laufende Anruf wird beendet.",
         "The current call will end.",
         "La llamada en curso finalizará.",
+    ),
+    (
+        "Der lokale Kontostatus konnte nicht gespeichert oder gelesen werden. Prüfe freien Speicher und Schreibrechte des App-Datenordners und versuche es erneut.",
+        "The local account state could not be saved or read. Check free disk space and write permissions on the app data folder, then try again.",
+        "No se pudo guardar o leer el estado local de la cuenta. Comprueba el espacio libre y los permisos de escritura de la carpeta de datos de la app e inténtalo de nuevo.",
+    ),
+    (
+        "Der macOS-Schlüsselbund ist gesperrt. Entsperre den Anmeldeschlüsselbund in der Schlüsselbundverwaltung und versuche das Entfernen erneut.",
+        "The macOS keychain is locked. Unlock your login keychain in Keychain Access, then try removing the account again.",
+        "El llavero de macOS está bloqueado. Desbloquea el llavero de inicio de sesión en Acceso a Llaveros y vuelve a eliminar la cuenta.",
     ),
     (
         "Der sichere Schlüsselspeicher ist auf diesem Gerät nicht verfügbar.",
@@ -690,6 +730,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La eliminación aún no está confirmada. Revisa el estado de las credenciales guardadas y vuelve a intentarlo.",
     ),
     (
+        "Die Freigabe für den Schlüsselspeicher wurde abgebrochen. Versuche das Entfernen erneut und bestätige die Systemabfrage.",
+        "Credential-store authorization was cancelled. Try removing the account again and confirm the system prompt.",
+        "Se canceló la autorización del almacén de credenciales. Vuelve a eliminar la cuenta y confirma la solicitud del sistema.",
+    ),
+    (
         "Die Freigabe kann hier noch nicht einzeln beendet werden. Du kannst den Anruf verlassen.",
         "Sharing cannot be stopped separately here yet. You can leave the call.",
         "Aún no se puede detener la pantalla compartida por separado. Puedes salir de la llamada.",
@@ -725,6 +770,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo verificar la identidad del servidor. Comprueba su dirección.",
     ),
     (
+        "Die Kontoverwaltung ist nicht verfügbar. Bitte starte die App neu und versuche das Entfernen erneut.",
+        "Account management is unavailable. Restart the app and try removing the account again.",
+        "La gestión de cuentas no está disponible. Reinicia la app y vuelve a eliminar la cuenta.",
+    ),
+    (
         "Die Mediensteuerung ist in diesem Client noch nicht verfügbar.",
         "Media controls are not available in this client yet.",
         "Los controles multimedia aún no están disponibles en este cliente.",
@@ -758,6 +808,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Verbindung ist noch nicht bereit.",
         "The connection is not ready yet.",
         "La conexión aún no está lista.",
+    ),
+    (
+        "Die Verbindung wurde getrennt, aber die Abmeldung konnte nicht dauerhaft gespeichert werden. Bitte versuche es erneut; nach einem Neustart könnte sich das Konto sonst wieder verbinden.",
+        "The connection was closed, but sign-out could not be saved permanently. Please try again; otherwise the account could reconnect after restarting.",
+        "Se cerró la conexión, pero no se pudo guardar el cierre de sesión de forma permanente. Inténtalo de nuevo; de lo contrario, la cuenta podría reconectarse al reiniciar.",
     ),
     (
         "Die Zugangseinstellungen sind noch nicht verfügbar.",
@@ -810,9 +865,29 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El almacenamiento recomendado por tu sistema operativo.",
     ),
     (
+        "Die gespeicherte Anmeldung konnte nicht sicher entfernt werden. Bitte versuche es erneut. Der Speicherfehler steht im lokalen Diagnoseprotokoll.",
+        "The saved sign-in could not be safely removed. Please try again. The storage error is in the local diagnostic log.",
+        "No se pudo eliminar de forma segura el inicio de sesión guardado. Inténtalo de nuevo. El error de almacenamiento está en el registro de diagnóstico local.",
+    ),
+    (
+        "Die gespeicherten Anmeldedaten wurden noch nicht vollständig entfernt.",
+        "The saved sign-in has not been fully removed yet.",
+        "Todavía no se ha eliminado por completo el inicio de sesión guardado.",
+    ),
+    (
         "Die gespeicherten Einstellungen konnten nicht gelesen werden. Die Standardwerte sind aktiv.",
         "Saved settings could not be read. Default settings are active.",
         "No se pudieron leer los ajustes guardados. Se usan los valores predeterminados.",
+    ),
+    (
+        "Die lokale Anmeldedatei konnte nicht sicher entfernt werden. Bitte versuche es erneut. Der Fehler steht im lokalen Diagnoseprotokoll.",
+        "The local sign-in file could not be safely removed. Please try again. Details are in the local diagnostic log.",
+        "No se pudo eliminar de forma segura el archivo local de inicio de sesión. Inténtalo de nuevo. El error está en el registro de diagnóstico local.",
+    ),
+    (
+        "Die lokale Anmeldedatei konnte wegen fehlender Schreibrechte nicht gelöscht werden. Prüfe die Zugriffsrechte des App-Datenordners und versuche es erneut.",
+        "The local sign-in file could not be deleted because write access was denied. Check permissions on the app data folder and try again.",
+        "No se pudo eliminar el archivo local de inicio de sesión por falta de permisos de escritura. Comprueba los permisos de la carpeta de datos de la app e inténtalo de nuevo.",
     ),
     (
         "Die lokale Gruppenablage ist voll. Entferne zuerst eine Gruppe oder Zuordnung.",
@@ -993,6 +1068,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Actualmente no está permitida otra llamada en esta conversación.",
     ),
     (
+        "Ein früherer Speichervorgang für diese Anmeldung ist noch nicht abgeschlossen. Das Konto bleibt abgemeldet. Warte kurz und versuche das Entfernen erneut.",
+        "An earlier save for this sign-in has not finished. The account remains signed out. Wait briefly and try removing it again.",
+        "Una operación de guardado anterior de este inicio de sesión no ha terminado. La cuenta sigue desconectada. Espera un momento y vuelve a eliminarla.",
+    ),
+    (
         "Ein gemeinsames Gespräch erstellen",
         "Create a group conversation",
         "Crear una conversación de grupo",
@@ -1126,6 +1206,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("FAVORITEN", "FAVORITES", "FAVORITAS"),
     ("Farbwelt", "Color palette", "Paleta de colores"),
     ("Favoriten", "Favorites", "Favoritas"),
+    ("Fenster minimieren", "Minimize window", "Minimizar ventana"),
+    ("Fenster schließen", "Close window", "Cerrar ventana"),
+    (
+        "Fenstergröße umschalten",
+        "Toggle window size",
+        "Cambiar tamaño de ventana",
+    ),
     (
         "Fiktive Verfügbarkeit. Keine Netzwerk- oder Dateiaktion.",
         "Fictional availability. No network or file action.",
@@ -1815,6 +1902,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Ruhig und klar.", "Calm and clear.", "Sereno y claro."),
     ("Rückgängig", "Undo", "Deshacer"),
     ("Salbei", "Sage", "Salvia"),
+    (
+        "Schließe den Dialog vor dem Neustart.",
+        "Close the dialog before restarting.",
+        "Cierra el diálogo antes de reiniciar.",
+    ),
     ("Schließen", "Close", "Cerrar"),
     (
         "Schneller Kontowechsel",
@@ -2330,6 +2422,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Zwischenablage für diesen Entwurf nicht freigegeben.",
         "Clipboard use is not permitted for this draft.",
         "No se permite usar el portapapeles con este borrador.",
+    ),
+    (
+        "macOS hat den Zugriff auf den Schlüsselbund verweigert. Erlaube dieser App den Zugriff auf ihre gespeicherte Anmeldung und versuche das Entfernen erneut.",
+        "macOS denied access to the keychain. Allow this app to access its saved sign-in, then try removing the account again.",
+        "macOS ha denegado el acceso al llavero. Permite que esta app acceda a su inicio de sesión guardado y vuelve a eliminar la cuenta.",
     ),
     ("{n} Antwort", "{n} reply", "{n} respuesta"),
     (

@@ -207,6 +207,7 @@ pub enum PreferenceEdit {
 impl Desktop {
     pub(super) fn can_install_update(&self) -> bool {
         !self.update_restart_pending
+            && self.prejoin.is_none()
             && matches!(
                 self.updates.state,
                 talk_core::preferences::updates::UpdateState::Ready(_)

@@ -13,6 +13,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use talk_core::identity::{StorageBackend, StorageFailure};
 use talk_core::ports::ErrorKind;
 
 mod private;
@@ -32,6 +33,13 @@ static LOGGER: OnceLock<Handle> = OnceLock::new();
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Operation {
     Application,
+    LoginBegin,
+    LoginPoll,
+    LoginSave,
+    AccountRemoval,
+    AccountRetire,
+    CredentialCleanup,
+    AccountForget,
     Connection,
     LiveConnection,
     History,
@@ -45,6 +53,13 @@ impl Operation {
     fn name(self) -> &'static str {
         match self {
             Self::Application => "application",
+            Self::LoginBegin => "login_begin",
+            Self::LoginPoll => "login_poll",
+            Self::LoginSave => "login_save",
+            Self::AccountRemoval => "account_removal",
+            Self::AccountRetire => "account_retire",
+            Self::CredentialCleanup => "credential_cleanup",
+            Self::AccountForget => "account_forget",
             Self::Connection => "connection",
             Self::LiveConnection => "live_connection",
             Self::History => "history",
@@ -105,6 +120,7 @@ pub(crate) struct Event {
     pub outcome: Outcome,
     pub count: u64,
     pub error: Option<ErrorKind>,
+    pub storage: Option<(StorageBackend, StorageFailure)>,
 }
 impl Event {
     pub(crate) fn new(operation: Operation, outcome: Outcome) -> Self {
@@ -114,6 +130,7 @@ impl Event {
             outcome,
             count: 0,
             error: None,
+            storage: None,
         }
     }
 }
@@ -324,10 +341,32 @@ fn encode(session: u128, record: Record) -> String {
         outcome,
         count,
         error,
+        storage,
     } = record.event;
     let error = error.map_or("none", error_name);
+    let detail = storage.map_or_else(String::new, |(backend, failure)| {
+        let backend = match backend {
+            StorageBackend::PrivateFile => "private_file",
+            StorageBackend::MacKeychain => "mac_keychain",
+            StorageBackend::WindowsCredential => "windows_credential",
+            StorageBackend::LinuxSecretService => "linux_secret_service",
+        };
+        let failure = match failure {
+            StorageFailure::Missing => "missing",
+            StorageFailure::Locked => "locked",
+            StorageFailure::AccessDenied => "access_denied",
+            StorageFailure::Corrupt => "corrupt",
+            StorageFailure::TemporarilyUnavailable => "temporarily_unavailable",
+            StorageFailure::Unavailable => "unavailable",
+            StorageFailure::Unsupported => "unsupported",
+            StorageFailure::Cancelled => "cancelled",
+            StorageFailure::Conflict => "conflict",
+            StorageFailure::Other => "other",
+        };
+        format!(",\"storage_backend\":\"{backend}\",\"storage_failure\":\"{failure}\"")
+    });
     format!(
-        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"}}\n",
+        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"{detail}}}\n",
         record.at,
         std::process::id(),
         env!("CARGO_PKG_VERSION"),

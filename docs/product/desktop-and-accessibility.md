@@ -48,6 +48,8 @@ Acceptance: VoiceOver and keyboard-only users can add an account, change convers
 
 ## DESK-006
 
+The application draws its own compact window title bar, including the verified Update action. macOS retains its native traffic lights; other supported client decorations provide minimize, maximize and close actions. Window movement, resizing and double-click behavior follow the platform. The update action is independent of the selected conversation and remains hidden during calls. Input carets cover the font's ascent and full descender at every text scale. Onboarding validation appears below a stable form anchor, with a dismiss action matching the message tone; it must not reposition the server field.
+
 **Readable visual and motion behavior (P1).** Support system light/dark appearance, increased contrast, reduced motion, and text scaling. Do not convey unread, muted, recording, permission-denied, or connection state by color alone. Keep critical controls visible at larger text sizes and small windows. Use contrast and target-size criteria from the quality plan, measured on actual native rendering.
 
 Acceptance: reduced motion removes nonessential animation without hiding progress. At 200% text size, core workflows remain available without text covering their controls. Selection/focus and disabled/error states stay distinguishable in both palettes. Animated images/reactions do not force autoplay when reduced motion or user preference disables it.

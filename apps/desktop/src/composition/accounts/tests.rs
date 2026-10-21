@@ -9,6 +9,8 @@ fn pending_login() -> (Accounts, RequestId, AccountId, LoginAttemptId) {
     model.login = Some(Login {
         request,
         begin: ConnectionRequestId(1),
+        server: ServerInput::new("https://cloud.example.test/nextcloud").unwrap(),
+        reservation: Some(account),
         owner: Some((account, attempt)),
         poll_at: Instant::now(),
         automatic_save_attempted: false,
@@ -60,6 +62,400 @@ fn authorized_login_schedules_one_native_save_before_showing_any_fallback() {
         }),
         Err(SubmitError::Busy)
     );
+}
+
+#[test]
+fn login_retry_keeps_the_bound_reservation_through_rejected_admission() {
+    let (mut model, _, account, _) = pending_login();
+    let server = model.login.as_ref().unwrap().server.clone();
+    model.login_failed(IdentityError::RecoveryRequired);
+    for request in [RequestId(18), RequestId(19)] {
+        // No worker is configured in this state fixture. Even an admission
+        // failure must preserve the retry target instead of reserving account B.
+        assert!(
+            model
+                .submit(UiIntent::BeginLogin {
+                    request,
+                    server: server.clone(),
+                })
+                .is_err()
+        );
+        let target = model.replace.as_ref().expect("same-account retry target");
+        assert_eq!(target.account, account);
+        assert_eq!(target.server.as_ref(), Some(&server));
+        assert_eq!(
+            target.save_choice,
+            talk_core::identity::StorageChoice::Native
+        );
+    }
+    model.submit(UiIntent::NewLogin).unwrap();
+    assert!(model.replace.is_none());
+    assert!(
+        model
+            .submit(UiIntent::BeginLogin {
+                request: RequestId(20),
+                server,
+            })
+            .is_err()
+    );
+    assert!(
+        model.replace.is_none(),
+        "NewLogin cannot inherit a retry account"
+    );
+}
+
+#[test]
+fn login_retry_never_reuses_another_installation_or_explicitly_cancelled_target() {
+    for server in [
+        "https://cloud.example.test/other-installation",
+        "https://cloud.example.test:8443/nextcloud",
+        "https://other.example.test/nextcloud",
+    ] {
+        for retained_after_rejection in [false, true] {
+            let (mut model, _, _, _) = pending_login();
+            if retained_after_rejection {
+                let previous = model.login.as_ref().unwrap().server.clone();
+                model.prepare_login(&previous);
+            }
+            assert!(
+                model
+                    .submit(UiIntent::BeginLogin {
+                        request: RequestId(18),
+                        server: ServerInput::new(server).unwrap(),
+                    })
+                    .is_err()
+            );
+            assert!(
+                model.replace.is_none(),
+                "a changed destination starts fresh"
+            );
+        }
+    }
+    let (mut model, request, _, _) = pending_login();
+    model.submit(UiIntent::CancelLogin(request)).unwrap();
+    assert!(model.login.is_none());
+    assert!(model.replace.is_none());
+}
+
+#[test]
+fn failed_browser_begin_retains_its_reserved_account_and_rejects_late_authorization() {
+    let (mut model, request, account, attempt) = pending_login();
+    let login = model.login.as_mut().unwrap();
+    login.owner = None;
+    login.reservation = None;
+    let server = login.server.clone();
+    model.snapshot.login.phase = LoginPhase::Validating;
+    let mut done = ConnectionCompletion {
+        cursor: ConnectionCursor::default(),
+        request: ConnectionRequestId(1),
+        account: Some(account),
+        attempt: None,
+        captured_scope: None,
+        cancel_requested: false,
+        scope_is_current: false,
+        result: Err(IdentityError::Request(ErrorKind::Transport)),
+    };
+    model.complete(Purpose::Login(request, LoginWork::Begin), &done);
+    assert_eq!(
+        model.snapshot.login.phase,
+        LoginPhase::Failed(LoginFailure::Network)
+    );
+    assert_eq!(model.login.as_ref().unwrap().reservation, Some(account));
+    model.prepare_login(&server);
+    assert_eq!(model.replace.as_ref().unwrap().account, account);
+    done.attempt = Some(attempt);
+    done.result = Ok(RuntimeReply::Authorized { account, attempt });
+    model.complete(Purpose::Login(request, LoginWork::Poll), &done);
+    assert!(model.login.is_none());
+    assert!(model.pending.is_empty());
+    assert_eq!(model.snapshot.login.phase, LoginPhase::EnterServer);
+}
+
+#[test]
+fn login_retry_preserves_a_deliberate_file_choice_without_inventing_one() {
+    let (mut model, _, _, _) = pending_login();
+    let server = model.login.as_ref().unwrap().server.clone();
+    model.login.as_mut().unwrap().automatic_save_choice =
+        talk_core::identity::StorageChoice::PrivateFile;
+    model.prepare_login(&server);
+    model.prepare_login(&server);
+    assert_eq!(
+        model.replace.as_ref().unwrap().save_choice,
+        talk_core::identity::StorageChoice::PrivateFile
+    );
+    model.submit(UiIntent::NewLogin).unwrap();
+    model.prepare_login(&server);
+    assert!(
+        model.replace.is_none(),
+        "a new login still defaults to native storage"
+    );
+}
+
+#[test]
+fn login_recovery_conflict_and_provider_failure_have_distinct_safe_states() {
+    for (work, error, phase, storage, failure) in [
+        (
+            LoginWork::Poll,
+            IdentityError::Request(ErrorKind::Conflict),
+            LoginPhase::Failed(LoginFailure::AccountExists),
+            StorageStatus::NotSaved,
+            None,
+        ),
+        (
+            LoginWork::Poll,
+            IdentityError::RecoveryRequired,
+            LoginPhase::Failed(LoginFailure::Storage),
+            StorageStatus::RecoveryRequired,
+            Some(StorageSaveFailure::RecoveryRequired),
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::SuppressionUnconfirmed,
+            LoginPhase::Failed(LoginFailure::Storage),
+            StorageStatus::RecoveryRequired,
+            Some(StorageSaveFailure::SuppressionUnconfirmed),
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::Request(ErrorKind::Uncertain),
+            LoginPhase::Failed(LoginFailure::Storage),
+            StorageStatus::RecoveryRequired,
+            Some(StorageSaveFailure::Uncertain),
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::Storage {
+                backend: StorageBackend::MacKeychain,
+                failure: StorageFailure::AccessDenied,
+            },
+            LoginPhase::ChooseStorage,
+            StorageStatus::NotSaved,
+            Some(StorageSaveFailure::NativeDenied),
+        ),
+    ] {
+        let (mut model, request, account, attempt) = pending_login();
+        if work == LoginWork::Save {
+            model.login.as_mut().unwrap().save_request = Some(ConnectionRequestId(9));
+            model.snapshot.login.storage = StorageStatus::Saving;
+            model.snapshot.login.phase = LoginPhase::ChooseStorage;
+        }
+        let done = ConnectionCompletion {
+            cursor: ConnectionCursor::default(),
+            request: ConnectionRequestId(9),
+            account: Some(account),
+            attempt: Some(attempt),
+            captured_scope: None,
+            cancel_requested: false,
+            scope_is_current: false,
+            result: Err(error),
+        };
+        model.complete(Purpose::Login(request, work), &done);
+        assert_eq!(model.snapshot.login.phase, phase);
+        assert_eq!(model.snapshot.login.storage, storage);
+        assert_eq!(model.snapshot.login.storage_failure, failure);
+        assert!(model.pending.is_empty(), "failure never submits a fallback");
+        if storage == StorageStatus::RecoveryRequired {
+            assert_eq!(
+                model.submit(UiIntent::ChooseStorage {
+                    attempt: request,
+                    choice: StorageChoice::PrivateFile,
+                }),
+                Err(SubmitError::Busy),
+                "unreconciled storage blocks a fallback"
+            );
+        }
+    }
+}
+
+#[test]
+fn login_diagnostics_distinguish_pre_save_conflict_provider_and_recovery_failures() {
+    let (_, _, account, attempt) = pending_login();
+    for (work, error, operation, outcome, code, native) in [
+        (
+            LoginWork::Poll,
+            IdentityError::Request(ErrorKind::Conflict),
+            "login_poll",
+            "failed",
+            "conflict",
+            false,
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::RecoveryRequired,
+            "login_save",
+            "failed",
+            "storage_unavailable",
+            false,
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::SuppressionUnconfirmed,
+            "login_save",
+            "uncertain",
+            "storage_unavailable",
+            false,
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::Request(ErrorKind::Uncertain),
+            "login_save",
+            "uncertain",
+            "uncertain",
+            false,
+        ),
+        (
+            LoginWork::Save,
+            IdentityError::Storage {
+                backend: StorageBackend::MacKeychain,
+                failure: StorageFailure::AccessDenied,
+            },
+            "login_save",
+            "failed",
+            "storage_unavailable",
+            true,
+        ),
+    ] {
+        let done = ConnectionCompletion {
+            cursor: ConnectionCursor::default(),
+            request: ConnectionRequestId(9),
+            account: Some(account),
+            attempt: Some(attempt),
+            captured_scope: None,
+            cancel_requested: false,
+            scope_is_current: false,
+            result: Err(error),
+        };
+        let line = diagnostics::test_line(login_completion_event(work, &done).unwrap());
+        assert!(line.contains("\"request\":9"));
+        assert!(line.contains(&format!("\"operation\":\"{operation}\"")));
+        assert!(line.contains(&format!("\"outcome\":\"{outcome}\"")));
+        assert!(line.contains(&format!("\"error\":\"{code}\"")));
+        if native {
+            assert!(line.contains("\"storage_backend\":\"mac_keychain\""));
+            assert!(line.contains("\"storage_failure\":\"access_denied\""));
+        }
+        assert_eq!(line.matches(':').count(), if native { 11 } else { 9 });
+        assert!(
+            !line.contains("account")
+                && !line.contains("attempt")
+                && !line.contains("http")
+                && !line.contains("password")
+        );
+    }
+}
+
+#[test]
+fn legacy_bound_accounts_without_credentials_offer_same_account_reauthentication() {
+    use talk_adapters::identity::{AccountPhase, ConnectionAccount, RecoverySelection};
+    use talk_core::identity::{ProviderBinding, QualifiedItem, Settlement};
+    use talk_core::ids::{ProfileId, VaultGeneration};
+    let account = AccountId::from_local(3);
+    let item = QualifiedItem {
+        account,
+        generation: VaultGeneration::from_local(7),
+        provider: ProviderBinding {
+            backend: StorageBackend::MacKeychain,
+            profile: ProfileId::from_local(11),
+            store: 13,
+        },
+    };
+    let summary = AccountSummary {
+        account,
+        navigation_key: talk_core::preferences::navigation::NavigationAccountKey::new(
+            "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+        )
+        .unwrap(),
+        server_label: Some(text("cloud.example.test")),
+        account_label: Some(text("Synthetic")),
+        attempt: None,
+        scope: None,
+        phase: AccountPhase::Disconnected,
+        display_name: text(""),
+        storage: StoredState::Suppressed,
+        cleanup_pending: false,
+        suppression_unconfirmed: false,
+        connection_degraded: false,
+        recovery: None,
+        revision: 1,
+    };
+    let mut settled_absent = summary.clone();
+    settled_absent.storage = StoredState::Unresolved;
+    settled_absent.recovery = Some(RecoverySelection {
+        attempted: item,
+        previous: None,
+        revision: 1,
+        settlement: Settlement::SettledAbsent,
+    });
+    let mut unknown_writer = settled_absent.clone();
+    unknown_writer.recovery.as_mut().unwrap().settlement = Settlement::Unknown;
+    unknown_writer.cleanup_pending = true;
+    let mut retained_previous = settled_absent.clone();
+    retained_previous.recovery.as_mut().unwrap().previous = Some(QualifiedItem {
+        generation: VaultGeneration::from_local(5),
+        ..item
+    });
+    let mut unconfirmed = settled_absent.clone();
+    unconfirmed.suppression_unconfirmed = true;
+    let mut cancelled_writer = summary.clone();
+    cancelled_writer.cleanup_pending = true;
+    let mut still_owned = settled_absent.clone();
+    still_owned.attempt = Some(LoginAttemptId::from_local(17));
+    for (summary, state, expected) in [
+        (
+            summary,
+            SavedAccountState::Dormant,
+            SavedAccountPhase::ReauthenticationRequired,
+        ),
+        (
+            settled_absent,
+            SavedAccountState::RecoveryRequired,
+            SavedAccountPhase::ReauthenticationRequired,
+        ),
+        (
+            unknown_writer,
+            SavedAccountState::RecoveryRequired,
+            SavedAccountPhase::RecoveryRequired,
+        ),
+        (
+            retained_previous,
+            SavedAccountState::RecoveryRequired,
+            SavedAccountPhase::RecoveryRequired,
+        ),
+        (
+            unconfirmed,
+            SavedAccountState::RecoveryRequired,
+            SavedAccountPhase::RecoveryRequired,
+        ),
+        (
+            cancelled_writer,
+            SavedAccountState::Dormant,
+            SavedAccountPhase::RecoveryRequired,
+        ),
+        (
+            still_owned,
+            SavedAccountState::RecoveryRequired,
+            SavedAccountPhase::RecoveryRequired,
+        ),
+    ] {
+        let mut model = model();
+        model.sync_accounts(&ConnectionSnapshot {
+            state: ConnectionState::Ready,
+            accounts: page([ConnectionAccount { summary, state }]),
+            pending: Page::empty(),
+            retained: 0,
+        });
+        let saved = &model.snapshot.saved_accounts.as_slice()[0];
+        assert_eq!(saved.id, account, "legacy identity remains visible");
+        assert_eq!(saved.phase, expected);
+        assert!(model.snapshot.accounts.as_slice().is_empty());
+        assert!(model.snapshot.active_account.is_none());
+        if expected == SavedAccountPhase::ReauthenticationRequired {
+            // This is the existing account chooser's typed reconnect action.
+            model.submit(UiIntent::Reauthenticate(account)).unwrap();
+            model.prepare_login(&ServerInput::new("https://cloud.example.test/nextcloud").unwrap());
+            assert_eq!(model.replace.as_ref().unwrap().account, account);
+        }
+    }
 }
 
 #[test]

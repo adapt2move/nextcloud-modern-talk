@@ -3,7 +3,8 @@ use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability};
 use gpui::{Context, Div, FocusHandle, FontWeight, Window, div, prelude::*, px};
 use talk_core::preferences::navigation::NavigationAccountKey;
 use talk_core::ui::presentation::{
-    AccountRemovalResult, Completion, PresentationSnapshot, RequestId, SavedAccountPhase, UiIntent,
+    AccountRemovalFailure, AccountRemovalResult, PresentationSnapshot, RequestId,
+    SavedAccountPhase, UiIntent,
 };
 use talk_core::ui::{AccountId, AccountScope};
 
@@ -53,19 +54,66 @@ impl AccountRemovalUi {
             return false;
         }
         if let Some((_, target)) = self.pending.take() {
-            self.failure = match result.result {
-                Completion::ServerAccepted => None,
-                Completion::Failed(_) => Some((
-                    target,
-                    "Das Konto konnte nicht vollständig aus dieser App entfernt werden. Bitte erneut versuchen oder den Speicherstatus prüfen.",
-                )),
-                Completion::Uncertain => Some((
-                    target,
-                    "Die Entfernung ist noch nicht bestätigt. Bitte prüfe den Speicherstatus und versuche es erneut.",
-                )),
-            };
+            self.failure = result
+                .result
+                .err()
+                .map(|failure| (target, removal_message(failure)));
         }
         true
+    }
+}
+
+fn removal_message(error: AccountRemovalFailure) -> &'static str {
+    match error {
+        AccountRemovalFailure::NativeLocked if cfg!(target_os = "macos") => {
+            "Der macOS-Schlüsselbund ist gesperrt. Entsperre den Anmeldeschlüsselbund in der Schlüsselbundverwaltung und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::NativeDenied if cfg!(target_os = "macos") => {
+            "macOS hat den Zugriff auf den Schlüsselbund verweigert. Erlaube dieser App den Zugriff auf ihre gespeicherte Anmeldung und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::LocalDenied => {
+            "Die lokale Anmeldedatei konnte wegen fehlender Schreibrechte nicht gelöscht werden. Prüfe die Zugriffsrechte des App-Datenordners und versuche es erneut."
+        }
+        AccountRemovalFailure::LocalFile => {
+            "Die lokale Anmeldedatei konnte nicht sicher entfernt werden. Bitte versuche es erneut. Der Fehler steht im lokalen Diagnoseprotokoll."
+        }
+        AccountRemovalFailure::NativeLocked => {
+            "Der Schlüsselspeicher ist gesperrt. Entsperre ihn und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::NativeDenied => {
+            "Der Zugriff auf den Schlüsselspeicher wurde verweigert. Erlaube der App den Zugriff und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::NativeCancelled => {
+            "Die Freigabe für den Schlüsselspeicher wurde abgebrochen. Versuche das Entfernen erneut und bestätige die Systemabfrage."
+        }
+        AccountRemovalFailure::NativeUnavailable => {
+            "Der Schlüsselspeicher des Betriebssystems ist nicht verfügbar. Stelle den Zugriff wieder her und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::NativeFailed => {
+            "Die gespeicherte Anmeldung konnte nicht sicher entfernt werden. Bitte versuche es erneut. Der Speicherfehler steht im lokalen Diagnoseprotokoll."
+        }
+        AccountRemovalFailure::LocalState => {
+            "Der lokale Kontostatus konnte nicht gespeichert oder gelesen werden. Prüfe freien Speicher und Schreibrechte des App-Datenordners und versuche es erneut."
+        }
+        AccountRemovalFailure::SuppressionUnconfirmed => {
+            "Die Verbindung wurde getrennt, aber die Abmeldung konnte nicht dauerhaft gespeichert werden. Bitte versuche es erneut; nach einem Neustart könnte sich das Konto sonst wieder verbinden."
+        }
+        AccountRemovalFailure::CleanupPending => {
+            "Ein früherer Speichervorgang für diese Anmeldung ist noch nicht abgeschlossen. Das Konto bleibt abgemeldet. Warte kurz und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::TimedOut => {
+            "Das Entfernen dauert länger als erwartet. Es wurde noch nicht als abgeschlossen bestätigt. Warte kurz und versuche es erneut."
+        }
+        AccountRemovalFailure::Busy => {
+            "Der Kontospeicher wird gerade verwendet. Warte kurz und versuche das Entfernen erneut."
+        }
+        AccountRemovalFailure::Cancelled => {
+            "Das Entfernen wurde unterbrochen. Bitte versuche es erneut."
+        }
+        AccountRemovalFailure::Changed => "Das Konto hat sich geändert. Bitte wähle es erneut aus.",
+        AccountRemovalFailure::Unavailable => {
+            "Die Kontoverwaltung ist nicht verfügbar. Bitte starte die App neu und versuche das Entfernen erneut."
+        }
     }
 }
 
@@ -270,11 +318,13 @@ impl Desktop {
                     self.commit_preferences(values, cx);
                 }
             }
-            Err(_) => {
-                self.account_removal.failure = Some((
-                    target,
-                    "Das Konto konnte nicht vollständig aus dieser App entfernt werden. Bitte erneut versuchen oder den Speicherstatus prüfen.",
-                ))
+            Err(error) => {
+                let error = match error {
+                    talk_core::ui::SubmitError::Busy => AccountRemovalFailure::Busy,
+                    talk_core::ui::SubmitError::StaleScope => AccountRemovalFailure::Changed,
+                    _ => AccountRemovalFailure::Unavailable,
+                };
+                self.account_removal.failure = Some((target, removal_message(error)));
             }
         }
     }
@@ -347,7 +397,7 @@ impl Desktop {
                 .w(px(440.)).max_w_full().rounded_xl().bg(self.theme.surface)
                 .border_1().border_color(self.theme.border).shadow_xl()
                 .child(self.scroll_area(super::navigation::Region::Overlay)
-                .max_h(window.viewport_size().height - px(48.)).p_5()
+                .max_h(window.viewport_size().height - px(super::window_chrome::HEIGHT + 48.)).p_5()
                 .child(div().flex().flex_col().gap_4()
                 .child(div().text_size(self.sp(18.)).font_weight(FontWeight::MEDIUM)
                     .child(self.l("Konto aus dieser App entfernen?")))
@@ -489,5 +539,30 @@ mod tests {
             Some(SavedAccountPhase::Restoring)
         ));
         assert!(!target_matches(account.account, None, None, None));
+    }
+    #[test]
+    fn removal_feedback_distinguishes_keychain_denial_waiting_and_restart_risk() {
+        let locked = removal_message(AccountRemovalFailure::NativeLocked);
+        let denied = removal_message(AccountRemovalFailure::NativeDenied);
+        let timeout = removal_message(AccountRemovalFailure::TimedOut);
+        let pending = removal_message(AccountRemovalFailure::CleanupPending);
+        let suppression = removal_message(AccountRemovalFailure::SuppressionUnconfirmed);
+        assert!(locked.contains("entsperre") || locked.contains("Entsperre"));
+        assert!(denied.contains("verweigert") && denied.contains("Erlaube"));
+        assert!(timeout.contains("länger") && !timeout.contains("abgemeldet"));
+        assert!(pending.contains("Speichervorgang") && pending.contains("abgemeldet"));
+        assert!(suppression.contains("Neustart") && suppression.contains("wieder verbinden"));
+        for key in [locked, denied, timeout, pending, suppression] {
+            for locale in [
+                talk_core::preferences::Locale::English,
+                talk_core::preferences::Locale::Spanish,
+            ] {
+                assert_ne!(
+                    crate::presentation::localization::text(locale, key),
+                    key,
+                    "all removal guidance needs en/de/es"
+                );
+            }
+        }
     }
 }

@@ -506,12 +506,17 @@ impl Desktop {
     }
 
     fn control_theme(&self, id: &ElementId) -> super::Theme {
+        if matches!(id, ElementId::Name(name) if name.as_ref() == "dismiss-feedback")
+            && let Some(feedback) = self.feedback
+        {
+            return feedback.dismiss_theme(self.theme);
+        }
         // Header controls use the same opaque Windows fallback as their host.
         // Keep this on the shared control path so icon, disabled and focus
         // colors resolve together instead of inheriting dark-theme foregrounds.
         if matches!(id, ElementId::Name(name) if matches!(name.as_ref(),
             "conversation-title" | "favorite-conversation" | "history-search"
-            | "call" | "room-info" | "room-members" | "install-update"))
+            | "call" | "room-info" | "room-members"))
         {
             self.theme.chat_header_theme(self.palette)
         } else {

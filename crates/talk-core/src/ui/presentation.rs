@@ -99,6 +99,7 @@ pub enum LoginFailure {
     Tls,
     Denied,
     Storage,
+    AccountExists,
     Unconfigured,
 }
 
@@ -125,6 +126,9 @@ pub enum StorageSaveFailure {
     LocalDenied,
     LocalCorrupt,
     LocalUnavailable,
+    RecoveryRequired,
+    SuppressionUnconfirmed,
+    Uncertain,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -440,10 +444,30 @@ pub struct ConversationMutationResult {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountRemovalFailure {
+    NativeLocked,
+    NativeDenied,
+    NativeUnavailable,
+    NativeCancelled,
+    NativeFailed,
+    LocalDenied,
+    LocalFile,
+    LocalState,
+    SuppressionUnconfirmed,
+    CleanupPending,
+    TimedOut,
+    Busy,
+    Cancelled,
+    Changed,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AccountRemovalResult {
     pub request: RequestId,
     pub account: AccountId,
-    pub result: Completion,
+    /// Local removal, never a claim that a server token was revoked.
+    pub result: Result<(), AccountRemovalFailure>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -329,6 +329,7 @@ impl Accounts {
                 outcome,
                 error,
                 count: 0,
+                storage: None,
             });
         }
         account.live = live;

@@ -39,8 +39,8 @@ use talk_core::ui::presentation::{
     ConversationKind, ConversationListState, ConversationMutationResult, ConversationOrganization,
     ConversationRef, ConversationView, FeatureSupport, LoginFailure, LoginPhase, NativeDesktopPort,
     NativeStoreState, OrganizationResult, Presence, PresentationSnapshot, RequestId,
-    SavedAccountPhase, SavedAccountView, StorageChoice, StorageSaveFailure, StorageStatus,
-    SubmissionResult, TagEdit, TagKind, TagRef, TagView, UiIntent,
+    SavedAccountPhase, SavedAccountView, ServerInput, StorageChoice, StorageSaveFailure,
+    StorageStatus, SubmissionResult, TagEdit, TagKind, TagRef, TagView, UiIntent,
 };
 use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIntent};
 
@@ -79,12 +79,22 @@ enum LoginWork {
 struct Login {
     request: RequestId,
     begin: ConnectionRequestId,
+    server: ServerInput,
+    reservation: Option<AccountId>,
     owner: Option<(AccountId, LoginAttemptId)>,
     poll_at: Instant,
     automatic_save_attempted: bool,
     automatic_save_pending: Option<Instant>,
     automatic_save_choice: talk_core::identity::StorageChoice,
     save_request: Option<ConnectionRequestId>,
+}
+struct Replacement {
+    account: AccountId,
+    // None only for an explicit Reauthenticate intent before its first Begin.
+    // Retain the full input, not the origin-only display label: installations
+    // under different paths on one host must never reuse a retry reservation.
+    server: Option<ServerInput>,
+    save_choice: talk_core::identity::StorageChoice,
 }
 #[derive(Clone, Copy)]
 struct Unresolved {
@@ -107,7 +117,7 @@ pub struct Accounts {
     pending: Vec<Pending>,
     login: Option<Login>,
     removal: Option<removal::Removal>,
-    replace: Option<AccountId>,
+    replace: Option<Replacement>,
     snapshot: PresentationSnapshot,
     dirty: bool,
     load_rooms: Option<AccountScope>,
@@ -223,6 +233,7 @@ impl Accounts {
                 outcome,
                 error,
                 count: 0,
+                storage: result.err().and_then(diagnostic_storage),
             });
         }
         result
@@ -305,6 +316,7 @@ impl Accounts {
             outcome,
             error,
             count: self.snapshot.accounts.as_slice().len() as u64,
+            storage: None,
         });
     }
     fn sync_accounts(&mut self, state: &ConnectionSnapshot) {
@@ -323,6 +335,23 @@ impl Accounts {
                 label: a.summary.account_label.clone(),
                 server_label: a.summary.server_label.clone(),
                 phase: match a.state {
+                    SavedAccountState::Dormant
+                        if !matches!(a.summary.storage, StoredState::Eligible(_)) =>
+                    {
+                        if a.summary.attempt.is_none()
+                            && a.summary.scope.is_none()
+                            && !a.summary.cleanup_pending
+                            && !a.summary.suppression_unconfirmed
+                            && matches!(
+                                a.summary.storage,
+                                StoredState::Suppressed | StoredState::SessionOnly
+                            )
+                        {
+                            SavedAccountPhase::ReauthenticationRequired
+                        } else {
+                            SavedAccountPhase::RecoveryRequired
+                        }
+                    }
                     SavedAccountState::Dormant => SavedAccountPhase::Dormant,
                     SavedAccountState::Restoring => SavedAccountPhase::Restoring,
                     SavedAccountState::WaitingForBrowser => SavedAccountPhase::WaitingForBrowser,
@@ -331,6 +360,21 @@ impl Accounts {
                     }
                     SavedAccountState::Active => SavedAccountPhase::Active,
                     SavedAccountState::ReauthenticationRequired => {
+                        SavedAccountPhase::ReauthenticationRequired
+                    }
+                    SavedAccountState::RecoveryRequired
+                        if a.summary.attempt.is_none()
+                            && a.summary.scope.is_none()
+                            && !a.summary.suppression_unconfirmed
+                            && a.summary.recovery.is_some_and(|recovery| {
+                                recovery.previous.is_none()
+                                    && recovery.settlement
+                                        == talk_core::identity::Settlement::SettledAbsent
+                            }) =>
+                    {
+                        // A legacy failed first save has no credential to Restore.
+                        // Explicit reauthorization still uses this exact account;
+                        // the runtime must qualify the new grant and durable save.
                         SavedAccountPhase::ReauthenticationRequired
                     }
                     SavedAccountState::RecoveryRequired => SavedAccountPhase::RecoveryRequired,
@@ -361,7 +405,6 @@ impl Accounts {
             self.select(None);
         }
         self.sync_background();
-        self.tick_removal(state);
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
@@ -420,6 +463,7 @@ impl Accounts {
                 }
             }
         }
+        self.tick_removal();
         self.tick_content();
         self.tick_background();
         self.tick_calls();
@@ -471,8 +515,17 @@ impl Accounts {
                 self.snapshot.login.phase = LoginPhase::ChooseStorage;
                 self.snapshot.login.storage = StorageStatus::NotSaved;
             }
-            IdentityError::RecoveryRequired | IdentityError::SuppressionUnconfirmed => {
+            IdentityError::RecoveryRequired
+            | IdentityError::SuppressionUnconfirmed
+            | IdentityError::Request(ErrorKind::Uncertain) => {
                 self.snapshot.login.storage = StorageStatus::RecoveryRequired;
+                self.snapshot.login.storage_failure = Some(match error {
+                    IdentityError::RecoveryRequired => StorageSaveFailure::RecoveryRequired,
+                    IdentityError::SuppressionUnconfirmed => {
+                        StorageSaveFailure::SuppressionUnconfirmed
+                    }
+                    _ => StorageSaveFailure::Uncertain,
+                });
                 self.snapshot.login.phase = LoginPhase::Failed(LoginFailure::Storage);
             }
             _ => self.snapshot.login.phase = LoginPhase::Failed(login_error(error)),
@@ -500,6 +553,8 @@ impl Accounts {
         )?;
         if let Some(login) = &mut self.login {
             login.save_request = Some(id);
+            // Only an admitted explicit choice changes a retry's destination.
+            login.automatic_save_choice = choice;
         }
         self.snapshot.login.phase = LoginPhase::ChooseStorage;
         self.snapshot.login.storage = StorageStatus::Saving;
@@ -538,10 +593,21 @@ impl Accounts {
                 };
                 if !current_work || done.cancel_requested
                     || (done.captured_scope.is_some() && !done.scope_is_current)
+                    || login.reservation.is_some_and(|account| done.account != Some(account))
                     || login.owner.is_some_and(|(account, attempt)| {
                         done.account != Some(account) || done.attempt != Some(attempt)
                     })
                 { return; }
+                if work == LoginWork::Begin
+                    && let Some(login) = &mut self.login
+                {
+                    // A failed browser handoff can still have reserved an account.
+                    // Keep its correlation so Retry does not consume another slot.
+                    login.reservation = done.account;
+                }
+                if let Some(event) = login_completion_event(work, done) {
+                    diagnostics::record(event);
+                }
                 match result {
                     Ok(RuntimeReply::Begun { account, attempt } | RuntimeReply::Pending { account, attempt }) => {
                         if self.login.as_ref().is_some_and(|l| l.automatic_save_attempted) { return; }
@@ -571,6 +637,13 @@ impl Accounts {
                         if let Some(scope) = summary.scope { self.select(Some(scope)); }
                     }
                     Ok(RuntimeReply::BrowserOpened { .. }) => (),
+                    Err(IdentityError::Request(ErrorKind::Conflict)) if work == LoginWork::Poll => {
+                        // Only a validated Poll can identify a duplicate canonical
+                        // account. A conflict in another stage is not this diagnosis.
+                        self.snapshot.login.phase = LoginPhase::Failed(LoginFailure::AccountExists);
+                        self.snapshot.login.storage = StorageStatus::NotSaved;
+                        self.snapshot.login.storage_failure = None;
+                    }
                     Err(error) => self.login_failed(error),
                     _ => self.login_failed(IdentityError::Request(ErrorKind::Malformed)),
                 }
@@ -622,7 +695,7 @@ impl Accounts {
                     Err(error) => completion_error(error),
                     _ => Completion::Uncertain,
                 };
-                diagnostics::record(Diagnostic { request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error });
+                diagnostics::record(Diagnostic { request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error, storage: None });
                 if completion != Completion::Uncertain { self.unresolved.retain(|u| u.operation != operation); }
                 self.snapshot.submission = Some(SubmissionResult { request, context, result: completion });
             }
@@ -721,6 +794,30 @@ impl Accounts {
         }
         self.snapshot.login = super::fixtures::snapshot(None).login;
         self.touch();
+    }
+    fn prepare_login(&mut self, server: &ServerInput) {
+        let target = if let Some(login) = &self.login {
+            (login.server == *server)
+                .then_some(login.reservation)
+                .flatten()
+                .map(|account| (account, login.automatic_save_choice))
+        } else {
+            self.replace.as_ref().and_then(|replacement| {
+                replacement
+                    .server
+                    .as_ref()
+                    .is_none_or(|previous| previous == server)
+                    .then_some((replacement.account, replacement.save_choice))
+            })
+        };
+        self.cancel_login();
+        // Retain the target even if Begin admission is busy or unavailable. A
+        // retry must not allocate B after Poll has already bound the user to A.
+        self.replace = target.map(|(account, save_choice)| Replacement {
+            account,
+            server: Some(server.clone()),
+            save_choice,
+        });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
         self.current(context.account)?;
@@ -902,20 +999,29 @@ impl Accounts {
                     return Err(SubmitError::StaleScope);
                 }
                 self.cancel_login();
-                self.replace = Some(account);
+                self.replace = Some(Replacement {
+                    account,
+                    server: None,
+                    save_choice: if self.snapshot.saved_accounts.as_slice().iter().any(|saved| {
+                        saved.id == account && saved.storage == StorageStatus::PrivateFileStored
+                    }) {
+                        talk_core::identity::StorageChoice::PrivateFile
+                    } else {
+                        talk_core::identity::StorageChoice::Native
+                    },
+                });
             }
             UiIntent::BeginLogin { request, server } => {
-                if self.login.is_some() {
-                    self.cancel_login();
-                }
                 let selected_origin =
                     talk_adapters::identity::selected_server_origin(server.as_str())
                         .map_err(submit_error)?;
+                self.prepare_login(&server);
+                let replacement = self.replace.as_ref().map(|target| target.account);
                 let id = self
                     .admit(
                         RuntimeCommand::Begin {
                             server: text(server.as_str()),
-                            replace: self.replace,
+                            replace: replacement,
                         },
                         Purpose::Login(request, LoginWork::Begin),
                     )
@@ -923,6 +1029,8 @@ impl Accounts {
                 self.login = Some(Login {
                     request,
                     begin: id,
+                    server,
+                    reservation: replacement,
                     owner: None,
                     poll_at: Instant::now(),
                     automatic_save_attempted: false,
@@ -930,15 +1038,12 @@ impl Accounts {
                     save_request: None,
                     // Reauthorization preserves a deliberately committed file choice.
                     // Native-store recovery alone must not silently migrate it.
-                    automatic_save_choice: if self.replace.is_some_and(|account| {
-                        self.snapshot.saved_accounts.as_slice().iter().any(|saved| {
-                            saved.id == account && saved.storage == StorageStatus::PrivateFileStored
-                        })
-                    }) {
-                        talk_core::identity::StorageChoice::PrivateFile
-                    } else {
-                        talk_core::identity::StorageChoice::Native
-                    },
+                    automatic_save_choice: self
+                        .replace
+                        .as_ref()
+                        .map_or(talk_core::identity::StorageChoice::Native, |target| {
+                            target.save_choice
+                        }),
                 });
                 self.snapshot.login.phase = LoginPhase::Validating;
                 self.snapshot.login.attempt = Some(request);
@@ -948,6 +1053,7 @@ impl Accounts {
             UiIntent::CancelLogin(request) => {
                 if self.login.as_ref().is_some_and(|l| l.request == request) {
                     self.cancel_login();
+                    self.replace = None;
                 } else {
                     return Err(SubmitError::StaleScope);
                 }
@@ -1292,11 +1398,71 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
 impl Purpose {
     fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
         match self {
+            Self::Login(_, work) => work.diagnostic_operation(),
             Self::Message(_, _, _, work) => work.diagnostic_operation(),
             Self::Send(..) => Some(DiagnosticOperation::Send),
             _ => None,
         }
     }
+}
+impl LoginWork {
+    fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
+        match self {
+            Self::Begin => Some(DiagnosticOperation::LoginBegin),
+            Self::Poll => Some(DiagnosticOperation::LoginPoll),
+            Self::Save => Some(DiagnosticOperation::LoginSave),
+            Self::Browser => None,
+        }
+    }
+}
+fn diagnostic_storage(error: IdentityError) -> Option<(StorageBackend, StorageFailure)> {
+    match error {
+        IdentityError::Storage { backend, failure } => Some((backend, failure)),
+        _ => None,
+    }
+}
+fn login_completion_event(work: LoginWork, done: &ConnectionCompletion) -> Option<Diagnostic> {
+    let operation = work.diagnostic_operation()?;
+    let (outcome, error) = match &done.result {
+        Err(IdentityError::SuppressionUnconfirmed) => (
+            DiagnosticOutcome::Uncertain,
+            Some(ErrorKind::StorageUnavailable),
+        ),
+        Err(IdentityError::Request(ErrorKind::Uncertain)) => {
+            (DiagnosticOutcome::Uncertain, Some(ErrorKind::Uncertain))
+        }
+        Err(error) => (DiagnosticOutcome::Failed, Some(diagnostic_error(*error))),
+        Ok(RuntimeReply::Pending { .. }) if work == LoginWork::Poll => {
+            (DiagnosticOutcome::Loading, None)
+        }
+        Ok(RuntimeReply::Begun { .. }) if work == LoginWork::Begin => {
+            (DiagnosticOutcome::Accepted, None)
+        }
+        Ok(RuntimeReply::Authorized { .. }) if work == LoginWork::Poll => {
+            (DiagnosticOutcome::Accepted, None)
+        }
+        Ok(RuntimeReply::Active { .. }) if work == LoginWork::Save => {
+            if done.scope_is_current {
+                (DiagnosticOutcome::Accepted, None)
+            } else {
+                (DiagnosticOutcome::Ignored, Some(ErrorKind::WrongScope))
+            }
+        }
+        _ => (DiagnosticOutcome::Failed, Some(ErrorKind::Malformed)),
+    };
+    Some(Diagnostic {
+        request: done.request.0,
+        operation,
+        outcome,
+        error,
+        count: 0,
+        storage: done
+            .result
+            .as_ref()
+            .err()
+            .copied()
+            .and_then(diagnostic_storage),
+    })
 }
 fn diagnostic_error(error: IdentityError) -> ErrorKind {
     match error {

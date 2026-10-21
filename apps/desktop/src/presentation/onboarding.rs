@@ -3,10 +3,11 @@ mod state;
 pub(super) use state::OnboardingUi;
 
 use super::controls::{Availability, icon};
-use super::{ButtonStyle, Desktop, LocalAction};
+use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::presentation::{
-    LoginFailure, LoginPhase, NativeStoreState, StorageChoice, StorageStatus, UiIntent,
+    LoginFailure, LoginPhase, NativeStoreState, StorageChoice, StorageSaveFailure, StorageStatus,
+    UiIntent,
 };
 
 impl Desktop {
@@ -14,8 +15,10 @@ impl Desktop {
         let t = self.theme;
         let login = &self.snapshot.login;
         let narrow = window.viewport_size().width < px(960.) || self.scale >= 150;
-        let sheet_height =
-            f32::from(window.viewport_size().height) - 26. - 24. - if narrow { 69. } else { 0. };
+        let sheet_height = f32::from(window.viewport_size().height)
+            - super::window_chrome::HEIGHT
+            - 24.
+            - if narrow { 69. } else { 0. };
         let phase = if self.onboarding_ui.resumed {
             LoginPhase::Ready
         } else {
@@ -81,7 +84,11 @@ impl Desktop {
                                     .relative()
                                     .child(self.field_ring(self.server.focus_handle(cx), 8.))
                                     .child(self.scaled_icon("globe", 18., t.muted))
-                                    .child(div().flex_1().min_w_0().child(self.server.clone())),
+                                    // The input is a flex child; retain its allocated
+                                    // width when focus/validation rebuilds the form.
+                                    .child(
+                                        div().flex().flex_1().min_w_0().child(self.server.clone()),
+                                    ),
                             )
                             .child(self.hint(self.l(if login.phase == LoginPhase::Validating {
                                 "Die Serveradresse wird geprüft. Bitte warte."
@@ -317,7 +324,18 @@ impl Desktop {
                     ),
                     LoginFailure::Storage => (
                         "Speicherung nicht bestätigt.",
-                        "Deine Anmeldung wurde nicht als gespeichert bestätigt. Bitte versuche es erneut.",
+                        storage_failure_key(
+                            Some(
+                                login
+                                    .storage_failure
+                                    .unwrap_or(StorageSaveFailure::RecoveryRequired),
+                            ),
+                            login.native_store,
+                        ),
+                    ),
+                    LoginFailure::AccountExists => (
+                        "Konto bereits vorhanden.",
+                        "Dieses Konto ist bereits auf diesem Gerät eingetragen. Öffne die Konten und verbinde es dort erneut.",
                     ),
                     LoginFailure::Network => (
                         "Server nicht erreichbar.",
@@ -339,8 +357,21 @@ impl Desktop {
                     ))
                     .child(self.title(self.l(title)))
                     .child(self.hint(self.l(detail)))
-                    .child(self.server_chip(login.server_label.as_str()))
-                    .child(
+                    .child(self.server_chip(login.server_label.as_str()));
+                if reason == LoginFailure::AccountExists {
+                    card = card.child(
+                        self.button_with_icon(
+                            "login-open-accounts",
+                            ("Konten öffnen", "user"),
+                            ButtonStyle::Primary,
+                            true,
+                            LocalAction::Open(Overlay::Accounts),
+                            cx,
+                        )
+                        .min_h(px(46.)),
+                    );
+                } else {
+                    card = card.child(
                         self.button_with_icon(
                             "retry-login",
                             ("Erneut anmelden", "refresh"),
@@ -351,6 +382,17 @@ impl Desktop {
                         )
                         .min_h(px(46.)),
                     );
+                }
+                if reason == LoginFailure::Storage {
+                    card = card.child(self.button(
+                        "login-storage-accounts",
+                        "Konten öffnen",
+                        ButtonStyle::Secondary,
+                        true,
+                        LocalAction::Open(Overlay::Accounts),
+                        cx,
+                    ));
+                }
                 if let Some(attempt) = login.attempt {
                     card = card.child(self.button(
                         "change-server",
@@ -540,11 +582,15 @@ was ihr miteinander besprecht.")),
                                     .min_h(px(sheet_height))
                                     .w_full()
                                     .px_8()
-                                    .py_8()
+                                    // Anchor the form to the viewport, not its
+                                    // content height: validation must not move
+                                    // the server field or the submit button.
+                                    .pt(px((sheet_height * 0.14).clamp(32., 80.)))
+                                    .pb_8()
                                     .flex()
                                     .flex_col()
                                     .items_center()
-                                    .justify_center()
+                                    .justify_start()
                                     .child(card),
                             ),
                     ),
@@ -647,6 +693,15 @@ fn storage_failure_key(
         }
         Some(StorageSaveFailure::Conflict) => {
             "Der Speicherzustand hat sich geändert. Bitte erneut versuchen."
+        }
+        Some(StorageSaveFailure::RecoveryRequired) => {
+            "Der lokale Kontozustand konnte nicht sicher bestätigt werden. Deine Anmeldung gilt noch nicht als gespeichert."
+        }
+        Some(StorageSaveFailure::SuppressionUnconfirmed) => {
+            "Die Abmeldung konnte noch nicht dauerhaft bestätigt werden. Der lokale Speicherstatus muss zuerst geklärt werden."
+        }
+        Some(StorageSaveFailure::Uncertain) => {
+            "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Bitte warte kurz und versuche es erneut."
         }
         Some(StorageSaveFailure::Failed) => {
             "Die Anmeldung konnte nicht sicher gespeichert werden. Bitte erneut versuchen oder die private Datei wählen."

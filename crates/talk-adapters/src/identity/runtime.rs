@@ -1466,7 +1466,21 @@ impl Worker {
                             }
                         };
                         self.attempt_admitted(*attempt, cancel)?;
-                        lock(&self.ledger)?.bind_user(self.account, &grant.user)?;
+                        {
+                            let mut ledger = lock(&self.ledger)?;
+                            // A fresh login can authorize an identity already bound to
+                            // another local account. Detect that before SQLite's unique
+                            // constraint turns it into a misleading storage-recovery
+                            // failure. Do not move the grant or alter the existing account.
+                            if ledger.accounts()?.iter().any(|account| {
+                                account.id != self.account
+                                    && account.origin == grant.origin.text
+                                    && account.user == grant.user.as_str()
+                            }) {
+                                return Err(ErrorKind::Conflict.into());
+                            }
+                            ledger.bind_user(self.account, &grant.user)?;
+                        }
                         lock(&self.ledger)?.set_account_label(self.account, &probe.display_name)?;
                         self.flow = None;
                         self.grant = Some((*attempt, grant));

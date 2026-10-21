@@ -343,16 +343,6 @@ impl Desktop {
                         .child(self.l("Vertraulich")),
                 )
             })
-            .when(self.can_install_update(), |d| {
-                d.child(self.button(
-                    "install-update",
-                    "Update",
-                    ButtonStyle::Primary,
-                    true,
-                    LocalAction::InstallUpdate(self.updates.generation),
-                    cx,
-                ))
-            })
             .when(
                 !matches!(
                     row.kind,

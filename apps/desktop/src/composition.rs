@@ -262,7 +262,12 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             // A minimized native window remains recoverable from the taskbar.
             show:true,focus:!hidden,
             window_min_size:Some(size(px(720.),px(580.))),
-            titlebar:Some(TitlebarOptions{title:Some(if development{"Talk — FICTITIOUS DATA · UI development"}else{"Talk"}.into()),appears_transparent:false,..Default::default()}),
+            titlebar:Some(TitlebarOptions{
+                title:Some(if development{"Talk — FICTITIOUS DATA · UI development"}else{"Talk"}.into()),
+                appears_transparent:true,
+                traffic_light_position:Some(gpui::point(px(12.),px(8.))),
+            }),
+            window_decorations:Some(gpui::WindowDecorations::Client),
             ..Default::default()
         },move|window,cx|{
         if options.font_metrics {

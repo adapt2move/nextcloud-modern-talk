@@ -147,7 +147,8 @@ impl Desktop {
     fn dialog_size(window: &Window) -> (f32, f32) {
         (
             (f32::from(window.viewport_size().width) - 48.).min(DIALOG_WIDTH),
-            (f32::from(window.viewport_size().height) - 74.).min(DIALOG_HEIGHT),
+            (f32::from(window.viewport_size().height) - super::window_chrome::HEIGHT - 74.)
+                .min(DIALOG_HEIGHT),
         )
     }
     pub(super) fn dialog_frame(
@@ -701,7 +702,7 @@ impl Desktop {
                         .when_some(saved.server_label.as_ref(), |d, label| d.child(self.hint(label.as_str())))
                         .child(self.hint(self.l(status)))
                         .when(saved.failure.is_some(), |d| d.child(self.hint(self.l("Das Konto konnte nicht verbunden werden. Bitte erneut versuchen."))))
-                        .when(saved.cleanup_pending, |d| d.child(self.hint(self.l("Aufräumen des Schlüsselspeichers noch ausstehend."))))
+                        .when(saved.cleanup_pending, |d| d.child(self.hint(self.l("Die gespeicherten Anmeldedaten wurden noch nicht vollständig entfernt."))))
                         .when(saved.suppression_unconfirmed, |d| d.child(self.hint(self.l("Der gespeicherte Anmeldestatus muss wiederhergestellt werden.")))))
                     .child(self.button(gpui::SharedString::from(format!("restore-account-{}", saved.id.as_local())), "Verbinden", ButtonStyle::Secondary,
                         Availability::when(matches!(saved.phase, SavedAccountPhase::Dormant | SavedAccountPhase::ReauthenticationRequired),

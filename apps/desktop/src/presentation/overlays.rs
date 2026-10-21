@@ -86,14 +86,16 @@ impl Desktop {
                     .min_h_0()
                     .when(side, |d| d.h_full())
                     .when(overlay == Overlay::Create, |d| {
-                        d.h(px(
-                            (f32::from(window.viewport_size().height) - 66.).min(632.)
-                        ))
+                        d.h(px((f32::from(window.viewport_size().height)
+                            - super::window_chrome::HEIGHT
+                            - 66.)
+                            .min(632.)))
                     })
                     .when(!side, |d| {
-                        d.max_h(px(
-                            (f32::from(window.viewport_size().height) - 66.).min(632.)
-                        ))
+                        d.max_h(px((f32::from(window.viewport_size().height)
+                            - super::window_chrome::HEIGHT
+                            - 66.)
+                            .min(632.)))
                     })
                     .flex()
                     .flex_col()

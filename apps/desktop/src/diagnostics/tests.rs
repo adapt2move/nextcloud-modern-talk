@@ -26,6 +26,7 @@ fn row(request: u64, outcome: Outcome) -> Event {
         outcome,
         count: 0,
         error: None,
+        storage: None,
     }
 }
 fn output(root: &Temp) -> String {

@@ -235,6 +235,13 @@
       "transformation": "none"
     },
     {
+      "asset": "minus.svg",
+      "upstream_path": "icons/minus.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/minus.svg",
+      "sha256": "a0c743ab6dbf545d8a6e19ef3874f48ede686ce68d25e231bd81f540d97b1f19",
+      "transformation": "none"
+    },
+    {
       "asset": "monitor-up.svg",
       "upstream_path": "icons/monitor-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/monitor-up.svg",

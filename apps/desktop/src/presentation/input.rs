@@ -85,6 +85,29 @@ impl EditHistory {
 const CARET_INTERVAL: Duration = Duration::from_millis(500);
 const CARET_TICKS: u8 = 20;
 
+fn caret_height(ascent: Pixels, descent: Pixels, font_size: Pixels, line_height: Pixels) -> Pixels {
+    // Font metrics can expose the signed OpenType descender. Its distance is
+    // part of the caret, not something to subtract from the ascender.
+    (ascent + px(f32::from(descent).abs()))
+        .max(font_size)
+        .clamp(px(1.), line_height.max(px(1.)))
+}
+
+fn horizontal_scroll(
+    previous: Pixels,
+    cursor: Pixels,
+    text_width: Pixels,
+    viewport_width: Pixels,
+) -> Pixels {
+    let visible = (viewport_width - px(4.)).max(px(1.));
+    // A wider field or shorter replacement must reveal text that now fits.
+    // Retaining the previous offset can otherwise hide the start indefinitely.
+    previous
+        .max(cursor - visible)
+        .min(cursor)
+        .clamp(px(0.), (text_width - visible).max(px(0.)))
+}
+
 /// One finite blink sequence per focused input. A new edit invalidates the old
 /// generation; a hidden view cannot keep blinking without presenting each tick.
 struct CaretBlink {
@@ -1083,10 +1106,16 @@ impl Element for TextElement {
         let cursor = layout.position(input.cursor_offset());
         let scroll_x = if input.multiline {
             px(0.)
-        } else if cursor.x - input.scroll_x > bounds.size.width - px(4.) {
-            (cursor.x - bounds.size.width + px(4.)).max(px(0.))
         } else {
-            input.scroll_x.min(cursor.x)
+            horizontal_scroll(
+                input.scroll_x,
+                cursor.x,
+                layout
+                    .lines
+                    .first()
+                    .map_or(px(0.), |line| line.size(layout.line_height).width),
+                bounds.size.width,
+            )
         };
         let rows = if input.multiline {
             (layout.height / layout.line_height).ceil() as usize
@@ -1116,9 +1145,12 @@ impl Element for TextElement {
         let caret = input.selected_range.is_empty().then(|| {
             let font_size = style.font_size.to_pixels(window.rem_size());
             let font = window.text_system().resolve_font(&style.font());
-            let height = (window.text_system().ascent(font, font_size)
-                + window.text_system().descent(font, font_size))
-            .clamp(px(1.), layout.line_height);
+            let height = caret_height(
+                window.text_system().ascent(font, font_size),
+                window.text_system().descent(font, font_size),
+                font_size,
+                layout.line_height,
+            );
             let origin = bounds.origin + cursor - point(scroll_x, scroll_y)
                 + point(px(0.), (layout.line_height - height) / 2.);
             let scale = window.scale_factor();
@@ -1472,9 +1504,42 @@ fn replacement_fits(
 #[cfg(test)]
 mod tests {
     use super::{
-        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, current_boundary, from_utf16,
-        mention_range, next_grapheme, previous_grapheme, replacement_fits, to_utf16,
+        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, caret_height, current_boundary,
+        from_utf16, horizontal_scroll, mention_range, next_grapheme, previous_grapheme,
+        replacement_fits, to_utf16,
     };
+    #[test]
+    fn single_line_scroll_recovers_after_resize_or_replacement() {
+        use gpui::px;
+        let clipped = horizontal_scroll(px(0.), px(120.), px(120.), px(20.));
+        assert_eq!(clipped, px(104.));
+        assert_eq!(
+            horizontal_scroll(clipped, px(120.), px(120.), px(354.)),
+            px(0.)
+        );
+        assert_eq!(
+            horizontal_scroll(px(200.), px(8.), px(8.), px(100.)),
+            px(0.)
+        );
+        assert_eq!(
+            horizontal_scroll(px(0.), px(180.), px(300.), px(100.)),
+            px(84.)
+        );
+        assert_eq!(
+            horizontal_scroll(px(84.), px(20.), px(300.), px(100.)),
+            px(20.)
+        );
+    }
+    #[test]
+    fn caret_covers_signed_descenders_at_each_text_scale() {
+        for scale in [1., 1.5, 2.] {
+            let px = |value| gpui::px(value * scale);
+            let height = caret_height(px(14.924), px(-4.2), px(14.), px(24.));
+            assert!((f32::from(height) - 19.124 * scale).abs() < 0.001);
+            assert_eq!(height, caret_height(px(14.924), px(4.2), px(14.), px(24.)));
+            assert_eq!(caret_height(px(100.), px(-30.), px(14.), px(24.)), px(24.));
+        }
+    }
     #[test]
     fn caret_blink_settles_visible_and_stale_ticks_cannot_hide_a_new_edit() {
         let mut caret = CaretBlink::default();

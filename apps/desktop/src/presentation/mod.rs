@@ -25,6 +25,7 @@ mod shell;
 mod sidebar;
 mod state;
 pub mod theme;
+mod window_chrome;
 
 use gpui::{
     App, Context, Div, Entity, FocusHandle, Focusable, FontWeight, KeyDownEvent, Subscription,
@@ -73,6 +74,7 @@ pub enum SearchKind {
 }
 #[derive(Clone)]
 pub enum LocalAction {
+    Window(window_chrome::Action),
     Content(content::Action),
     CreateMode(bool),
     FindPeople,
@@ -770,6 +772,12 @@ impl Desktop {
             )
     }
     pub fn handle(&mut self, action: LocalAction, window: &mut Window, cx: &mut Context<Self>) {
+        // Window controls stay available while the content is modal or inert,
+        // just like the system controls they replace.
+        if let LocalAction::Window(action) = action {
+            action.perform(window);
+            return;
+        }
         self.motion_trigger = None;
         if self.update_restart_pending {
             return;
@@ -830,12 +838,14 @@ impl Desktop {
         self.hover_hints.cancel();
         let previous_feedback = self.feedback;
         let invoker = window.focused(cx);
+        let mut server_input_rejected = false;
         match action {
             LocalAction::RemoveAccount(account, scope) => {
                 self.request_account_removal(account, scope, window, cx)
             }
             LocalAction::RetryAccountRemoval => self.retry_account_removal(window, cx),
             LocalAction::ConfirmAccountRemoval | LocalAction::CancelAccountRemoval => {}
+            LocalAction::Window(action) => action.perform(window),
             LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
             LocalAction::FindPeople => {
@@ -1197,6 +1207,9 @@ impl Desktop {
             }
             LocalAction::BeginLogin => match ServerInput::new(&self.server.read(cx).content) {
                 Ok(server) => {
+                    self.feedback = None;
+                    self.pending_feedback_focus = false;
+                    self.feedback_return_focus = None;
                     self.onboarding_open = true;
                     self.submit(UiIntent::BeginLogin {
                         request: RequestId(self.snapshot.revision.saturating_add(1)),
@@ -1204,6 +1217,7 @@ impl Desktop {
                     });
                 }
                 Err(_) => {
+                    server_input_rejected = true;
                     self.feedback = Some(Feedback::error(
                         "Bitte eine HTTPS-Serveradresse ohne Zugangsdaten, Abfrage oder Fragment eingeben.",
                     ))
@@ -1395,6 +1409,14 @@ impl Desktop {
             self.feedback_return_focus = invoker;
             self.pending_feedback_focus = reveal_result && self.overlay.is_none();
         }
+        if server_input_rejected {
+            // Let the user correct the field directly. Moving focus to the
+            // banner also scrolls the entire form when vertical space is tight.
+            let focus = self.server.focus_handle(cx);
+            focus.focus(window);
+            self.feedback_return_focus = Some(focus);
+            self.pending_feedback_focus = false;
+        }
         cx.notify();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1425,7 +1447,6 @@ impl Desktop {
         if key == "f7" && self.development && self.diagnostic_frames < 64 {
             self.diagnostic_frames += 1;
             self.trace_chat_ui(window, cx);
-            // Bounded fixture-only geometry/counts: no input content or server identifiers.
             println!(
                 "UI_LOCAL_STATE editor_chars={} editor_focused={} history_focused={} filter_chars={} search_chars={} overlay={:?} prejoin={} highlighted={:?} keyboard_navigation={}",
                 self.composer.read(cx).content.len(),
@@ -1799,7 +1820,7 @@ impl Render for Desktop {
         let narrow = window.viewport_size().width < px(880.) || self.scale >= 150;
         // Reserve header, navigation, toolbar/result and a usable history slice.
         // The editor scrolls internally when large text cannot fit five lines.
-        let reserved = px(if narrow { 230. } else { 180. })
+        let reserved = px(window_chrome::HEIGHT + if narrow { 230. } else { 180. })
             + self.sp(if self.feedback.is_some() { 100. } else { 40. })
             + self.sp(72.);
         let max_rows = (f32::from((window.viewport_size().height - reserved).max(px(24.)))
@@ -1902,6 +1923,7 @@ impl Render for Desktop {
         let message_menu = self.message_menu_popup(window, cx);
         let reveal = self.navigation.reveal.clone();
         let view = div()
+            .relative()
             .on_children_prepainted(cx.processor(move |this, _, window, cx| {
                 // Virtual list controls register during child prepaint, after
                 // Render returns. Retiring them earlier loses row focus and
@@ -1958,6 +1980,7 @@ impl Render for Desktop {
             }))
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
+            .child(self.window_chrome(window, cx))
             .child(
                 div()
                     .relative()
@@ -1968,7 +1991,8 @@ impl Render for Desktop {
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
                     .when_some(incoming_card, |d, card| d.child(card))
                     .when_some(message_menu, |d, menu| d.child(menu)),
-            );
+            )
+            .children(self.window_resize_edges(window));
         if let Some(scope) = self.pending_prejoin_return.take()
             && self.overlay.is_none()
             && self.prejoin.is_none()
