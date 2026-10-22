@@ -14,7 +14,7 @@ use crate::media::{
 };
 use nextcloud_talk_api::{
     self as api,
-    meeting::{MeetingReader, MeetingStop, MeetingWriter, Observation, Topology},
+    meeting::{MeetingReader, MeetingStop, MeetingWriter, Observation, ObservationError, Topology},
     models::ParticipantFlags,
     signaling::{
         DescriptionKind, Event as SignalEvent, Negotiation, PeerSession, Signal, SignalBatch,
@@ -190,7 +190,6 @@ impl LiveCall {
             writer,
             write_rx,
             policy_tx,
-            scope,
             session.clone(),
             network.clone(),
             cancel.clone(),
@@ -291,10 +290,13 @@ pub(super) async fn refresh(
             .observe(&context(scope, network, cancel, 3000), observation)
             .await
             .map_err(|e| {
+                let kind = e.kind();
                 if matches!(observation, Observation::Account)
-                    && e.kind == api::ErrorKind::ReauthenticationRequired
+                    && (kind == api::ErrorKind::ReauthenticationRequired
+                        || e == ObservationError::CanonicalIdentityMismatch)
                 {
-                    // This observation alone uses the authoritative user probe.
+                    // Only the authoritative user probe can confirm rejection
+                    // or canonical identity loss; other WrongScope errors cannot.
                     // Close local admission immediately; durable suppression is
                     // owned by identity and must not depend on another UI poll.
                     if let Some(report) = account_rejection {
@@ -312,9 +314,9 @@ pub(super) async fn refresh(
                         Observation::CallParticipants => "call participants",
                         Observation::SignalingSettings => "signaling settings",
                     };
-                    eprintln!("normal observation stopped: {source} {:?}", e.kind);
+                    eprintln!("normal observation stopped: {source} {kind:?}");
                 }
-                e.kind
+                kind
             })?;
         sources.add(observation, value);
     }
@@ -324,12 +326,12 @@ async fn write_loop(
     mut writer: MeetingWriter,
     mut commands: mpsc::Receiver<Write>,
     policy: mpsc::Sender<PolicyUpdate>,
-    scope: CallScope,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
     account_rejection: Option<super::AccountRejection>,
 ) {
+    let scope = session.scope;
     let mut refresh_at = Instant::now();
     let mut requested = 0;
     let mut tick = tokio::time::interval(Duration::from_millis(50));

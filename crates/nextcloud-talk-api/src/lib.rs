@@ -610,14 +610,13 @@ impl Client {
                 .map_err(|k| self.error(if mutation { ErrorKind::Uncertain } else { k }))?,
             _ => {}
         }
-        if let Reply::Account(ref account) = decoded {
-            if self
+        if let Reply::Account(ref account) = decoded
+            && self
                 .expected_user
                 .as_ref()
                 .is_some_and(|expected| expected.as_str() != account.id)
-            {
-                return Err(self.error(ErrorKind::WrongScope));
-            }
+        {
+            return Err(self.error(ErrorKind::WrongScope));
         }
         self.validate(context)
             .map_err(|e| if mutation { self.mutation_error(e) } else { e })?;

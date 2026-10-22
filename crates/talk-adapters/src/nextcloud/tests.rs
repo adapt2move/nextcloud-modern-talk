@@ -382,22 +382,24 @@ async fn malformed_cookie_batch_cannot_change_the_next_request_session() {
 #[tokio::test]
 async fn autonomous_account_probe_reports_only_authoritative_rejection() {
     use talk_core::ids::{CallGeneration, CallScope};
-    for (status, code, expected, rejected) in [
+    for (probe, expected, rejected) in [
         (
-            401,
-            997,
+            Reply::envelope(401, "failure", 997, json!([])),
             nextcloud_talk_api::ErrorKind::ReauthenticationRequired,
             true,
         ),
         (
-            403,
-            403,
+            Reply::data(json!({"id":"another-user"})),
+            nextcloud_talk_api::ErrorKind::WrongScope,
+            true,
+        ),
+        (
+            Reply::envelope(403, "failure", 403, json!([])),
             nextcloud_talk_api::ErrorKind::PermissionDenied,
             false,
         ),
         (
-            500,
-            500,
+            Reply::envelope(500, "failure", 500, json!([])),
             nextcloud_talk_api::ErrorKind::ServerUnavailable,
             false,
         ),
@@ -406,7 +408,7 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
             Reply::data(room()),
             Reply::data(json!({"sessionId":"own-session"})),
             Reply::data(json!([])),
-            Reply::envelope(status, "failure", code, json!([])),
+            probe,
             Reply::data(json!({"id":"fixture_user"})),
         ])
         .await;
@@ -455,6 +457,35 @@ async fn autonomous_account_probe_reports_only_authoritative_rejection() {
         let handler: super::AccountRejection =
             Arc::new(move |scope| recorded.lock().unwrap().push(scope));
         let cancel = client.cancellation();
+        let wrong_scope = CallScope {
+            account: AccountScope {
+                runtime: RuntimeGeneration::from_local(2),
+                ..call.account
+            },
+            ..call
+        };
+        let wrong_scope_result = super::meeting_runtime::refresh(
+            &mut writer,
+            wrong_scope,
+            &runtime,
+            &cancel,
+            Some(&handler),
+        )
+        .await;
+        assert!(matches!(
+            wrong_scope_result,
+            Err(nextcloud_talk_api::ErrorKind::WrongScope)
+        ));
+        assert!(
+            !cancel.is_cancelled(),
+            "request scope mismatch is not account identity loss"
+        );
+        assert!(reports.lock().unwrap().is_empty());
+        assert_eq!(
+            server.count(),
+            3,
+            "wrong scope never dispatches the account probe"
+        );
         let result =
             super::meeting_runtime::refresh(&mut writer, call, &runtime, &cancel, Some(&handler))
                 .await;

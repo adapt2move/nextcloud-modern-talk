@@ -88,6 +88,33 @@ fn select(model: &mut Accounts, context: ConversationRef) {
     model.snapshot.message_panel = Some(MessagePanel::new(context));
     model.project_history(context);
 }
+// Model successful admission without starting the protocol worker. The same
+// request/target projection is established by Accounts::start_message.
+fn admit_target(
+    model: &mut Accounts,
+    key: ConversationRef,
+    serial: u64,
+    work: Work,
+) -> OperationId {
+    let operation = admit(&mut model.history, key, serial, work);
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    match work {
+        Work::Thread => {
+            panel.thread_root = Some(7);
+            panel.thread_state = RemoteState::Loading(RequestId(serial));
+        }
+        Work::Context(target) => {
+            panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
+                target,
+                state: RemoteState::Loading(RequestId(serial)),
+            });
+            panel.located = None;
+        }
+        _ => panic!("targeted read required"),
+    }
+    operation
+}
+
 fn reply(
     context: ConversationRef,
     operation: OperationId,
@@ -587,11 +614,7 @@ fn denied_thread_or_message_context_does_not_revoke_conversation_history() {
             messages(key, [message(key, 7, "Readable conversation")], Some(7)),
         );
         model.project_history(key);
-        let operation = admit(&mut model.history, key, 2, work);
-        if work == Work::Thread {
-            model.snapshot.message_panel.as_mut().unwrap().thread_state =
-                RemoteState::Loading(RequestId(2));
-        }
+        let operation = admit_target(&mut model, key, 2, work);
         model.apply_message(
             RequestId(2),
             key,
@@ -606,9 +629,328 @@ fn denied_thread_or_message_context_does_not_revoke_conversation_history() {
         );
         let panel = model.snapshot.message_panel.as_ref().unwrap();
         assert_eq!(panel.history, RemoteState::Idle);
+        assert_eq!(panel.state, RemoteState::Idle);
+        let state = if work == Work::Thread {
+            panel.thread_state
+        } else {
+            panel.context_load.as_ref().unwrap().state
+        };
+        assert_eq!(
+            state,
+            RemoteState::Failed(RequestId(2), UnavailableReason::PermissionDenied)
+        );
+    }
+}
+
+#[test]
+fn target_failure_then_successful_retry_clears_only_its_own_error() {
+    for work in [Work::Thread, Work::Context(9)] {
+        let mut model = super::super::tests::model();
+        let key = context(1, 1, 1, 1);
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Retained conversation")], Some(7)),
+        );
+        model.project_history(key);
+        let failure = admit_target(&mut model, key, 2, work);
+        model.apply_message(
+            RequestId(2),
+            key,
+            failure,
+            work,
+            Err(IdentityError::Request(ErrorKind::ServerUnavailable)),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        let state = if work == Work::Thread {
+            panel.thread_state
+        } else {
+            panel.context_load.as_ref().unwrap().state
+        };
+        assert!(matches!(state, RemoteState::Failed(RequestId(2), _)));
+        assert_eq!(panel.state, RemoteState::Idle);
+        assert!(panel.result.is_none());
+        assert_eq!(
+            model.snapshot.content,
+            ContentState::Ready,
+            "target endpoint failure cannot change room availability"
+        );
+        let retry = admit_target(&mut model, key, 3, work);
+        model.apply_message(
+            RequestId(3),
+            key,
+            retry,
+            work,
+            reply(
+                key,
+                retry,
+                messages(key, [message(key, 9, "Located reply")], None),
+            ),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        let state = if work == Work::Thread {
+            panel.thread_state
+        } else {
+            panel.context_load.as_ref().unwrap().state
+        };
+        assert_eq!(state, RemoteState::Idle);
         assert_eq!(
             panel.state,
-            RemoteState::Failed(RequestId(2), UnavailableReason::PermissionDenied)
+            RemoteState::Idle,
+            "successful retry leaves no shared chat error"
+        );
+        assert!(panel.result.is_none());
+        if matches!(work, Work::Context(_)) {
+            assert_eq!(panel.located, Some((RequestId(3), 9)));
+        }
+        assert!(
+            model
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .any(|m| m.local_id == 7 && m.body.as_str() == "Retained conversation")
+        );
+    }
+}
+
+#[test]
+fn target_denial_and_retry_cannot_settle_or_unlock_a_concurrent_mutation() {
+    for work in [Work::Thread, Work::Context(9)] {
+        let mut model = super::super::tests::model();
+        let key = context(1, 1, 1, 1);
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Retained conversation")], Some(7)),
+        );
+        model.project_history(key);
+        let mutation = admit(&mut model.history, key, 2, Work::Action);
+        model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(2));
+        let target = admit_target(&mut model, key, 3, work);
+        model.apply_message(
+            RequestId(3),
+            key,
+            target,
+            work,
+            Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+        );
+        let retry = admit_target(&mut model, key, 4, work);
+        model.apply_message(
+            RequestId(4),
+            key,
+            retry,
+            work,
+            reply(
+                key,
+                retry,
+                messages(key, [message(key, 9, "Target reply")], None),
+            ),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.state, RemoteState::Saving(RequestId(2)));
+        assert!(panel.result.is_none());
+        assert_eq!(model.snapshot.content, ContentState::Ready);
+        assert_eq!(
+            model.message_action(
+                RequestId(5),
+                key,
+                talk_core::ui::messaging::MessageAction::Edit {
+                    message: 7,
+                    body: text("Second edit")
+                }
+            ),
+            Err(SubmitError::Busy),
+            "the outstanding mutation still owns admission"
+        );
+        model.apply_message(
+            RequestId(2),
+            key,
+            mutation,
+            Work::Action,
+            reply(
+                key,
+                mutation,
+                MessagingResult::Message(Box::new(message(key, 7, "Confirmed edit"))),
+            ),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.state, RemoteState::Idle);
+        assert_eq!(
+            panel.result,
+            Some((RequestId(2), Completion::ServerAccepted))
+        );
+        assert!(
+            model
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .any(|m| m.local_id == 7 && m.body.as_str() == "Confirmed edit")
+        );
+    }
+}
+
+#[test]
+fn obsolete_context_target_completions_retire_without_touching_a_new_panel() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Current history")], Some(7)),
+    );
+    model.project_history(key);
+    let old = admit_target(&mut model, key, 2, Work::Context(9));
+    // Reopening the same room creates a different panel owner in the same
+    // account runtime; matching the room alone is insufficient correlation.
+    model.snapshot.message_panel = Some(MessagePanel::new(key));
+    let current = admit_target(&mut model, key, 3, Work::Context(10));
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(99));
+    model.apply_message(
+        RequestId(2),
+        key,
+        old,
+        Work::Context(9),
+        reply(
+            key,
+            old,
+            messages(key, [message(key, 9, "Obsolete target")], None),
+        ),
+    );
+    assert!(
+        !model
+            .history
+            .get(key)
+            .unwrap()
+            .messages
+            .as_slice()
+            .iter()
+            .any(|m| m.local_id == 9)
+    );
+    let late_denial = admit(&mut model.history, key, 4, Work::Context(9));
+    model.apply_message(
+        RequestId(4),
+        key,
+        late_denial,
+        Work::Context(9),
+        Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.context_load.as_ref().unwrap().target, 10);
+    assert_eq!(
+        panel.context_load.as_ref().unwrap().state,
+        RemoteState::Loading(RequestId(3))
+    );
+    assert_eq!(panel.state, RemoteState::Saving(RequestId(99)));
+    assert!(panel.located.is_none());
+    assert_eq!(model.snapshot.content, ContentState::Ready);
+    model.apply_message(
+        RequestId(3),
+        key,
+        current,
+        Work::Context(10),
+        reply(
+            key,
+            current,
+            messages(key, [message(key, 10, "Current target")], None),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.context_load.as_ref().unwrap().state,
+        RemoteState::Idle
+    );
+    assert_eq!(panel.located, Some((RequestId(3), 10)));
+    assert_eq!(panel.state, RemoteState::Saving(RequestId(99)));
+    assert!(
+        model.history.flights.is_empty(),
+        "obsolete target tickets must be retired"
+    );
+}
+
+#[test]
+fn target_retry_does_not_clear_an_unrelated_settled_mutation_error() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    let mutation = admit(&mut model.history, key, 1, Work::Action);
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(1));
+    model.apply_message(
+        RequestId(1),
+        key,
+        mutation,
+        Work::Action,
+        Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+    );
+    let before = model.snapshot.message_panel.as_ref().unwrap().state;
+    let receipt = model.snapshot.message_panel.as_ref().unwrap().result;
+    let context_request = admit_target(&mut model, key, 2, Work::Context(9));
+    model.apply_message(
+        RequestId(2),
+        key,
+        context_request,
+        Work::Context(9),
+        reply(
+            key,
+            context_request,
+            messages(key, [message(key, 9, "Read target")], None),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.state, before);
+    assert_eq!(panel.result, receipt);
+    assert_eq!(
+        panel.context_load.as_ref().unwrap().state,
+        RemoteState::Idle
+    );
+}
+
+#[test]
+fn missing_context_target_is_a_scoped_failure_instead_of_successful_navigation() {
+    for result in [
+        messages(context(1, 1, 1, 1), [], None),
+        MessagingResult::Changed,
+    ] {
+        let mut model = super::super::tests::model();
+        let key = context(1, 1, 1, 1);
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Readable conversation")], Some(7)),
+        );
+        model.project_history(key);
+        let operation = admit_target(&mut model, key, 2, Work::Context(9));
+        model.apply_message(
+            RequestId(2),
+            key,
+            operation,
+            Work::Context(9),
+            reply(key, operation, result),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert!(matches!(
+            panel.context_load.as_ref().unwrap().state,
+            RemoteState::Failed(RequestId(2), _)
+        ));
+        assert!(panel.located.is_none());
+        assert_eq!(panel.state, RemoteState::Idle);
+        assert_eq!(model.snapshot.content, ContentState::Ready);
+        assert_eq!(
+            model.snapshot.messages.as_slice()[0].body.as_str(),
+            "Readable conversation"
         );
     }
 }

@@ -2385,6 +2385,23 @@ mod tests {
         ledger.settle(op, true).unwrap();
         let revision = ledger.account(account.id).unwrap().revision;
         ledger.activate(op, revision).unwrap();
+        let unrelated_account = ledger
+            .reserve("https://other.example.invalid/".into())
+            .unwrap();
+        ledger
+            .bind_user(unrelated_account.id, "other-synthetic-user")
+            .unwrap();
+        let unrelated_op = ledger
+            .stage(
+                unrelated_account.id,
+                LoginAttemptId::from_local(ledger::random().unwrap()),
+                talk_core::identity::StorageBackend::PrivateFile,
+                "other-synthetic-user",
+            )
+            .unwrap();
+        ledger.settle(unrelated_op, true).unwrap();
+        let unrelated_revision = ledger.account(unrelated_account.id).unwrap().revision;
+        ledger.activate(unrelated_op, unrelated_revision).unwrap();
         let cancel = Cancellation::default();
         if cancelled {
             cancel.cancel();
@@ -2408,8 +2425,12 @@ mod tests {
             faults: Arc::default(),
         });
         let unrelated_cancel = Cancellation::default();
+        let unrelated_scope = AccountScope {
+            account: unrelated_account.id,
+            runtime: RuntimeGeneration::from_local(1),
+        };
         let unrelated = Arc::new(Control {
-            account: AccountId::from_local(account.id.as_local().wrapping_add(1)),
+            account: unrelated_account.id,
             slots: Arc::new(Semaphore::new(7)),
             epoch: AtomicU64::new(0),
             close: AtomicBool::new(false),
@@ -2417,13 +2438,7 @@ mod tests {
             removed: AtomicBool::new(false),
             changed: Notify::new(),
             inflight: Mutex::new(None),
-            runtime: Mutex::new(Some((
-                AccountScope {
-                    account: AccountId::from_local(account.id.as_local().wrapping_add(1)),
-                    runtime: RuntimeGeneration::from_local(1),
-                },
-                unrelated_cancel.clone(),
-            ))),
+            runtime: Mutex::new(Some((unrelated_scope, unrelated_cancel.clone()))),
             pending: Mutex::new(None),
             suppression: Mutex::new(None),
             faults: Arc::default(),
@@ -2447,6 +2462,13 @@ mod tests {
                 revision: ledger.account(account.id).unwrap().revision,
             })
             .unwrap();
+        let mut unrelated_summary = summaries.as_slice()[0].clone();
+        unrelated_summary.account = unrelated_account.id;
+        unrelated_summary.navigation_key = ledger.account_key(unrelated_account.id).unwrap();
+        unrelated_summary.scope = Some(unrelated_scope);
+        unrelated_summary.storage = StoredState::Eligible(unrelated_op.item);
+        unrelated_summary.revision = ledger.account(unrelated_account.id).unwrap().revision;
+        summaries.try_push(unrelated_summary).unwrap();
         let shared = Shared {
             summaries: Mutex::new(summaries),
             controls: Mutex::new(vec![control.clone(), unrelated.clone()]),
@@ -2478,6 +2500,9 @@ mod tests {
         assert!(!control.suppression_pending().unwrap());
         assert!(!unrelated_cancel.is_cancelled());
         assert!(lock(&unrelated.runtime).unwrap().is_some());
+        let unrelated_summary = lock(&shared.summaries).unwrap().as_slice()[1].clone();
+        assert_eq!(unrelated_summary.scope, Some(unrelated_scope));
+        assert_eq!(unrelated_summary.phase, AccountPhase::Active);
         if rejected {
             let summaries = lock(&shared.summaries).unwrap();
             assert_eq!(
@@ -2492,6 +2517,9 @@ mod tests {
         let persisted = reopened.account(account.id).unwrap();
         assert_eq!(persisted.disposition, if closed { 0 } else { 2 });
         assert_eq!(persisted.eligible, if closed { None } else { Some(op.id) });
+        let unrelated_persisted = reopened.account(unrelated_account.id).unwrap();
+        assert_eq!(unrelated_persisted.disposition, 2);
+        assert_eq!(unrelated_persisted.eligible, Some(unrelated_op.id));
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
     }

@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(next.state.text.as_ref(), "A文BC");
         assert_eq!(next.state.selection, 4..4);
         assert_eq!(range_from_utf16("A🧭B", 2..2), 5..5);
-        assert_eq!(range_from_utf16("A🧭B", 3..2), 1..5);
+        assert_eq!(range_from_utf16("A🧭B", Range { start: 3, end: 2 }), 1..5);
         assert_eq!(range_from_utf16("A🧭B", 99..usize::MAX), 6..6);
     }
 

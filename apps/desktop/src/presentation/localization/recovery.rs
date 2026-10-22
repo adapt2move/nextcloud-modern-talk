@@ -6,6 +6,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo actualizar.",
     ),
     (
+        "Auf diese Nachricht kannst du derzeit nicht zugreifen. Der Gesprächsverlauf bleibt erhalten.",
+        "You cannot access this message right now. The conversation history is retained.",
+        "Ahora no puedes acceder a este mensaje. Se conserva el historial de la conversación.",
+    ),
+    (
         "Beende zuerst die aktuelle Bearbeitung.",
         "Finish the current edit first.",
         "Termina primero la edición actual.",
@@ -36,6 +41,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El contenido cargado anteriormente sigue visible. Vuelve a conectarte y recarga el contenido.",
     ),
     (
+        "Die Nachricht konnte nicht geöffnet werden. Der Gesprächsverlauf bleibt erhalten.",
+        "The message could not be opened. The conversation history is retained.",
+        "No se pudo abrir el mensaje. Se conserva el historial de la conversación.",
+    ),
+    (
         "Inhalte konnten nicht geladen werden. Bitte erneut versuchen.",
         "Content could not be loaded. Please try again.",
         "No se pudo cargar el contenido. Vuelve a intentarlo.",
@@ -46,6 +56,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Todavía no se ha cargado el contenido. Comprueba la conexión y vuelve a intentarlo.",
     ),
     ("Kein Zugriff.", "No access.", "Sin acceso."),
+    (
+        "Nachricht wird geöffnet …",
+        "Opening message…",
+        "Abriendo mensaje…",
+    ),
     ("Wird aktualisiert …", "Refreshing…", "Actualizando…"),
     ("Wird geladen …", "Loading…", "Cargando…"),
 ];

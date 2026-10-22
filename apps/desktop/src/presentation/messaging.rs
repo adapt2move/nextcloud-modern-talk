@@ -14,7 +14,7 @@ use gpui::{
     Window, div, list, prelude::*, px,
 };
 use std::{cell::RefCell, rc::Rc, time::Instant};
-use talk_core::ui::messaging::{ComposeTarget, MessageAction, MessageFeature};
+use talk_core::ui::messaging::{ComposeTarget, ContextLoad, MessageAction, MessageFeature};
 use talk_core::ui::presentation::{
     Completion, ContentState, ConversationRef, MessageView, RequestId, UiIntent,
 };
@@ -30,6 +30,7 @@ pub(crate) enum Action {
     Menu(u128),
     MenuChoice(menu::Target, menu::Choice),
     RetryHistory,
+    RetryContext { request: RequestId, target: u128 },
     Reply(u128),
     Edit(u128),
     CancelCompose,
@@ -76,6 +77,38 @@ pub(super) struct ThreadLoad {
     pub context: ConversationRef,
     pub root: u128,
     pub request: Option<RequestId>,
+}
+
+struct ContextStatus {
+    label: &'static str,
+    retry: Option<RequestId>,
+}
+fn context_status(load: &ContextLoad) -> Option<ContextStatus> {
+    use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+    let (label, retry) = match load.state {
+        RemoteState::Idle => return None,
+        RemoteState::Loading(_) | RemoteState::Saving(_) => ("Nachricht wird geöffnet …", None),
+        RemoteState::Failed(_, UnavailableReason::Unsupported) => {
+            ("Der Server unterstützt diese Funktion nicht.", None)
+        }
+        RemoteState::Failed(_, UnavailableReason::Unconfigured) => {
+            ("In diesem Client noch nicht verfügbar.", None)
+        }
+        RemoteState::Failed(request, UnavailableReason::PermissionDenied) => (
+            "Auf diese Nachricht kannst du derzeit nicht zugreifen. Der Gesprächsverlauf bleibt erhalten.",
+            Some(request),
+        ),
+        RemoteState::Failed(request, _) | RemoteState::Uncertain(request) => (
+            "Die Nachricht konnte nicht geöffnet werden. Der Gesprächsverlauf bleibt erhalten.",
+            Some(request),
+        ),
+    };
+    Some(ContextStatus { label, retry })
+}
+
+fn current_context_retry(load: &ContextLoad, request: RequestId, target: u128) -> bool {
+    load.target == target
+        && context_status(load).is_some_and(|status| status.retry == Some(request))
 }
 
 impl ThreadLoad {
@@ -751,6 +784,18 @@ impl Desktop {
             Action::RetryHistory => {
                 self.request_older_history(true);
             }
+            Action::RetryContext { request, target } => {
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context)
+                    .and_then(|panel| panel.context_load.as_ref())
+                    .is_some_and(|load| current_context_retry(load, request, target))
+                {
+                    self.submit_message(MessageAction::Context(target));
+                }
+            }
             Action::Reply(id) => {
                 if self.save_draft(cx)
                     && self
@@ -1114,6 +1159,41 @@ impl Desktop {
             .as_ref()
             .filter(|p| Some(p.context) == self.snapshot.selected)
         {
+            if let Some(load) = &panel.context_load
+                && let Some(status) = context_status(load)
+            {
+                body = body.child(
+                    div()
+                        .px_6()
+                        .py_2()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(self.hint(self.l(status.label))),
+                        )
+                        .when_some(status.retry, |d, request| {
+                            d.child(self.button(
+                                "retry-context",
+                                "Erneut versuchen",
+                                ButtonStyle::Secondary,
+                                true,
+                                LocalAction::MessageIn(
+                                    panel.context,
+                                    Action::RetryContext {
+                                        request,
+                                        target: load.target,
+                                    },
+                                ),
+                                cx,
+                            ))
+                        }),
+                );
+            }
             if let talk_core::ui::conversation::RemoteState::Failed(_, reason) = panel.state {
                 body = body.child(div().px_6().py_2().text_color(t.danger).child(self.l(
                     match reason {
@@ -2204,6 +2284,32 @@ fn parse_time(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_feedback_and_retry_follow_the_current_request_and_target() {
+        use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+        let mut load = ContextLoad {
+            target: 42,
+            state: RemoteState::Loading(RequestId(7)),
+        };
+        assert!(context_status(&load).is_some());
+        assert!(context_status(&load).unwrap().retry.is_none());
+        assert!(!current_context_retry(&load, RequestId(7), 42));
+        load.state = RemoteState::Failed(RequestId(7), UnavailableReason::PolicyStale);
+        assert_eq!(context_status(&load).unwrap().retry, Some(RequestId(7)));
+        assert!(current_context_retry(&load, RequestId(7), 42));
+        assert!(!current_context_retry(&load, RequestId(6), 42));
+        assert!(!current_context_retry(&load, RequestId(7), 41));
+        load.state = RemoteState::Loading(RequestId(8));
+        assert!(!current_context_retry(&load, RequestId(7), 42));
+        load.state = RemoteState::Idle;
+        assert!(
+            context_status(&load).is_none(),
+            "successful retry removes its own error feedback"
+        );
+        load.state = RemoteState::Failed(RequestId(9), UnavailableReason::Unsupported);
+        assert!(context_status(&load).is_some());
+        assert!(context_status(&load).unwrap().retry.is_none());
+    }
     #[test]
     fn thread_failure_and_rejected_admission_never_become_empty_success() {
         use talk_core::ui::{

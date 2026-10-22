@@ -241,10 +241,22 @@ impl Accounts {
         )?;
         self.history
             .admitted(context, operation, work, request, self.next_request);
-        if let Some(panel) = self.snapshot.message_panel.as_mut() {
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_mut()
+            .filter(|p| p.context == context)
+        {
             match work {
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
                 Work::Thread => panel.thread_state = RemoteState::Loading(request),
+                Work::Context(target) => {
+                    panel.context_load = Some(view::ContextLoad {
+                        target,
+                        state: RemoteState::Loading(request),
+                    });
+                    panel.located = None;
+                }
                 Work::Action | Work::PinChange | Work::Share | Work::Send => {
                     panel.state = RemoteState::Saving(request)
                 }
@@ -551,6 +563,40 @@ impl Accounts {
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
+        // Navigation belongs to the panel that admitted its exact request and
+        // target. A reopened panel or newer target cannot inherit its result.
+        // Retire obsolete cache tickets as no-effect cancellations below, so
+        // neither a stale success nor failure changes rows or current feedback.
+        let current_target = match work {
+            Work::Thread => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_state == RemoteState::Loading(request)
+                    })
+            }
+            Work::Context(target) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.context_load.as_ref().is_some_and(|load| {
+                                load.target == target && load.state == RemoteState::Loading(request)
+                            })
+                    })
+            }
+            _ => true,
+        };
+        if !current_target {
+            let _ = self.history.complete(
+                context,
+                operation,
+                work,
+                request,
+                &Err(Completion::Failed(UnavailableReason::PolicyStale)),
+                false,
+            );
+            return;
+        }
         let network_failure = matches!(
             reply,
             Err(IdentityError::Request(
@@ -594,10 +640,21 @@ impl Accounts {
             _ if work == Work::Send => Err(Completion::Uncertain),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
-        if !self
-            .history
-            .complete(context, operation, work, request, &result, network_failure)
+        let result = if matches!(work, Work::Thread | Work::Context(_))
+            && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
         {
+            Err(Completion::Failed(UnavailableReason::PolicyStale))
+        } else {
+            result
+        };
+        if !self.history.complete(
+            context,
+            operation,
+            work,
+            request,
+            &result,
+            network_failure && room_read,
+        ) {
             if work == Work::Send {
                 self.settle_retained_send(request, context, operation, &result);
             }
@@ -613,13 +670,6 @@ impl Accounts {
             if work == Work::Send {
                 self.settle_retained_send(request, context, operation, &result);
             }
-            return;
-        }
-        if work == Work::Thread
-            && !self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                panel.context == context && panel.thread_state == RemoteState::Loading(request)
-            })
-        {
             return;
         }
         self.history.expire(history::now_unix());
@@ -672,7 +722,15 @@ impl Accounts {
                         common_read: _,
                     } => {
                         if let Work::Context(id) = work {
-                            panel.located = Some((request, id));
+                            if messages
+                                .as_slice()
+                                .iter()
+                                .any(|m| u128::from(m.message.id.sequence) == id)
+                            {
+                                panel.located = Some((request, id));
+                            } else {
+                                completion = Completion::Failed(UnavailableReason::PolicyUnknown);
+                            }
                         } else if work == Work::Pins {
                             panel.pinned_messages =
                                 page(messages.as_slice().iter().map(message_view));
@@ -810,12 +868,10 @@ impl Accounts {
                 panel.thread_messages = Page::empty();
             }
         }
-        // Timeline state is projected by the cache's versioned completion owner.
-        // Reapplying this raw result would let a stale failure undo recovery.
-        if matches!(work, Work::Thread | Work::Context(_))
-            && completion != Completion::ServerAccepted
+        if matches!(work, Work::Context(_))
+            && let Some(load) = panel.context_load.as_mut()
         {
-            panel.state = state;
+            load.state = state;
         }
         if matches!(
             work,

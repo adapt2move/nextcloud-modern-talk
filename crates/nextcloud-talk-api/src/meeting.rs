@@ -218,6 +218,27 @@ pub struct ObservedReply {
     pub reply: Reply,
 }
 
+/// A canonical identity mismatch is confirmed by a successfully decoded account
+/// probe. Ordinary request, room and signaling scope failures carry no such fact.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservationError {
+    Protocol(Error),
+    CanonicalIdentityMismatch,
+}
+impl ObservationError {
+    pub fn kind(self) -> ErrorKind {
+        match self {
+            Self::Protocol(error) => error.kind,
+            Self::CanonicalIdentityMismatch => ErrorKind::WrongScope,
+        }
+    }
+}
+impl From<Error> for ObservationError {
+    fn from(error: Error) -> Self {
+        Self::Protocol(error)
+    }
+}
+
 impl MeetingWriter {
     pub fn topology(&self) -> Topology {
         if self.binding.hpb.is_some() {
@@ -252,7 +273,7 @@ impl MeetingWriter {
         &mut self,
         context: &OperationContext,
         observation: Observation,
-    ) -> Result<ObservedReply, Error> {
+    ) -> Result<ObservedReply, ObservationError> {
         let context = self.binding.context(context)?;
         let request = match observation {
             Observation::Account => Request::Account,
@@ -281,7 +302,7 @@ impl MeetingWriter {
             Reply::SignalingSettings(settings)
                 if (settings.mode == SignalingMode::External) != self.binding.hpb.is_some() =>
             {
-                return Err(self.binding.error(ErrorKind::WrongScope));
+                return Err(self.binding.error(ErrorKind::WrongScope).into());
             }
             Reply::SignalingSettings(settings) if self.binding.hpb.is_some() => {
                 let external = settings
@@ -296,13 +317,15 @@ impl MeetingWriter {
                     .map_err(|e| self.binding.error(e))?;
             }
             Reply::Account(account) if account.id != self.transport.user() => {
-                return Err(self.binding.error(ErrorKind::WrongScope));
+                self.transport.validate(&context)?;
+                self.binding.lifetime.validate(&context)?;
+                return Err(ObservationError::CanonicalIdentityMismatch);
             }
             Reply::Room(room)
                 if room.token != self.binding.room.as_str()
                     || room.server_id != Some(self.binding.room_id) =>
             {
-                return Err(self.binding.error(ErrorKind::WrongScope));
+                return Err(self.binding.error(ErrorKind::WrongScope).into());
             }
             _ => {}
         }

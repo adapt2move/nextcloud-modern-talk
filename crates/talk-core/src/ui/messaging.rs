@@ -108,6 +108,12 @@ pub struct UploadedFile {
     pub bytes: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextLoad {
+    pub target: u128,
+    pub state: RemoteState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagePanel {
     pub pinned_messages: Page<super::presentation::MessageView, 50>,
     pub shared_files: Page<super::presentation::MessageView, 50>,
@@ -119,6 +125,7 @@ pub struct MessagePanel {
     pub thread_state: RemoteState,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
     pub context: ConversationRef,
+    /// Foreground mutation state; targeted reads settle their own request slots.
     pub state: RemoteState,
     pub history: RemoteState,
     pub older: Option<u128>,
@@ -130,6 +137,8 @@ pub struct MessagePanel {
     pub search_loaded: bool,
     pub search_more: bool,
     pub located: Option<(RequestId, u128)>,
+    /// One message-navigation request, independent of mutation and history state.
+    pub context_load: Option<ContextLoad>,
     pub mentions: Page<Mention, 100>,
     pub reminders: Page<Reminder, 100>,
     pub scheduled: Page<Scheduled, 100>,
@@ -159,6 +168,7 @@ impl MessagePanel {
             search_loaded: false,
             search_more: false,
             located: None,
+            context_load: None,
             mentions: Page::empty(),
             reminders: Page::empty(),
             scheduled: Page::empty(),

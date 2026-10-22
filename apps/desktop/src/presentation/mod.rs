@@ -1485,7 +1485,7 @@ impl Desktop {
                 !self.snapshot.messages.as_slice().is_empty(),
             );
             println!(
-                "UI_INTERACTION overlay_focus={} server_focus={} editing={:?} content={:?} retained={} history_visible={} confirmed_empty={} thread_state={:?}",
+                "UI_INTERACTION overlay_focus={} server_focus={} editing={:?} content={:?} retained={} history_visible={} confirmed_empty={} thread_state={:?} thread_request={:?}",
                 self.modal_focus.contains_focused(window, cx),
                 self.server.focus_handle(cx).is_focused(window),
                 self.message_ui.editing,
@@ -1497,7 +1497,17 @@ impl Desktop {
                 self.message_ui
                     .thread_load
                     .as_ref()
-                    .map(|load| load.content_state(self.snapshot.message_panel.as_ref()))
+                    .map(|load| load.content_state(self.snapshot.message_panel.as_ref())),
+                self.snapshot.message_panel.as_ref().and_then(|panel| {
+                    use talk_core::ui::conversation::RemoteState;
+                    match panel.thread_state {
+                        RemoteState::Idle => None,
+                        RemoteState::Loading(id)
+                        | RemoteState::Saving(id)
+                        | RemoteState::Failed(id, _)
+                        | RemoteState::Uncertain(id) => Some(id.0),
+                    }
+                })
             );
             println!(
                 "UI_SETTINGS revision={} durable={} locale={:?} palette={:?} appearance={:?} density={:?} tab={:?} load={:?} save={:?} startup={:?} background={} quick_switcher={:?}",
