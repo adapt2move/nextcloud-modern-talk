@@ -18,6 +18,13 @@ Linux installs [native prerequisites](../tools/ui/prepare-linux.sh), libdbus and
 
 [prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py) installs checksum-pinned official SDKs on macOS and Windows. The Rust `webrtc` engine comes from the pinned Cargo dependencies and uses GStreamer for codecs, with no separate libwebrtc SDK download. Third-party native code remains upstream's responsibility; application Rust forbids `unsafe`.
 
+Desktop/workspace compilation uses [tools/cargo.py](../tools/cargo.py), the same
+native-environment starter used by the local [Task commands](development.md#native-ui-entrypoint).
+CI does not install Task. The starter adds the selected macOS SDK's runtime
+search path while preserving `-D warnings`; it does not install SDKs or execute
+tests implicitly. The workflow still states package, target and compile-only
+scope explicitly. Packaging retains the separate pinned-runtime builder.
+
 ## Releases
 
 The manual [release workflow](../.github/workflows/release.yml) accepts an exact commit on `main`, an existing version tag and an optional publish flag. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The ordinary macOS CI job also assembles these packages so packaging failures can be fixed before a release tag is created.

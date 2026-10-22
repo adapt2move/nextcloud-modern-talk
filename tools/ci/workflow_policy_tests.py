@@ -45,7 +45,15 @@ class PolicyTests(unittest.TestCase):
         self.check("    name: Compile only (Windows x86_64 MSVC)", "    permissions:\n      contents: write\n    name: Compile only (Windows x86_64 MSVC)")
 
     def test_windows_cannot_execute_tests(self):
-        self.check("cargo build --locked --workspace --all-targets --target x86_64-pc-windows-msvc", "cargo test --locked --workspace --target x86_64-pc-windows-msvc")
+        self.check("python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc", "cargo test --locked --workspace --target x86_64-pc-windows-msvc")
+
+    def test_compile_jobs_cannot_execute_through_cargo_wrapper(self):
+        for command in ("test", "run", "bench", "nextest"):
+            with self.subTest(command=command):
+                self.check("python tools/cargo.py build", "python tools/cargo.py " + command)
+
+    def test_wrapped_check_cannot_replace_required_compilation(self):
+        self.check("python tools/cargo.py build", "python tools/cargo.py check")
 
     def test_macos_compile_not_skipped(self):
         self.check("    name: Compile only (macOS Apple Silicon)", "    if: false\n    name: Compile only (macOS Apple Silicon)")

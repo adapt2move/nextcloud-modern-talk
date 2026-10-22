@@ -23,9 +23,23 @@ Linux browser login uses the session's `org.freedesktop.portal.OpenURI` service 
 
 Linux screen-sharing capability checks use ashpd over the session bus, without the `gdbus` command or additional native build prerequisites. Actual ScreenCast availability requires a portal backend matching the desktop/compositor; installing the GTK backend for browser login does not establish ScreenCast support. Checks never open a source picker or capture session. Private portal fixtures require `dbus-run-session`, `dbus-daemon` and GNU `timeout` (coreutils); they use isolated buses with service activation disabled.
 
-On Apple Silicon macOS, install the official GStreamer runtime and development framework as recorded in [prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py), full Xcode and its macOS/Metal toolchain, select its developer directory, and verify `xcrun --sdk macosx --find metal` and `metallib`. Command Line Tools alone may be insufficient. No macOS runtime qualification is established.
+On Apple Silicon macOS, install full Xcode and its macOS/Metal toolchain, select
+its developer directory, and verify `xcrun --sdk macosx --find metal` and
+`metallib`. Command Line Tools alone may be insufficient. Local development can
+use Homebrew's SDK with `brew install pkgconf gstreamer`. CI and distributable
+packages use the official runtime and development framework recorded in
+[prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py). No macOS runtime
+qualification is established.
 
-For a local macOS Cargo build, set `RUSTFLAGS="-C link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"`. The official framework's pkg-config files supply link-time paths; this additional path lets an unbundled development binary find its runtime libraries. Release packaging copies the required libraries and plugins into the app and rewrites their paths to be bundle-relative. The SDK is a developer prerequisite, not an end-user installation step.
+The task commands below find the selected GStreamer SDK through pkg-config,
+with framework and Homebrew fallbacks, and add its runtime library search path.
+No shell exports are needed for the usual local setup. They preserve compiler
+flags and canonicalize macOS temporary paths for identity/storage tests. Direct
+Cargo use remains available through [tools/cargo.py](../tools/cargo.py), for
+example `python3 tools/cargo.py build --locked -p talk-desktop`. Packaging has its
+own pinned SDK and clean-source checks; a Homebrew development build does not
+replace them. The SDK is a developer prerequisite, not an end-user installation
+step.
 
 [rust-toolchain.toml](../rust-toolchain.toml) pins Rust 1.99.1, Clippy and rustfmt. Keep [Cargo.lock](../Cargo.lock) and use `--locked` for Cargo build/check/test/run commands. Coordinate dependency changes with the affected module owners. The toolchain helper reads the pin:
 
@@ -43,10 +57,47 @@ dependency for camera capture and media codecs. Windows builds use the explicit
 
 ## Native UI entrypoint
 
+Install [Go Task](https://taskfile.dev/docs/installation) v3.54 or newer. On macOS,
+use `brew install go-task`; this is Go Task, not Taskwarrior. Cargo remains the
+Rust build tool. [Taskfile.yml](../Taskfile.yml) supplies common commands, and
+[tools/cargo.py](../tools/cargo.py) supplies the same native environment in CI
+without requiring Task on the runners.
+
+| Command | Result |
+| --- | --- |
+| `task dev` | Build the debug desktop and start ordinary account-connected mode |
+| `task dev -- --ui-scenario chat --ui-preserve-preferences` | Build and start a fictional chat preview without saving preferences |
+| `task build:debug` | Build `target/debug/talk-desktop` without starting it |
+| `task build` | Build the optimized desktop in `target/release` using Cargo's release profile |
+| `task check` | Check the workspace and all targets |
+| `task test` | Run workspace tests |
+| `task lint` | Run workspace Clippy with warnings denied |
+| `task fmt` / `task fmt:check` | Apply / check Rust formatting |
+| `task docs` | Check documentation links |
+| `task --list` | List available commands |
+
+On Windows, executable names end in `.exe`. Supplying Cargo's `--target` changes
+the output directory to `target/<triple>/<profile>`. App arguments follow
+`task dev --`; additional Cargo arguments follow the other tasks' `--` separator.
+Cargo controls incremental rebuilds, so Task does not maintain a second file
+timestamp cache.
+
+`task build` produces a native release binary. To create distributable packages
+on a matching native host with the pinned SDK:
+
+```sh
+task package -- --target aarch64-apple-darwin \
+  --version 0.0.7 --output /absolute/new/package-directory
+```
+
+This delegates to the existing
+[release builder](../tools/release/README.md), which requires a clean committed
+checkout and a new output directory outside it.
+
 For a fictional-data preview:
 
 ```sh
-cargo run --locked -p talk-desktop -- --ui-scenario chat
+task dev -- --ui-scenario chat --ui-preserve-preferences
 ```
 
 This opens a native GPUI window without server login or capture. Launch without `--ui-scenario` for ordinary browser login and restored accounts. Previews, focus/keyboard checks and appearance fixtures do not establish integrated behavior. See [native UI boundaries](design/native-ui/README.md). Keep `--licenses` output and installed notices with packages.

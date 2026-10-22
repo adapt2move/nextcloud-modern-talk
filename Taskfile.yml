@@ -1,0 +1,59 @@
+version: '3.54'
+
+vars:
+  PYTHON: '{{if eq OS "windows"}}python{{else}}python3{{end}}'
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  dev:
+    desc: Build and start the debug desktop; pass app arguments after --
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py run --locked -p talk-desktop -- {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  build:
+    desc: Build the optimized desktop binary in target/release
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py build --locked --release --no-default-features -p talk-desktop {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  build:debug:
+    desc: Build the debug desktop without starting it
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py build --locked -p talk-desktop {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  check:
+    desc: Check the workspace and all targets
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py check --locked --workspace --all-targets {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  test:
+    desc: Run workspace tests
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py test --locked --workspace {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  lint:
+    desc: Run workspace Clippy with warnings denied
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/cargo.py clippy --locked --workspace --all-targets {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}} -- -D warnings'
+
+  fmt:
+    desc: Format Rust sources
+    cmds:
+      - cargo fmt --all
+
+  fmt:check:
+    desc: Check Rust formatting
+    cmds:
+      - cargo fmt --all -- --check
+
+  docs:
+    desc: Check documentation links
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/check_docs.py'
+
+  package:
+    desc: Package a clean commit; pass --target, --version and --output after --
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/release/build.py {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'

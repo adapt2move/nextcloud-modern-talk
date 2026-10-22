@@ -22,7 +22,7 @@ ACTIONLINT_SHA256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b34
 ACTIONLINT_URL = "https://github.com/rhysd/actionlint/releases/download/v" + ACTIONLINT_VERSION + "/actionlint_" + ACTIONLINT_VERSION + "_linux_amd64.tar.gz"
 LINUX = {"blacksmith-2vcpu-ubuntu-2404", "blacksmith-4vcpu-ubuntu-2404"}
 COMPILE = {"blacksmith-4vcpu-windows-2025", "blacksmith-6vcpu-macos-latest"}
-TEST = re.compile(r"cargo\s+(?:test|bench|run|nextest)\b|tests?\.py\b|capture\.py|--ui-scenario|--licenses|xvfb-run|pytest")
+TEST = re.compile(r"cargo(?:\.py)?\s+(?:test|bench|run|nextest)\b|tests?\.py\b|capture\.py|--ui-scenario|--licenses|xvfb-run|pytest")
 
 
 def check(root, actionlint=False, placement=True):
@@ -56,7 +56,9 @@ def check(root, actionlint=False, placement=True):
             if runner[1] in COMPILE:
                 if TEST.search(job):
                     raise ValueError("Tests/application execution must run on Linux: " + name)
-                if "cargo build --locked" not in job and "tools/release/build.py" not in job:
+                if not any(command in job for command in (
+                    "cargo build --locked", "tools/cargo.py build --locked", "tools/release/build.py",
+                )):
                     raise ValueError("Compile-only job lacks its build: " + name)
                 if re.search(r"(?m)^    if:|^        if:", job):
                     raise ValueError("Compile-only builds must not be conditionally skipped: " + name)

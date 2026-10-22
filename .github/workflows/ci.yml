@@ -40,6 +40,7 @@ jobs:
       - run: python3 tools/release/check_workflows.py --actionlint
       - run: python3 tools/ci/workflow_policy_tests.py
       - run: python3 tools/ci/test_prepare_gstreamer.py
+      - run: python3 tools/test_cargo.py
       - run: python3 tools/release/tests.py
       - run: python3 tools/release/publication_tests.py
       - name: Native prerequisites
@@ -58,7 +59,7 @@ jobs:
       - run: cargo test --locked --workspace
       - run: cargo clippy --locked -p talk-adapters --features backend-test --all-targets -- -D warnings
       - run: cargo test --locked -p talk-adapters --features backend-test --lib
-      - run: cargo build --locked -p talk-desktop
+      - run: python3 tools/cargo.py build --locked -p talk-desktop
       - name: Native Linux smoke
         run: timeout 180 python3 tools/ui/capture.py --binary target/debug/talk-desktop --output "$RUNNER_TEMP/render" --scenarios server,chat:dark,settings
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -87,14 +88,14 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: cargo-windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: cargo build --locked --workspace --all-targets --target x86_64-pc-windows-msvc
+      - run: python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc
 
   macos:
     name: Compile only (macOS Apple Silicon)
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 60
     env:
-      RUSTFLAGS: "-D warnings -C link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"
+      RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,7 +107,7 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: cargo-macos-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: cargo build --locked --workspace --all-targets --target aarch64-apple-darwin
+      - run: python3 tools/cargo.py build --locked --workspace --all-targets --target aarch64-apple-darwin
       - name: Compile native permission and notification helper
         run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
       - name: Inspect native library dependencies

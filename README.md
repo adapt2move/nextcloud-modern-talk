@@ -16,6 +16,12 @@ German messages. The image card is an actual shared attachment.
 
 Start with [Contributing](CONTRIBUTING.md) and the [development guide](docs/development.md) for prerequisites, the pinned toolchain and scoped commands. UI scenarios use fictional data and do not log into a server. The [backend lab](docs/backend-lab.md) uses Docker and synthetic accounts.
 
+With prerequisites and [Go Task](https://taskfile.dev/docs/installation) installed,
+run `task dev` to build and start the debug app, or `task build` for an optimized
+release binary. `task --list` shows the other development commands. See the
+[development guide](docs/development.md#native-ui-entrypoint) for preview and
+packaging commands.
+
 ## Documentation
 
 - [Product requirements](docs/product/README.md) and [feature inventory](docs/compatibility/feature-inventory.md)
