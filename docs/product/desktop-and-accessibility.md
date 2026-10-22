@@ -48,6 +48,16 @@ Acceptance: VoiceOver and keyboard-only users can add an account, change convers
 
 ## DESK-006
 
+Message bodies, connection-error details and displayed server addresses support
+read-only text selection by dragging, word selection by double-click, Select All
+and the platform Copy shortcut. Selection covers one text block; message export
+requires the current room privacy policy to allow clipboard use. Replaced,
+removed, hidden or newly restricted content cannot retain clipboard authority.
+Button labels remain controls rather than selectable text. On macOS, ordinary
+buttons use the system arrow and selectable or editable text uses the system
+I-beam. GPUI draws the insertion caret; it follows text metrics, focus and reduced
+motion rather than embedding an AppKit text view.
+
 The application draws its own compact window title bar, including the verified Update action. macOS retains its native traffic lights; other supported client decorations provide minimize, maximize and close actions. Window movement, resizing and double-click behavior follow the platform. The update action is independent of the selected conversation and remains hidden during calls. Input carets cover the font's ascent and full descender at every text scale. Onboarding validation appears below a stable form anchor, with a dismiss action matching the message tone; it must not reposition the server field.
 
 **Readable visual and motion behavior (P1).** Support system light/dark appearance, increased contrast, reduced motion, and text scaling. Do not convey unread, muted, recording, permission-denied, or connection state by color alone. Keep critical controls visible at larger text sizes and small windows. Use contrast and target-size criteria from the quality plan, measured on actual native rendering.

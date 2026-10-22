@@ -123,6 +123,7 @@ pub(super) fn kind(k: api::ErrorKind) -> ErrorKind {
         api::ErrorKind::Conflict => ErrorKind::Conflict,
         api::ErrorKind::RateLimited => ErrorKind::RateLimited,
         api::ErrorKind::ServerUnavailable => ErrorKind::ServerUnavailable,
+        api::ErrorKind::ServerAccessDenied => ErrorKind::ServerAccessDenied,
     }
 }
 fn error(e: api::Error) -> PortError {

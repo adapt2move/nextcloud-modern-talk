@@ -35,12 +35,13 @@ use talk_core::preferences::{
 };
 use talk_core::protocol::{self, RoomKind, SendMessage, SendState};
 use talk_core::ui::presentation::{
-    AccountConnectionState, AccountView, Completion, ContentState, ConversationCategory,
-    ConversationKind, ConversationListState, ConversationMutationResult, ConversationOrganization,
-    ConversationRef, ConversationView, FeatureSupport, LoginFailure, LoginPhase, NativeDesktopPort,
-    NativeStoreState, OrganizationResult, Presence, PresentationSnapshot, RequestId,
-    SavedAccountPhase, SavedAccountView, ServerInput, StorageChoice, StorageSaveFailure,
-    StorageStatus, SubmissionResult, TagEdit, TagKind, TagRef, TagView, UiIntent,
+    AccountConnectionState, AccountView, Completion, ConnectionFailure, ContentState,
+    ConversationCategory, ConversationKind, ConversationListState, ConversationMutationResult,
+    ConversationOrganization, ConversationRef, ConversationView, FeatureSupport, LoginFailure,
+    LoginPhase, NativeDesktopPort, NativeStoreState, OrganizationResult, Presence,
+    PresentationSnapshot, RequestId, SavedAccountPhase, SavedAccountView, ServerInput,
+    StorageChoice, StorageSaveFailure, StorageStatus, SubmissionResult, TagEdit, TagKind, TagRef,
+    TagView, UiIntent,
 };
 use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIntent};
 
@@ -384,11 +385,17 @@ impl Accounts {
                 storage: storage(&a.summary),
                 cleanup_pending: a.summary.cleanup_pending,
                 suppression_unconfirmed: a.summary.suppression_unconfirmed,
-                failure: self
-                    .failures
-                    .iter()
-                    .find(|(id, _)| *id == a.summary.account)
-                    .map(|(_, e)| *e),
+                failure: a
+                    .summary
+                    .connection_error
+                    .and_then(connection_failure)
+                    .map(LoginFailure::Connection)
+                    .or_else(|| {
+                        self.failures
+                            .iter()
+                            .find(|(id, _)| *id == a.summary.account)
+                            .map(|(_, e)| *e)
+                    }),
             }
         }));
         if self.snapshot.accounts != accounts || self.snapshot.saved_accounts != saved {
@@ -613,6 +620,7 @@ impl Accounts {
                 match result {
                     Ok(RuntimeReply::Begun { account, attempt } | RuntimeReply::Pending { account, attempt }) => {
                         if self.login.as_ref().is_some_and(|l| l.automatic_save_attempted) { return; }
+                        self.failures.retain(|(id, _)| *id != account);
                         if let Some(login) = &mut self.login { login.owner = Some((account, attempt)); login.poll_at = Instant::now() + Duration::from_secs(1); }
                         self.snapshot.login.phase = LoginPhase::BrowserWaiting;
                     }
@@ -646,7 +654,16 @@ impl Accounts {
                         self.snapshot.login.storage = StorageStatus::NotSaved;
                         self.snapshot.login.storage_failure = None;
                     }
-                    Err(error) => self.login_failed(error),
+                    Err(error) => {
+                        let expired = work == LoginWork::Poll && error == IdentityError::Request(ErrorKind::Deadline);
+                        let failure = if expired { LoginFailure::Expired } else { login_error(error) };
+                        if let Some(id) = done.account {
+                            self.failures.retain(|(account, _)| *account != id);
+                            if self.failures.len() < 8 { self.failures.push((id, failure)); }
+                        }
+                        self.login_failed(error);
+                        if expired { self.snapshot.login.phase = LoginPhase::Failed(failure); }
+                    },
                     _ => self.login_failed(IdentityError::Request(ErrorKind::Malformed)),
                 }
             }
@@ -1354,6 +1371,7 @@ fn account(a: &AccountSummary, scope: AccountScope) -> AccountView {
         } else {
             AccountConnectionState::Connected
         },
+        connection_failure: a.connection_error.and_then(connection_failure),
         initials: initials(label.as_str()),
         self_name: label.clone(),
         label,
@@ -1512,6 +1530,11 @@ fn diagnostic_completion(completion: Completion) -> DiagnosticOutcome {
 }
 
 fn submit_error(e: IdentityError) -> SubmitError {
+    if let IdentityError::Request(kind) = e
+        && let Some(failure) = connection_failure(kind)
+    {
+        return SubmitError::Unavailable(UnavailableReason::Connection(failure));
+    }
     match e {
         IdentityError::Request(ErrorKind::Unsupported) => {
             SubmitError::Unavailable(UnavailableReason::Unsupported)
@@ -1548,12 +1571,20 @@ fn content_error(e: IdentityError) -> ContentState {
             | ErrorKind::Cancelled,
         ) => ContentState::Denied,
         IdentityError::Request(
-            ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable,
+            ErrorKind::Transport
+            | ErrorKind::Deadline
+            | ErrorKind::ServerUnavailable
+            | ErrorKind::ServerAccessDenied,
         ) => ContentState::Offline,
         _ => ContentState::Failed,
     }
 }
 fn login_error(e: IdentityError) -> LoginFailure {
+    if let IdentityError::Request(kind) = e
+        && let Some(failure) = connection_failure(kind)
+    {
+        return LoginFailure::Connection(failure);
+    }
     match e {
         IdentityError::Storage { .. }
         | IdentityError::RecoveryRequired
@@ -1561,12 +1592,22 @@ fn login_error(e: IdentityError) -> LoginFailure {
         IdentityError::Request(
             ErrorKind::PermissionDenied | ErrorKind::ReauthenticationRequired,
         ) => LoginFailure::Denied,
-        IdentityError::Request(ErrorKind::Deadline) => LoginFailure::Expired,
-        IdentityError::Request(ErrorKind::Transport | ErrorKind::ServerUnavailable) => {
-            LoginFailure::Network
-        }
         _ => LoginFailure::Unconfigured,
     }
+}
+
+fn connection_failure(kind: ErrorKind) -> Option<ConnectionFailure> {
+    Some(match kind {
+        ErrorKind::ServerAccessDenied => ConnectionFailure::AccessDenied,
+        ErrorKind::Transport => ConnectionFailure::Unreachable,
+        ErrorKind::Deadline => ConnectionFailure::TimedOut,
+        ErrorKind::ServerUnavailable => ConnectionFailure::ServerUnavailable,
+        ErrorKind::RateLimited => ConnectionFailure::RateLimited,
+        ErrorKind::Malformed | ErrorKind::RedirectRejected | ErrorKind::TooLarge => {
+            ConnectionFailure::InvalidResponse
+        }
+        _ => return None,
+    })
 }
 fn preference_error(e: IdentityError) -> AccountPreferenceError {
     match e {

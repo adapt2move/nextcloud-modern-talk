@@ -250,7 +250,7 @@ fn failed_browser_begin_retains_its_reserved_account_and_rejects_late_authorizat
     model.complete(Purpose::Login(request, LoginWork::Begin), &done);
     assert_eq!(
         model.snapshot.login.phase,
-        LoginPhase::Failed(LoginFailure::Network)
+        LoginPhase::Failed(LoginFailure::Connection(ConnectionFailure::Unreachable))
     );
     assert_eq!(model.login.as_ref().unwrap().reservation, Some(account));
     model.prepare_login(&server);
@@ -467,6 +467,7 @@ fn legacy_bound_accounts_without_credentials_offer_same_account_reauthentication
         cleanup_pending: false,
         suppression_unconfirmed: false,
         connection_degraded: false,
+        connection_error: None,
         recovery: None,
         revision: 1,
     };
@@ -626,6 +627,7 @@ fn login_activation_handoff_releases_only_the_current_save() {
         cleanup_pending: false,
         suppression_unconfirmed: false,
         connection_degraded: false,
+        connection_error: None,
         recovery: None,
         revision: 1,
     };
@@ -886,4 +888,27 @@ fn stale_preference_reply_preserves_confirmed_values_and_cannot_enable_a_toggle(
             error: AccountPreferenceError::Stale
         }
     );
+}
+
+#[test]
+fn refused_login_retains_the_safe_cause_for_the_saved_account_row() {
+    let (mut model, request, account, _) = pending_login();
+    model.login.as_mut().unwrap().owner = None;
+    model.login.as_mut().unwrap().reservation = None;
+    model.snapshot.login.phase = LoginPhase::Validating;
+    let done = ConnectionCompletion {
+        cursor: ConnectionCursor::default(),
+        request: ConnectionRequestId(1),
+        account: Some(account),
+        attempt: None,
+        captured_scope: None,
+        cancel_requested: false,
+        scope_is_current: false,
+        result: Err(IdentityError::Request(ErrorKind::ServerAccessDenied)),
+    };
+    model.complete(Purpose::Login(request, LoginWork::Begin), &done);
+    let expected = LoginFailure::Connection(ConnectionFailure::AccessDenied);
+    assert_eq!(model.snapshot.login.phase, LoginPhase::Failed(expected));
+    assert_eq!(model.failures, vec![(account, expected)]);
+    assert_eq!(model.login.as_ref().unwrap().reservation, Some(account));
 }

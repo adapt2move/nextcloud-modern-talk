@@ -636,7 +636,7 @@ impl Desktop {
                                 .min_w_0()
                                 .flex_1()
                                 .child(div().font_weight(FontWeight::MEDIUM).child(self.account_name(a)))
-                                .child(self.hint(a.server_label.as_str()))
+                                .child(self.selectable_hint(super::focus::account_id("account-server", a.scope), a.server_label.as_str()))
                                 .when(a.storage != talk_core::ui::presentation::StorageStatus::Saving, |d| d.child(self.hint(self.l(match a.storage {
                                     talk_core::ui::presentation::StorageStatus::NativeStored => "Anmeldung im sicheren Schlüsselspeicher gespeichert.",
                                     talk_core::ui::presentation::StorageStatus::PrivateFileStored => "Auf diesem Gerät gespeichert · unverschlüsselte private Datei.",
@@ -646,11 +646,13 @@ impl Desktop {
                                     talk_core::ui::presentation::StorageStatus::Saving => "",
                                     talk_core::ui::presentation::StorageStatus::NotSaved => "Deine Anmeldung ist nicht gespeichert.",
                                 }))))
-                                .child(self.hint(self.l(match a.connection {
+                                .child(self.selectable_hint(super::focus::account_id("account-connection", a.scope), self.l(if let Some(failure) = a.connection_failure {
+                                    super::state::connection_failure_copy(failure).1
+                                } else { match a.connection {
                                     talk_core::ui::presentation::AccountConnectionState::Connected => "Verbunden",
                                     talk_core::ui::presentation::AccountConnectionState::Guest => "Gastzugang",
                                     talk_core::ui::presentation::AccountConnectionState::Disconnected => "Nicht verbunden",
-                                }))),
+                                }}))),
                         )
                         .child(
                             self.button(
@@ -699,9 +701,9 @@ impl Desktop {
                 accounts = accounts.child(div().flex().items_center().gap_3().py_3().border_b_1().border_color(t.border)
                     .child(div().flex_1().min_w_0()
                         .child(div().font_weight(FontWeight::MEDIUM).child(saved.label.as_ref().map_or_else(|| self.l("Gespeichertes Konto").to_owned(), |s| s.as_str().to_owned())))
-                        .when_some(saved.server_label.as_ref(), |d, label| d.child(self.hint(label.as_str())))
+                        .when_some(saved.server_label.as_ref(), |d, label| d.child(self.selectable_hint(gpui::SharedString::from(format!("saved-server-{}", saved.id.as_local())), label.as_str())))
                         .child(self.hint(self.l(status)))
-                        .when(saved.failure.is_some(), |d| d.child(self.hint(self.l("Das Konto konnte nicht verbunden werden. Bitte erneut versuchen."))))
+                        .when_some(saved.failure, |d, failure| d.child(self.selectable_hint(gpui::SharedString::from(format!("saved-failure-{}", saved.id.as_local())), self.l(super::state::login_failure_detail(failure)))))
                         .when(saved.cleanup_pending, |d| d.child(self.hint(self.l("Die gespeicherten Anmeldedaten wurden noch nicht vollständig entfernt."))))
                         .when(saved.suppression_unconfirmed, |d| d.child(self.hint(self.l("Der gespeicherte Anmeldestatus muss wiederhergestellt werden.")))))
                     .child(self.button(gpui::SharedString::from(format!("restore-account-{}", saved.id.as_local())), "Verbinden", ButtonStyle::Secondary,

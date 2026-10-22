@@ -22,6 +22,13 @@ Blue/System/100%/Comfortable are the intended defaults. Persistent settings requ
 
 ## Input, privacy and native qualification
 
+The input module owns native clipboard admission for editable fields and explicit
+read-only Copy actions. A desktop retains one bounded read-only selection, not
+one entity per message. Live rendered text supplies its current content and
+privacy decision; unmounting, replacement and restriction revoke its action
+route. A message uses the room's existing native clipboard privacy projection,
+independently of send permission. Read-only text has no IME handler or caret.
+
 Keep server/search/creation input and draft text distinct from backend snapshots. Clipboard admission for drafts is an explicit privacy-policy decision; generic send permission is insufficient. GPUI 0.2.2 materializes the platform clipboard String before a widget can check its size, so that transient allocation remains an explicit resource limitation.
 
 Bounded multiline plain-text editing, IME integration, focus restoration and modal isolation each need appropriate checks. Actual language/IME sessions, localization, bidi handling, macOS permissions, native accessibility roles/announcements and VoiceOver remain unqualified. Direct incoming acceptance skips voluntary conference prejoin while preserving mandatory permission, consent and security gates.

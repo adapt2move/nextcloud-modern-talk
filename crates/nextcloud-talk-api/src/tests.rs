@@ -76,6 +76,12 @@ impl Drop for Server {
 }
 impl Server {
     pub(super) async fn start(replies: Vec<(u16, String, Duration)>) -> Self {
+        Self::with_content_type(replies, "Content-Type: application/json\r\n").await
+    }
+    async fn with_content_type(
+        replies: Vec<(u16, String, Duration)>,
+        content_type: &'static str,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -107,7 +113,7 @@ impl Server {
                 out.lock().unwrap().push(String::from_utf8(bytes).unwrap());
                 tokio::time::sleep(delay).await;
                 let response = format!(
-                    "HTTP/1.1 {status} fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status} fixture\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes()).await;
@@ -177,7 +183,7 @@ async fn definitive_activation_and_join_denials_retire_only_provisional_state() 
     let (mut client, runtime) = client(&server);
     assert!(
         matches!(client.request(&context(&runtime), Request::ActivateRoom(room())).await,
-        Err(error) if error.kind == ErrorKind::PermissionDenied)
+        Err(error) if error.kind == ErrorKind::ServerAccessDenied)
     );
     assert!(client.active_room.is_none());
     let other = RoomToken::parse("otherroom").unwrap();
@@ -192,7 +198,7 @@ async fn definitive_activation_and_join_denials_retire_only_provisional_state() 
         recording_consent: false,
     };
     assert!(matches!(client.request(&context(&runtime), join()).await,
-        Err(error) if error.kind == ErrorKind::PermissionDenied));
+        Err(error) if error.kind == ErrorKind::ServerAccessDenied));
     assert!(!client.call_remote_pending);
     assert!(matches!(
         client.request(&context(&runtime), join()).await,
@@ -699,4 +705,42 @@ async fn dropped_activation_cannot_join_or_switch_rooms_before_cleanup() {
         .await
         .unwrap();
     assert_eq!(server.count(), 2);
+}
+
+#[tokio::test]
+async fn unstructured_http_refusals_preserve_safe_causes_without_claiming_revocation() {
+    for content_type in [
+        "",
+        "Content-Type: text/html\r\n",
+        "Content-Type: application/json\r\n",
+    ] {
+        for (status, expected) in [
+            (403, ErrorKind::ServerAccessDenied),
+            (503, ErrorKind::ServerUnavailable),
+            (401, ErrorKind::Malformed),
+        ] {
+            let server = Server::with_content_type(
+                vec![(status, "Forbidden".into(), Duration::ZERO)],
+                content_type,
+            )
+            .await;
+            let (mut owner, clock) = client(&server);
+            let result = owner.request(&context(&clock), Request::Account).await;
+            assert!(matches!(result, Err(error) if error.kind == expected));
+            assert_eq!(server.count(), 1, "a refused request must not be retried");
+        }
+    }
+    // A valid OCS room refusal keeps its permission meaning rather than turning
+    // a conversation restriction into an account-wide connectivity failure.
+    let server = Server::start(vec![(
+        403,
+        json!({"ocs":{"meta":{"status":"failure","statuscode":403,"message":"denied"},"data":[]}})
+            .to_string(),
+        Duration::ZERO,
+    )])
+    .await;
+    let (mut owner, clock) = client(&server);
+    assert!(
+        matches!(owner.request(&context(&clock), Request::Rooms).await, Err(error) if error.kind == ErrorKind::PermissionDenied)
+    );
 }

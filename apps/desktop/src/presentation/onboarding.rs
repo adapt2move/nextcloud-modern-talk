@@ -353,6 +353,9 @@ impl Desktop {
             }
             LoginPhase::Failed(reason) => {
                 let (title, detail) = match reason {
+                    LoginFailure::Connection(failure) => {
+                        super::state::connection_failure_copy(failure)
+                    }
                     LoginFailure::Expired => (
                         "Der Link ist abgelaufen.",
                         "Die Anmeldung hat zu lange gedauert. Mit einem neuen Link kannst du weitermachen.",
@@ -403,7 +406,7 @@ impl Desktop {
                         true,
                     ))
                     .child(self.title(self.l(title)))
-                    .child(self.hint(self.l(detail)))
+                    .child(self.selectable_hint("login-failure-detail", self.l(detail)))
                     .child(self.server_chip(login.server_label.as_str()));
                 if reason == LoginFailure::AccountExists {
                     card = card.child(
@@ -684,7 +687,12 @@ was ihr miteinander besprecht.")),
             .text_color(self.theme.muted)
             .text_size(self.sp(12.))
             .child(self.scaled_icon("lock", 14., self.theme.muted))
-            .child(div().min_w_0().whitespace_normal().child(label.to_owned()))
+            .child(
+                div()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .child(self.selectable_text("login-server-address", label)),
+            )
     }
     fn storage_option(
         &self,

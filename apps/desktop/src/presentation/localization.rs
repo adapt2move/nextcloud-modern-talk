@@ -1,6 +1,7 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
 mod chat;
+mod connection;
 mod content;
 mod conversation;
 mod onboarding;
@@ -16,6 +17,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
     }
     for catalog in [
         chat::MESSAGES,
+        connection::MESSAGES,
         content::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
@@ -79,6 +81,7 @@ mod tests {
             recovery::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,
+            connection::MESSAGES,
             content::MESSAGES,
             updates::MESSAGES,
             onboarding::MESSAGES,
@@ -93,5 +96,28 @@ mod tests {
         }
         assert_eq!(text(Locale::English, "Allgemein"), "General");
         assert_eq!(text(Locale::Spanish, "Einstellungen"), "Ajustes");
+    }
+    #[test]
+    fn connection_failure_copy_is_translated_on_every_surface() {
+        use talk_core::ui::presentation::ConnectionFailure;
+        for failure in [
+            ConnectionFailure::Unreachable,
+            ConnectionFailure::TimedOut,
+            ConnectionFailure::AccessDenied,
+            ConnectionFailure::ServerUnavailable,
+            ConnectionFailure::RateLimited,
+            ConnectionFailure::InvalidResponse,
+        ] {
+            let (title, detail) = crate::presentation::state::connection_failure_copy(failure);
+            for key in [
+                title,
+                detail,
+                "Dein Entwurf bleibt erhalten. Nachrichten werden nicht automatisch gesendet.",
+            ] {
+                for locale in [Locale::English, Locale::Spanish] {
+                    assert_ne!(text(locale, key), key, "missing translation: {key}");
+                }
+            }
+        }
     }
 }

@@ -62,6 +62,8 @@ This document defines end-to-end acceptance journeys and shared states. Each jou
 
 **Network and server errors preserve intent.** Apply bounded backoff/cancellation, honor retry information, and distinguish network loss, maintenance, rate limits, server failure, unsupported operation, and remote federation failure. Reconcile uncertain mutations before retry. Acceptance: retry cannot duplicate a send/invite/dial-out or apply an obsolete form to a different account. A server upgrade requirement is not retried as a network error.
 
+Show the observed connection cause during sign-in, beside the affected account in the account overview, and in the chat composer footer. Distinguish an unreachable server, timeout, HTTP access refusal, temporary server failure, rate limit and unexpected response. Preserve drafts and loaded history during a connection failure and prevent sends until the account connection is confirmed again. Clear the account warning after successful validation of that same account runtime. A room permission refusal does not mark other conversations or accounts as unavailable; a proxy's HTTP 403 does not revoke saved credentials.
+
 ### STATE-005
 
 **Permission and lifecycle races invalidate actions.** Confirmed account rejection, room deletion, participant removal, role change, expiry, end of call and capability-hash change may arrive during a form or OS dialog. Revalidate before mutation and after uncertain responses; COMP-003 also requires bounded refresh for changes with no hash/event. Acceptance: AUTH-007 invalidates the rejected account's generation and stops local work/media independently of remote leave. A late approval/success cannot resurrect an obsolete object, renew expired authority, expose removed content or turn on media.

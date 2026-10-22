@@ -1449,3 +1449,52 @@ async fn r2_cancelled_unexecuted_creators_do_not_own_current_attempt() {
         r2_forwarded_stale(kind, false, true).await;
     }
 }
+
+#[tokio::test]
+async fn server_access_failure_is_account_scoped_retains_credentials_and_clears_after_recovery() {
+    let server = Server::start(35).await;
+    let other = Server::start(34).await;
+    let fixture = Fixture::new();
+    let runtime =
+        IdentityRuntime::start(RuntimeConfig::isolated_fixture(fixture.0.clone())).unwrap();
+    let a = active(&runtime, &server).await;
+    let b = active(&runtime, &other).await;
+    let scope = a.scope.unwrap();
+    let cancellation = runtime.account_cancellation(scope).unwrap();
+    *server.probe_override.lock().unwrap() = Some((403, json!("Forbidden")));
+    assert!(matches!(
+        command(
+            &runtime,
+            RuntimeCommand::Request {
+                scope,
+                request: ProtocolRequest::ProbeAccount
+            }
+        )
+        .await,
+        Err(IdentityError::Request(ErrorKind::ServerAccessDenied))
+    ));
+    let failed = summary(&runtime, a.account);
+    assert_eq!(failed.connection_error, Some(ErrorKind::ServerAccessDenied));
+    assert!(failed.connection_degraded);
+    assert_eq!(
+        (failed.scope, failed.storage, failed.revision),
+        (a.scope, a.storage, a.revision)
+    );
+    assert!(!cancellation.is_cancelled());
+    assert_eq!(summary(&runtime, b.account).connection_error, None);
+    *server.probe_override.lock().unwrap() = None;
+    command(
+        &runtime,
+        RuntimeCommand::Request {
+            scope,
+            request: ProtocolRequest::ProbeAccount,
+        },
+    )
+    .await
+    .unwrap();
+    let recovered = summary(&runtime, a.account);
+    assert_eq!(recovered.connection_error, None);
+    assert!(!recovered.connection_degraded);
+    assert_eq!(recovered.scope, a.scope);
+    assert!(runtime.join());
+}

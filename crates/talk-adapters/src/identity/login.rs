@@ -275,7 +275,11 @@ impl LoginFlow {
     }
 }
 fn status(code: StatusCode) -> IdentityError {
-    if code.is_redirection() {
+    if code == StatusCode::FORBIDDEN {
+        ErrorKind::ServerAccessDenied
+    } else if code == StatusCode::UNAUTHORIZED {
+        ErrorKind::ReauthenticationRequired
+    } else if code.is_redirection() {
         ErrorKind::RedirectRejected
     } else if code == StatusCode::TOO_MANY_REQUESTS {
         ErrorKind::RateLimited
@@ -460,6 +464,50 @@ fn parse(bytes: &[u8]) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn refused_login_is_denied_before_parsing_a_non_json_error_body() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        for (code, expected) in [
+            (403, ErrorKind::ServerAccessDenied),
+            (401, ErrorKind::ReauthenticationRequired),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("http://{}/", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                tokio::time::timeout(Duration::from_secs(3), async move {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        assert!(request.len() < 8192, "bounded fixture request");
+                        request.push(stream.read_u8().await.unwrap());
+                    }
+                    assert!(request.starts_with(b"POST /index.php/login/v2 HTTP/1.1\r\n"));
+                    stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 {code} Refused\r\nContent-Length: 9\r\nConnection: close\r\n\r\nForbidden"
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+            });
+            let result = LoginFlow::start(
+                Origin::parse(&origin, true).unwrap(),
+                Cancellation::default(),
+            )
+            .await;
+            server.await.unwrap();
+            assert!(matches!(result, Err(IdentityError::Request(kind)) if kind == expected));
+        }
+    }
     #[test]
     fn flow_routes_are_exact_origin_and_installation_bound() {
         let origin = Origin::parse("https://cloud.example.invalid/install", false).unwrap();

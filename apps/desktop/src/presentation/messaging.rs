@@ -1420,7 +1420,7 @@ impl Desktop {
                     .gap_2()
                     .text_color(t.muted)
                     .text_size(self.sp(12.))
-                    .child(m.body.as_str().to_owned())
+                    .child(self.message_text(m))
                     .child(self.hint(m.time_label.as_str())),
             );
         }
@@ -1468,7 +1468,7 @@ impl Desktop {
         if m.metadata.deleted {
             content = content.child(self.hint(self.l("Nachricht gelöscht.")));
         } else {
-            content = content.child(self.rich_text(m.body.as_str()));
+            content = content.child(self.message_text(m));
         }
         for object in m.metadata.rich.as_slice().iter().filter(|r| {
             !matches!(
@@ -1811,28 +1811,30 @@ impl Desktop {
         }
         body
     }
-    fn rich_text(&self, text: &str) -> Div {
-        let mut body = div().flex().flex_col().gap_1().line_height(self.sp(22.));
-        let mut code = false;
-        // Bounded by message bytes; no HTML interpretation, remote embedding, or automatic link open.
-        for line in text.split('\n').take(256) {
-            if line.starts_with("```") {
-                code = !code;
-                continue;
-            }
-            let quote = line.strip_prefix("> ");
-            body = body.child(
-                div()
-                    .when(code, |d| {
-                        d.font_family("monospace").bg(self.theme.subtle).px_2()
-                    })
-                    .when(quote.is_some(), |d| {
-                        d.pl_3().border_l_2().border_color(self.theme.border)
-                    })
-                    .child(quote.unwrap_or(line).to_owned()),
-            );
+    fn message_text(&self, message: &MessageView) -> super::selectable::SelectableText {
+        let context = self.snapshot.selected.expect("message context");
+        // The current room privacy projection also gates read-only export.
+        // Unknown policy, cached-only content and obsolete scopes cannot copy.
+        let permitted = !self.background_inert
+            && !self.projection_blocked
+            && !self.update_restart_pending
+            && self.snapshot.content == ContentState::Ready
+            && self
+                .selected()
+                .is_some_and(|room| room.draft_clipboard == Decision::Allowed)
+            && !message.metadata.deleted;
+        let text = super::selectable::SelectableText::new(
+            scoped_id("message-text", context, message.local_id, 0),
+            message.body.as_str(),
+            self.text_selection.clone(),
+            self.theme,
+            permitted,
+        );
+        if compact_system_message(message) {
+            text
+        } else {
+            text.rich(message.body.as_str(), f32::from(self.scale) / 100.)
         }
-        body
     }
     fn compose_motion_id(&self, context: ConversationRef) -> Option<gpui::ElementId> {
         let target = self.drafts.target(context);

@@ -805,22 +805,26 @@ impl Desktop {
                 })
             })
             .when(enabled && !self.background_inert, |b| {
-                b.cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.handle(action.clone(), window, cx);
-                        if !this.reduced_motion
-                            && !this.update_restart_pending
-                            && !this.projection_blocked
-                            && let Some(from) = availability.switch_value
-                        {
-                            this.motion_trigger = Some(super::motion::MotionTrigger {
-                                id: click_id.clone(),
-                                kind: super::motion::TriggerKind::Switch(from),
-                                admitted: Instant::now(),
-                            });
-                        }
-                    }))
+                b.cursor(if cfg!(target_os = "macos") {
+                    gpui::CursorStyle::Arrow
+                } else {
+                    gpui::CursorStyle::PointingHand
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.handle(action.clone(), window, cx);
+                    if !this.reduced_motion
+                        && !this.update_restart_pending
+                        && !this.projection_blocked
+                        && let Some(from) = availability.switch_value
+                    {
+                        this.motion_trigger = Some(super::motion::MotionTrigger {
+                            id: click_id.clone(),
+                            kind: super::motion::TriggerKind::Switch(from),
+                            admitted: Instant::now(),
+                        });
+                    }
+                }))
             })
             .when(!enabled && !self.background_inert, |b| {
                 b.on_mouse_down(gpui::MouseButton::Left, |_, window, cx| {

@@ -11,6 +11,8 @@ separates implemented paths from remaining parity work.
   automatic native storage for a new sign-in or an explicitly selected
   unencrypted private-file fallback after a storage failure.
   Restoration, logout suppression and cleanup share one account owner.
+  Account-scoped connection causes appear during login, in the account overview
+  and in the chat footer, with drafts retained and sending blocked during failure.
 - Compact grouped navigation includes a dedicated favorites group and active/archive views.
   Header actions open members and conversation settings; the title opens shared
   content. Messaging includes history, replies, edits/deletes, reactions, threads,
@@ -63,6 +65,11 @@ separates implemented paths from remaining parity work.
   bounded composition undo and grapheme-aware display offsets. Dialogs keep
   deferred virtualized controls inert. Native macOS input-method and cursor
   behavior still requires runtime qualification on macOS.
+- Message bodies, connection-error details and server addresses support selection
+  and explicit clipboard copy within one text block, subject to room privacy
+  policy. Selection across separate messages and a read-only text context menu
+  are not implemented. macOS pointers use native system cursors; input carets
+  remain GPUI-rendered.
 
 ## Verification scope
 

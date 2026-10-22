@@ -265,6 +265,7 @@ impl Client {
             || matches!(
                 error.kind,
                 ErrorKind::PermissionDenied
+                    | ErrorKind::ServerAccessDenied
                     | ErrorKind::NotFound
                     | ErrorKind::Conflict
                     | ErrorKind::RateLimited

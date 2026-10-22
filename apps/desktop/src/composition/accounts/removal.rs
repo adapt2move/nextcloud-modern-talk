@@ -372,6 +372,7 @@ mod tests {
             cleanup_pending: true,
             suppression_unconfirmed: false,
             connection_degraded: false,
+            connection_error: None,
             recovery: None,
             revision: 2,
         }

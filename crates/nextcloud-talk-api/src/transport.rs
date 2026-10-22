@@ -448,6 +448,7 @@ impl Transport {
                 ErrorKind::Uncertain => Retry::AfterReconciliation,
                 ErrorKind::ReauthenticationRequired
                 | ErrorKind::Transport
+                | ErrorKind::ServerAccessDenied
                 | ErrorKind::ServerUnavailable
                 | ErrorKind::Deadline => Retry::UserAction,
                 _ => Retry::Never,
@@ -664,11 +665,21 @@ impl Transport {
             if (300..400).contains(&status) {
                 return Err(self.error(ErrorKind::RedirectRejected));
             }
+            let content_type = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("")
+                .split(';')
+                .next()
+                .unwrap_or("");
             // Reverse proxies and maintenance pages need not return OCS JSON.
             // These HTTP failures are scoped evidence only. Account rejection
             // still requires the complete authoritative HTTP401/OCS997 probe below.
             let http_failure = match status {
-                403 => Some(ErrorKind::PermissionDenied),
+                // A JSON refusal still needs its bounded OCS classification:
+                // room denial and account-wide proxy refusal are different scopes.
+                403 if content_type != "application/json" => Some(ErrorKind::ServerAccessDenied),
                 429 => Some(ErrorKind::RateLimited),
                 500..=599 => Some(ErrorKind::ServerUnavailable),
                 _ => None,
@@ -701,16 +712,8 @@ impl Transport {
             {
                 return Err(self.error(ErrorKind::TooLarge));
             }
-            let content_type = response
-                .headers()
-                .get(CONTENT_TYPE)
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("")
-                .split(';')
-                .next()
-                .unwrap_or("");
             if status != 304 && content_type != "application/json" {
-                return Err(self.error(ErrorKind::Malformed));
+                return Err(self.error(unstructured_http_error(status, ErrorKind::Malformed)));
             }
             let last_given = header_number(response.headers(), "X-Chat-Last-Given")
                 .map_err(|k| self.error(k))?;
@@ -732,9 +735,14 @@ impl Transport {
                 }
                 body.extend_from_slice(&chunk);
             }
-            let envelope = json::json(&body).map_err(|k| self.error(k))?;
+            let envelope =
+                json::json(&body).map_err(|k| self.error(unstructured_http_error(status, k)))?;
             if let Err(kind) = classify_ocs(status, &envelope, options.account_probe) {
-                let mut error = self.error(kind);
+                let mut error = self.error(if kind == ErrorKind::Malformed {
+                    unstructured_http_error(status, kind)
+                } else {
+                    kind
+                });
                 if kind == ErrorKind::RateLimited {
                     error.retry = Retry::AfterDelay {
                         millis: retry_seconds * 1000,
@@ -864,6 +872,16 @@ impl Drop for Transport {
         }
         #[cfg(any(test, feature = "backend-test"))]
         self.diagnostic_stop();
+    }
+}
+
+// An HTTP refusal is useful connection evidence even when a proxy supplies no
+// OCS envelope. It cannot prove account revocation or a room policy decision.
+fn unstructured_http_error(status: u16, fallback: ErrorKind) -> ErrorKind {
+    match status {
+        403 => ErrorKind::ServerAccessDenied,
+        500..=599 => ErrorKind::ServerUnavailable,
+        _ => fallback,
     }
 }
 

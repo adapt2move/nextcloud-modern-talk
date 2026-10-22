@@ -600,7 +600,10 @@ impl Accounts {
         let network_failure = matches!(
             reply,
             Err(IdentityError::Request(
-                ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
+                ErrorKind::Transport
+                    | ErrorKind::Deadline
+                    | ErrorKind::ServerUnavailable
+                    | ErrorKind::ServerAccessDenied
             ))
         );
         let room_read = matches!(

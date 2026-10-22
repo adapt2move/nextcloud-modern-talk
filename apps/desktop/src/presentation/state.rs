@@ -5,6 +5,91 @@ use talk_core::ui::presentation::{
 };
 use talk_core::ui::{CallScope, Decision, SubmitError, Text, UnavailableReason};
 
+pub(super) fn account_connection_failure(
+    accounts: &talk_core::ui::Page<talk_core::ui::presentation::AccountView, 8>,
+    scope: talk_core::ui::AccountScope,
+) -> Option<talk_core::ui::presentation::ConnectionFailure> {
+    accounts
+        .as_slice()
+        .iter()
+        .find(|account| account.scope == scope)
+        .and_then(|account| account.connection_failure)
+}
+
+pub(super) fn composer_send_decision(
+    snapshot: &PresentationSnapshot,
+    row: &ConversationView,
+) -> Decision {
+    if snapshot.content == ContentState::Ready
+        && account_connection_failure(&snapshot.accounts, row.context.account).is_none()
+    {
+        row.send
+    } else {
+        Decision::Unknown
+    }
+}
+
+pub(super) fn connection_failure_copy(
+    failure: talk_core::ui::presentation::ConnectionFailure,
+) -> (&'static str, &'static str) {
+    use talk_core::ui::presentation::ConnectionFailure;
+    match failure {
+        ConnectionFailure::Unreachable => (
+            "Server nicht erreichbar.",
+            "Die Verbindung zum Server ist fehlgeschlagen. Prüfe Netzwerk, VPN und Serveradresse.",
+        ),
+        ConnectionFailure::TimedOut => (
+            "Server antwortet nicht rechtzeitig.",
+            "Die Verbindung hat zu lange gedauert. Bitte versuche es später erneut.",
+        ),
+        ConnectionFailure::AccessDenied => (
+            "Server verweigert den Zugriff.",
+            "Der Server hat die Anfrage mit HTTP 403 abgelehnt. Prüfe den Serverzugriff.",
+        ),
+        ConnectionFailure::ServerUnavailable => (
+            "Server vorübergehend nicht verfügbar.",
+            "Der Server meldet einen Fehler. Bitte versuche es später erneut.",
+        ),
+        ConnectionFailure::RateLimited => (
+            "Zu viele Anfragen.",
+            "Der Server begrenzt die Anfragen. Bitte warte und versuche es später erneut.",
+        ),
+        ConnectionFailure::InvalidResponse => (
+            "Unerwartete Serverantwort.",
+            "Die Serverantwort konnte nicht verarbeitet werden. Prüfe die Serveradresse oder versuche es später erneut.",
+        ),
+    }
+}
+
+pub(super) fn login_failure_detail(
+    failure: talk_core::ui::presentation::LoginFailure,
+) -> &'static str {
+    use talk_core::ui::presentation::LoginFailure;
+    match failure {
+        LoginFailure::Connection(failure) => connection_failure_copy(failure).1,
+        LoginFailure::Network => {
+            connection_failure_copy(talk_core::ui::presentation::ConnectionFailure::Unreachable).1
+        }
+        LoginFailure::Expired => {
+            "Die Anmeldung hat zu lange gedauert. Mit einem neuen Link kannst du weitermachen."
+        }
+        LoginFailure::BrowserUnavailable => "Prüfe deinen Standardbrowser und versuche es erneut.",
+        LoginFailure::Tls => {
+            "Die Identität des Servers konnte nicht bestätigt werden. Prüfe die Serveradresse."
+        }
+        LoginFailure::Denied => {
+            "Dein Konto wurde nicht verbunden. Du kannst die Anmeldung erneut starten."
+        }
+        LoginFailure::Storage => "Der gespeicherte Anmeldestatus muss wiederhergestellt werden.",
+        LoginFailure::AccountExists => {
+            "Dieses Konto ist bereits auf diesem Gerät eingetragen. Öffne die Konten und verbinde es dort erneut."
+        }
+        LoginFailure::Unconfigured => {
+            "Diese Vorschau kann sich noch nicht mit eurer NextCloud verbinden."
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CallEntry {
     Direct(CallScope),
@@ -377,6 +462,9 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
 
 pub fn error_label(error: SubmitError) -> &'static str {
     match error {
+        SubmitError::Unavailable(UnavailableReason::Connection(failure)) => {
+            connection_failure_copy(failure).1
+        }
         SubmitError::Busy => {
             "Gerade ausgelastet. Dein Entwurf bleibt erhalten; bitte erneut versuchen."
         }
@@ -797,5 +885,38 @@ mod tests {
         row.call = Decision::Allowed;
         row.call_scope.as_mut().unwrap().account.runtime = RuntimeGeneration::from_local(99);
         assert_eq!(call_entry(&row, ContentState::Ready), None);
+    }
+
+    #[test]
+    fn connection_failures_belong_only_to_the_observed_account_runtime() {
+        use talk_core::ui::presentation::{
+            AccountConnectionState, AccountView, ConnectionFailure, Presence, StorageStatus,
+        };
+        let scope = context(1).account;
+        let mut accounts = talk_core::ui::Page::empty();
+        accounts
+            .try_push(AccountView {
+                scope,
+                navigation_key: None,
+                connection: AccountConnectionState::Disconnected,
+                connection_failure: Some(ConnectionFailure::AccessDenied),
+                label: Text::new("Fixture").unwrap(),
+                server_label: Text::new("Fixture server").unwrap(),
+                self_name: Text::new("Fixture").unwrap(),
+                initials: Text::new("F").unwrap(),
+                presence: Presence::Unknown,
+                storage: StorageStatus::NotSaved,
+            })
+            .unwrap();
+        assert_eq!(
+            account_connection_failure(&accounts, scope),
+            Some(ConnectionFailure::AccessDenied)
+        );
+        let mut other = scope;
+        other.account = AccountId::from_local(2);
+        assert_eq!(account_connection_failure(&accounts, other), None);
+        other = scope;
+        other.runtime = RuntimeGeneration::from_local(99);
+        assert_eq!(account_connection_failure(&accounts, other), None);
     }
 }

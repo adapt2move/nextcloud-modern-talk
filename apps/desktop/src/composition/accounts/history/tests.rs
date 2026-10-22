@@ -1201,6 +1201,7 @@ fn room_capacity_uses_open_order_and_evicted_replies_cannot_recreate_content() {
 fn newer_connectivity_observations_keep_warm_rows_and_win_over_late_completions() {
     for error in [
         ErrorKind::Transport,
+        ErrorKind::ServerAccessDenied,
         ErrorKind::Deadline,
         ErrorKind::ServerUnavailable,
     ] {

@@ -456,8 +456,9 @@ def check() -> None:
                 require(allowed, "native presentation import must use core UI, GPUI or local view types")
         require(not re.search(r"nextcloud_talk_api|talk_adapters|talk_core\s*::\s*(?!(?:ui|preferences)\b)\w+|\b(?:core_graphics|ashpd|async_io|futures_lite|enigo|reqwest|hyper|tokio|cookie|serde_json|zeroize|sqlite|rusqlite|keyring_core|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites|cpal|gstreamer|gstreamer_app|gstreamer_video)\b|\b(?:image|windows)\s*::|(?:std|gpui)\s*::\s*(?:net|fs|process|thread|os)|crate\s*::\s*(?!presentation\b)\w+|super\s*::\s*(?:super|composition)|\b(?:include|include_str|include_bytes)\s*!|https?://|/ocs/|/remote\.php/", source),
                 "native presentation contains worker/secret/network/file/media I/O or route")
-        # Native user-entry clipboard only. GPUI's read allocation is not bounded;
-        # admission and privacy gating belong to the reviewed input widget/producer.
+        # Native text clipboard owner: user-entry and explicit read-only selection.
+        # GPUI's read allocation is not bounded; admission and privacy gating
+        # belong to the input owner/producer. Other views cannot access the OS.
         hidden_io = source
         if path == native / "presentation/input.rs":
             hidden_io = allow_input_caret_timer(hidden_io)

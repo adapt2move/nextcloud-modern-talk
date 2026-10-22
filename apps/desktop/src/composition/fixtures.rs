@@ -22,6 +22,7 @@ pub const SCENARIOS: &[&str] = &[
     "expired",
     "login-network",
     "login-admission",
+    "login-server-denied",
     "login-tls",
     "login-denied",
     "login-browser-error",
@@ -32,6 +33,9 @@ pub const SCENARIOS: &[&str] = &[
     "storage-cleanup",
     "storage-recovery",
     "chat",
+    "chat-server-denied",
+    "chat-server-unavailable",
+    "accounts-server-denied",
     "chat-ux",
     "chat-ux-call",
     "chat-edit",
@@ -313,6 +317,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         "storage" | "storage-locked" | "storage-denied" | "storage-saving" | "storage-cleanup"
         | "storage-recovery" => LoginPhase::ChooseStorage,
         "login-network" | "login-admission" => LoginPhase::Failed(LoginFailure::Network),
+        "login-server-denied" => LoginPhase::Failed(LoginFailure::Connection(
+            talk_core::ui::presentation::ConnectionFailure::AccessDenied,
+        )),
         "login-tls" => LoginPhase::Failed(LoginFailure::Tls),
         "login-denied" => LoginPhase::Failed(LoginFailure::Denied),
         "login-browser-error" => LoginPhase::Failed(LoginFailure::BrowserUnavailable),
@@ -346,6 +353,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "storage-recovery"
             | "login-network"
             | "login-admission"
+            | "login-server-denied"
             | "login-tls"
             | "login-denied"
             | "login-browser-error"
@@ -357,6 +365,15 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         scope: scope(),
         navigation_key: None,
         connection: talk_core::ui::presentation::AccountConnectionState::Disconnected,
+        connection_failure: match scenario {
+            "chat-server-denied" | "accounts-server-denied" => {
+                Some(talk_core::ui::presentation::ConnectionFailure::AccessDenied)
+            }
+            "chat-server-unavailable" => {
+                Some(talk_core::ui::presentation::ConnectionFailure::Unreachable)
+            }
+            _ => None,
+        },
         label: text("Nord Studio"),
         server_label: text("cloud.example.test"),
         self_name: text("Alex Sommer"),

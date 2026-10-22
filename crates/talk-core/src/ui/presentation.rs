@@ -93,6 +93,7 @@ pub enum NativeStoreState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoginFailure {
+    Connection(ConnectionFailure),
     Expired,
     BrowserUnavailable,
     Network,
@@ -166,12 +167,24 @@ pub struct AccountView {
     pub scope: AccountScope,
     pub navigation_key: Option<NavigationAccountKey>,
     pub connection: AccountConnectionState,
+    pub connection_failure: Option<ConnectionFailure>,
     pub label: Text<128>,
     pub server_label: Text<128>,
     pub self_name: Text<128>,
     pub initials: Text<16>,
     pub presence: Presence,
     pub storage: StorageStatus,
+}
+
+/// Safe account-wide connection observations, never raw server messages or URLs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionFailure {
+    Unreachable,
+    TimedOut,
+    AccessDenied,
+    ServerUnavailable,
+    RateLimited,
+    InvalidResponse,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

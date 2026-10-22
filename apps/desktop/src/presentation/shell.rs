@@ -444,9 +444,13 @@ impl Desktop {
             .child(header)
             .child(self.conversation_search(cx).bg(t.surface));
         let timeline = self.conversation_timeline(header, constrained, cx);
-        let composer =
-            if self.snapshot.content == ContentState::Denied || row.send == Decision::Denied {
-                div()
+        let composer = if (self.snapshot.content == ContentState::Denied
+            || row.send == Decision::Denied)
+            && self
+                .account_connection_failure(row.context.account)
+                .is_none()
+        {
+            div()
                 .flex_none()
                 .px_6()
                 .py_4()
@@ -458,9 +462,9 @@ impl Desktop {
                 .when(self.local_feedback_visible(), |d| {
                     d.child(self.feedback_view(cx))
                 })
-            } else {
-                self.composer_view(row, false, cx)
-            };
+        } else {
+            self.composer_view(row, false, cx)
+        };
         let panel = div()
             .rounded(px(12.))
             .flex()
@@ -493,7 +497,8 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
-        let ready = self.snapshot.content == ContentState::Ready && row.send == Decision::Allowed;
+        let connection_failure = self.account_connection_failure(row.context.account);
+        let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
         let emoji_availability = self.emoji_availability(cx).above_composer();
         let options_availability = Availability::available().above_composer();
@@ -616,9 +621,25 @@ impl Desktop {
                             ))),
                     ),
             )
-            .when(self.snapshot.content == ContentState::Offline, |d| {
-                d.child(self.hint(self.l("Offline · Entwürfe werden nicht automatisch gesendet.")))
+            .when_some(connection_failure, |d, failure| {
+                d.child(div().text_color(t.danger).text_size(self.sp(12.)).child(
+                    self.selectable_text(
+                        "composer-connection-error",
+                        self.l(super::state::connection_failure_copy(failure).1),
+                    ),
+                ))
+                .child(self.hint(self.l(
+                    "Dein Entwurf bleibt erhalten. Nachrichten werden nicht automatisch gesendet.",
+                )))
             })
+            .when(
+                self.snapshot.content == ContentState::Offline && connection_failure.is_none(),
+                |d| {
+                    d.child(
+                        self.hint(self.l("Offline · Entwürfe werden nicht automatisch gesendet.")),
+                    )
+                },
+            )
             .when(self.composer.read(cx).rejected, |d| {
                 d.child(
                     div().text_color(t.danger).text_size(self.sp(12.)).child(

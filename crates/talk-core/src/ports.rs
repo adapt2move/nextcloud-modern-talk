@@ -40,6 +40,7 @@ pub enum ErrorKind {
     Deadline,
     Busy,
     PermissionDenied,
+    ServerAccessDenied,
     ReauthenticationRequired,
     Malformed,
     Uncertain,

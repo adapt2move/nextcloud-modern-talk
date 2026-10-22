@@ -394,6 +394,7 @@ fn error_name(error: ErrorKind) -> &'static str {
         ErrorKind::Conflict => "conflict",
         ErrorKind::RateLimited => "rate_limited",
         ErrorKind::ServerUnavailable => "server_unavailable",
+        ErrorKind::ServerAccessDenied => "server_access_denied",
     }
 }
 struct Sink {

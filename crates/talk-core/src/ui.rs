@@ -23,6 +23,7 @@ pub const MAX_INTENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnavailableReason {
+    Connection(presentation::ConnectionFailure),
     Unconfigured,
     Unsupported,
     PermissionDenied,

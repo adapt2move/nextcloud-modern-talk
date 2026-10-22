@@ -66,6 +66,35 @@ actions!(
 const CARET_INTERVAL: Duration = Duration::from_millis(500);
 const CARET_TICKS: u8 = 20;
 
+/// Native clipboard writes belong to the text interaction owner. Both editable
+/// fields and read-only selections require an explicit user Copy action and a
+/// current privacy decision before allocating the clipboard String.
+pub(super) fn copy_text_selection(
+    text: &str,
+    range: Range<usize>,
+    permitted: bool,
+    limit: usize,
+    cx: &mut App,
+) -> bool {
+    let Some(selected) = admitted_selection(text, range, permitted, limit) else {
+        return false;
+    };
+    cx.write_to_clipboard(ClipboardItem::new_string(selected.to_owned()));
+    true
+}
+
+fn admitted_selection(
+    text: &str,
+    range: Range<usize>,
+    permitted: bool,
+    limit: usize,
+) -> Option<&str> {
+    if !permitted || range.is_empty() || range.len() > limit {
+        return None;
+    }
+    text.get(range)
+}
+
 fn caret_height(ascent: Pixels, descent: Pixels, font_size: Pixels, line_height: Pixels) -> Pixels {
     // Font metrics can expose the signed OpenType descender. Its distance is
     // part of the caret, not something to subtract from the ascender.
@@ -702,11 +731,13 @@ impl TextInput {
             cx.notify();
             return;
         }
-        if !self.selected_range.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                self.content[self.selected_range.clone()].to_string(),
-            ));
-        }
+        copy_text_selection(
+            &self.content,
+            self.selected_range.clone(),
+            self.clipboard_allowed,
+            self.limit,
+            cx,
+        );
     }
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.interactive || self.composing() {
@@ -718,10 +749,13 @@ impl TextInput {
             cx.notify();
             return;
         }
-        if !self.selected_range.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                self.content[self.selected_range.clone()].to_string(),
-            ));
+        if copy_text_selection(
+            &self.content,
+            self.selected_range.clone(),
+            self.clipboard_allowed,
+            self.limit,
+            cx,
+        ) {
             self.replace_text_in_range(None, "", window, cx)
         }
     }
@@ -1394,7 +1428,11 @@ impl Render for TextInput {
             .min_w_0()
             .key_context("TextInput")
             .track_focus(&self.focus_handle(cx).tab_stop(self.interactive))
-            .cursor(CursorStyle::IBeam)
+            .cursor(if self.interactive {
+                CursorStyle::IBeam
+            } else {
+                CursorStyle::Arrow
+            })
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::delete_to_end))
@@ -1544,6 +1582,7 @@ impl TextInput {
     }
 }
 pub fn bind_keys(cx: &mut App) {
+    super::selectable::bind_keys(cx);
     let context = Some("TextInput");
     use talk_core::preferences::shortcuts::{ActionId, Modifiers, SHORTCUTS};
     cx.bind_keys(SHORTCUTS.iter().filter_map(|shortcut| {
@@ -1679,9 +1718,9 @@ fn closest_grapheme(text: &str, offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, caret_height, closest_grapheme,
-        current_boundary, from_utf16, horizontal_scroll, mention_range, next_grapheme,
-        previous_grapheme, replacement_fits, to_utf16, visual_row,
+        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, admitted_selection, caret_height,
+        closest_grapheme, current_boundary, from_utf16, horizontal_scroll, mention_range,
+        next_grapheme, previous_grapheme, replacement_fits, to_utf16, visual_row,
     };
     use unicode_segmentation::UnicodeSegmentation;
     #[test]
@@ -1706,6 +1745,16 @@ mod tests {
                 snapped == text.len() || text.grapheme_indices(true).any(|(i, _)| i == snapped)
             );
         }
+    }
+    #[test]
+    fn clipboard_admission_rejects_denial_oversize_and_invalid_utf8_ranges() {
+        let text = "A🌍B";
+        assert_eq!(admitted_selection(text, 1..5, true, 4), Some("🌍"));
+        assert_eq!(admitted_selection(text, 1..5, false, 4), None);
+        assert_eq!(admitted_selection(text, 1..5, true, 3), None);
+        assert_eq!(admitted_selection(text, 2..5, true, 4), None);
+        assert_eq!(admitted_selection(text, 0..99, true, 100), None);
+        assert_eq!(admitted_selection(text, 0..0, true, 4), None);
     }
     #[test]
     fn single_line_scroll_recovers_after_resize_or_replacement() {

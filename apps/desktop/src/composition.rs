@@ -222,7 +222,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("discover") => Some(Overlay::Discover),
-        Some("accounts" | "focus-accounts") => Some(Overlay::Accounts),
+        Some("accounts" | "focus-accounts" | "accounts-server-denied") => Some(Overlay::Accounts),
         _ => None,
     };
     let prejoin = matches!(

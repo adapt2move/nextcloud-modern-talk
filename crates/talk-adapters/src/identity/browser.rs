@@ -62,12 +62,12 @@ pub(crate) async fn open(url: &str, cancel: &Cancellation) -> Result<()> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| ErrorKind::Unsupported)?;
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(url.as_bytes()).is_err() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(ErrorKind::Unsupported.into());
-        }
+    if let Some(mut stdin) = child.stdin.take()
+        && stdin.write_all(url.as_bytes()).is_err()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(ErrorKind::Unsupported.into());
     }
     let until = Instant::now() + Duration::from_secs(3);
     loop {

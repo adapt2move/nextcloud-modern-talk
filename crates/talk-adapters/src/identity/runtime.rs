@@ -118,6 +118,7 @@ pub struct AccountSummary {
     pub cleanup_pending: bool,
     pub suppression_unconfirmed: bool,
     pub connection_degraded: bool,
+    pub connection_error: Option<ErrorKind>,
     pub recovery: Option<RecoverySelection>,
     pub revision: u64,
 }
@@ -748,7 +749,7 @@ struct Worker {
     active_item: Option<QualifiedItem>,
     active_grant: Option<Grant>,
     health_probe: Option<ProbePlan>,
-    connection_degraded: bool,
+    connection_error: Option<ErrorKind>,
     sends: Vec<SendRecord>,
     create_uncertain: bool,
     tag_create_uncertain: bool,
@@ -836,7 +837,7 @@ async fn run(
                 active_item: None,
                 active_grant: None,
                 health_probe: None,
-                connection_degraded: false,
+                connection_error: None,
                 sends: Vec::new(),
                 create_uncertain: false,
                 tag_create_uncertain: false,
@@ -1097,7 +1098,7 @@ impl Worker {
             self.active_item = None;
             self.active_grant = None;
             self.health_probe = None;
-            self.connection_degraded = false;
+            self.connection_error = None;
             self.epoch = current;
         }
         if lock(&self.control.pending)
@@ -1175,7 +1176,8 @@ impl Worker {
                     .iter()
                     .any(|o| o.settlement == 0 || (o.abandoned && !o.cleanup)),
             suppression_unconfirmed: unconfirmed,
-            connection_degraded: self.connection_degraded,
+            connection_degraded: self.connection_error.is_some(),
+            connection_error: self.connection_error,
             recovery,
             revision: a.revision,
         })
@@ -1717,7 +1719,7 @@ impl Worker {
                             ProtocolRequest::ProbeAccount | ProtocolRequest::InspectAccount
                         ) {
                             self.health_probe = None;
-                            self.connection_degraded = false;
+                            self.connection_error = None;
                             self.publish_current()?;
                         }
                         Ok(RuntimeReply::Protocol(reply))
@@ -1740,7 +1742,7 @@ impl Worker {
                             self.publish(AccountPhase::ReauthenticationRequired)?;
                             self.shared.wake.notify_one();
                         } else if ambiguous(e.kind) {
-                            self.schedule_probe(e.retry);
+                            self.schedule_probe(e.kind, e.retry);
                             self.publish_current()?;
                         }
                         Err(IdentityError::Request(e.kind))
@@ -1788,8 +1790,8 @@ impl Worker {
         self.publish(old.phase)?;
         Ok(())
     }
-    fn schedule_probe(&mut self, retry: talk_core::ports::Retry) {
-        self.connection_degraded = true;
+    fn schedule_probe(&mut self, kind: ErrorKind, retry: talk_core::ports::Retry) {
+        self.connection_error = Some(kind);
         let guidance = match retry {
             talk_core::ports::Retry::AfterDelay { millis } => {
                 Duration::from_millis(u64::from(millis))
@@ -1854,7 +1856,7 @@ impl Worker {
             Ok(ProtocolReply::AccountValid(valid))
                 if valid == scope && self.admitted(&cancel).is_ok() =>
             {
-                self.connection_degraded = false;
+                self.connection_error = None;
                 let _ = self.publish_current();
             }
             Err(error)
@@ -1868,6 +1870,8 @@ impl Worker {
                 self.shared.wake.notify_one();
             }
             Err(error) if ambiguous(error.kind) && self.admitted(&cancel).is_ok() => {
+                self.connection_error = Some(error.kind);
+                let _ = self.publish_current();
                 let base = [2000u64, 4000, 8000, 16000, 30000][usize::from(plan.retries.min(4))];
                 let jitter = ledger::random()
                     .map(|n| (n % ((base / 5 + 1) as u128)) as u64)
@@ -2138,7 +2142,7 @@ impl Worker {
         self.active_item = active_item;
         self.active_grant = Some(grant);
         self.health_probe = None;
-        self.connection_degraded = false;
+        self.connection_error = None;
         self.operation = None;
         let summary = self.publish(AccountPhase::Active)?;
         Ok(RuntimeReply::Active { summary, probe })
@@ -2351,6 +2355,7 @@ fn ambiguous(kind: ErrorKind) -> bool {
     matches!(
         kind,
         ErrorKind::Transport
+            | ErrorKind::ServerAccessDenied
             | ErrorKind::Deadline
             | ErrorKind::Malformed
             | ErrorKind::ServerUnavailable
@@ -2458,6 +2463,7 @@ mod tests {
                 cleanup_pending: false,
                 suppression_unconfirmed: false,
                 connection_degraded: false,
+                connection_error: None,
                 recovery: None,
                 revision: ledger.account(account.id).unwrap().revision,
             })

@@ -316,7 +316,7 @@ async fn probe_checks_origin_canonical_user_and_request_headers() {
 #[tokio::test]
 async fn non_ocs_http_failures_preserve_account_admission_and_retry_guidance() {
     for (status, expected) in [
-        (403, ErrorKind::PermissionDenied),
+        (403, ErrorKind::ServerAccessDenied),
         (429, ErrorKind::RateLimited),
         (500, ErrorKind::ServerUnavailable),
         (503, ErrorKind::ServerUnavailable),

@@ -20,6 +20,7 @@ mod overlays;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
+mod selectable;
 mod settings;
 mod settings_pages;
 mod shell;
@@ -197,6 +198,8 @@ pub struct InitialView {
 use crate::presentation::feedback::Feedback;
 
 pub struct Desktop {
+    text_selection: Entity<selectable::Selection>,
+    _text_selection_observer: Subscription,
     updates: talk_core::preferences::updates::UpdateSnapshot,
     // Successful install admission drains all service owners. This latch is
     // never cleared by an error snapshot; composition owns restart/quit.
@@ -340,6 +343,8 @@ impl Desktop {
         });
         let theme = Theme::resolve(palette, appearance, cx.window_appearance());
         let root_focus = cx.focus_handle();
+        let text_selection = cx.new(selectable::Selection::new);
+        let text_selection_observer = cx.observe(&text_selection, |_, _, cx| cx.notify());
         let modal_focus = cx.focus_handle();
         let server = cx.new(|cx| TextInput::new("cloud.example.test/nextcloud", 2048, theme, cx));
         let search = cx.new(|cx| TextInput::new("Geladene Inhalte durchsuchen …", 256, theme, cx));
@@ -411,6 +416,8 @@ impl Desktop {
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
+            text_selection,
+            _text_selection_observer: text_selection_observer,
             room_ui,
             message_ui,
             content_ui,
@@ -644,6 +651,7 @@ impl Desktop {
         self.drafts.retain_accounts(&next);
         if previous != next.selected || previous_account != next.active_account {
             self.retire_emoji_picker();
+            self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
         self.snapshot = next;
@@ -784,6 +792,12 @@ impl Desktop {
                 self.prejoin.is_some(),
                 self.incoming_visible(),
             )
+    }
+    fn account_connection_failure(
+        &self,
+        scope: talk_core::ui::AccountScope,
+    ) -> Option<talk_core::ui::presentation::ConnectionFailure> {
+        state::account_connection_failure(&self.snapshot.accounts, scope)
     }
     pub fn handle(&mut self, action: LocalAction, window: &mut Window, cx: &mut Context<Self>) {
         // Window controls stay available while the content is modal or inert,
@@ -1158,6 +1172,17 @@ impl Desktop {
                 if self.composer.read(cx).composing() {
                     return;
                 }
+                if let Some(context) = self.snapshot.selected
+                    && let Some(failure) = self.account_connection_failure(context.account)
+                {
+                    self.save_draft(cx);
+                    self.feedback = Some(
+                        Feedback::warning(state::connection_failure_copy(failure).1)
+                            .in_conversation(context),
+                    );
+                    cx.notify();
+                    return;
+                }
                 if self.send_edit(cx) {
                     cx.notify();
                     return;
@@ -1171,11 +1196,7 @@ impl Desktop {
                     && let Some(row) = self.selected()
                 {
                     let context = row.context;
-                    let gate = if self.snapshot.content == ContentState::Ready {
-                        row.send
-                    } else {
-                        Decision::Unknown
-                    };
+                    let gate = state::composer_send_decision(&self.snapshot, row);
                     self.feedback = Some(
                         (match self.drafts.send(context, gate, self.port.as_mut()) {
                             Ok(_) => Feedback::info("Senden wird vorbereitet …"),
@@ -1722,9 +1743,32 @@ impl Desktop {
             .text_color(self.theme.muted)
             .child(text.to_owned())
     }
+    fn selectable_text(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        text: &str,
+    ) -> selectable::SelectableText {
+        selectable::SelectableText::new(
+            id,
+            text,
+            self.text_selection.clone(),
+            self.theme,
+            !self.background_inert && !self.projection_blocked && !self.update_restart_pending,
+        )
+    }
+    fn selectable_hint(&self, id: impl Into<gpui::ElementId>, text: &str) -> Div {
+        div()
+            .text_size(self.sp(12.))
+            .line_height(self.sp(18.))
+            .font_weight(FontWeight::NORMAL)
+            .text_color(self.theme.muted)
+            .child(self.selectable_text(id, text))
+    }
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.text_selection
+            .update(cx, |owner, _| owner.begin_frame());
         // Retained parent focus includes toolbar controls reached by Tab.
         // Only entry/exit notifications rebuild the optional composer details.
         self.composer_active =
@@ -1981,20 +2025,20 @@ impl Render for Desktop {
         let view = div()
             .relative()
             .on_children_prepainted(cx.processor(move |this, _, window, cx| {
+                let fallback = if this.account_removal.confirming() {
+                    &this.account_removal.focus
+                } else if this.overlay.is_some() || this.prejoin.is_some() {
+                    &this.modal_focus
+                } else {
+                    &this.root_focus
+                };
+                this.text_selection
+                    .update(cx, |owner, cx| owner.finish_frame(window, fallback, cx));
                 // Virtual list controls register during child prepaint, after
                 // Render returns. Retiring them earlier loses row focus and
                 // hover ownership on every keyboard-triggered render.
                 reveal.finish();
-                this.control_focus.finish_frame(
-                    window,
-                    if this.account_removal.confirming() {
-                        &this.account_removal.focus
-                    } else if this.overlay.is_some() || this.prejoin.is_some() {
-                        &this.modal_focus
-                    } else {
-                        &this.root_focus
-                    },
-                );
+                this.control_focus.finish_frame(window, fallback);
                 this.finish_message_menu_frame(window, cx);
                 if this.hover_hints.retire(|id| this.control_focus.live(id)) {
                     cx.notify();
