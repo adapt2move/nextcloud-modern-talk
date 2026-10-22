@@ -440,16 +440,22 @@ impl Desktop {
                         cx,
                     ));
                 }
-                if let Some(attempt) = login.attempt {
-                    card = card.child(self.button(
+                // Begin can fail before a runtime attempt exists. Leaving that
+                // failure must still clear the retained retry destination.
+                card = card.child(
+                    self.button(
                         "change-server",
                         "Anderen Server verwenden",
                         ButtonStyle::Quiet,
                         true,
-                        LocalAction::Intent(UiIntent::CancelLogin(attempt)),
+                        LocalAction::Intent(
+                            login
+                                .attempt
+                                .map_or(UiIntent::NewLogin, UiIntent::CancelLogin),
+                        ),
                         cx,
-                    ));
-                }
+                    ),
+                );
             }
         }
         card = card.when(self.local_feedback_visible(), |d| {

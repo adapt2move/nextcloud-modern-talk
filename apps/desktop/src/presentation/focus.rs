@@ -141,6 +141,7 @@ impl FocusStates {
             "reopen-browser",
             "login",
             "retry-login",
+            "change-server",
             "cancel-validating",
             "cancel-login",
             "retry-content",

@@ -133,6 +133,47 @@ fn typed_login_retry_preserves_installation_and_replacement_after_repeated_worke
 }
 
 #[test]
+fn rejected_begin_can_change_server_without_an_admitted_attempt() {
+    for busy in [false, true] {
+        let mut model = model();
+        if busy {
+            for id in 1..=16 {
+                model.pending.push(Pending {
+                    id: ConnectionRequestId(id),
+                    purpose: Purpose::Login(RequestId(id), LoginWork::Begin),
+                });
+            }
+        }
+        let server = ServerInput::new("https://cloud.example.test/nextcloud").unwrap();
+        for request in [RequestId(20), RequestId(21)] {
+            assert!(
+                model
+                    .submit(UiIntent::BeginLogin {
+                        request,
+                        server: server.clone()
+                    })
+                    .is_err()
+            );
+            assert!(matches!(model.snapshot.login.phase, LoginPhase::Failed(_)));
+            assert!(model.snapshot.login.attempt.is_none());
+            assert!(model.login.is_none());
+            assert_eq!(model.login_retry_server.as_ref(), Some(&server));
+        }
+        // The failure page uses NewLogin when no admitted attempt can be cancelled.
+        model.submit(UiIntent::NewLogin).unwrap();
+        assert_eq!(model.snapshot.login.phase, LoginPhase::EnterServer);
+        assert!(model.login_retry_server.is_none());
+        assert!(model.replace.is_none());
+        assert_eq!(
+            model.submit(UiIntent::RetryLogin {
+                request: RequestId(22)
+            }),
+            Err(SubmitError::StaleScope)
+        );
+    }
+}
+
+#[test]
 fn new_login_retry_retains_full_address_without_inventing_a_replacement() {
     let mut model = model();
     let server = ServerInput::new("https://cloud.example.test/nextcloud").unwrap();

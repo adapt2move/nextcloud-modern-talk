@@ -35,6 +35,8 @@ impl Transport {
         upload: Option<(reqwest::Body, u64)>,
         sink: &mut W,
     ) -> Result<u64, PortError> {
+        // Endpoint construction is local admission for this operation too.
+        self.request_dispatched = false;
         let url = self.file_endpoint(&path)?;
         self.stream(c, url, upload, sink, StreamRead::File(None))
             .await
@@ -46,6 +48,7 @@ impl Transport {
         sink: &mut W,
         progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
     ) -> Result<u64, PortError> {
+        self.request_dispatched = false;
         let url = self.file_endpoint(&path)?;
         self.stream(c, url, None, sink, StreamRead::File(Some(progress)))
             .await
@@ -58,6 +61,7 @@ impl Transport {
         sink: &mut W,
         read: StreamRead<'_>,
     ) -> Result<u64, PortError> {
+        self.request_dispatched = false;
         let pdf = matches!(read, StreamRead::Pdf);
         let (read_limit, progress, image) = match read {
             StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
@@ -127,6 +131,8 @@ impl Transport {
         .min(FILE_LIMIT);
         let account_cancel = self.binding.cancellation.clone();
         let work = async {
+            // Only polled work can dispatch; cancellation may win before this point.
+            self.request_dispatched = true;
             let mut response = self
                 .client
                 .execute(request)
@@ -235,3 +241,6 @@ impl Transport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -21,6 +21,7 @@ pub const SCENARIOS: &[&str] = &[
     "ready",
     "expired",
     "login-network",
+    "login-admission",
     "login-tls",
     "login-denied",
     "login-browser-error",
@@ -304,14 +305,14 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     };
     s.login.server_label = text("cloud.example.test");
     s.login.account_label = text("Alex Sommer");
-    s.login.attempt = Some(RequestId(1));
+    s.login.attempt = (scenario != "login-admission").then_some(RequestId(1));
     s.login.phase = match scenario {
         "server" => LoginPhase::EnterServer,
         "validating" => LoginPhase::Validating,
         "browser" => LoginPhase::BrowserWaiting,
         "storage" | "storage-locked" | "storage-denied" | "storage-saving" | "storage-cleanup"
         | "storage-recovery" => LoginPhase::ChooseStorage,
-        "login-network" => LoginPhase::Failed(LoginFailure::Network),
+        "login-network" | "login-admission" => LoginPhase::Failed(LoginFailure::Network),
         "login-tls" => LoginPhase::Failed(LoginFailure::Tls),
         "login-denied" => LoginPhase::Failed(LoginFailure::Denied),
         "login-browser-error" => LoginPhase::Failed(LoginFailure::BrowserUnavailable),
@@ -344,6 +345,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "storage-cleanup"
             | "storage-recovery"
             | "login-network"
+            | "login-admission"
             | "login-tls"
             | "login-denied"
             | "login-browser-error"
@@ -1169,6 +1171,10 @@ impl NativeDesktopPort for DevelopmentPort {
             UiIntent::BeginLogin { request, .. } => {
                 self.snapshot.login.phase = LoginPhase::BrowserWaiting;
                 self.snapshot.login.attempt = Some(request);
+            }
+            UiIntent::NewLogin => {
+                self.snapshot.login.phase = LoginPhase::EnterServer;
+                self.snapshot.login.attempt = None;
             }
             UiIntent::CancelLogin(attempt) => {
                 if self.snapshot.login.attempt != Some(attempt) {
