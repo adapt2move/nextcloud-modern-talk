@@ -336,6 +336,17 @@ impl Transport {
     ) -> Result<Vec<u8>, PortError> {
         self.api.image(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn video(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+        format: api::content::VideoFormat,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api
+            .video(&context(c), path, format)
+            .await
+            .map_err(error)
+    }
     #[cfg(any(test, target_os = "macos"))]
     pub(super) async fn preview_pdf(
         &mut self,

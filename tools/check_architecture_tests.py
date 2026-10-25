@@ -47,7 +47,7 @@ class ImportStrings(unittest.TestCase):
     def setUp(self):
         self.guard['failures'].clear()
 
-    def native(self, source, core='', core_ui='', filename='fixture.rs'):
+    def native(self, source, core='', core_ui='', filename='fixture.rs', core_filename='fixture.rs'):
         with tempfile.TemporaryDirectory(prefix='architecture-strings-') as directory:
             root = Path(directory)
             native = root / 'apps/desktop/src/presentation'
@@ -55,7 +55,7 @@ class ImportStrings(unittest.TestCase):
             (native / filename).write_text(source)
             core_dir = root / 'crates/talk-core/src'
             core_dir.mkdir(parents=True)
-            (core_dir / 'fixture.rs').write_text(core)
+            (core_dir / core_filename).write_text(core)
             (core_dir / 'ui').mkdir()
             (core_dir / 'ui/presentation.rs').write_text(core_ui)
             self.guard['ROOT'] = root
@@ -80,17 +80,28 @@ class ImportStrings(unittest.TestCase):
         source = 'use gpui::div;\nconst COPY: &str = "Both will use GitHub Releases in the future.";'
         self.assertEqual(self.native(source), [])
 
+    def test_user_web_values_are_scoped_to_markup_without_allowing_runtime_io_or_protocol_routes(self):
+        text = 'const INPUT: &str = "https://example.invalid/guide";'
+        self.assertEqual(self.native('', core=text, core_filename='markup.rs'), [])
+        self.assertTrue(self.native('', core=text))
+        self.assertIn('crates/talk-core/src/markup.rs: core contains adapter/runtime I/O',
+                      self.native('', core='use reqwest::Client;', core_filename='markup.rs'))
+        self.assertIn('crates/talk-core/src/markup.rs: raw protocol route leaked into core',
+                      self.native('', core='const ROUTE: &str = "/ocs/v2.php/";', core_filename='markup.rs'))
+
     def test_caret_timer_is_scoped_to_its_input_method(self):
         source = ('impl Input { fn schedule_caret_blink(&mut self, window: &Window, '
                   'cx: &mut Context<Self>) { let literal = "}"; '
-                  'self.task = Some(cx.spawn_in(window, async move |input, cx| { '
-                  'Timer::after(INTERVAL).await; })); } }')
+                  'self.task = Some(cx.spawn(async move |input, cx| { '
+                  'cx.background_executor().timer(CARET_INTERVAL).await; })); } }')
         self.assertEqual(self.native(source, filename='input.rs'), [])
         for value, filename in [
             (source, 'fixture.rs'),
             (source + ' fn other() { cx.spawn_in(window, async {}); }', 'input.rs'),
-            (source.replace('Timer::after', 'cx.http_client(); Timer::after'), 'input.rs'),
-            (source.replace('cx.spawn_in', 'executor.spawn_in'), 'input.rs'),
+            (source.replace('cx.background_executor()', 'cx.http_client(); cx.background_executor()'), 'input.rs'),
+            (source.replace('timer(CARET_INTERVAL)', 'timer(OTHER_INTERVAL)'), 'input.rs'),
+            (source + ' fn other() { cx.background_executor().timer(CARET_INTERVAL); }', 'input.rs'),
+            (source.replace('cx.spawn', 'executor.spawn'), 'input.rs'),
             (source + source, 'input.rs'),
         ]:
             with self.subTest(filename=filename, source=value):
@@ -172,6 +183,8 @@ class ImportStrings(unittest.TestCase):
                       self.native('const S: &str = "use releases; reqwest";'))
         self.assertIn('native presentation contains worker/secret/network/file/media I/O or route',
                       self.native('let file = ::std::fs::File;'))
+        self.assertIn('native presentation contains worker/secret/network/file/media I/O or route',
+                      self.native('let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();'))
         self.assertIn('renderer contract contains secret/transport-bearing identifiers',
                       self.native('', core_ui='const S: &str = "use releases; password";'))
         malformed = 'use talk_core::ui::Text "https://example.invalid/";'

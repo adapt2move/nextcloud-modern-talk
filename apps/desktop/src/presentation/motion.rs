@@ -103,10 +103,10 @@ impl Desktop {
     /// Mounted only while hovered. Persistent selection is static, including
     /// when a virtualized row returns or a modal closes. GPUI's one-shot settles and
     /// stops requesting frames; unmounting retires it without a timer or task.
-    pub(super) fn control_wash(&self, color: gpui::Hsla, radius: f32) -> AnyElement {
+    pub(super) fn control_wash(&self, color: gpui::Hsla, radius: f32, border: f32) -> AnyElement {
         let wash = div()
             .absolute()
-            .inset_0()
+            .inset(gpui::px(-border))
             .rounded(gpui::px(radius))
             .bg(color);
         if self.reduced_motion {

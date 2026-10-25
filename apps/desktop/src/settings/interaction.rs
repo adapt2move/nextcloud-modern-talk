@@ -1,7 +1,7 @@
 //! Cached OS presentation preferences and one deliberate native emoji action.
 //! The existing settings worker owns all OS work. The picker owns its UI after
 //! activation; admission is not a claim that a character was selected or inserted.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use super::native_process;
 use std::time::{Duration, Instant};
 use talk_core::preferences::PreferenceError;
@@ -90,19 +90,14 @@ impl State {
 pub(super) fn observe(cancelled: impl Fn() -> bool) -> Profile {
     #[cfg(target_os = "macos")]
     {
-        let reduced = native_process::mac_helper()
-            .ok()
-            .and_then(|path| {
-                native_process::capture(
-                    std::process::Command::new(path).arg("reduce-motion"),
-                    Duration::from_secs(2),
-                    &cancelled,
-                )
-                .ok()
-            })
-            .and_then(|value| parse_bool(&value));
+        // This read needs neither a bundle identity nor permission. Using the
+        // permission helper here made every cargo-run build appear to request
+        // reduced motion, permanently disabling its caret and arrival animation.
+        let reduced = cancelled()
+            || objc2_app_kit::NSWorkspace::sharedWorkspace()
+                .accessibilityDisplayShouldReduceMotion();
         Profile {
-            reduced_motion: reduced.unwrap_or(true),
+            reduced_motion: reduced,
             // GPUI opens the character palette in the actual app process.
             picker: Picker::Unavailable,
         }
@@ -229,7 +224,7 @@ pub(super) fn open(picker: Picker, cancelled: impl Fn() -> bool) -> Result<(), P
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(any(target_os = "linux", test))]
 fn parse_bool(value: &str) -> Option<bool> {
     match value.trim() {
         "true" => Some(true),

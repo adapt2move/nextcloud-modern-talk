@@ -15,6 +15,7 @@ use talk_core::preferences::{
 };
 
 mod navigation;
+mod reactions;
 
 pub(super) const MAX_FILE_BYTES: usize = 512 * 1024;
 pub(super) trait PreferenceStore: Send {
@@ -93,7 +94,7 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 pub(super) fn encode(values: &LocalPreferences) -> String {
     let mut encoded = format!(
-        "nextcloud-modern-talk-preferences 6\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
+        "nextcloud-modern-talk-preferences 7\npalette={}\nappearance={}\nscale={}\nsidebar={}\nlocale={}\nlogin={}\nbackground={}\nmessages_banners={}\nmessages_sounds={}\nimportant_banners={}\nimportant_sounds={}\nincoming_calls_banners={}\nincoming_calls_sounds={}\ncalendar_banners={}\ncalendar_sounds={}\nmicrophone={}\nspeaker={}\ncamera={}\n",
         match values.palette {
             Palette::Blue => "blue",
             Palette::Sage => "sage",
@@ -149,6 +150,7 @@ pub(super) fn encode(values: &LocalPreferences) -> String {
         encoded.push_str("onboarding_resume=none\n");
     }
     navigation::encode(&values.navigation, &mut encoded);
+    reactions::encode(&values.recent_reactions, &mut encoded);
     encoded
 }
 fn encode_device(selection: &DeviceSelection) -> String {
@@ -218,6 +220,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         Some("nextcloud-modern-talk-preferences 4") => 4,
         Some("nextcloud-modern-talk-preferences 5") => 5,
         Some("nextcloud-modern-talk-preferences 6") => 6,
+        Some("nextcloud-modern-talk-preferences 7") => 7,
         Some(header) if header.starts_with("nextcloud-modern-talk-preferences ") => {
             return Err(PreferenceError::UnsupportedVersion);
         }
@@ -380,6 +383,10 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
                 };
                 22
             }
+            "recent_reactions" if version >= 7 => {
+                result.recent_reactions = reactions::decode(value)?;
+                23
+            }
             _ => return Err(PreferenceError::InvalidData),
         };
         if seen & (1 << index) != 0 {
@@ -393,7 +400,8 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         3 => 0xffe7f,
         4 => 0x1ffe7f,
         5 => 0x3ffe7f,
-        _ => 0x7ffe7f,
+        6 => 0x7ffe7f,
+        _ => 0xfffe7f,
     };
     if seen != required {
         return Err(PreferenceError::InvalidData);
@@ -407,10 +415,10 @@ pub(super) fn decode(bytes: &[u8]) -> Result<(LocalPreferences, LoadState), Pref
         result.notifications.calendar = NotificationDelivery::OFF;
     }
     // Existing login=false remains explicit. Older formats have no setup handoff.
-    // Migration is decoded in memory; the next explicit save atomically writes v6.
+    // Migration is decoded in memory; the next explicit save atomically writes v7.
     Ok((
         result,
-        if version < 6 {
+        if version < 7 {
             LoadState::Migrated
         } else {
             LoadState::Loaded

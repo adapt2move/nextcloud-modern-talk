@@ -30,6 +30,28 @@ impl crate::transport::Transport {
         }
         Ok(bytes)
     }
+    pub(crate) async fn video(
+        &mut self,
+        c: &OperationContext,
+        path: crate::files::FilePath,
+        format: crate::content::VideoFormat,
+    ) -> Result<Vec<u8>, Error> {
+        self.request_dispatched = false;
+        let url = self.file_endpoint(&path)?;
+        let mut bytes = Vec::new();
+        self.stream(
+            c,
+            url,
+            None,
+            &mut bytes,
+            super::files::StreamRead::Video(format),
+        )
+        .await?;
+        if bytes.is_empty() {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        Ok(bytes)
+    }
     pub(crate) async fn image(
         &mut self,
         c: &OperationContext,

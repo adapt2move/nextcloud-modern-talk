@@ -1,6 +1,6 @@
 //! Current-account creation: directory selection or an explicit named group.
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability};
-use gpui::{Context, Div, Focusable, div, prelude::*, px};
+use gpui::{Context, Div, div, prelude::*, px};
 use talk_core::ui::{
     Decision,
     conversation::{CreateAction, RemoteState},
@@ -129,7 +129,12 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(self.room_ui.search.clone())
+                        .child(
+                            self.input_surface(&self.room_ui.search, cx)
+                                .flex_1()
+                                .min_w_0()
+                                .child(self.room_ui.search.clone()),
+                        )
                         .child(self.button(
                             "create-find-people",
                             "Suchen",
@@ -179,14 +184,8 @@ impl Desktop {
                 ))
                 .child(self.title(self.l("Name des Gesprächs")))
                 .child(
-                    div()
-                        .relative()
+                    self.input_surface(&self.conversation_name, cx)
                         .min_h(px(48.))
-                        .px_3()
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(self.theme.input_border)
-                        .child(self.field_ring(self.conversation_name.focus_handle(cx), 8.))
                         .child(self.conversation_name.clone()),
                 );
             if panel.is_none_or(|p| p.group != Decision::Allowed) {

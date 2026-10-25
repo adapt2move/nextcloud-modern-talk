@@ -40,6 +40,7 @@
         "lib/libgstaudio-1.0.0.dylib",
         "lib/libgstgl-1.0.0.dylib",
         "lib/libgstpbutils-1.0.0.dylib",
+        "lib/libgstriff-1.0.0.dylib",
         "lib/libgstrtp-1.0.0.dylib",
         "lib/libgsttag-1.0.0.dylib",
         "lib/libgstvideo-1.0.0.dylib"
@@ -52,6 +53,10 @@
       "filename": "gst-plugins-good-1.28.4.tar.xz",
       "name": "gst-plugins-good",
       "runtime_files": [
+        "lib/gstreamer-1.0/libgstaudioparsers.dylib",
+        "lib/gstreamer-1.0/libgstisomp4.dylib",
+        "lib/gstreamer-1.0/libgstmatroska.dylib",
+        "lib/gstreamer-1.0/libgstosxaudio.dylib",
         "lib/gstreamer-1.0/libgstrtp.dylib",
         "lib/gstreamer-1.0/libgstvpx.dylib"
       ],
@@ -64,6 +69,7 @@
       "name": "gst-plugins-bad",
       "runtime_files": [
         "lib/gstreamer-1.0/libgstapplemedia.dylib",
+        "lib/gstreamer-1.0/libgstvideoparsersbad.dylib",
         "lib/libgstcodecparsers-1.0.0.dylib",
         "lib/libgstvulkan-1.0.0.dylib"
       ],

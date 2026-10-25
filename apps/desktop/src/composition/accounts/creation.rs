@@ -167,7 +167,7 @@ impl Accounts {
             _ => Completion::Failed(UnavailableReason::PolicyStale),
         };
         panel.state = match completion {
-            Completion::ServerAccepted => RemoteState::Idle,
+            Completion::Queued | Completion::ServerAccepted => RemoteState::Idle,
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };

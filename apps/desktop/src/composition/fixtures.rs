@@ -33,6 +33,13 @@ pub const SCENARIOS: &[&str] = &[
     "storage-cleanup",
     "storage-recovery",
     "chat",
+    "chat-grouped",
+    "chat-busy",
+    "chat-send-pending",
+    "chat-reactions",
+    "chat-reactions-pending",
+    "chat-reactions-denied",
+    "loading-conversations",
     "chat-server-denied",
     "chat-server-unavailable",
     "accounts-server-denied",
@@ -181,6 +188,148 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(
+        scenario,
+        Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
+    ) {
+        let mut state = snapshot(Some("chat-send-pending"));
+        if scenario == Some("chat-reactions-denied")
+            && let Some(panel) = state.message_panel.as_mut()
+        {
+            panel.features = page(panel.features.as_slice().iter().copied().map(
+                |(feature, mut available)| {
+                    if feature == talk_core::ui::messaging::MessageFeature::React {
+                        available.allowed = Decision::Denied;
+                    }
+                    (feature, available)
+                },
+            ));
+        }
+        return state;
+    }
+    if scenario == Some("chat-send-pending") {
+        let mut state = snapshot(Some("chat-grouped"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut message| {
+            if message.local_id == 5 { message.metadata.edited = true; }
+            if message.local_id == 6 {
+                message.body = text("Eine längere fiktive Nachricht prüft den Umbruch und den gleichbleibenden Abstand der Bestätigung. Auch mit mehreren Textzeilen bleibt das Häkchen in derselben Spalte wie bei der vorherigen Nachricht.");
+            }
+            message
+        }));
+        return state;
+    }
+    if scenario == Some("chat-busy") {
+        return snapshot(Some("chat-grouped"));
+    }
+    if scenario == Some("loading-conversations") {
+        let mut state = snapshot(Some("chat"));
+        state.conversations = Page::empty();
+        state.selected = None;
+        state.messages = Page::empty();
+        state.files = Page::empty();
+        state.participants = Page::empty();
+        state.conversation_panel = None;
+        state.message_panel = None;
+        state.content_panel = Default::default();
+        state.conversation_list.content = ContentState::Loading;
+        state.content = ContentState::Loading;
+        return state;
+    }
+    if scenario == Some("chat-grouped") {
+        let mut state = snapshot(Some("chat-ux"));
+        let base = 1_800_003_600;
+        state.messages = page(
+            [
+                (
+                    1,
+                    "Mara Fischer",
+                    "MF",
+                    "Die neue Navigation ist bereit.",
+                    false,
+                    0,
+                ),
+                (
+                    2,
+                    "Mara Fischer",
+                    "MF",
+                    "Die Gruppen stehen jetzt direkt unter Gespräche.",
+                    false,
+                    45,
+                ),
+                (
+                    3,
+                    "Mara Fischer",
+                    "MF",
+                    "Und die Zeilen sind wieder kompakt.",
+                    false,
+                    95,
+                ),
+                (
+                    4,
+                    "Alex Sommer",
+                    "AS",
+                    "Passt. Ich prüfe gerade den Eingabebereich.",
+                    true,
+                    110,
+                ),
+                (
+                    5,
+                    "Alex Sommer",
+                    "AS",
+                    "Der Fokus hebt jetzt nur den vorhandenen Rand hervor.",
+                    true,
+                    145,
+                ),
+                (
+                    6,
+                    "Alex Sommer",
+                    "AS",
+                    "Nach einer längeren Pause beginnt eine neue Gruppe.",
+                    true,
+                    300,
+                ),
+            ]
+            .into_iter()
+            .map(|(id, author, initials, body, own, offset)| {
+                let mut message = message(id, author, initials, "10:00", body, own);
+                message.metadata.author_key =
+                    Some(text(if own { "5:users:alex" } else { "5:users:mara" }));
+                message.metadata.timestamp = base + offset;
+                if id == 4 {
+                    message.metadata.reactions = page([
+                        talk_core::ui::messaging::Reaction {
+                            emoji: text("👍"),
+                            count: 3,
+                            own: true,
+                        },
+                        talk_core::ui::messaging::Reaction {
+                            emoji: text("❤️"),
+                            count: 1,
+                            own: false,
+                        },
+                    ]);
+                }
+                message
+            }),
+        );
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.common_read = Some(4);
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::ReadReceipts,
+                talk_core::ui::messaging::MessageFeature::React,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: talk_core::ui::presentation::FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+        }
+        return state;
+    }
     if matches!(scenario, Some("chat-edit" | "thread-error")) {
         let mut state = snapshot(Some("chat-ux"));
         if let Some(panel) = state.message_panel.as_mut() {
@@ -752,6 +901,8 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
         }
     }
     let mut panel = MessagePanel::new(context);
+    panel.pin_change = Decision::Allowed;
+    panel.pins_loaded = true;
     panel.features = page(
         [
             MessageFeature::Reply,
@@ -891,6 +1042,8 @@ fn account_snapshot(step: u8) -> PresentationSnapshot {
 }
 
 pub struct DevelopmentPort {
+    reaction_fixture: Option<bool>,
+    reaction_diagnostics: u8,
     thread_fixture: Option<bool>,
     snapshot: PresentationSnapshot,
     dirty: bool,
@@ -900,6 +1053,7 @@ pub struct DevelopmentPort {
     pending: bool,
     intents: u8,
     chat_ux_send_diagnostics: u8,
+    busy_read_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
     probe_step: u8,
@@ -924,6 +1078,12 @@ impl DevelopmentPort {
             snapshot(scenario)
         };
         Self {
+            reaction_fixture: matches!(
+                scenario,
+                Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
+            )
+            .then_some(scenario == Some("chat-reactions-pending")),
+            reaction_diagnostics: 0,
             thread_fixture: match scenario {
                 Some("chat-edit") => Some(false),
                 Some("thread-error") => Some(true),
@@ -934,7 +1094,9 @@ impl DevelopmentPort {
             probe_step: 0,
             chat_ux: matches!(
                 scenario,
-                Some("chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error")
+                Some(
+                    "chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error" | "chat-send-pending"
+                )
             ),
             chat_motion: scenario == Some("chat-motion"),
             history_pagination: scenario == Some("history-pagination"),
@@ -942,11 +1104,15 @@ impl DevelopmentPort {
             snapshot: initial,
             dirty: true,
             enabled: scenario.is_some(),
-            busy: matches!(scenario, Some("busy" | "history-busy")),
+            busy: matches!(scenario, Some("busy" | "history-busy" | "chat-busy")),
             uncertain: matches!(scenario, Some("uncertain" | "history-uncertain")),
-            pending: matches!(scenario, Some("pending" | "history-pending")),
+            pending: matches!(
+                scenario,
+                Some("pending" | "history-pending" | "chat-send-pending")
+            ),
             intents: 0,
             chat_ux_send_diagnostics: 0,
+            busy_read_diagnostics: 0,
         }
     }
 }
@@ -1031,7 +1197,105 @@ impl NativeDesktopPort for DevelopmentPort {
                 target.thread,
             );
         }
+        if self.busy
+            && matches!(
+                &intent,
+                UiIntent::Message {
+                    action: talk_core::ui::messaging::MessageAction::MarkRead(_),
+                    ..
+                }
+            )
+        {
+            if self.busy_read_diagnostics < 4 {
+                self.busy_read_diagnostics += 1;
+                println!("UI_BUSY automatic_read_rejected=true no_backend=true");
+            }
+            return Err(SubmitError::Busy);
+        }
         match intent {
+            UiIntent::Message {
+                request,
+                context,
+                action:
+                    talk_core::ui::messaging::MessageAction::React {
+                        message,
+                        emoji,
+                        add,
+                    },
+            } if self.reaction_fixture.is_some() => {
+                use talk_core::ui::{
+                    conversation::RemoteState,
+                    messaging::{MessageFeature, Reaction},
+                };
+                if self.snapshot.selected != Some(context) {
+                    return Err(SubmitError::StaleScope);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                if !panel.availability(MessageFeature::React).enabled() {
+                    return Err(SubmitError::Unavailable(
+                        UnavailableReason::PermissionDenied,
+                    ));
+                }
+                if panel.reaction_pending.is_some() {
+                    return Err(SubmitError::Busy);
+                }
+                let row = self
+                    .snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|row| {
+                        row.local_id == message && !row.metadata.deleted && !row.metadata.system
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                if self.reaction_fixture == Some(true) {
+                    panel.reaction_pending = Some(message);
+                    panel.state = RemoteState::Saving(request);
+                } else {
+                    let mut updated = row.clone();
+                    let mut counts = row.metadata.reactions.as_slice().to_vec();
+                    if let Some(reaction) = counts.iter_mut().find(|r| r.emoji == emoji) {
+                        if add && !reaction.own {
+                            reaction.count += 1;
+                            reaction.own = true;
+                        }
+                        if !add && reaction.own {
+                            reaction.count = reaction.count.saturating_sub(1);
+                            reaction.own = false;
+                        }
+                    } else if add {
+                        counts.push(Reaction {
+                            emoji: emoji.clone(),
+                            count: 1,
+                            own: true,
+                        });
+                    }
+                    counts.retain(|reaction| reaction.count > 0);
+                    updated.metadata.reactions = page(counts);
+                    self.snapshot.messages =
+                        page(self.snapshot.messages.as_slice().iter().map(|row| {
+                            if row.local_id == message {
+                                updated.clone()
+                            } else {
+                                row.clone()
+                            }
+                        }));
+                    panel.state = RemoteState::Idle;
+                    panel.result = Some((request, Completion::ServerAccepted));
+                }
+                if self.reaction_diagnostics < 8 {
+                    self.reaction_diagnostics += 1;
+                    println!(
+                        "UI_REACTION_FIXTURE message={message} emoji={} add={add} pending={} no_backend=true",
+                        emoji.as_str(),
+                        self.reaction_fixture == Some(true)
+                    );
+                }
+            }
             UiIntent::Content {
                 account, action, ..
             } if self.chat_content => {
@@ -1455,6 +1719,47 @@ impl NativeDesktopPort for DevelopmentPort {
 mod tests {
     use super::*;
     use talk_core::ui::MediaIntent;
+    #[test]
+    fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {
+        use talk_core::ui::{conversation::RemoteState, messaging::MessageAction};
+        let mut fixture = DevelopmentPort::new(Some("chat-reactions"));
+        let context = fixture.snapshot.selected.unwrap();
+        let intent = |request, add| UiIntent::Message {
+            request: RequestId(request),
+            context,
+            action: MessageAction::React {
+                message: 4,
+                emoji: text("👍"),
+                add,
+            },
+        };
+        assert_eq!(fixture.try_submit(intent(1, false)), Ok(()));
+        let reaction = &fixture.snapshot.messages.as_slice()[3]
+            .metadata
+            .reactions
+            .as_slice()[0];
+        assert_eq!((reaction.count, reaction.own), (2, false));
+        assert_eq!(fixture.try_submit(intent(2, true)), Ok(()));
+        let reaction = &fixture.snapshot.messages.as_slice()[3]
+            .metadata
+            .reactions
+            .as_slice()[0];
+        assert_eq!((reaction.count, reaction.own), (3, true));
+        let mut pending = DevelopmentPort::new(Some("chat-reactions-pending"));
+        assert_eq!(pending.try_submit(intent(3, false)), Ok(()));
+        assert_eq!(
+            pending.snapshot.message_panel.as_ref().unwrap().state,
+            RemoteState::Saving(RequestId(3))
+        );
+        assert_eq!(pending.try_submit(intent(4, false)), Err(SubmitError::Busy));
+        let mut denied = DevelopmentPort::new(Some("chat-reactions-denied"));
+        assert_eq!(
+            denied.try_submit(intent(5, true)),
+            Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied
+            ))
+        );
+    }
     #[test]
     fn live_account_focus_probe_never_reuses_a_runtime_on_removal_or_switch() {
         let original = account_snapshot(0);

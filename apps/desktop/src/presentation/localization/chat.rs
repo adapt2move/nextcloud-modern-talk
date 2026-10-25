@@ -1,6 +1,12 @@
 //! Chat controls and native picker guidance; never user content.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Als Entwurf bearbeiten",
+        "Edit as draft",
+        "Editar como borrador",
+    ),
+    ("Angeheftet", "Pinned", "Fijado"),
+    (
         "Angeheftete Nachricht lösen",
         "Unpin message",
         "Desfijar mensaje",
@@ -16,6 +22,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Quitar de favoritos",
     ),
     (
+        "Beende zuerst die aktuelle Eingabe. Ein vorhandener Entwurf wird nicht überschrieben.",
+        "Finish the current entry first. An existing draft will not be overwritten.",
+        "Termina primero el texto actual. No se sobrescribirá ningún borrador existente.",
+    ),
+    (
         "Beende zuerst die laufende Texteingabe.",
         "Finish composing the current text first.",
         "Termina primero la composición de texto actual.",
@@ -24,6 +35,21 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Beginn des Gesprächs",
         "Beginning of conversation",
         "Inicio de la conversación",
+    ),
+    (
+        "Bitte ein gültiges Datum mit Uhrzeit eingeben.",
+        "Enter a valid date and time.",
+        "Introduce una fecha y una hora válidas.",
+    ),
+    (
+        "Bitte einen Zeitpunkt in der Zukunft wählen.",
+        "Choose a time in the future.",
+        "Elige una hora futura.",
+    ),
+    (
+        "Bitte erneut anmelden.",
+        "Please sign in again.",
+        "Vuelve a iniciar sesión.",
     ),
     (
         "Das Zielgespräch ist nicht mehr verfügbar.",
@@ -36,9 +62,24 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Archivos y multimedia",
     ),
     (
+        "Datum und Uhrzeit: JJJJ-MM-TT HH:MM",
+        "Date and time: YYYY-MM-DD HH:MM",
+        "Fecha y hora: AAAA-MM-DD HH:MM",
+    ),
+    (
+        "Der Entwurf wird gerade verarbeitet.",
+        "The draft is being processed.",
+        "El borrador se está procesando.",
+    ),
+    (
         "Die Emoji-Auswahl benötigt die für diesen Entwurf gesperrte Zwischenablage.",
         "The emoji picker needs clipboard access, which is blocked for this draft.",
         "El selector de emojis necesita acceso al portapapeles, bloqueado para este borrador.",
+    ),
+    (
+        "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
+        "The system time zone is unavailable. Please try again shortly.",
+        "La zona horaria del sistema no está disponible. Inténtalo de nuevo en un momento.",
     ),
     (
         "Die Verbindung ist derzeit nicht bereit.",
@@ -55,11 +96,53 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "The native emoji picker could not be opened.",
         "No se pudo abrir el selector nativo de emojis.",
     ),
+    (
+        "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen.",
+        "The change could not be saved. Please try again.",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+    ),
+    (
+        "Diese Aktion kann gerade nicht erneut versucht werden.",
+        "This action cannot be retried right now.",
+        "No se puede reintentar esta acción en este momento.",
+    ),
+    (
+        "Diese Uhrzeit kommt bei der Zeitumstellung zweimal vor. Welche möchtest du verwenden?",
+        "This time occurs twice when the clocks change. Which one do you want?",
+        "Esta hora ocurre dos veces al cambiar la hora. ¿Cuál quieres usar?",
+    ),
+    (
+        "Diese Uhrzeit wird bei der Zeitumstellung übersprungen. Bitte eine andere wählen.",
+        "This time is skipped when the clocks change. Choose another time.",
+        "Esta hora se omite al cambiar la hora. Elige otra.",
+    ),
+    (
+        "Eigene Reaktion entfernen",
+        "Remove your reaction",
+        "Quitar tu reacción",
+    ),
     ("Emoji auswählen", "Choose an emoji", "Elegir un emoji"),
+    ("Erinnern", "Remind me", "Recordarme"),
+    ("Erinnerung", "Reminder", "Recordatorio"),
+    (
+        "Erinnerung entfernt.",
+        "Reminder removed.",
+        "Recordatorio eliminado.",
+    ),
+    (
+        "Erinnerung gespeichert.",
+        "Reminder saved.",
+        "Recordatorio guardado.",
+    ),
     (
         "Erinnerungen sind derzeit nicht verfügbar.",
         "Reminders are currently unavailable.",
         "Los recordatorios no están disponibles en este momento.",
+    ),
+    (
+        "Erste Uhrzeit verwenden",
+        "Use the first occurrence",
+        "Usar la primera vez",
     ),
     ("Favorit", "Favorite", "Favorito"),
     (
@@ -71,6 +154,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Für diese Nachricht sind keine Aktionen verfügbar.",
         "No actions are available for this message.",
         "No hay acciones disponibles para este mensaje.",
+    ),
+    (
+        "Gelesen (öffentliche Lesebestätigungen)",
+        "Read (public read receipts)",
+        "Leído (confirmaciones públicas)",
+    ),
+    (
+        "Geplante Nachricht entfernt.",
+        "Scheduled message removed.",
+        "Mensaje programado eliminado.",
     ),
     (
         "Gesprächssuche schließen",
@@ -98,27 +191,73 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Search this conversation",
         "Buscar en esta conversación",
     ),
+    ("In 30 Minuten", "In 30 minutes", "Dentro de 30 minutos"),
+    ("In einer Stunde", "In one hour", "Dentro de una hora"),
+    ("JJJJ-MM-TT HH:MM", "YYYY-MM-DD HH:MM", "AAAA-MM-DD HH:MM"),
+    (
+        "Keine Berechtigung für diese Aktion.",
+        "You don't have permission for this action.",
+        "No tienes permiso para esta acción.",
+    ),
     ("Mit 👍 reagieren", "React with 👍", "Reaccionar con 👍"),
+    ("Morgen um 09:00", "Tomorrow at 09:00", "Mañana a las 09:00"),
+    (
+        "Nachricht geplant.",
+        "Message scheduled.",
+        "Mensaje programado.",
+    ),
+    (
+        "Nachricht weitergeleitet.",
+        "Message forwarded.",
+        "Mensaje reenviado.",
+    ),
+    (
+        "Nächste angeheftete Nachricht",
+        "Next pinned message",
+        "Siguiente mensaje fijado",
+    ),
+    (
+        "Nächsten Montag um 09:00",
+        "Next Monday at 09:00",
+        "El próximo lunes a las 09:00",
+    ),
+    ("Nächster Entwurf", "Next draft", "Siguiente borrador"),
     (
         "Offline · Entwürfe werden nicht automatisch gesendet.",
         "Offline · Drafts will not be sent automatically.",
         "Sin conexión · Los borradores no se enviarán automáticamente.",
     ),
+    ("Planen", "Schedule", "Programar"),
+    (
+        "Planung fehlgeschlagen",
+        "Scheduling failed",
+        "Error al programar",
+    ),
+    ("Reaktion hinzufügen", "Add reaction", "Añadir reacción"),
     (
         "Reaktionen sind derzeit nicht verfügbar.",
         "Reactions are currently unavailable.",
         "Las reacciones no están disponibles en este momento.",
     ),
+    ("Senden fehlgeschlagen", "Sending failed", "Error al enviar"),
     (
         "Threads sind derzeit nicht verfügbar.",
         "Threads are currently unavailable.",
         "Los hilos no están disponibles en este momento.",
     ),
+    ("Verwerfen", "Discard", "Descartar"),
+    (
+        "Vorherige angeheftete Nachricht",
+        "Previous pinned message",
+        "Mensaje fijado anterior",
+    ),
+    ("Vorheriger Entwurf", "Previous draft", "Borrador anterior"),
     (
         "Weiterleiten ist derzeit nicht verfügbar.",
         "Forwarding is currently unavailable.",
         "Reenviar no está disponible en este momento.",
     ),
+    ("Wird gesendet …", "Sending…", "Enviando…"),
     (
         "Wird leise gesendet",
         "Sending silently",
@@ -135,6 +274,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Añadir a favoritos",
     ),
     (
+        "Zweite Uhrzeit verwenden",
+        "Use the second occurrence",
+        "Usar la segunda vez",
+    ),
+    (
         "Ältere Nachrichten erneut laden",
         "Retry loading older messages",
         "Volver a cargar mensajes anteriores",
@@ -144,6 +288,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Loading older messages…",
         "Cargando mensajes anteriores…",
     ),
+    ("Änderung fehlgeschlagen", "Edit failed", "Error al editar"),
     (
         "Öffne zuerst das Nachrichtenfeld.",
         "Open the message composer first.",

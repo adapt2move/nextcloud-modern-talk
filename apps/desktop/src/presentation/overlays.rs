@@ -1,11 +1,14 @@
 use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
-use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
 
 impl Desktop {
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
+        if self.overlay == Some(Overlay::ContentPreview) {
+            return self.media_view(window, cx);
+        }
         if matches!(
             self.overlay,
             Some(Overlay::RoomInfo | Overlay::Participants)
@@ -57,7 +60,7 @@ impl Desktop {
             Overlay::Create => self.creation_body(cx),
             Overlay::Discover => self.discover_body(cx),
             Overlay::Organize => self.organization_body(cx),
-            Overlay::ContentPreview => self.preview_body(cx),
+            Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
             _ => unreachable!(),
         };
@@ -139,15 +142,18 @@ impl Desktop {
                     .when(overlay == Overlay::Create, |d| {
                         d.child(self.creation_footer(cx))
                     })
-                    .when(self.feedback.is_some_and(|f| f.context.is_none()), |d| {
-                        d.child(
-                            div()
-                                .flex_none()
-                                .px_4()
-                                .pb_3()
-                                .child(self.feedback_view(cx)),
-                        )
-                    }),
+                    .when(
+                        self.feedback_visible() && overlay != Overlay::CallChat,
+                        |d| {
+                            d.child(
+                                div()
+                                    .flex_none()
+                                    .px_4()
+                                    .pb_3()
+                                    .child(self.feedback_view(cx)),
+                            )
+                        },
+                    ),
             )
     }
     fn participant_row(&self, p: &ParticipantView) -> Div {
@@ -413,9 +419,6 @@ impl Desktop {
                 cx,
             ));
         }
-        if load.is_some_and(|load| load.request.is_none()) && self.feedback.is_some() {
-            body = body.child(self.feedback_view(cx));
-        }
         if let Some(panel) =
             panel.filter(|_| collection.shows_content() || collection.confirmed_empty())
         {
@@ -484,16 +487,8 @@ impl Desktop {
                 .flex_col()
                 .gap_4()
                 .child(
-                    div()
-                        .relative()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .rounded(px(8.))
-                        .bg(t.subtle)
-                        .px_3()
+                    self.input_surface(&self.search, cx)
                         .min_h(px(48.))
-                        .child(self.field_ring(self.search.focus_handle(cx), 8.))
                         .child(self.scaled_icon("search", 20., t.muted))
                         .child(div().flex_1().min_w_0().child(self.search.clone()))
                         .child(

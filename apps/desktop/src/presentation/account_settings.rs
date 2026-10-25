@@ -2,7 +2,7 @@
 use super::controls::Availability;
 use super::preferences::SettingsTab;
 use super::{ButtonStyle, Desktop, LocalAction};
-use gpui::{Context, Div, Focusable, FontWeight, div, prelude::*};
+use gpui::{Context, Div, FontWeight, div, prelude::*};
 use talk_core::preferences::{
     RequestId,
     account::{
@@ -183,8 +183,7 @@ impl Desktop {
             }
         } else {
             section=section.child(self.hint(self.l("Ordner in NextCloud für geteilte Dokumente. Kein Downloadordner auf diesem Computer.")))
-                .child(div().relative().rounded_lg().p_3().border_1().border_color(self.theme.input_border)
-                    .child(self.field_ring(self.upload_folder.focus_handle(cx),8.)).child(self.upload_folder.clone()))
+                .child(self.input_surface(&self.upload_folder, cx).child(self.upload_folder.clone()))
                 .child(self.dialog_actions().child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,Availability::when(ready&&values.and_then(|v|v.attachment_folder.as_ref()).is_some(),reason),LocalAction::SaveUploadFolder,cx)));
             if values.is_some_and(|v| v.conversation_subfolders == Some(true)) {
                 section = section.child(

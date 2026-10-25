@@ -20,9 +20,9 @@ from vendor import verify_gpui
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
-    "talk-core": ("crates/talk-core", set()),
+    "talk-core": ("crates/talk-core", {"pulldown-cmark", "url"}),
     "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs"}),
-    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "keyring-core", "rusqlite", "dirs", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
+    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "keyring-core", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
 }
@@ -34,7 +34,7 @@ PLATFORM_EDGES = {
 }
 DESKTOP_PLATFORM_EDGES = {
     'cfg(unix)': {'rustix'},
-    'cfg(target_os = "macos")': {'core-graphics', 'exacl'},
+    'cfg(target_os = "macos")': {'core-graphics', 'exacl', 'objc2-app-kit'},
     'cfg(target_os = "linux")': {'ashpd', 'async-io', 'futures-lite'},
     'cfg(target_os = "windows")': {'enigo', 'windows', 'windows-permissions'},
 }
@@ -111,19 +111,28 @@ def allow_input_caret_timer(source: str) -> str:
     require(depth == 0, "native input caret timer method is not closed")
     if depth:
         return source
-    calls = list(re.finditer(r"\bcx\s*\.\s*spawn_in\s*\(", code[start:end - 1]))
+    calls = list(re.finditer(r"\bcx\s*\.\s*spawn\s*\(", code[start:end - 1]))
     require(len(calls) == 1, "native input caret timer must own one foreground task")
     if len(calls) != 1:
         return source
     call = calls[0]
-    begin, finish = start + call.start(), start + call.end()
-    return source[:begin] + "cx.reviewed_input_caret_timer(" + source[finish:]
+    method = source[start:end - 1]
+    method = method[:call.start()] + "cx.reviewed_input_caret_timer(" + method[call.end():]
+    # Permit only this owned visual interval, not background execution or I/O.
+    # Leave all other executor access visible to the ordinary forbidden-call scan.
+    timer = r"\bcx\s*\.\s*background_executor\s*\(\s*\)\s*\.\s*timer\s*\(\s*CARET_INTERVAL\s*\)"
+    require(len(re.findall(timer, method)) == 1, "native input must use one platform caret interval")
+    method = re.sub(timer, "cx.reviewed_caret_interval()", method)
+    return source[:start] + method + source[end - 1:]
 
 
-# This is the reviewed transitive data vocabulary, not permission to reexport modules.
+
+# The markup module is a bounded pure user-text parser, separately inspected by
+# the core I/O guard. Its public records use Text/Page, without transport authority.
 UI_EXPORTS = {
     *(('crate', 'bounded', name) for name in ('LimitExceeded', 'Page', 'Text')),
     ('crate', 'identity', 'PersistenceState'),
+    ('crate', 'markup'),
     *(('crate', 'ids', name) for name in (
         'AccountId', 'AccountScope', 'CallGeneration', 'CallScope', 'ConversationId',
         'HostId', 'RuntimeGeneration', 'VaultGeneration',
@@ -258,6 +267,7 @@ def check() -> None:
         'zip': {'version': '=9.0.4', 'default-features': False, 'features': ['deflate']},
         "gpui": {"version": "=0.2.2", "default-features": False, "features": ["font-kit", "x11"]},
         "unicode-segmentation": "=1.12.0",
+        "pulldown-cmark": {"version": "=0.13.5", "default-features": False},
         "cpal": {"version": "=0.18.2", "default-features": False, "features": ["pulseaudio"]},
         "gstreamer": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
         "gstreamer-app": {"version": "=0.25.2", "default-features": False, "features": ["v1_24"]},
@@ -266,12 +276,14 @@ def check() -> None:
         "enigo": {"version": "=0.6.1", "default-features": False},
         "windows": {"version": "=0.61.3", "default-features": False, "features": ["UI_ViewManagement"]},
         "core-graphics": {"version": "=0.24.0", "default-features": False, "features": ["link"]},
+        "objc2-app-kit": {"version": "=0.3.2", "default-features": False, "features": ["std", "NSWorkspace", "NSAccessibility"]},
         "ashpd": {"version": "=0.12.3", "default-features": False, "features": ["async-std"]},
         "async-io": {"version": "=2.6.0", "default-features": False},
         "futures-lite": {"version": "=2.6.1", "default-features": False, "features": ["std"]},
         "keyring-core": {"version": "=1.0.1", "default-features": False},
         "rusqlite": {"version": "=0.40.2", "default-features": False, "features": ["bundled", "limits"]},
         "dirs": {"version": "=5.0.1", "default-features": False},
+        "jiff": {"version": "=0.2.38", "default-features": False, "features": ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"]},
         "rustix": {"version": "=1.1.5", "default-features": False, "features": ["std", "fs", "process"]},
         "apple-native-keyring-store": {"version": "=1.0.2", "default-features": False, "features": ["keychain"]},
         "windows-native-keyring-store": {"version": "=1.1.0", "default-features": False},
@@ -385,6 +397,11 @@ def check() -> None:
         # User-entered server input is not validated authority; only these scheme-test
         # literals are allowed in its reviewed UI value type. Actual URLs/routes still fail.
         routes = source.replace('"https://"', '"scheme"').replace('"http://"', '"insecure-scheme"') if path == ROOT / "crates/talk-core/src/ui/presentation.rs" else source
+        # User-authored web destinations and synthetic parser fixtures are data,
+        # not authenticated protocol routes. All core I/O restrictions above
+        # still apply; application endpoints remain forbidden in this owner.
+        if path == ROOT / "crates/talk-core/src/markup.rs" or path.is_relative_to(ROOT / "crates/talk-core/src/markup"):
+            routes = re.sub(r"https?://", "user-web-scheme:", source)
         require(not re.search(r"https?://|/ocs/|/remote\.php/", routes),
                 f"{path.relative_to(ROOT)}: raw protocol route leaked into core")
         require(not re.search(r"\b(?:include|include_str|include_bytes)!", source),
@@ -454,7 +471,7 @@ def check() -> None:
                     ("std", "cell", "RefCell"), ("std", "rc", "Rc")
                 }
                 require(allowed, "native presentation import must use core UI, GPUI or local view types")
-        require(not re.search(r"nextcloud_talk_api|talk_adapters|talk_core\s*::\s*(?!(?:ui|preferences)\b)\w+|\b(?:core_graphics|ashpd|async_io|futures_lite|enigo|reqwest|hyper|tokio|cookie|serde_json|zeroize|sqlite|rusqlite|keyring_core|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites|cpal|gstreamer|gstreamer_app|gstreamer_video)\b|\b(?:image|windows)\s*::|(?:std|gpui)\s*::\s*(?:net|fs|process|thread|os)|crate\s*::\s*(?!presentation\b)\w+|super\s*::\s*(?:super|composition)|\b(?:include|include_str|include_bytes)\s*!|https?://|/ocs/|/remote\.php/", source),
+        require(not re.search(r"nextcloud_talk_api|talk_adapters|talk_core\s*::\s*(?!(?:ui|preferences)\b)\w+|\b(?:core_graphics|objc2_app_kit|ashpd|async_io|futures_lite|enigo|reqwest|hyper|tokio|cookie|serde_json|zeroize|sqlite|rusqlite|keyring_core|zbus|secret_service|dbus_secret_service|dirs|rustix|exacl|security_framework|windows_permissions|winapi_util|atomicwrites|cpal|gstreamer|gstreamer_app|gstreamer_video)\b|\b(?:image|windows)\s*::|(?:std|gpui)\s*::\s*(?:net|fs|process|thread|os)|crate\s*::\s*(?!presentation\b)\w+|super\s*::\s*(?:super|composition)|\b(?:include|include_str|include_bytes)\s*!|https?://|/ocs/|/remote\.php/", source),
                 "native presentation contains worker/secret/network/file/media I/O or route")
         # Native text clipboard owner: user-entry and explicit read-only selection.
         # GPUI's read allocation is not bounded; admission and privacy gating

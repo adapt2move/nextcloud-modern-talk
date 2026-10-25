@@ -13,6 +13,8 @@ use talk_core::preferences::{
 use talk_core::ui::Text;
 
 pub struct Services {
+    shutdown_deadline: std::cell::Cell<Option<std::time::Instant>>,
+    shutdown_unconfirmed_reported: std::cell::Cell<bool>,
     pub(super) install: std::cell::RefCell<super::updates::Install>,
     notification_sequence: std::cell::Cell<u64>,
     notification_sources:
@@ -47,6 +49,8 @@ impl Services {
             devices.attach_media(media.clone());
         }
         Ok(Rc::new(Self {
+            shutdown_deadline: std::cell::Cell::new(None),
+            shutdown_unconfirmed_reported: std::cell::Cell::new(false),
             install: std::cell::RefCell::default(),
             notification_sequence: std::cell::Cell::new(0),
             notification_sources: std::cell::RefCell::new(Vec::new()),
@@ -155,6 +159,11 @@ impl Services {
         }
     }
     pub fn request_shutdown(&self) {
+        if self.shutdown_deadline.get().is_none() {
+            self.shutdown_deadline.set(Some(
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+            ));
+        }
         if let Ok(updates) = &self.updates {
             updates.request_shutdown();
         }
@@ -174,6 +183,23 @@ impl Services {
         if let Ok(notifications) = &self.notifications {
             notifications.request_shutdown();
         }
+    }
+    /// An explicit process quit has a finite wait. Expiry is unconfirmed
+    /// shutdown, never a fabricated successful native/resource cleanup.
+    pub fn waiting_for_shutdown(&self) -> bool {
+        let stopped = self.stopped();
+        let waiting = shutdown_pending(
+            stopped,
+            self.shutdown_deadline.get(),
+            std::time::Instant::now(),
+        );
+        if !stopped && !waiting && !self.shutdown_unconfirmed_reported.replace(true) {
+            crate::diagnostics::record(crate::diagnostics::Event::new(
+                crate::diagnostics::Operation::Application,
+                crate::diagnostics::Outcome::Uncertain,
+            ));
+        }
+        waiting
     }
     pub fn stopped(&self) -> bool {
         self.updates
@@ -209,6 +235,21 @@ pub struct Bridge {
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
+    fn resolve_deadline(
+        &self,
+        choice: talk_core::preferences::time::DeadlineChoice,
+    ) -> Result<
+        talk_core::preferences::time::DeadlineMoment,
+        talk_core::preferences::time::LocalTimeError,
+    > {
+        talk_adapters::system_time::deadline(choice)
+    }
+    fn local_datetime(&self, timestamp: u64) -> Option<talk_core::ui::Text<32>> {
+        talk_adapters::system_time::local_datetime(timestamp)
+    }
+    fn same_local_day(&self, first: u64, second: u64) -> bool {
+        talk_adapters::system_time::same_local_day(first, second)
+    }
     fn reduced_motion(&self) -> bool {
         self.services.preferences.reduced_motion()
     }
@@ -533,4 +574,24 @@ pub fn call_image(
     Some(std::sync::Arc::new(gpui::RenderImage::new([
         image::Frame::new(image),
     ])))
+}
+
+fn shutdown_pending(
+    stopped: bool,
+    deadline: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    !stopped && deadline.is_none_or(|deadline| now < deadline)
+}
+#[cfg(test)]
+mod shutdown_tests {
+    #[test]
+    fn explicit_quit_deadline_does_not_claim_resource_shutdown() {
+        let now = std::time::Instant::now();
+        let deadline = now + std::time::Duration::from_secs(5);
+        assert!(super::shutdown_pending(false, Some(deadline), now));
+        assert!(!super::shutdown_pending(false, Some(deadline), deadline));
+        assert!(!super::shutdown_pending(true, Some(deadline), now));
+        assert!(super::shutdown_pending(false, None, deadline));
+    }
 }

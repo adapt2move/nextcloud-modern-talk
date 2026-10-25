@@ -1,6 +1,6 @@
 //! Native room dialogs keep their originating context and submit typed, correlated intents.
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability, input::TextInput};
-use gpui::{Context, Div, Entity, Focusable, FontWeight, Window, div, prelude::*, px};
+use gpui::{Context, Div, Entity, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::conversation::{
     self, ConversationAction, DirectorySource, MemberRole, RemoteState, RoomSetting,
 };
@@ -557,7 +557,18 @@ impl Desktop {
                 region: super::navigation::Region::Overlay,
                 navigation,
                 page: self.reveal(("room-page", key), page),
-                footer: self.room_status(cx),
+                footer: if self.feedback_visible() {
+                    Some(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .children(self.room_status(cx))
+                            .child(self.feedback_view(cx)),
+                    )
+                } else {
+                    self.room_status(cx)
+                },
             },
             window,
             cx,
@@ -1091,28 +1102,9 @@ impl Desktop {
         page
     }
     fn room_input(&self, input: &Entity<TextInput>, cx: &Context<Self>) -> Div {
-        let entity = input.clone();
-        div()
-            .flex_1()
-            .min_w_0()
-            .relative()
-            // Same height as the adjacent buttons on a field's action line.
-            .min_h(px(36.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(self.theme.input_border)
-            .bg(self.theme.subtle)
-            .px_3()
-            .py(px(7.))
-            .child(self.field_ring(input.focus_handle(cx), 8.))
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(move |_, _, window, cx| {
-                    entity.focus_handle(cx).focus(window);
-                }),
-            )
-            .child(input.clone())
+        self.input_surface(input, cx).flex_1().child(input.clone())
     }
+
     fn members_page(&self, narrow: bool, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_3().child(self.room_page_header(
             if self.room_ui.bots {

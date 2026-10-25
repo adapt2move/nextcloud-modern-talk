@@ -1,4 +1,5 @@
 //! Shared loading/recovery presentation. Retained data never establishes authority.
+use super::controls::Skeleton;
 use super::{ButtonStyle, Desktop, LocalAction};
 use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::ui::presentation::ContentState;
@@ -22,6 +23,9 @@ impl CollectionState {
     pub fn confirmed_empty(self) -> bool {
         !self.retained && self.state == ContentState::Ready
     }
+    pub fn initial_loading(self) -> bool {
+        !self.retained && self.state == ContentState::Loading
+    }
     fn retry(self) -> bool {
         matches!(
             self.state,
@@ -30,13 +34,9 @@ impl CollectionState {
     }
     fn copy(self) -> Option<(&'static str, &'static str, &'static str)> {
         Some(match self.state {
-            ContentState::Ready => return None,
-            ContentState::Loading if self.retained => (
-                "refresh",
-                "Wird aktualisiert …",
-                "Der bestätigte Stand bleibt sichtbar.",
-            ),
-            ContentState::Loading => ("clock", "Wird geladen …", "Bitte warte einen Moment."),
+            // Keep the confirmed collection mounted during routine refresh.
+            // Initial loading has a bounded skeleton rather than a notice card.
+            ContentState::Ready | ContentState::Loading => return None,
             ContentState::Offline => (
                 "cloud",
                 "Offline",
@@ -77,6 +77,31 @@ impl Desktop {
         retry: LocalAction,
         cx: &Context<Self>,
     ) -> Div {
+        if state.initial_loading() {
+            return self.collection_skeleton(Skeleton::Rows);
+        }
+        if state.state == ContentState::Offline {
+            if !self.offline_notice_visible() {
+                return div();
+            }
+            return div()
+                .flex_none()
+                .px_2()
+                .py_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_size(self.sp(12.))
+                .text_color(self.theme.muted)
+                .child(self.scaled_icon("cloud", 14., self.theme.muted))
+                .child(div().flex_1().child(self.l("Offline")))
+                .child(
+                    self.button(id, "Erneut laden", ButtonStyle::Quiet, true, retry, cx)
+                        .min_h(px(28.))
+                        .py_0()
+                        .text_size(self.sp(12.)),
+                );
+        }
         let Some((symbol, title, detail)) = state.copy() else {
             return div();
         };
@@ -132,11 +157,13 @@ mod tests {
             let retained = CollectionState::new(state, true);
             assert!(retained.shows_content());
             assert!(!retained.confirmed_empty());
-            assert!(retained.copy().is_some());
+            assert_eq!(retained.copy().is_some(), state != ContentState::Loading);
+            assert!(!retained.initial_loading());
             let initial = CollectionState::new(state, false);
             assert!(!initial.shows_content());
             assert!(!initial.confirmed_empty());
-            assert!(initial.copy().is_some());
+            assert_eq!(initial.copy().is_some(), state != ContentState::Loading);
+            assert_eq!(initial.initial_loading(), state == ContentState::Loading);
             assert_eq!(initial.retry(), state != ContentState::Loading);
         }
         assert!(CollectionState::new(ContentState::Ready, false).confirmed_empty());

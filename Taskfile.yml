@@ -11,7 +11,12 @@ tasks:
   dev:
     desc: Build and start the debug desktop; pass app arguments after --
     cmds:
-      - '{{.PYTHON | shellQuote}} tools/cargo.py run --locked -p talk-desktop -- {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+      - '{{.PYTHON | shellQuote}} tools/dev.py {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  dev:setup:
+    desc: Set up one persistent local macOS development signing identity
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/dev.py --setup-signing'
 
   build:
     desc: Build the optimized desktop binary in target/release

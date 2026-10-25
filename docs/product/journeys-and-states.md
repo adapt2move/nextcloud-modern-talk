@@ -48,7 +48,11 @@ This document defines end-to-end acceptance journeys and shared states. Each jou
 
 ### STATE-001
 
-**Loading is bounded and cancellable.** Distinguish initial load, refreshing old data, pagination, and submitting an action. Keep useful confirmed content during refresh, labeled stale when necessary. Prevent repeat submission while pending without trapping the user indefinitely. Cancellation invalidates callbacks, not just the spinner. Acceptance: stale completions cannot overwrite a newer account/room/call selection.
+**Loading is bounded and cancellable.** Distinguish initial load, refreshing old data, pagination, and submitting an action. Keep useful confirmed content during refresh, labeled stale when necessary. Prevent duplicate staging of the same submission without trapping the user indefinitely. Deliberate queueable message actions project immediately and retain their own identities; a running network mutation does not disable unrelated message actions. Cancellation invalidates callbacks, not just the spinner. Acceptance: stale completions cannot overwrite a newer account/room/call selection.
+
+Initial conversation and message collections use bounded, static skeleton rows in the space the content will occupy. They do not add an animated redraw loop or a waiting notice card. Routine refresh leaves confirmed rows mounted without replacing them with skeletons or inserting an updating banner; offline, denied and failed states retain their specific recovery explanation. The main conversation surface must not ask the user to choose a conversation while the initial room list is still loading.
+
+Automatic receipt, mention, image and acknowledgement requests must not create a global action warning when local admission is busy. Non-admitted observations remain eligible for the existing owner retry; they do not count as completed. A busy user action preserves its input and shows a transient notice only in its originating surface and, for message actions, conversation. That notice clears when another user action is admitted or after eight seconds, including when no new snapshot arrives. Failed or uncertain effects do not use this expiry.
 
 ### STATE-002
 

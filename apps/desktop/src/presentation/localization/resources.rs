@@ -705,6 +705,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Las respuestas aún no se han cargado. Se conserva el borrador de la conversación.",
     ),
     (
+        "Die App ist gerade ausgelastet. Bitte kurz warten und erneut versuchen.",
+        "The app is busy. Please wait a moment and try again.",
+        "La aplicación está ocupada. Espera un momento y vuelve a intentarlo.",
+    ),
+    (
         "Die Bereinigung einer früheren Speicherung ist noch offen.",
         "Cleanup of an earlier save is still pending.",
         "La limpieza de un almacenamiento anterior sigue pendiente.",
@@ -1929,6 +1934,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Te damos la bienvenida a tu espacio de trabajo.",
     ),
     ("Seitenleiste", "Sidebar", "Barra lateral"),
+    (
+        "Seitenleiste ausblenden",
+        "Hide sidebar",
+        "Ocultar barra lateral",
+    ),
+    (
+        "Seitenleiste einblenden",
+        "Show sidebar",
+        "Mostrar barra lateral",
+    ),
     ("Senden", "Send", "Enviar"),
     (
         "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten.",

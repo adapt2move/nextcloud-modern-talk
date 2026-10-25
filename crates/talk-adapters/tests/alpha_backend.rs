@@ -15,7 +15,7 @@ use talk_core::protocol::conversation::{
 use talk_core::protocol::messaging::{
     ComposeOptions, MessagingCommand as M, MessagingResult as MR,
 };
-use talk_core::protocol::{FeatureSupport, MessageKind, Role, SendState};
+use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, SendState};
 fn scope() -> AccountScope {
     AccountScope {
         account: AccountId::from_local(700),
@@ -35,6 +35,28 @@ fn context(r: &NetworkRuntime) -> OperationContext {
 }
 fn text<const N: usize>(s: &str) -> Text<N> {
     Text::new(s).unwrap()
+}
+fn canonical_accepted_id(result: MR, operation: OperationId) -> MessageId {
+    let id = match result {
+        MR::Message(message) => {
+            assert!(
+                message.own,
+                "accepted message must be the current user's own send"
+            );
+            assert_eq!(message.message.own_operation, Some(operation));
+            message.message.id
+        }
+        MR::Send(receipt) => {
+            assert_eq!(receipt.operation, operation);
+            let SendState::ServerAccepted(id) = receipt.state else {
+                panic!("send is not confirmed accepted");
+            };
+            id
+        }
+        _ => panic!("send returned no correlated canonical acceptance"),
+    };
+    assert!(id.sequence > 0);
+    id
 }
 async fn m(
     c: &mut NextcloudClient,
@@ -314,7 +336,7 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
-    let MR::Send(receipt) = m(
+    let sent = m(
         &mut client,
         &runtime,
         id,
@@ -325,14 +347,10 @@ async fn released_server_messaging_and_room_controls() {
             options: ComposeOptions::default(),
         },
     )
-    .await
-    else {
-        panic!("send")
-    };
-    let SendState::ServerAccepted(first) = receipt.state else {
-        panic!("accepted")
-    };
-    let MR::Send(receipt) = m(
+    .await;
+    let first = canonical_accepted_id(sent, OperationId::from_local(101));
+    assert_eq!(first.conversation, id);
+    let sent = m(
         &mut client,
         &runtime,
         id,
@@ -346,13 +364,9 @@ async fn released_server_messaging_and_room_controls() {
             },
         },
     )
-    .await
-    else {
-        panic!("send")
-    };
-    let SendState::ServerAccepted(second) = receipt.state else {
-        panic!("accepted")
-    };
+    .await;
+    let second = canonical_accepted_id(sent, OperationId::from_local(102));
+    assert_eq!(second.conversation, id);
     m(
         &mut client,
         &runtime,
@@ -595,7 +609,7 @@ async fn released_server_messaging_and_room_controls() {
         M::CancelScheduled(schedule.id),
     )
     .await;
-    let MR::Send(receipt) = m(
+    let sent = m(
         &mut client,
         &runtime,
         id,
@@ -609,13 +623,9 @@ async fn released_server_messaging_and_room_controls() {
             },
         },
     )
-    .await
-    else {
-        panic!("send")
-    };
-    let SendState::ServerAccepted(thread) = receipt.state else {
-        panic!("accepted")
-    };
+    .await;
+    let thread = canonical_accepted_id(sent, OperationId::from_local(123));
+    assert_eq!(thread.conversation, id);
     m(&mut client, &runtime, id, 124, "thread-list", M::Threads).await;
     m(
         &mut client,

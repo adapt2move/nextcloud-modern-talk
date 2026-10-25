@@ -1,10 +1,49 @@
 //! Same-frame header measurement with a live timeline underneath.
 #[cfg(not(target_os = "windows"))]
+use crate::presentation::controls::CONTENT_RADIUS;
+#[cfg(not(target_os = "windows"))]
 use gpui::Corners;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Div, Element, ElementId, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, div, prelude::*, px, size,
 };
+
+pub(in crate::presentation) fn theme(
+    theme: crate::presentation::Theme,
+    palette: crate::presentation::Palette,
+) -> crate::presentation::Theme {
+    let theme = theme.chat_header_theme(palette);
+    crate::presentation::Theme {
+        sidebar_secondary: theme.text,
+        ..theme
+    }
+}
+
+/// Keep enough tint for labels while letting the current-frame backdrop remain
+/// visible. The former 92% tint looked opaque even with a correct GPU blur pass.
+pub(in crate::presentation) fn surface(theme: crate::presentation::Theme) -> gpui::Background {
+    if cfg!(target_os = "windows") {
+        return theme.chat_header_surface();
+    }
+    let [top, bottom] = [0.84, 0.80];
+    gpui::linear_gradient(
+        180.,
+        gpui::linear_color_stop(
+            gpui::Hsla {
+                a: top,
+                ..theme.surface
+            },
+            0.,
+        ),
+        gpui::linear_color_stop(
+            gpui::Hsla {
+                a: bottom,
+                ..theme.surface
+            },
+            1.,
+        ),
+    )
+}
 
 type History = Box<dyn FnOnce(Pixels, &mut Window, &mut App) -> Div>;
 
@@ -131,13 +170,64 @@ impl Element for ScrollUnderHeader {
         let _ = window.paint_backdrop(
             Bounds::new(_bounds.origin, size(_bounds.size.width, *_header_height)),
             Corners {
-                top_left: px(12.),
-                top_right: px(12.),
+                top_left: px(CONTENT_RADIUS),
+                top_right: px(CONTENT_RADIUS),
                 bottom_left: px(0.),
                 bottom_right: px(0.),
             },
-            px(12.),
+            px(16.),
         );
         window.with_tab_group(Some(0), |window| self.header.paint(window, cx));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::{Palette, Theme, theme::Appearance};
+
+    fn contrast(a: gpui::Rgba, b: gpui::Rgba) -> f32 {
+        let luminance = |c: gpui::Rgba| {
+            let linear = |v: f32| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn frosted_header_keeps_labels_focus_and_icons_readable_over_extreme_content() {
+        for palette in [Palette::Blue, Palette::Sage] {
+            for mode in [Appearance::Light, Appearance::Dark] {
+                let original = Theme::resolve(palette, mode, gpui::WindowAppearance::Light);
+                let header = theme(original, palette);
+                let tint = gpui::Rgba::from(header.surface);
+                let alphas = if cfg!(target_os = "windows") {
+                    [1., 1.]
+                } else {
+                    [0.84, 0.80]
+                };
+                for alpha in alphas {
+                    for underlying in [0., 1.] {
+                        let background = gpui::Rgba {
+                            r: tint.r * alpha + underlying * (1. - alpha),
+                            g: tint.g * alpha + underlying * (1. - alpha),
+                            b: tint.b * alpha + underlying * (1. - alpha),
+                            a: 1.,
+                        };
+                        assert!(contrast(header.text.into(), background) >= 4.5);
+                        assert!(contrast(header.sidebar_secondary.into(), background) >= 4.5);
+                        assert!(contrast(header.focus.into(), background) >= 3.);
+                        assert!(contrast(header.sidebar_secondary.into(), background) >= 3.);
+                    }
+                }
+            }
+        }
     }
 }

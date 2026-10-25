@@ -1,4 +1,4 @@
-//! Finite content operations on an admitted account. Images are transient worker values,
+//! Finite content operations on an admitted account. Binary content is transient worker data,
 //! never serialized UI data. Progress is shared observation, not a second network owner.
 use super::MessageId;
 use super::conversation::{ActionAvailability, MemberId, RecipientId};
@@ -10,6 +10,27 @@ use std::sync::{
 };
 
 pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_VIDEO_BYTES: usize = 32 * 1024 * 1024;
+/// One admitted original video, retained in memory only for its scoped player.
+/// Encoded bytes never become message, cache or serializable UI data.
+#[derive(Clone, Eq, PartialEq)]
+pub struct VideoBytes(Arc<[u8]>);
+impl std::fmt::Debug for VideoBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VideoBytes").field(&self.0.len()).finish()
+    }
+}
+impl VideoBytes {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, LimitExceeded> {
+        if bytes.len() > MAX_VIDEO_BYTES {
+            return Err(LimitExceeded);
+        }
+        Ok(Self(bytes.into()))
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
 #[derive(Clone, Eq, PartialEq)]
 pub struct ImageBytes {
     bytes: Arc<[u8]>,
@@ -106,6 +127,11 @@ pub enum PollCommand {
 pub enum ContentCommand {
     SelfProfile,
     Asset(AssetRequest),
+    /// Deliberate playback input, distinct from a static attachment thumbnail.
+    Video {
+        message: MessageId,
+        placeholder: Text<128>,
+    },
     OpenCloud {
         message: MessageId,
         placeholder: Text<128>,
@@ -122,6 +148,7 @@ pub enum ContentResult {
         organization: Option<Text<256>>,
     },
     Image(ImageBytes),
+    Video(VideoBytes),
     Emoji {
         text: Text<64>,
         color: Option<Text<16>>,
@@ -203,5 +230,13 @@ mod tests {
     #[test]
     fn oversized_encoded_image_never_crosses_worker_boundary() {
         assert!(ImageBytes::new(vec![0; MAX_IMAGE_BYTES + 1]).is_err());
+    }
+    #[test]
+    fn video_worker_value_is_bounded_shared_and_does_not_debug_its_contents() {
+        let bytes = VideoBytes::new(b"private video source".to_vec()).unwrap();
+        let cloned = bytes.clone();
+        assert!(std::ptr::eq(bytes.as_slice(), cloned.as_slice()));
+        assert_eq!(format!("{bytes:?}"), "VideoBytes(20)");
+        assert!(VideoBytes::new(vec![0; MAX_VIDEO_BYTES + 1]).is_err());
     }
 }

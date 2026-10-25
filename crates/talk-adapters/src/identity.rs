@@ -1,7 +1,9 @@
 //! Owner of browser authorization, qualified OS vault and private restoration metadata.
 //! Production implementation keeps secrets, storage and owned runtime workers private.
+mod avatars;
 pub(crate) mod browser;
 mod connection;
+mod data;
 mod error;
 mod ledger;
 mod login;
@@ -12,6 +14,13 @@ pub use connection::{
     AccountConnection, CONNECTION_CAPACITY, CONNECTION_PAGE, ConnectionAccount,
     ConnectionCompletion, ConnectionCursor, ConnectionPending, ConnectionRequestId,
     ConnectionSnapshot, ConnectionState, ConnectionUpdate, SavedAccountState,
+};
+pub use data::{
+    CACHE_HISTORY_LIMIT, CACHE_LIFETIME, CACHE_ROOM_LIMIT, CACHE_THUMBNAIL_BYTES,
+    CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory, CacheRoom, CacheThumbnail,
+    CachedAttachment, CachedMessage, CachedReaction, CachedReply, CachedRoomKind, DataCommand,
+    DataError, DataResult, DataSnapshot, OUTBOX_LIMIT, OutboxEntry, OutboxIntent, OutboxKind,
+    OutboxOptions, OutboxPhase, OutboxRecord,
 };
 pub use error::IdentityError;
 pub use runtime::{

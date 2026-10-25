@@ -18,6 +18,126 @@ fn message(id: u64) -> Value {
     json!({"id":id,"token":"testroom","actorType":"users","actorId":"fixture_user","actorDisplayName":"Fixture","messageType":"comment","message":"original","timestamp":1,"referenceId":"","isReplyable":true,"messageParameters":{},"reactions":{},"reactionsSelf":[]})
 }
 #[tokio::test]
+async fn reminder_writes_publish_only_confirmed_values_and_keep_read_failure_uncertain() {
+    for major in [34, 35] {
+        for case in ["confirmed", "wrong-target", "read-failed", "cancelled"] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("remind-me-later"));
+            let mut replies = vec![
+                Reply::data(capabilities),
+                Reply::data(room()),
+                Reply::envelope(201, "ok", 201, json!([])),
+            ];
+            if case != "cancelled" {
+                replies.push(if case == "read-failed" {
+                    Reply::envelope(500, "failure", 500, json!([]))
+                } else {
+                    Reply::data(json!({"roomToken":"testroom", "messageId": if case == "wrong-target" {8} else {7}, "reminderTimestamp": 201}))
+                });
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let result = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(1),
+                        command: M::Reminder {
+                            message: MessageId {
+                                conversation,
+                                sequence: 7,
+                            },
+                            timestamp: if case == "cancelled" { None } else { Some(200) },
+                        },
+                    },
+                )
+                .await;
+            match case {
+                "confirmed" => assert!(
+                    matches!(result, Ok(ProtocolReply::Messaging { result: R::Reminder(Some(ref reminder)), .. }) if reminder.message.sequence == 7 && reminder.timestamp == 201)
+                ),
+                "cancelled" => assert!(matches!(
+                    result,
+                    Ok(ProtocolReply::Messaging {
+                        result: R::Reminder(None),
+                        ..
+                    })
+                )),
+                _ => assert_eq!(result.err().unwrap().kind, ErrorKind::Uncertain),
+            }
+            assert_eq!(server.count(), if case == "cancelled" { 3 } else { 4 });
+            let requests = server.seen.lock().unwrap();
+            let mutation = String::from_utf8_lossy(&requests[2]);
+            assert!(mutation.starts_with(if case == "cancelled" {
+                "DELETE "
+            } else {
+                "POST "
+            }));
+            if case != "cancelled" {
+                assert!(String::from_utf8_lossy(&requests[3]).starts_with(
+                    "GET /cloud/ocs/v2.php/apps/spreed/api/v1/chat/testroom/7/reminder"
+                ));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn reading_pins_never_grants_shared_pin_mutation_to_members() {
+    for major in [34, 35] {
+        for (role, expected) in [
+            (1, Decision::Allowed),
+            (2, Decision::Allowed),
+            (3, Decision::Denied),
+            (6, Decision::Allowed),
+        ] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("pinned-messages"));
+            let mut data = room();
+            data["participantType"] = json!(role);
+            let server = Server::start(vec![Reply::data(capabilities), Reply::data(data)]).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let ProtocolReply::Messaging {
+                result: R::Capabilities(value),
+                ..
+            } = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(1),
+                        command: M::Capabilities,
+                    },
+                )
+                .await
+                .unwrap()
+            else {
+                panic!("expected capabilities");
+            };
+            assert_eq!(value.pin_change, expected);
+            assert!(
+                value
+                    .actions
+                    .as_slice()
+                    .iter()
+                    .any(|(feature, action)| *feature == MessagingFeature::Pins
+                        && action.allowed == Decision::Allowed)
+            );
+        }
+    }
+}
+#[tokio::test]
 async fn fresh_poll_notification_requires_known_policy_silent_and_current_user_status() {
     for (case, expected, observe_status) in [
         ("all", Decision::Allowed, true),
@@ -142,7 +262,10 @@ async fn reaction_permission_is_independent_of_chat_permission() {
         Reply::data(features(&["react-permission", "chat-get-context"])),
         Reply::data(room_data),
         Reply::data(json!([message(7)])),
-        Reply::data(json!([])),
+        Reply::data(json!({"👍":[
+            {"actorType":"users","actorId":"fixture_user","actorDisplayName":"Fixture","timestamp":1},
+            {"actorType":"users","actorId":"another","actorDisplayName":"Other","timestamp":2}
+        ]})),
     ])
     .await;
     let r = runtime();
@@ -169,11 +292,64 @@ async fn reaction_permission_is_independent_of_chat_permission() {
     assert!(matches!(
         result,
         ProtocolReply::Messaging {
-            result: R::Changed,
+            result: R::Reactions { message, reactions },
             ..
-        }
+        } if message.sequence == 7 && reactions.as_slice().len() == 1
+            && reactions.as_slice()[0].count == 2 && reactions.as_slice()[0].own
     ));
     assert_eq!(server.count(), 4);
+}
+
+#[tokio::test]
+async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
+    let mut first = message(7);
+    first["actorId"] = json!("one");
+    let mut second = message(8);
+    second["actorId"] = json!("two");
+    let mut guest = message(9);
+    guest["actorId"] = json!("one");
+    guest["actorType"] = json!("guests");
+    let mut unknown = message(10);
+    unknown.as_object_mut().unwrap().remove("actorId");
+    let server = Server::start(vec![
+        Reply::data(features(&[])),
+        Reply::data(room()),
+        Reply::data(json!([first, second, guest, unknown])),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let result = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Messaging {
+                conversation,
+                operation: OperationId::from_local(1),
+                command: M::History {
+                    before: None,
+                    thread: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let ProtocolReply::Messaging {
+        result: R::Messages { messages, .. },
+        ..
+    } = result
+    else {
+        panic!("expected history");
+    };
+    let rows = messages.as_slice();
+    assert!(rows[0].author_key.is_some());
+    assert_ne!(rows[0].author_key, rows[1].author_key);
+    assert_ne!(rows[0].author_key, rows[2].author_key);
+    assert_eq!(rows[3].author_key, None);
+    assert!(
+        rows.iter()
+            .all(|row| row.message.author == rows[0].message.author)
+    );
 }
 #[tokio::test]
 async fn preserved_owner_cannot_delete_clear_or_change_guest_access() {

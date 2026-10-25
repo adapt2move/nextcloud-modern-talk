@@ -1,5 +1,6 @@
 //! One composition-owned account facade; the renderer receives bounded, scoped data only.
 mod background;
+mod cache;
 mod calls;
 pub(super) mod content;
 mod conversations;
@@ -8,7 +9,11 @@ pub(super) mod files;
 mod history;
 mod messaging;
 mod notifications;
+mod outbox;
+mod preview;
+mod reads;
 mod removal;
+mod startup;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -47,6 +52,8 @@ use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIn
 
 #[derive(Clone, Copy)]
 enum Purpose {
+    Outbox(outbox::Work),
+    Data(cache::Work),
     Content(OperationId),
     Create(RequestId, AccountScope, creation::Work),
     Room(RequestId, ConversationRef, OperationId, bool),
@@ -59,6 +66,7 @@ enum Purpose {
     TagMutation(RequestId, AccountScope),
     Login(RequestId, LoginWork),
     Restore(AccountId),
+    RestoreAutomatic(AccountId),
     Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
     Mutation(RequestId, ConversationRef),
@@ -114,6 +122,7 @@ pub struct Accounts {
     connection: Result<AccountConnection, IdentityError>,
     cursor: ConnectionCursor,
     diagnostic_connection: Option<ConnectionState>,
+    startup: startup::Restoration,
     next_request: u64,
     pending: Vec<Pending>,
     login: Option<Login>,
@@ -127,11 +136,15 @@ pub struct Accounts {
     preferences: Vec<AccountPreferenceSnapshot>,
     failures: Vec<(AccountId, LoginFailure)>,
     unresolved: Vec<Unresolved>,
+    queued_send: Option<messaging::QueuedSend>,
+    queued_read: reads::Reads,
+    outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
     background: background::Background,
     history: history::Cache,
+    cache: cache::Cache,
     picker: Option<files::Picker>,
     picker_open: bool,
     message_poll_at: Instant,
@@ -153,6 +166,7 @@ impl Accounts {
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
             cursor: ConnectionCursor::default(),
             diagnostic_connection: None,
+            startup: startup::Restoration::default(),
             next_request: 0,
             pending: Vec::new(),
             login: None,
@@ -166,11 +180,15 @@ impl Accounts {
             preferences: Vec::new(),
             failures: Vec::new(),
             unresolved: Vec::new(),
+            queued_send: None,
+            queued_read: reads::Reads::default(),
+            outbox: outbox::Outbox::default(),
             room_invite: None,
             message_search: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
+            cache: cache::Cache::default(),
             picker: None,
             picker_open: false,
             message_poll_at: Instant::now(),
@@ -178,6 +196,9 @@ impl Accounts {
         }))
     }
     pub fn shutdown(&mut self) {
+        self.stop_video();
+        self.queued_send = None;
+        self.queued_read.clear();
         self.history = history::Cache::default();
         self.call_actions.clear();
         if let Ok(connection) = &mut self.connection {
@@ -185,6 +206,9 @@ impl Accounts {
         }
     }
     pub fn stopped(&self) -> bool {
+        if !self.content_owner.video.stopped() {
+            return false;
+        }
         self.connection
             .as_ref()
             .map_or(true, AccountConnection::is_stopped)
@@ -264,6 +288,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
         self.room_invite = None;
@@ -285,14 +310,17 @@ impl Accounts {
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
             .map_or_else(Page::empty, |a| a.rooms.clone());
-        self.snapshot.conversation_list = ConversationListState {
-            content: if scope.is_some() {
-                ContentState::Loading
-            } else {
-                ContentState::Unconfigured
-            },
-            complete: false,
-        };
+        self.snapshot.conversation_list = scope
+            .and_then(|s| self.background.account(s))
+            .map(|a| a.state)
+            .unwrap_or(ConversationListState {
+                content: if scope.is_some() {
+                    ContentState::Loading
+                } else {
+                    ContentState::Unconfigured
+                },
+                complete: false,
+            });
         self.snapshot.tags = Page::empty();
         self.snapshot.tag_state = ContentState::Unconfigured;
         self.load_tags = None;
@@ -324,15 +352,22 @@ impl Accounts {
     }
     fn sync_accounts(&mut self, state: &ConnectionSnapshot) {
         self.diagnostic_connection(state.state);
-        let accounts = page(
-            state
-                .accounts
-                .as_slice()
-                .iter()
-                .filter_map(|a| a.summary.scope.map(|scope| account(&a.summary, scope))),
-        );
+        self.sync_cache_accounts(state);
+        let accounts = page(state.accounts.as_slice().iter().filter_map(|a| {
+            a.summary
+                .scope
+                .or_else(|| self.cache.local_scope(a.summary.account))
+                .map(|scope| {
+                    let mut row = account(&a.summary, scope);
+                    if self.cache.is_local(scope) {
+                        row.connection = AccountConnectionState::Disconnected;
+                    }
+                    row
+                })
+        }));
         let saved = page(state.accounts.as_slice().iter().map(|a| {
             SavedAccountView {
+                connected_once: a.summary.connected_once,
                 id: a.summary.account,
                 navigation_key: a.summary.navigation_key.clone(),
                 label: a.summary.account_label.clone(),
@@ -414,6 +449,7 @@ impl Accounts {
             self.select(None);
         }
         self.sync_background();
+        self.restore_cache_views();
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
@@ -424,6 +460,7 @@ impl Accounts {
         {
             self.select(Some(account.scope));
         }
+        self.restore_cache_selection();
         if let ConnectionState::Failed(error) = state.state {
             self.snapshot.login.phase = LoginPhase::Failed(login_error(error));
             self.snapshot.content = ContentState::Failed;
@@ -445,6 +482,8 @@ impl Accounts {
                     }
                 }
                 self.cursor = update.cursor;
+                self.tick_cache();
+                self.restore_on_startup(&update.snapshot);
             }
             Err(error) => {
                 self.diagnostic_connection(ConnectionState::Failed(error));
@@ -473,10 +512,16 @@ impl Accounts {
             }
         }
         self.tick_removal();
+        self.load_outbox();
+        self.tick_outbox();
+        // A deliberate send gets the next free admission before asset/poll work.
+        self.tick_queued_send(Instant::now());
+        self.tick_queued_read(Instant::now());
         self.tick_content();
         self.tick_background();
         self.tick_calls();
         self.poll_messages();
+        self.tick_prefetch();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -579,10 +624,15 @@ impl Accounts {
                 done.result.clone()
             };
         match purpose {
+            Purpose::Outbox(work) => self.complete_outbox_data(work,result),
+            Purpose::Data(work) => self.complete_data(work,result),
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Room(request, context, operation, read) => self.complete_room(request, context, operation, read, result),
-            Purpose::Message(request, context, operation, work) => self.complete_message((request, done.request.0), context, operation, work, result),
+            Purpose::Message(request, context, operation, work) => {
+                self.complete_message((request, done.request.0), context, operation, work, result);
+                self.cache_history(context);
+            },
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
@@ -667,9 +717,21 @@ impl Accounts {
                     _ => self.login_failed(IdentityError::Request(ErrorKind::Malformed)),
                 }
             }
-            Purpose::Restore(id) => {
+            Purpose::Restore(id) | Purpose::RestoreAutomatic(id) => {
+                let error = result.as_ref().err().copied();
+                diagnostics::record(Diagnostic {
+                    request: done.request.0,
+                    operation: DiagnosticOperation::AccountRestore,
+                    outcome: if matches!(&result, Ok(RuntimeReply::Active { .. })) { DiagnosticOutcome::Accepted } else { DiagnosticOutcome::Failed },
+                    error: error.map(diagnostic_error),
+                    storage: error.and_then(diagnostic_storage),
+                    count: 0,
+                });
                 match result {
-                    Ok(RuntimeReply::Active { summary, .. }) => { if let Some(scope) = summary.scope { self.select(Some(scope)); } }
+                    Ok(RuntimeReply::Active { summary, .. }) => { if let Some(scope) = summary.scope
+                        && done.scope_is_current && self.current(scope).is_ok()
+                        && (matches!(purpose, Purpose::Restore(_)) || self.snapshot.active_account.is_none())
+                        { self.select(Some(scope)); } }
                     Err(error) => { self.failures.retain(|(a, _)| *a != id); if self.failures.len() < 8 { self.failures.push((id, login_error(error))); } }
                     _ => (),
                 }
@@ -840,6 +902,10 @@ impl Accounts {
         });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self.cache.is_presentation(context) {
+            self.select_conversation(context)?;
+            return Ok(());
+        }
         self.current(context.account)?;
         if !self.select_conversation(context)? {
             return Ok(());
@@ -876,6 +942,14 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::OpenMessageLink {
+                context,
+                message,
+                source,
+                ordinal,
+            } => {
+                self.open_message_link(context, message, source, ordinal)?;
+            }
             UiIntent::RemoveAccount {
                 request,
                 account,
@@ -1145,7 +1219,9 @@ impl Accounts {
                 self.failures.retain(|(a, _)| *a != account);
             }
             UiIntent::SelectAccount(scope) => {
-                self.current(scope)?;
+                if !self.cache.is_local(scope) {
+                    self.current(scope)?;
+                }
                 self.select(Some(scope));
             }
             UiIntent::OpenConversation(context) => self.open(context)?,
@@ -1208,11 +1284,14 @@ impl Accounts {
                 context,
                 body,
             } => {
-                if self.snapshot.submission.is_some()
-                    || self
-                        .pending
-                        .iter()
-                        .any(|p| matches!(p.purpose, Purpose::Send(..)))
+                if self.queued_send.is_some()
+                    || self.snapshot.submission.is_some()
+                    || self.pending.iter().any(|p| {
+                        matches!(
+                            p.purpose,
+                            Purpose::Send(..) | Purpose::Message(_, _, _, messaging::Work::Send)
+                        )
+                    })
                     || self.unresolved.len() >= 8
                     || self.unresolved.iter().any(|u| u.context == context)
                 {
@@ -1257,6 +1336,7 @@ impl Accounts {
                     .map_err(submit_error)?;
                 self.preferences.retain(|p| p.scope.account != account);
                 self.history.remove_account(account);
+                self.outbox.retire_account(account);
                 if self
                     .snapshot
                     .active_account
@@ -1449,6 +1529,9 @@ impl Purpose {
             Self::Login(_, work) => work.diagnostic_operation(),
             Self::Message(_, _, _, work) => work.diagnostic_operation(),
             Self::Send(..) => Some(DiagnosticOperation::Send),
+            Self::Restore(_) | Self::RestoreAutomatic(_) => {
+                Some(DiagnosticOperation::AccountRestore)
+            }
             _ => None,
         }
     }
@@ -1523,7 +1606,7 @@ fn diagnostic_error(error: IdentityError) -> ErrorKind {
 }
 fn diagnostic_completion(completion: Completion) -> DiagnosticOutcome {
     match completion {
-        Completion::ServerAccepted => DiagnosticOutcome::Accepted,
+        Completion::Queued | Completion::ServerAccepted => DiagnosticOutcome::Accepted,
         Completion::Uncertain => DiagnosticOutcome::Uncertain,
         Completion::Failed(_) => DiagnosticOutcome::Failed,
     }

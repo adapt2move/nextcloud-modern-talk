@@ -7,7 +7,9 @@ pub mod devices;
 pub mod navigation;
 pub mod notifications;
 pub mod permissions;
+pub mod reactions;
 pub mod shortcuts;
+pub mod time;
 
 use devices::DevicePreferences;
 use navigation::NavigationPreferences;
@@ -192,6 +194,7 @@ pub struct LocalPreferences {
     pub notifications: NotificationPreferences,
     pub devices: DevicePreferences,
     pub onboarding_resume: Option<OnboardingResume>,
+    pub recent_reactions: reactions::RecentReactions,
 }
 impl Default for LocalPreferences {
     fn default() -> Self {
@@ -209,6 +212,7 @@ impl Default for LocalPreferences {
             notifications: NotificationPreferences::default(),
             devices: DevicePreferences::default(),
             onboarding_resume: None,
+            recent_reactions: reactions::RecentReactions::default(),
         }
     }
 }
@@ -293,6 +297,13 @@ pub struct PreferenceSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreferenceCommand {
+    /// Merge local recency into the owner's newest preferences, without replacing
+    /// unrelated edits from a stale presentation snapshot.
+    RememberReaction {
+        generation: u64,
+        request: RequestId,
+        emoji: crate::bounded::Text<64>,
+    },
     Set {
         generation: u64,
         request: RequestId,

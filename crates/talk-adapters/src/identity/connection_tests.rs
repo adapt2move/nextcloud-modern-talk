@@ -11,6 +11,9 @@ use talk_core::{
     ports::{ErrorKind, ProtocolReply, ProtocolRequest},
 };
 
+#[path = "data/runtime_tests.rs"]
+mod durable_data_runtime;
+
 async fn ready(connection: &mut AccountConnection) {
     let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -444,6 +447,7 @@ async fn account_connection_retains_results_and_distinguishes_dormant_restore() 
             panic!("save");
         };
         let scope = summary.scope.unwrap();
+        assert!(summary.connected_once);
         assert_ne!(
             connection.new_operation_id(scope).unwrap(),
             connection.new_operation_id(scope).unwrap()
@@ -493,12 +497,58 @@ async fn account_connection_retains_results_and_distinguishes_dormant_restore() 
             "Synthetic"
         );
         assert!(dormant.summary.scope.is_none());
+        assert!(dormant.summary.connected_once);
         assert!(restored.account_cancellation(scope).is_err());
         assert!(restored.new_operation_id(scope).is_err());
+        let StoredState::Eligible(item) = dormant.summary.storage else {
+            panic!("persisted fixture credentials must remain eligible");
+        };
+        let mut mismatched_generation = item;
+        mismatched_generation.generation =
+            talk_core::ids::VaultGeneration::from_local(item.generation.as_local().wrapping_add(1));
+        let mut mismatched_provider = item;
+        mismatched_provider.provider.store = item.provider.store.wrapping_add(1);
+        let mut cursor = ConnectionCursor::default();
+        for (request, mismatched) in [(1, mismatched_generation), (2, mismatched_provider)] {
+            restored
+                .try_submit(
+                    ConnectionRequestId(request),
+                    RuntimeCommand::RestoreExact {
+                        account,
+                        item: mismatched,
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                restored.snapshot().accounts.as_slice()[0].state,
+                SavedAccountState::Restoring,
+            );
+            let rejected = completed(&mut restored, cursor, request).await;
+            assert!(matches!(
+                rejected.result,
+                Err(IdentityError::Request(ErrorKind::Conflict))
+            ));
+            assert!(!rejected.scope_is_current);
+            let snapshot = restored.snapshot();
+            let still_dormant = &snapshot.accounts.as_slice()[0];
+            assert_eq!(still_dormant.state, SavedAccountState::Dormant);
+            assert!(still_dormant.summary.scope.is_none());
+            assert_eq!(still_dormant.summary.storage, StoredState::Eligible(item));
+            assert!(restored.account_cancellation(scope).is_err());
+            assert!(restored.new_operation_id(scope).is_err());
+            cursor = rejected.cursor;
+        }
         restored
-            .try_submit(ConnectionRequestId(1), RuntimeCommand::Restore { account })
+            .try_submit(
+                ConnectionRequestId(3),
+                RuntimeCommand::RestoreExact { account, item },
+            )
             .unwrap();
-        let active = completed(&mut restored, ConnectionCursor::default(), 1).await;
+        assert_eq!(
+            restored.snapshot().accounts.as_slice()[0].state,
+            SavedAccountState::Restoring,
+        );
+        let active = completed(&mut restored, cursor, 3).await;
         let Ok(RuntimeReply::Active { summary, .. }) = active.result else {
             panic!("restore");
         };
@@ -507,8 +557,14 @@ async fn account_connection_retains_results_and_distinguishes_dormant_restore() 
         let cancel = restored.account_cancellation(new_scope).unwrap();
         restored.logout(account).unwrap();
         assert!(cancel.is_cancelled());
-        let replay = restored.poll(ConnectionCursor::default()).unwrap();
-        assert!(!replay.completions.as_slice()[0].scope_is_current);
+        let replay = restored.poll(cursor).unwrap();
+        let replayed_active = replay
+            .completions
+            .as_slice()
+            .iter()
+            .find(|done| done.request == ConnectionRequestId(3))
+            .expect("unacknowledged exact restoration remains observable");
+        assert!(!replayed_active.scope_is_current);
         assert!(
             replay.snapshot.accounts.as_slice()[0]
                 .summary
@@ -544,11 +600,12 @@ fn account_connection_schema_upgrade_preserves_eligibility_and_unsettled_items()
     // profile/store binding, account and dispatched operation.
     {
         let db = rusqlite::Connection::open(fixture.0.join("restoration.sqlite")).unwrap();
-        db.execute_batch("BEGIN IMMEDIATE; DROP TABLE account_labels; DROP TABLE navigation_rooms; UPDATE meta SET schema=5; COMMIT;").unwrap();
+        db.execute_batch("BEGIN IMMEDIATE; DROP TABLE account_labels; DROP TABLE navigation_rooms; ALTER TABLE accounts DROP COLUMN connected_once; UPDATE meta SET schema=5; COMMIT;").unwrap();
     }
     let mut ledger = fixture.ledger();
     let state = ledger.account(account).unwrap();
     assert_eq!(state.disposition, 1);
+    assert!(!state.connected_once);
     assert!(state.eligible.is_none());
     let retained = ledger.operation(account, operation.id).unwrap();
     assert_eq!(retained.item, operation.item);

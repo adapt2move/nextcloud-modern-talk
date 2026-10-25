@@ -524,6 +524,9 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             q.extend([
                 ("lookIntoFuture", u8::from(future).to_string()),
                 ("limit", "50".into()),
+                // The server only returns common-read updates when explicitly
+                // requested. This observes public receipts without marking read.
+                ("lastCommonReadId", "0".into()),
                 ("setReadMarker", "0".into()),
                 ("markNotificationsAsRead", "0".into()),
                 ("noStatusUpdate", "1".into()),
@@ -594,6 +597,9 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             } else {
                 q.push(("reaction", reaction.clone()))
             }
+            // POST and DELETE return the complete emoji-to-actor map, just
+            // like GET. Decode it so the accepted change needs no second read.
+            kind = Kind::Chat(K::ReactionAuthors)
         }
         C::ReactionAuthors { message, reaction } => {
             positive(*message)?;

@@ -6,6 +6,7 @@ pub(super) enum StreamRead<'a> {
     File(Option<&'a (dyn Fn(u64, Option<u64>) + Send + Sync)>),
     Image,
     Pdf,
+    Video(crate::content::VideoFormat),
 }
 impl Transport {
     pub(super) fn file_endpoint(
@@ -63,10 +64,15 @@ impl Transport {
     ) -> Result<u64, PortError> {
         self.request_dispatched = false;
         let pdf = matches!(read, StreamRead::Pdf);
+        let video = match &read {
+            StreamRead::Video(format) => Some(*format),
+            _ => None,
+        };
         let (read_limit, progress, image) = match read {
             StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
             StreamRead::Image => (crate::content::MAX_IMAGE_BYTES as u64, None, true),
             StreamRead::Pdf => (crate::content::MAX_IMAGE_BYTES as u64, None, false),
+            StreamRead::Video(_) => (crate::content::MAX_VIDEO_BYTES as u64, None, false),
         };
         self.validate(c)?;
         let shared = self.begin_shared_cookies()?;
@@ -171,14 +177,16 @@ impl Transport {
             if response.content_length().is_some_and(|n| n > limit) {
                 return Err(self.error(ErrorKind::TooLarge));
             }
-            if image || pdf {
+            if image || pdf || video.is_some() {
                 let mime = response
                     .headers()
                     .get(CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.split(';').next())
                     .unwrap_or("");
-                let accepted = if pdf {
+                let accepted = if let Some(format) = video {
+                    mime == format.mime_type()
+                } else if pdf {
                     mime == "application/pdf"
                 } else {
                     matches!(

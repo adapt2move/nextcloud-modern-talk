@@ -110,6 +110,7 @@ pub struct AccountSummary {
     pub navigation_key: NavigationAccountKey,
     pub server_label: Option<Text<128>>,
     pub account_label: Option<Text<128>>,
+    pub connected_once: bool,
     pub attempt: Option<LoginAttemptId>,
     pub scope: Option<AccountScope>,
     pub phase: AccountPhase,
@@ -125,6 +126,12 @@ pub struct AccountSummary {
 /// Worker/composition vocabulary, never a renderer import. No credentials or wire URL.
 pub enum RuntimeCommand {
     Accounts,
+    /// Private account observations and durable intents. This confers no live
+    /// network authority and remains available while credential restore waits.
+    AccountData {
+        account: AccountId,
+        command: super::data::DataCommand,
+    },
     StorageStatus {
         account: AccountId,
     },
@@ -161,6 +168,11 @@ pub enum RuntimeCommand {
     Restore {
         account: AccountId,
     },
+    /// Startup may restore only the exact provider/generation it observed.
+    RestoreExact {
+        account: AccountId,
+        item: talk_core::identity::QualifiedItem,
+    },
     RetainPrevious {
         account: AccountId,
         attempt: LoginAttemptId,
@@ -180,6 +192,10 @@ pub enum RuntimeCommand {
 #[derive(Clone, Debug)]
 pub enum RuntimeReply {
     Accounts(Page<AccountSummary, 8>),
+    AccountData {
+        account: AccountId,
+        result: std::result::Result<super::data::DataResult, super::data::DataError>,
+    },
     StorageStatus {
         account: AccountId,
         revision: u64,
@@ -323,6 +339,7 @@ struct Suppression {
 struct Control {
     account: AccountId,
     slots: Arc<Semaphore>,
+    data_slots: Arc<Semaphore>,
     epoch: AtomicU64,
     close: AtomicBool,
     rejected: AtomicBool,
@@ -546,7 +563,11 @@ impl IdentityRuntime {
                         self.shared.wake.notify_one();
                     }
                     epoch = c.epoch.load(Ordering::Acquire);
-                    c.slots.clone()
+                    if matches!(command, RuntimeCommand::AccountData { .. }) {
+                        c.data_slots.clone()
+                    } else {
+                        c.slots.clone()
+                    }
                 })
                 .ok_or(ErrorKind::NotFound)?
         } else {
@@ -673,6 +694,7 @@ fn command_account(command: &RuntimeCommand) -> Option<AccountId> {
         RuntimeCommand::Accounts => None,
         RuntimeCommand::Begin { replace, .. } => *replace,
         RuntimeCommand::StorageStatus { account }
+        | RuntimeCommand::AccountData { account, .. }
         | RuntimeCommand::BeginSave { account }
         | RuntimeCommand::RetireStored { account, .. }
         | RuntimeCommand::RetireAll { account }
@@ -681,6 +703,7 @@ fn command_account(command: &RuntimeCommand) -> Option<AccountId> {
         | RuntimeCommand::ReopenBrowser { account, .. }
         | RuntimeCommand::Save { account, .. }
         | RuntimeCommand::Restore { account }
+        | RuntimeCommand::RestoreExact { account, .. }
         | RuntimeCommand::RetainPrevious { account, .. }
         | RuntimeCommand::ResolvePrevious { account, .. }
         | RuntimeCommand::Maintain { account } => Some(*account),
@@ -689,6 +712,28 @@ fn command_account(command: &RuntimeCommand) -> Option<AccountId> {
 }
 fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>> {
     m.lock().map_err(|_| IdentityError::WorkerUnavailable)
+}
+async fn observe_provider_read(
+    mut job: tokio::task::JoinHandle<Result<Zeroizing<String>>>,
+    backend: talk_core::identity::StorageBackend,
+    limit: Duration,
+    admitted: impl Fn() -> Result<()>,
+) -> Result<Zeroizing<String>> {
+    let deadline = tokio::time::Instant::now() + limit;
+    loop {
+        admitted()?;
+        tokio::select! {
+            result = &mut job => {
+                admitted()?;
+                return result.map_err(|_| IdentityError::WorkerUnavailable)?;
+            }
+            _ = tokio::time::sleep_until(deadline) => return Err(super::error::storage(backend, talk_core::identity::StorageFailure::TemporarilyUnavailable)),
+            // Cancellation cannot interrupt the OS call. Stop observing within
+            // 50 ms; its existing permit remains in the blocking worker until it
+            // returns. Never dispatch a replacement read while it owns that slot.
+            _ = tokio::time::sleep(Duration::from_millis(50)) => (),
+        }
+    }
 }
 fn path(config: &RuntimeConfig) -> Result<PathBuf> {
     if let Some(p) = &config.path {
@@ -759,6 +804,10 @@ async fn run(
     shared: Arc<Shared>,
     mut jobs: mpsc::Receiver<Job>,
 ) -> Result<()> {
+    crate::system_time::refresh_system_zone();
+    let mut timezone_refresh = tokio::time::interval(Duration::from_secs(60));
+    timezone_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    timezone_refresh.tick().await;
     let directory = Arc::new(PrivateDir::open(&path(&config)?, config.fixture)?);
     let ledger = Ledger::open(directory.clone())?;
     let providers = Providers::new(directory, ledger.lock.clone());
@@ -780,6 +829,7 @@ async fn run(
             let control = Arc::new(Control {
                 account,
                 slots: Arc::new(Semaphore::new(7)),
+                data_slots: Arc::new(Semaphore::new(2)),
                 epoch: AtomicU64::new(0),
                 close: AtomicBool::new(false),
                 rejected: AtomicBool::new(false),
@@ -856,6 +906,7 @@ async fn run(
             break;
         }
         tokio::select! {
+            _=timezone_refresh.tick()=>crate::system_time::refresh_system_zone(),
             _=shared.wake.notified()=>{},
             _ = tasks.join_next(), if !tasks.is_empty() => {},
             next=jobs.recv()=>{
@@ -882,6 +933,20 @@ async fn run(
                     job.command=RuntimeCommand::Begin{server:server.clone(),replace:Some(account.id)};
                 }
                 let id=command_account(&job.command).ok_or(IdentityError::WorkerUnavailable)?;
+                if let RuntimeCommand::AccountData { account, command } = job.command {
+                    let controls = lock(&shared.controls)?.clone();
+                    let current = controls.iter().any(|c| c.account == account
+                        && c.epoch.load(Ordering::Acquire) == job.epoch
+                        && !c.removed.load(Ordering::Acquire)
+                        && !c.rejected.load(Ordering::Acquire));
+                    let result = if current && !job.cancel.is_cancelled() {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs());
+                        super::data::Store::new(ledger.clone(),account).execute(command,now)
+                    } else { Err(super::data::DataError::Ineligible) };
+                    let _ = job.reply.send(Ok(RuntimeReply::AccountData { account, result }));
+                    continue;
+                }
                 if matches!(job.command,RuntimeCommand::ForgetAccount{..}) {
                     let controls=lock(&shared.controls)?.clone();
                     let control=controls.iter().find(|c|c.account==id);
@@ -1150,6 +1215,7 @@ impl Worker {
             navigation_key: ledger.account_key(self.account)?,
             server_label: Origin::parse(&a.origin, self.fixture)?.label(),
             account_label: ledger.account_label(self.account)?,
+            connected_once: a.connected_once,
             attempt: lock(&self.control.pending)?
                 .as_ref()
                 .filter(|p| !p.cancelled() && p.epoch == self.epoch)
@@ -1320,7 +1386,9 @@ impl Worker {
             self.admitted(cancel)?;
         }
         match command {
-            RuntimeCommand::Accounts | RuntimeCommand::ForgetAccount { .. } => unreachable!(),
+            RuntimeCommand::Accounts
+            | RuntimeCommand::AccountData { .. }
+            | RuntimeCommand::ForgetAccount { .. } => unreachable!(),
             RuntimeCommand::StorageStatus { .. } => {
                 let unconfirmed = self.control.suppression_pending()?;
                 let ledger = lock(&self.ledger)?;
@@ -1544,7 +1612,8 @@ impl Worker {
             RuntimeCommand::Save {
                 attempt, choice, ..
             } => self.save(*attempt, *choice, cancel).await,
-            RuntimeCommand::Restore { .. } => self.restore(cancel).await,
+            RuntimeCommand::Restore { .. } => self.restore(None, cancel).await,
+            RuntimeCommand::RestoreExact { item, .. } => self.restore(Some(*item), cancel).await,
             RuntimeCommand::RetainPrevious { attempt, .. } => self.retain(*attempt, cancel).await,
             RuntimeCommand::ResolvePrevious { selection, .. } => {
                 let a = lock(&self.ledger)?.account(self.account)?;
@@ -1598,6 +1667,9 @@ impl Worker {
                     ProtocolRequest::Messaging {
                         command: talk_core::protocol::messaging::MessagingCommand::UploadFile { .. }
                             | talk_core::protocol::messaging::MessagingCommand::DownloadFile { .. },
+                        ..
+                    } | ProtocolRequest::Content {
+                        command: talk_core::protocol::content::ContentCommand::Video { .. },
                         ..
                     }
                 ) {
@@ -1887,17 +1959,25 @@ impl Worker {
             _ => {}
         }
     }
-    async fn provider_read(&self, item: QualifiedItem) -> Result<Zeroizing<String>> {
+    async fn provider_read(
+        &self,
+        item: QualifiedItem,
+        cancel: &Cancellation,
+    ) -> Result<Zeroizing<String>> {
         let permit = self.provider_permit()?;
         let providers = self.providers.clone();
         let job = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             providers.read(item)
         });
-        tokio::time::timeout(Duration::from_secs(3), job)
-            .await
-            .map_err(|_| IdentityError::Request(ErrorKind::Deadline))?
-            .map_err(|_| IdentityError::WorkerUnavailable)?
+        // A native permission sheet can outlive a network deadline. Keep this
+        // exact read pending, rather than discarding its later approval and
+        // making the user click Connect again. This grants no runtime authority:
+        // identity/network validation still starts only after the read returns.
+        observe_provider_read(job, item.provider.backend, Duration::from_secs(60), || {
+            self.admitted(cancel)
+        })
+        .await
     }
     async fn save(
         &mut self,
@@ -2051,7 +2131,7 @@ impl Worker {
         };
         self.admitted(cancel)?;
         // Validate both actual readable N and account again before durable eligibility.
-        let read = self.provider_read(op.item).await?;
+        let read = self.provider_read(op.item, cancel).await?;
         if read.as_str() != credential.password.as_str() {
             return Err(IdentityError::RecoveryRequired);
         }
@@ -2097,6 +2177,12 @@ impl Worker {
             self.network.clone(),
         )
         .map_err(|e| IdentityError::Request(e.kind))?;
+        if a.disposition == 2 && a.eligible.is_some() {
+            client.set_avatar_store(Box::new(super::avatars::Store::new(
+                self.ledger.clone(),
+                self.account,
+            )));
+        }
         client.set_media_service(self.media.clone());
         client.set_account_rejection_handler(
             self.control.rejection_handler(self.shared.wake.clone()),
@@ -2109,6 +2195,11 @@ impl Worker {
                     .map(|o| o.item)
             })
             .transpose()?;
+        // This historical write records a validated connection, not admission.
+        // Keep its disk I/O outside the UI-visible pending mutex. Cancellation
+        // may leave this marker, but must still prevent the handoff below.
+        self.admitted(cancel)?;
+        lock(&self.ledger)?.remember_connection(self.account)?;
         // Serialize pending cancellation with the activation handoff, without holding
         // a UI-visible lock across ledger, provider or network I/O.
         {
@@ -2147,7 +2238,11 @@ impl Worker {
         let summary = self.publish(AccountPhase::Active)?;
         Ok(RuntimeReply::Active { summary, probe })
     }
-    async fn restore(&mut self, cancel: &Cancellation) -> Result<RuntimeReply> {
+    async fn restore(
+        &mut self,
+        expected: Option<talk_core::identity::QualifiedItem>,
+        cancel: &Cancellation,
+    ) -> Result<RuntimeReply> {
         if self
             .client
             .as_ref()
@@ -2163,10 +2258,13 @@ impl Worker {
             self.account,
             a.eligible.ok_or(IdentityError::RecoveryRequired)?,
         )?;
+        if expected.is_some_and(|item| item != op.item) {
+            return Err(ErrorKind::Conflict.into());
+        }
         if op.abandoned || op.settlement != 1 || op.cleanup {
             return Err(IdentityError::RecoveryRequired);
         }
-        let password = self.provider_read(op.item).await?;
+        let password = self.provider_read(op.item, cancel).await?;
         self.admitted(cancel)?;
         let mut grant = Grant {
             origin: Origin::parse(&a.origin, self.fixture)?,
@@ -2277,7 +2375,7 @@ impl Worker {
                 return Err(e.kind.into());
             }
         } else {
-            let password = self.provider_read(previous.item).await?;
+            let password = self.provider_read(previous.item, cancel).await?;
             let mut grant = Grant {
                 origin: Origin::parse(&a.origin, self.fixture)?,
                 user: Zeroizing::new(a.user.clone()),
@@ -2369,6 +2467,88 @@ fn ambiguous(kind: ErrorKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn provider_read_waits_for_the_original_completion_and_rechecks_cancellation() {
+        use talk_core::identity::StorageBackend;
+        let (send, receive) = oneshot::channel();
+        let cancel = Cancellation::default();
+        let job = tokio::spawn(async move {
+            receive.await.unwrap();
+            Ok(Zeroizing::new("synthetic credential".into()))
+        });
+        let observation = observe_provider_read(
+            job,
+            StorageBackend::PrivateFile,
+            Duration::from_secs(1),
+            || {
+                if cancel.is_cancelled() {
+                    Err(ErrorKind::Cancelled.into())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        tokio::pin!(observation);
+        tokio::select! {
+            result = &mut observation => panic!("read completed before provider settlement: {}", result.is_ok()),
+            _ = tokio::task::yield_now() => (),
+        }
+        cancel.cancel();
+        send.send(()).unwrap();
+        assert!(matches!(
+            observation.await,
+            Err(IdentityError::Request(ErrorKind::Cancelled))
+        ));
+    }
+
+    #[tokio::test]
+    async fn provider_read_timeout_keeps_the_worker_charged_and_is_a_storage_failure() {
+        use talk_core::identity::{StorageBackend, StorageFailure};
+        let slots = Arc::new(Semaphore::new(1));
+        let permit = slots.clone().try_acquire_owned().unwrap();
+        let (release, gate) = std::sync::mpsc::sync_channel(1);
+        let (started, entered) = oneshot::channel();
+        let (finished, settled) = oneshot::channel();
+        let job = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            gate.recv().unwrap();
+            drop(permit);
+            finished.send(()).unwrap();
+            Ok(Zeroizing::new("synthetic credential".into()))
+        });
+        entered.await.unwrap();
+        let result =
+            observe_provider_read(job, StorageBackend::MacKeychain, Duration::ZERO, || Ok(()))
+                .await;
+        assert!(matches!(
+            result,
+            Err(IdentityError::Storage {
+                backend: StorageBackend::MacKeychain,
+                failure: StorageFailure::TemporarilyUnavailable
+            })
+        ));
+        assert!(
+            slots.clone().try_acquire_owned().is_err(),
+            "timeout cannot start a replacement provider read"
+        );
+        release.send(()).unwrap();
+        settled.await.unwrap();
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn settled_provider_read_delivers_the_original_value_without_another_dispatch() {
+        let job = tokio::spawn(async { Ok(Zeroizing::new("synthetic credential".into())) });
+        let value = observe_provider_read(
+            job,
+            talk_core::identity::StorageBackend::PrivateFile,
+            Duration::from_secs(1),
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value.as_str(), "synthetic credential");
+    }
 
     fn closing_priority(cancelled: bool, rejected: bool) {
         let path = std::env::temp_dir().join(format!(
@@ -2418,6 +2598,7 @@ mod tests {
         let control = Arc::new(Control {
             account: account.id,
             slots: Arc::new(Semaphore::new(7)),
+            data_slots: Arc::new(Semaphore::new(2)),
             epoch: AtomicU64::new(0),
             close: AtomicBool::new(false),
             rejected: AtomicBool::new(false),
@@ -2437,6 +2618,7 @@ mod tests {
         let unrelated = Arc::new(Control {
             account: unrelated_account.id,
             slots: Arc::new(Semaphore::new(7)),
+            data_slots: Arc::new(Semaphore::new(2)),
             epoch: AtomicU64::new(0),
             close: AtomicBool::new(false),
             rejected: AtomicBool::new(false),
@@ -2455,6 +2637,7 @@ mod tests {
                 navigation_key: ledger.account_key(account.id).unwrap(),
                 server_label: None,
                 account_label: None,
+                connected_once: true,
                 attempt: None,
                 scope: Some(scope),
                 phase: AccountPhase::Active,

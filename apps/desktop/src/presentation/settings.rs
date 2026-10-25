@@ -329,75 +329,6 @@ impl Desktop {
             )
             .when_some(description, |d, text| d.child(self.hint(self.l(text))))
     }
-    /// A page is a column of groups separated by space, not by cards.
-    pub(super) fn dialog_page(&self) -> Div {
-        div().flex().flex_col().gap_6().w_full()
-    }
-    /// A group of related rows under a short label.
-    pub(super) fn dialog_section(&self, label: Option<&str>) -> Div {
-        div()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .when_some(label, |d, label| {
-                d.child(
-                    div()
-                        .text_size(self.sp(13.))
-                        .line_height(self.sp(18.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(self.l(label).to_owned()),
-                )
-            })
-    }
-    /// Label and explanation on the left, the single control on the right.
-    pub(super) fn dialog_row(
-        &self,
-        label: &str,
-        detail: Option<&str>,
-        control: impl IntoElement,
-    ) -> Div {
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .py(px(10.))
-            .border_b_1()
-            .border_color(self.theme.border)
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .text_size(self.sp(13.))
-                            .line_height(self.sp(18.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(self.l(label).to_owned()),
-                    )
-                    .when_some(detail, |d, detail| d.child(self.hint(self.l(detail)))),
-            )
-            .child(control)
-    }
-    /// Buttons keep their intrinsic width instead of stretching across the page.
-    pub(super) fn dialog_actions(&self) -> Div {
-        div().flex_none().flex().flex_wrap().items_center().gap_2()
-    }
-    /// Container for one exclusive choice; options keep their natural width.
-    pub(super) fn segmented(&self) -> Div {
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_1()
-            .p(px(2.))
-            .rounded(px(8.))
-            .bg(self.theme.subtle)
-    }
     pub(super) fn segment(
         &self,
         id: impl Into<gpui::ElementId>,
@@ -416,7 +347,6 @@ impl Desktop {
             .text_size(self.sp(12.))
             .when(selected, |d| {
                 d.bg(t.segment)
-                    .border_color(t.input_border)
                     .font_weight(FontWeight::MEDIUM)
                     .when(enabled, |d| d.text_color(t.text))
             })
@@ -749,9 +679,10 @@ impl Desktop {
             // Computer persistence cannot confirm account-owned values or sources.
             content = content.child(self.preference_status(cx));
         }
-        content = content.when(self.feedback.is_some_and(|f| f.context.is_none()), |d| {
-            d.child(self.feedback_view(cx))
-        });
+        content = content.when(
+            self.feedback_visible() && self.feedback.is_some_and(|f| f.context.is_none()),
+            |d| d.child(self.feedback_view(cx)),
+        );
         let navigation = if narrow {
             self.dialog_bar(self.button_with_leading_icon(
                 "settings-menu",
@@ -811,7 +742,7 @@ impl Desktop {
             .rounded(px(10.))
             .p(px(6.))
             .border_2()
-            .border_color(if selected { t.focus } else { t.border })
+            .border_color(gpui::transparent_black())
             .bg(if selected { t.subtle } else { t.surface })
     }
     fn check_badge(&self) -> Div {

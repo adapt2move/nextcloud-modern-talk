@@ -57,6 +57,23 @@ pub(super) fn update_error_label(
 }
 
 pub trait ComputerSettingsPort {
+    /// Resolve against the platform owner's cached system timezone. These calls
+    /// perform no timezone discovery, storage or network work on the UI thread.
+    fn resolve_deadline(
+        &self,
+        _choice: talk_core::preferences::time::DeadlineChoice,
+    ) -> Result<
+        talk_core::preferences::time::DeadlineMoment,
+        talk_core::preferences::time::LocalTimeError,
+    > {
+        Err(talk_core::preferences::time::LocalTimeError::Unavailable)
+    }
+    fn local_datetime(&self, _timestamp: u64) -> Option<talk_core::ui::Text<32>> {
+        None
+    }
+    fn same_local_day(&self, _first: u64, _second: u64) -> bool {
+        false
+    }
     /// Cached OS preference only; the platform owner observes changes outside
     /// rendering. Unknown support suppresses nonessential motion.
     fn reduced_motion(&self) -> bool {
@@ -205,6 +222,28 @@ pub enum PreferenceEdit {
     NotificationBanner(NotificationCategory, bool),
 }
 impl Desktop {
+    /// Recency is merged by the settings owner, so a rapid reaction cannot
+    /// replace another setting from an older presentation snapshot.
+    pub(super) fn remember_reaction_emoji(&mut self, emoji: talk_core::ui::Text<64>) {
+        let snapshot = self.settings_port.snapshot();
+        if snapshot.active.recent_reactions.as_slice().first() == Some(&emoji) {
+            return;
+        }
+        let Some(request) = self.settings_request.checked_add(1) else {
+            self.preference_error = Some(PreferenceError::RevisionExhausted);
+            return;
+        };
+        self.settings_request = request;
+        self.preference_error = self
+            .settings_port
+            .submit(PreferenceCommand::RememberReaction {
+                generation: snapshot.generation,
+                request: RequestId(request),
+                emoji,
+            })
+            .err();
+        self.preferences = self.settings_port.snapshot();
+    }
     pub(super) fn can_install_update(&self) -> bool {
         !self.update_restart_pending
             && self.prejoin.is_none()

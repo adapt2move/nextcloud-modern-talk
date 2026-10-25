@@ -1,17 +1,25 @@
 //! Native content surfaces over scoped observations and composition-owned images.
 //! Views never resolve a URL, decode remote bytes, or report transfer success.
+pub(in crate::presentation) mod gallery;
+pub(in crate::presentation) mod groups;
+mod window;
+
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, scoped_id},
     input::TextInput,
+    messaging::composer_menu,
 };
 use gpui::{
     Context, Div, Entity, Focusable, ImageSource, ObjectFit, Window, div, img, prelude::*, px,
 };
 use talk_core::ui::content::{
-    AssetState, AssetTarget, AttachmentRef, ContentAction, DownloadState, PollDraft, PollView,
+    AssetState, AssetTarget, AssetView, AttachmentRef, ContentAction, DownloadState, PollDraft,
+    PollView,
 };
-use talk_core::ui::presentation::{Completion, ConversationRef, RequestId, UiIntent};
+use talk_core::ui::presentation::{
+    Completion, ContentState, ConversationRef, PresentationSnapshot, RequestId, UiIntent,
+};
 use talk_core::ui::{AccountScope, Page, Text, conversation::RemoteState};
 
 const MAX_IMAGES: usize = 128;
@@ -20,6 +28,7 @@ const MAX_POLL_OPTIONS: usize = 8;
 #[derive(Clone)]
 pub(crate) enum Action {
     Menu,
+    ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
     AddOption,
     RemoveOption,
@@ -27,6 +36,7 @@ pub(crate) enum Action {
     HiddenResults,
     SubmitPoll,
     Preview(AttachmentRef),
+    GalleryMove { from: AttachmentRef, offset: i8 },
     Download(AttachmentRef),
     Command(ContentAction),
 }
@@ -38,7 +48,12 @@ pub(super) struct ContentUi {
     requested: Vec<AssetTarget>,
     request: u64,
     pub menu: bool,
+    pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
+    gallery: Vec<AttachmentRef>,
+    gallery_position: Option<(usize, usize)>,
+    media_groups: Vec<groups::Span>,
+    swipe: gallery::Swipe,
     return_overlay: Option<Overlay>,
     pub question: Entity<TextInput>,
     pub options: Vec<Entity<TextInput>>,
@@ -63,7 +78,12 @@ impl ContentUi {
             requested: Vec::new(),
             request: 0,
             menu: false,
+            composer_menu: composer_menu::Menu::new(cx),
             preview: None,
+            gallery: Vec::new(),
+            gallery_position: None,
+            media_groups: Vec::new(),
+            swipe: gallery::Swipe::default(),
             return_overlay: None,
             question: cx.new(|cx| TextInput::new("Frage der Umfrage", 4000, theme, cx)),
             options: (0..MAX_POLL_OPTIONS)
@@ -163,8 +183,9 @@ impl Desktop {
         .then_some(request)
     }
 
-    /// One missing asset per existing owner tick. The owner may reject Busy;
-    /// only admitted requests are retained, and no render callback starts work.
+    /// One missing asset per existing owner tick. The content owner settles
+    /// enqueue success with admission, bounded Busy retry or a failed asset;
+    /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
@@ -193,6 +214,36 @@ impl Desktop {
             }
             self.content_ui.account = account;
             self.content_ui.context = self.snapshot.selected;
+        }
+        self.content_ui.gallery =
+            gallery::entries(&self.snapshot, self.content_ui.preview.as_ref());
+        self.content_ui.gallery_position = self
+            .content_ui
+            .preview
+            .as_ref()
+            .and_then(|reference| window::global_position(&self.snapshot, reference));
+        let pins: Vec<_> = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| Some(p.context) == self.snapshot.selected)
+            .into_iter()
+            .flat_map(|p| p.pinned_messages.as_slice())
+            .map(|m| m.local_id)
+            .collect();
+        self.content_ui.media_groups =
+            groups::spans(self.snapshot.messages.as_slice(), &pins, |a, b| {
+                self.settings_port.same_local_day(a, b)
+            });
+        if self.overlay == Some(Overlay::ContentPreview)
+            && (self.snapshot.content == ContentState::Denied
+                || self
+                    .content_ui
+                    .preview
+                    .as_ref()
+                    .is_some_and(|r| self.attachment_object(r).is_none()))
+        {
+            self.close_content_overlay();
         }
         self.set_content_images(account, Vec::new(), cx);
         if self.projection_blocked || self.update_restart_pending {
@@ -238,6 +289,13 @@ impl Desktop {
         }
         let Some(account) = account else { return };
         let mut targets = Vec::with_capacity(MAX_IMAGES);
+        // Returning online or retiring an obsolete descriptor must not leave
+        // an open viewer waiting for an original nobody has requested.
+        if !self.media_offline()
+            && let Some(reference) = &self.content_ui.preview
+        {
+            targets.push(AssetTarget::Image(reference.clone()));
+        }
         targets.push(AssetTarget::SelfAvatar);
         if let Some(context) = self.snapshot.selected {
             targets.push(AssetTarget::ConversationAvatar(context));
@@ -249,11 +307,23 @@ impl Desktop {
                 top
             };
             for message in rows.iter().skip(start).take(16) {
-                if targets.len() < MAX_IMAGES {
-                    targets.push(AssetTarget::MessageAvatar {
-                        context,
-                        message: message.local_id,
-                    });
+                let avatar = AssetTarget::MessageAvatar {
+                    context,
+                    message: message.local_id,
+                };
+                // Own rows use the account's already requested SelfAvatar.
+                // A verified same-actor alias also needs no per-message GET;
+                // the content owner still retires it on policy/expiry changes.
+                if targets.len() < MAX_IMAGES
+                    && !message.own
+                    && matches!(
+                        message.delivery,
+                        talk_core::ui::presentation::DeliveryState::Received
+                            | talk_core::ui::presentation::DeliveryState::ServerAccepted
+                    )
+                    && avatar_alias(&self.snapshot, &avatar).is_none()
+                {
+                    targets.push(avatar);
                 }
                 for rich in message
                     .metadata
@@ -356,7 +426,10 @@ impl Desktop {
                 .try_submit(UiIntent::Content {
                     request: RequestId(next),
                     account,
-                    action: ContentAction::Load(target.clone()),
+                    action: match &target {
+                        AssetTarget::Image(reference) => ContentAction::Preview(reference.clone()),
+                        _ => ContentAction::Load(target.clone()),
+                    },
                 })
                 .is_ok()
             {
@@ -378,7 +451,7 @@ impl Desktop {
         })
         .flatten()
     }
-    fn content_scope_current(&self) -> bool {
+    pub(super) fn content_scope_current(&self) -> bool {
         self.snapshot.active_account.is_some()
             && self.snapshot.content_panel.account == self.snapshot.active_account
             && self.snapshot.selected.is_some()
@@ -398,6 +471,19 @@ impl Desktop {
             .map(|(_, image)| image.clone())
     }
     pub(super) fn content_avatar(&self, target: AssetTarget, initials: &str, size: f32) -> Div {
+        if let AssetTarget::MessageAvatar { context, message } = &target
+            && self.snapshot.active_account == Some(context.account)
+            && self.snapshot.selected == Some(*context)
+            && self
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .any(|m| m.local_id == *message && m.own)
+            && let Some(avatar) = self.projected_avatar(AssetTarget::SelfAvatar, size)
+        {
+            return avatar;
+        }
         if let Some(avatar) = self.projected_avatar(target, size) {
             avatar
         } else {
@@ -414,7 +500,20 @@ impl Desktop {
             .flex()
             .items_center()
             .justify_center();
-        if let Some(image) = self.asset_image(&target) {
+        let asset = self
+            .asset(&target)
+            .filter(|asset| matches!(asset.state, AssetState::Ready { .. }))
+            .or_else(|| avatar_alias(&self.snapshot, &target))?;
+        let image = if let AssetState::Ready { key } = asset.state {
+            self.content_ui
+                .images
+                .iter()
+                .find(|(id, _)| *id == key)
+                .map(|(_, image)| image.clone())
+        } else {
+            None
+        };
+        if let Some(image) = image {
             // GPUI's parent overflow mask is rectangular. The image primitive
             // needs its own radius; avatar decode supplies an undistorted square.
             return Some(
@@ -426,7 +525,6 @@ impl Desktop {
                 ),
             );
         }
-        let asset = self.asset(&target)?;
         let emoji = asset.emoji.as_ref()?;
         let bg = asset
             .color
@@ -450,7 +548,10 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         match action {
-            Action::Menu => self.content_ui.menu = !self.content_ui.menu,
+            Action::Menu => self.toggle_composer_menu(window, cx),
+            Action::ComposerChoice(target, choice) => {
+                self.choose_composer_menu(target, choice, window, cx);
+            }
             Action::CreatePoll => {
                 self.content_ui.return_overlay = self.overlay;
                 self.content_ui.menu = false;
@@ -479,15 +580,12 @@ impl Desktop {
                     self.content_ui.pending_poll = Some((context, request));
                 }
             }
-            Action::Preview(reference) => {
-                if self.snapshot.selected == Some(reference.context)
-                    && self
-                        .submit_content(ContentAction::Preview(reference.clone()))
-                        .is_some()
+            Action::Preview(reference) => self.open_media_preview(reference, window, cx),
+            Action::GalleryMove { from, offset } => {
+                if self.content_ui.preview.as_ref() == Some(&from)
+                    && let Some(next) = gallery::adjacent(&self.content_ui.gallery, &from, offset)
                 {
-                    self.content_ui.preview = Some(reference);
-                    self.content_ui.return_overlay = self.overlay;
-                    self.handle(LocalAction::Open(Overlay::ContentPreview), window, cx);
+                    self.open_media_preview(next, window, cx);
                 }
             }
             Action::Download(reference) => {
@@ -516,7 +614,11 @@ impl Desktop {
             return false;
         }
         if self.overlay == Some(Overlay::ContentPreview) {
-            self.submit_content(ContentAction::ClosePreview);
+            if !self.snapshot.selected.is_some_and(|c| {
+                c.account.runtime.as_local() == 0 || c.conversation.host.as_local() == 0
+            }) {
+                self.submit_content(ContentAction::ClosePreview);
+            }
             self.content_ui.preview = None;
         }
         self.overlay = self.content_ui.return_overlay.take();
@@ -539,10 +641,18 @@ impl Desktop {
                 self.snapshot
                     .message_panel
                     .as_ref()
+                    .filter(|p| p.context == reference.context)
                     .into_iter()
-                    .flat_map(|p| p.shared_files.as_slice()),
+                    .flat_map(|p| {
+                        p.shared_files
+                            .as_slice()
+                            .iter()
+                            .chain(p.thread_messages.as_slice())
+                            .chain(p.pinned_messages.as_slice())
+                    }),
             )
-            .find(|m| m.local_id == reference.message)?
+            .find(|m| m.local_id == reference.message)
+            .filter(|m| !m.metadata.deleted)?
             .metadata
             .rich
             .as_slice()
@@ -566,225 +676,6 @@ impl Desktop {
         } else {
             self.message_available(talk_core::ui::messaging::MessageFeature::Files)
         }
-    }
-    pub(super) fn attachment_card(
-        &self,
-        reference: AttachmentRef,
-        object: &talk_core::ui::messaging::RichObject,
-        cx: &Context<Self>,
-    ) -> Div {
-        let target = AssetTarget::Thumbnail(reference.clone());
-        let preview = self.asset_image(&target);
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .w(px(360.))
-            .max_w_full()
-            .child(
-                self.button(
-                    scoped_id(
-                        "content-preview",
-                        reference.context,
-                        reference.message,
-                        placeholder_key(reference.placeholder.as_str()),
-                    ),
-                    "",
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::Content(Action::Preview(reference.clone())),
-                    cx,
-                )
-                .w_full()
-                .p_0()
-                .overflow_hidden()
-                .flex_col()
-                .items_start()
-                .child(
-                    div()
-                        .w_full()
-                        .h(px(180.))
-                        .bg(self.theme.subtle)
-                        .rounded(px(8.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(if let Some(image) = preview {
-                            img(image)
-                                .size_full()
-                                .object_fit(ObjectFit::Contain)
-                                .into_any_element()
-                        } else {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap_2()
-                                .child(self.scaled_icon("file", 38., self.theme.muted))
-                                .child(self.hint(self.l(
-                                    match self.asset(&target).map(|a| a.state) {
-                                        None
-                                        | Some(AssetState::Loading | AssetState::Ready { .. }) => {
-                                            "Vorschau wird geladen …"
-                                        }
-                                        Some(AssetState::Denied) => {
-                                            "Du hast keinen Zugriff auf diese Vorschau."
-                                        }
-                                        Some(AssetState::Failed) => {
-                                            "Die Vorschau konnte nicht geladen werden."
-                                        }
-                                        Some(AssetState::Missing | AssetState::Unsupported) => {
-                                            "Vorschau nicht verfügbar"
-                                        }
-                                    },
-                                )))
-                                .into_any_element()
-                        }),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .p_3()
-                        .bg(self.theme.subtle)
-                        .child(self.scaled_icon("file", 20., self.theme.muted))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(div().text_ellipsis().child(object.name.as_str().to_owned()))
-                                .child(
-                                    self.hint(
-                                        object
-                                            .mime_type
-                                            .as_ref()
-                                            .map_or(self.l("Datei"), |m| m.as_str()),
-                                    ),
-                                ),
-                        ),
-                ),
-            )
-    }
-
-    pub(super) fn preview_body(&self, cx: &Context<Self>) -> Div {
-        let Some(reference) = self
-            .content_ui
-            .preview
-            .as_ref()
-            .filter(|r| Some(r.context) == self.snapshot.selected)
-        else {
-            return self.state_note(
-                "file",
-                "Vorschau nicht verfügbar",
-                "Öffne die Datei erneut aus dem Gespräch.",
-            );
-        };
-        let target = AssetTarget::Image(reference.clone());
-        let name = self
-            .attachment_object(reference)
-            .map_or(self.l("Datei"), |o| o.name.as_str());
-        let thumbnail = AssetTarget::Thumbnail(reference.clone());
-        let large_state = self.asset(&target).map(|asset| asset.state);
-        let large_image = self.asset_image(&target);
-        let using_thumbnail = large_image.is_none() && large_state != Some(AssetState::Denied);
-        let image = large_image.or_else(|| {
-            using_thumbnail
-                .then(|| self.asset_image(&thumbnail))
-                .flatten()
-        });
-        let mut body = div().flex().flex_col().gap_4().child(self.title(name));
-        if image.is_some() && using_thumbnail {
-            body = body.child(self.hint(self.l("Kleine Vorschau")));
-        }
-        let pages = image.as_ref().and_then(|_| {
-            self.asset(&target)
-                .and_then(|a| a.document_pages)
-                .or_else(|| self.asset(&thumbnail).and_then(|a| a.document_pages))
-        });
-        if let Some(pages) = pages {
-            body = body.child(self.hint(&self.lf(
-                "Erste PDF-Seite · {pages} Seiten",
-                &[("pages", &pages.to_string())],
-            )));
-        } else if image.is_some()
-            && self
-                .attachment_object(reference)
-                .and_then(|o| o.mime_type.as_ref())
-                .is_some_and(|mime| mime.as_str() == "application/pdf")
-        {
-            body = body.child(self.hint(self.l("PDF-Vorschau · erste Seite")));
-        }
-        body = if let Some(image) = image {
-            body.child(
-                img(image)
-                    .w_full()
-                    .h(px(420.))
-                    .object_fit(ObjectFit::Contain)
-                    .rounded(px(8.)),
-            )
-        } else {
-            let status = match self.asset(&target).map(|a| a.state) {
-                None | Some(AssetState::Loading | AssetState::Ready { .. }) => {
-                    "Vorschau wird geladen …"
-                }
-                Some(AssetState::Denied) => "Du hast keinen Zugriff auf diese Vorschau.",
-                Some(AssetState::Failed) => "Die Vorschau konnte nicht geladen werden.",
-                Some(AssetState::Missing | AssetState::Unsupported) => {
-                    "Keine native Vorschau verfügbar. Öffne die Datei in der Cloud-Webansicht."
-                }
-            };
-            body.child(
-                div()
-                    .min_h(px(180.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(self.theme.subtle)
-                    .rounded(px(8.))
-                    .p_5()
-                    .child(self.hint(self.l(status))),
-            )
-        };
-        if matches!(
-            large_state,
-            Some(AssetState::Failed | AssetState::Missing | AssetState::Unsupported)
-        ) {
-            body = body.child(self.button(
-                "preview-retry",
-                "Vorschau erneut laden",
-                ButtonStyle::Secondary,
-                true,
-                LocalAction::Content(Action::Command(ContentAction::Preview(reference.clone()))),
-                cx,
-            ));
-        }
-        body = body.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_3()
-                .child(self.button_with_icon(
-                    "preview-download",
-                    ("Herunterladen", "download"),
-                    ButtonStyle::Primary,
-                    self.download_available(),
-                    LocalAction::Content(Action::Download(reference.clone())),
-                    cx,
-                ))
-                .child(self.button_with_icon(
-                    "preview-cloud",
-                    ("In der Cloud-Webansicht öffnen", "external"),
-                    ButtonStyle::Secondary,
-                    true,
-                    LocalAction::Content(Action::Command(ContentAction::OpenCloud(
-                        reference.clone(),
-                    ))),
-                    cx,
-                )),
-        );
-        body.children(self.download_status(cx))
     }
     pub(super) fn download_status(&self, cx: &Context<Self>) -> Option<Div> {
         let transfer = self.snapshot.content_panel.transfer.as_ref()?;
@@ -852,35 +743,6 @@ impl Desktop {
         Some(status)
     }
 
-    pub(super) fn composer_more_menu(&self, cx: &Context<Self>) -> Option<Div> {
-        if !self.content_ui.menu || !self.composer_active {
-            return None;
-        }
-        // One compact menu card: content first, then message send options.
-        Some(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .p_1()
-                .rounded(px(10.))
-                .border_1()
-                .border_color(self.theme.border)
-                .bg(self.theme.surface)
-                .child(self.button_with_icon(
-                    "composer-add-file",
-                    ("Datei anhängen", "paperclip"),
-                    ButtonStyle::Quiet,
-                    self.message_available(talk_core::ui::messaging::MessageFeature::Files),
-                    LocalAction::Message(super::messaging::Action::Command(
-                        talk_core::ui::messaging::MessageAction::PickUpload,
-                    )),
-                    cx,
-                ))
-                .child(self.create_poll_button("composer-create-poll", cx))
-                .children(self.composer_send_options(cx)),
-        )
-    }
     pub(super) fn create_poll_button(
         &self,
         id: &'static str,
@@ -919,7 +781,10 @@ impl Desktop {
             .flex_col()
             .gap_3()
             .child(self.title(self.l("Frage der Umfrage")))
-            .child(self.content_ui.question.clone());
+            .child(
+                self.input_surface(&self.content_ui.question, cx)
+                    .child(self.content_ui.question.clone()),
+            );
         for (index, input) in self
             .content_ui
             .options
@@ -933,7 +798,12 @@ impl Desktop {
                     .items_center()
                     .gap_2()
                     .child(self.hint(&(index + 1).to_string()))
-                    .child(div().flex_1().child(input.clone())),
+                    .child(
+                        self.input_surface(input, cx)
+                            .flex_1()
+                            .min_w_0()
+                            .child(input.clone()),
+                    ),
             );
         }
         body = body
@@ -1126,6 +996,76 @@ fn placeholder_key(value: &str) -> u128 {
     })
 }
 
+/// A new message may reuse already visible pixels while its own fresh content
+/// request runs. Only an exact canonical actor key in this same authorized room
+/// qualifies; missing/unknown identities and terminal refusals keep the fallback.
+/// This projection starts no work and cannot skip protocol revalidation.
+fn avatar_alias<'a>(
+    snapshot: &'a PresentationSnapshot,
+    target: &AssetTarget,
+) -> Option<&'a AssetView> {
+    let AssetTarget::MessageAvatar { context, message } = target else {
+        return None;
+    };
+    if snapshot.active_account != Some(context.account)
+        || snapshot.content_panel.account != snapshot.active_account
+        || snapshot.selected != Some(*context)
+        || snapshot.content_panel.context != Some(*context)
+        || !matches!(
+            snapshot.content,
+            ContentState::Ready | ContentState::Offline
+        )
+        || !snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|r| r.context == *context && r.draft_clipboard == talk_core::ui::Decision::Allowed)
+    {
+        return None;
+    }
+    message_avatar_alias(
+        snapshot.content_panel.assets.as_slice(),
+        snapshot.messages.as_slice(),
+        *context,
+        *message,
+    )
+}
+
+fn message_avatar_alias<'a>(
+    assets: &'a [AssetView],
+    rows: &[talk_core::ui::presentation::MessageView],
+    context: ConversationRef,
+    message: u128,
+) -> Option<&'a AssetView> {
+    let target = AssetTarget::MessageAvatar { context, message };
+    if assets
+        .iter()
+        .any(|a| a.target == target && a.state != AssetState::Loading)
+    {
+        return None;
+    }
+    let actor = rows
+        .iter()
+        .find(|m| m.local_id == message)?
+        .metadata
+        .author_key
+        .as_ref()?;
+    assets.iter().find(|a| {
+        let AssetTarget::MessageAvatar {
+            context: source_context,
+            message: source,
+        } = &a.target
+        else {
+            return false;
+        };
+        *source_context == context
+            && matches!(a.state, AssetState::Ready { .. })
+            && rows
+                .iter()
+                .any(|m| m.local_id == *source && m.metadata.author_key.as_ref() == Some(actor))
+    })
+}
+
 fn toggled_poll_votes(
     max_votes: u16,
     own: impl IntoIterator<Item = u16>,
@@ -1184,7 +1124,101 @@ fn poll_draft_values<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{poll_draft_values, toggled_poll_votes};
+    use super::{message_avatar_alias, poll_draft_values, toggled_poll_votes};
+    use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
+    use talk_core::ui::presentation::{ConversationRef, DeliveryState, MessageView};
+    use talk_core::ui::{
+        AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration, Text,
+    };
+
+    fn avatar_message(id: u128, key: Option<&str>) -> MessageView {
+        let metadata = talk_core::ui::messaging::MessageMetadata {
+            author_key: key.map(|key| Text::new(key).unwrap()),
+            ..Default::default()
+        };
+        MessageView {
+            local_id: id,
+            author: Text::new("Same display name").unwrap(),
+            initials: Text::new("SD").unwrap(),
+            time_label: Text::new("09:41").unwrap(),
+            body: Text::new("Synthetic message").unwrap(),
+            own: false,
+            delivery: DeliveryState::Received,
+            attachments: Page::empty(),
+            reply_count: 0,
+            metadata,
+        }
+    }
+
+    #[test]
+    fn current_room_avatar_alias_uses_canonical_identity_and_never_overrides_refusal() {
+        let account = AccountId::from_local(1);
+        let context = ConversationRef {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let source = AssetView {
+            target: AssetTarget::MessageAvatar {
+                context,
+                message: 1,
+            },
+            state: AssetState::Ready { key: 7 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        };
+        let mut rows = [
+            avatar_message(1, Some("5:users:synthetic")),
+            avatar_message(2, Some("5:users:synthetic")),
+        ];
+        assert_eq!(
+            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2),
+            Some(&source)
+        );
+        rows[1].metadata.author_key = None;
+        assert!(message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2).is_none());
+        rows[1].metadata.author_key = Some(Text::new("6:guests:synthetic").unwrap());
+        assert!(
+            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2).is_none(),
+            "equal labels or IDs in another actor namespace are not identity"
+        );
+        rows[1].metadata.author_key = rows[0].metadata.author_key.clone();
+        let mut other = context;
+        other.account.runtime = RuntimeGeneration::from_local(2);
+        assert!(message_avatar_alias(std::slice::from_ref(&source), &rows, other, 2).is_none());
+        for state in [
+            AssetState::Denied,
+            AssetState::Unsupported,
+            AssetState::Missing,
+            AssetState::Failed,
+        ] {
+            let target = AssetView {
+                target: AssetTarget::MessageAvatar {
+                    context,
+                    message: 2,
+                },
+                state,
+                emoji: None,
+                color: None,
+                document_pages: None,
+            };
+            assert!(message_avatar_alias(&[source.clone(), target], &rows, context, 2).is_none());
+        }
+        rows[0].metadata.deleted = true;
+        rows[1].metadata.deleted = true;
+        assert_eq!(
+            message_avatar_alias(std::slice::from_ref(&source), &rows, context, 2),
+            Some(&source),
+            "tombstones retain a known actor's already admitted image without restoring message content"
+        );
+    }
 
     #[test]
     fn poll_votes_preserve_unlimited_selections_and_enforce_single_or_limited_modes() {

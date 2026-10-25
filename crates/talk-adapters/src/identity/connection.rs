@@ -171,7 +171,10 @@ impl AccountConnection {
             }
             _ => None,
         };
-        let restoring = matches!(command, RuntimeCommand::Restore { .. });
+        let restoring = matches!(
+            command,
+            RuntimeCommand::Restore { .. } | RuntimeCommand::RestoreExact { .. }
+        );
         let observation = self.runtime.try_submit(command)?;
         self.last_request = request.0;
         self.jobs.push(Retained {
@@ -355,6 +358,20 @@ impl AccountConnection {
     /// reconciliation. This random correlation ID grants no account authority.
     pub fn new_operation_id(&self, scope: AccountScope) -> Result<OperationId> {
         self.account_cancellation(scope)?;
+        Ok(OperationId::from_local(super::ledger::random()?))
+    }
+
+    /// Correlation for a saved-account local intent. Dispatch must independently
+    /// obtain the current live scope; a queue identifier is never authorization.
+    pub fn new_local_operation_id(&self, account: AccountId) -> Result<OperationId> {
+        if self.state != ConnectionState::Ready
+            || !self.runtime.snapshot().as_slice().iter().any(|s| {
+                s.account == account
+                    && matches!(s.storage, super::runtime::StoredState::Eligible(_))
+            })
+        {
+            return Err(ErrorKind::WrongScope.into());
+        }
         Ok(OperationId::from_local(super::ledger::random()?))
     }
 

@@ -18,11 +18,18 @@ struct Batch {
 #[derive(Default)]
 pub(super) struct Arrival {
     high_water: u128,
+    // At most one page of recent own operation identities. Retaining these
+    // across temporary projection gaps prevents a canonical reply from replaying
+    // its already observed optimistic entry. Reset retires the conversation.
+    operations: Vec<u128>,
     ready: bool,
     visible: bool,
     entry: Option<Batch>,
     // Outer Some: admitted; inner None: awaiting its first completed layout.
     follow: Option<Option<Instant>>,
+    // A requested scroll takes effect during the next list layout. Entry time
+    // must not advance while the list is still painting the previous viewport.
+    awaiting_scroll_layout: bool,
     new_rows: u64,
     follows: u64,
     cancelled_follows: u64,
@@ -49,7 +56,7 @@ impl Arrival {
     }
 
     pub fn manual_scroll(&mut self) {
-        if self.follow.is_some() {
+        if self.following() {
             self.cancelled_follows = self.cancelled_follows.saturating_add(1);
         }
         if self
@@ -60,6 +67,7 @@ impl Arrival {
             self.entry = None;
         }
         self.follow = None;
+        self.awaiting_scroll_layout = false;
     }
 
     pub fn observe(
@@ -74,33 +82,75 @@ impl Arrival {
         let eligible = self.ready && ready && self.visible;
         self.ready = ready;
         let old_high_water = self.high_water;
-        // The production projection uses increasing server sequences as local IDs.
-        // Pending fixture rows are not server identities. A same-ID reconciliation
-        // is already observed and never starts a second entry animation.
+        // Only canonical server sequences can advance this watermark. Local
+        // pending/uncertain IDs may exceed every server ID in the conversation.
         self.high_water = rows
             .iter()
-            .filter(|row| row.delivery != DeliveryState::Pending)
+            .filter(|row| {
+                matches!(
+                    row.delivery,
+                    DeliveryState::Received | DeliveryState::ServerAccepted
+                )
+            })
             .map(|row| row.local_id)
             .max()
             .unwrap_or(0)
             .max(self.high_water);
         if !eligible {
+            self.remember_operations(rows);
             self.cancel();
             return;
+        }
+        // A server reply can replace the local row ID while its entry is still
+        // visible. Keep the original clock and follow deadline for that operation.
+        if let Some(batch) = &mut self.entry {
+            for id in &mut batch.ids {
+                if let Some(operation) = previous
+                    .iter()
+                    .find(|old| old.local_id == *id && old.own)
+                    .and_then(|old| old.metadata.local_operation)
+                    && let Some(canonical) = rows
+                        .iter()
+                        .find(|row| row.own && row.metadata.local_operation == Some(operation))
+                {
+                    *id = canonical.local_id;
+                }
+            }
         }
         let appended: Vec<_> = rows
             .iter()
             .filter(|row| {
-                row.local_id > old_high_water
-                    && row.delivery != DeliveryState::Pending
+                let correlated = row.own
+                    && row.metadata.local_operation.is_some_and(|operation| {
+                        self.operations.contains(&operation)
+                            || previous.iter().any(|old| {
+                                old.own && old.metadata.local_operation == Some(operation)
+                            })
+                    });
+                let canonical = matches!(
+                    row.delivery,
+                    DeliveryState::Received | DeliveryState::ServerAccepted
+                ) && row.local_id > old_high_water;
+                let local = row.own
+                    && row.metadata.local_operation.is_some()
+                    && matches!(
+                        row.delivery,
+                        DeliveryState::Pending | DeliveryState::Uncertain
+                    );
+                (canonical || local)
+                    && !correlated
                     && !previous.iter().any(|old| old.local_id == row.local_id)
             })
             .take(MAX_ENTRIES)
             .collect();
+        self.remember_operations(rows);
         if appended.is_empty() {
             return;
         }
         self.new_rows = self.new_rows.saturating_add(appended.len() as u64);
+        let own_send = appended
+            .iter()
+            .any(|row| row.own && row.metadata.local_operation.is_some());
         // Baselines are excluded by ready/high-water above, not by an arbitrary
         // time window that would also suppress a real send just after opening.
         // System and bulk rows still follow; one's own accepted send keeps its
@@ -111,9 +161,10 @@ impl Arrival {
             .map(|row| row.local_id)
             .collect();
         if !reduced && !ids.is_empty() {
-            let waiting = at_bottom || self.follow.is_some();
+            let following = self.following();
+            let waiting = at_bottom || own_send || following;
             if let Some(batch) = self.entry.as_mut().filter(|batch| match batch.started {
-                None => waiting && self.follow.is_some(),
+                None => waiting && following,
                 Some(started) => !waiting && now.saturating_duration_since(started) < ENTRY,
             }) {
                 // A burst shares the original deadline; it cannot keep motion alive.
@@ -129,8 +180,24 @@ impl Arrival {
                 });
             }
         }
-        if at_bottom && self.follow.is_none() {
+        if (at_bottom || own_send) && !self.following() {
             self.follow = Some(None);
+        }
+    }
+
+    fn remember_operations(&mut self, rows: &[MessageView]) {
+        for operation in rows
+            .iter()
+            .filter(|row| row.own)
+            .filter_map(|row| row.metadata.local_operation)
+            .take(MAX_ENTRIES)
+        {
+            if !self.operations.contains(&operation) {
+                if self.operations.len() == MAX_ENTRIES {
+                    self.operations.remove(0);
+                }
+                self.operations.push(operation);
+            }
         }
     }
 
@@ -140,7 +207,7 @@ impl Arrival {
             .filter(|batch| batch.ids.contains(&id))
             .and_then(|batch| {
                 let Some(started) = batch.started else {
-                    return self.follow.is_some().then_some(0.);
+                    return self.following().then_some(0.);
                 };
                 let elapsed = now.saturating_duration_since(started);
                 (elapsed < ENTRY).then(|| elapsed.as_secs_f32() / ENTRY.as_secs_f32())
@@ -160,7 +227,26 @@ impl Arrival {
     }
 
     pub fn following(&self) -> bool {
-        self.follow.is_some()
+        self.follow.is_some() || self.awaiting_scroll_layout
+    }
+
+    /// Confirm the viewport after the requested scroll, not the layout that
+    /// requested it. A user/focus override cancels motion rather than animating
+    /// an offscreen bubble or fighting the new reading position.
+    pub fn after_scroll_layout(&mut self, now: Instant, at_bottom: bool) {
+        if !self.awaiting_scroll_layout {
+            return;
+        }
+        if !at_bottom {
+            self.manual_scroll();
+            return;
+        }
+        self.awaiting_scroll_layout = false;
+        if let Some(batch) = self.entry.as_mut()
+            && batch.started.is_none()
+        {
+            batch.started = Some(now);
+        }
     }
 
     pub fn diagnostic(&self) -> (u64, u64, u64, Option<u128>) {
@@ -187,11 +273,7 @@ impl Arrival {
             });
             self.follows = self.follows.saturating_add(1);
             self.follow = None;
-            if let Some(batch) = self.entry.as_mut()
-                && batch.started.is_none()
-            {
-                batch.started = Some(now);
-            }
+            self.awaiting_scroll_layout = true;
             true
         } else {
             false
@@ -227,6 +309,212 @@ mod tests {
         state
     }
 
+    fn local(id: u128, operation: u128, delivery: DeliveryState) -> MessageView {
+        let mut row = row(id);
+        row.own = true;
+        row.delivery = delivery;
+        row.metadata.local_operation = Some(operation);
+        row
+    }
+
+    #[test]
+    fn own_send_from_older_history_scrolls_before_starting_visible_entry() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let pending = local(u128::MAX - 1, 801, DeliveryState::Pending);
+        state.observe(
+            &[row(10)],
+            &[row(10), pending.clone()],
+            true,
+            false,
+            false,
+            now,
+        );
+        assert!(
+            state.following(),
+            "an own send overrides the old reading position"
+        );
+        assert_eq!(state.progress(pending.local_id, now), Some(0.));
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+
+        let scrolled = now + FOLLOW + Duration::from_millis(350);
+        assert_eq!(state.progress(pending.local_id, scrolled), Some(0.));
+        assert!(!state.animate_next_frame(scrolled));
+        assert!(
+            state.following(),
+            "requesting the scroll is not its completion"
+        );
+        state.after_scroll_layout(scrolled, true);
+        assert!(!state.following());
+        assert_eq!(state.progress(pending.local_id, scrolled), Some(0.));
+        assert_eq!(
+            state.progress(pending.local_id, scrolled + ENTRY / 2),
+            Some(0.5)
+        );
+    }
+
+    #[test]
+    fn overridden_scroll_cancels_waiting_entry_and_remote_own_messages_do_not_force_follow() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let pending = local(u128::MAX - 2, 802, DeliveryState::Pending);
+        state.observe(
+            &[row(10)],
+            std::slice::from_ref(&pending),
+            true,
+            false,
+            false,
+            now,
+        );
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, false);
+        assert!(!state.following());
+        assert!(state.progress(pending.local_id, now + FOLLOW).is_none());
+
+        let mut remote_own = row(11);
+        remote_own.own = true;
+        remote_own.delivery = DeliveryState::ServerAccepted;
+        state.observe(&[pending], &[remote_own], true, false, false, now + FOLLOW);
+        assert!(
+            !state.following(),
+            "another client's send preserves the reading position"
+        );
+    }
+
+    #[test]
+    fn optimistic_own_entry_follows_and_canonical_operation_keeps_its_original_clock() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let pending = local(u128::MAX - 1, 501, DeliveryState::Pending);
+        state.observe(
+            &[row(10)],
+            &[row(10), pending.clone()],
+            true,
+            true,
+            false,
+            now,
+        );
+        assert_eq!(state.progress(pending.local_id, now), Some(0.));
+        assert!(state.following());
+        assert_eq!(state.high_water, 10);
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, true);
+        let middle = now + FOLLOW + ENTRY / 2;
+        let canonical = local(11, 501, DeliveryState::ServerAccepted);
+        state.observe(
+            &[row(10), pending.clone()],
+            &[row(10), canonical.clone()],
+            true,
+            true,
+            false,
+            middle,
+        );
+        assert_eq!(state.progress(11, middle), Some(0.5));
+        assert!(state.progress(pending.local_id, middle).is_none());
+        assert!(
+            !state.following(),
+            "correlation does not schedule another follow"
+        );
+        assert_eq!(state.diagnostic().0, 1);
+        // An equal body is irrelevant when operation identity differs.
+        let other = local(u128::MAX - 2, 502, DeliveryState::Pending);
+        state.observe(
+            &[canonical],
+            &[row(11), other.clone()],
+            true,
+            false,
+            false,
+            middle,
+        );
+        assert!(state.progress(other.local_id, middle).is_some());
+        assert_eq!(state.diagnostic().0, 2);
+    }
+
+    #[test]
+    fn uncertain_local_ids_cannot_advance_the_server_watermark_or_block_incoming_rows() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let uncertain = local(u128::MAX - 3, 503, DeliveryState::Uncertain);
+        state.observe(
+            &[row(10)],
+            &[row(10), uncertain.clone()],
+            true,
+            true,
+            false,
+            now,
+        );
+        assert_eq!(state.progress(uncertain.local_id, now), Some(0.));
+        assert_eq!(state.high_water, 10);
+        state.observe(
+            &[row(10), uncertain.clone()],
+            &[row(10), row(11), uncertain],
+            true,
+            true,
+            false,
+            now,
+        );
+        assert_eq!(state.progress(11, now), Some(0.));
+        assert_eq!(state.high_water, 11);
+        assert_eq!(state.diagnostic().0, 2);
+        let failed = local(u128::MAX - 4, 504, DeliveryState::Failed);
+        state.observe(&[row(11)], &[row(11), failed], true, false, false, now);
+        assert_eq!(state.high_water, 11);
+        assert_eq!(state.diagnostic().0, 2);
+    }
+
+    #[test]
+    fn operation_retention_is_bounded_and_prevents_replay_after_a_projection_gap() {
+        let now = Instant::now();
+        let mut state = baseline(now);
+        let pending = local(u128::MAX - 5, 505, DeliveryState::Pending);
+        state.observe(
+            &[row(10)],
+            std::slice::from_ref(&pending),
+            true,
+            false,
+            false,
+            now,
+        );
+        assert!(!state.after_layout(now, false));
+        assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, true);
+        state.observe(&[pending], &[row(10)], true, false, false, now + FOLLOW);
+        state.animate_next_frame(now + FOLLOW + ENTRY);
+        state.observe(
+            &[row(10)],
+            &[local(11, 505, DeliveryState::ServerAccepted)],
+            true,
+            true,
+            false,
+            now + ENTRY,
+        );
+        assert!(state.progress(11, now + ENTRY).is_none());
+        assert!(!state.following());
+        assert_eq!(state.diagnostic().0, 1);
+        for operation in 600..710 {
+            state.observe(
+                &[row(11)],
+                &[local(
+                    u128::MAX - operation,
+                    operation,
+                    DeliveryState::Pending,
+                )],
+                true,
+                false,
+                true,
+                now,
+            );
+        }
+        assert_eq!(state.operations.len(), MAX_ENTRIES);
+        assert!(!state.operations.contains(&505));
+        assert!(state.operations.contains(&709));
+        state.reset();
+        assert!(state.operations.is_empty());
+    }
+
     #[test]
     fn bursts_and_system_rows_follow_without_entry_but_own_sends_still_enter() {
         let now = Instant::now();
@@ -241,6 +529,7 @@ mod tests {
         assert!(state.following());
         assert!(!state.after_layout(now, false));
         assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, true);
         let mut system = row(15);
         system.metadata.system = true;
         state.observe(
@@ -256,6 +545,7 @@ mod tests {
         assert!(!state.animate_next_frame(now + FOLLOW));
         assert!(!state.after_layout(now + FOLLOW, false));
         assert!(state.after_layout(now + FOLLOW * 2, false));
+        state.after_scroll_layout(now + FOLLOW * 2, true);
         let mut own = row(16);
         own.own = true;
         let mut batch = vec![own];
@@ -278,6 +568,7 @@ mod tests {
         assert_eq!(state.progress(12, now), Some(0.));
         assert!(!state.after_layout(now, false));
         assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, true);
         let settled = now + FOLLOW + ENTRY;
         state.observe(
             &[row(11)],
@@ -322,6 +613,7 @@ mod tests {
         state.observe(&[row(11)], &[row(11), row(12)], true, true, false, now);
         assert!(!state.after_layout(now, false));
         assert!(state.after_layout(now + FOLLOW, false));
+        state.after_scroll_layout(now + FOLLOW, true);
         let visible = now + FOLLOW;
         assert_eq!(state.progress(12, visible + ENTRY / 2), Some(0.5));
         // Re-querying a remounted row cannot restart or reverse its clock.
@@ -346,6 +638,7 @@ mod tests {
         );
         assert!(!state.after_layout(layout + FOLLOW - Duration::from_millis(1), false));
         assert!(state.after_layout(layout + FOLLOW, false));
+        state.after_scroll_layout(layout + FOLLOW, true);
         assert!(!state.following());
         state.observe(&[row(12)], &[row(13)], true, true, false, now + ENTRY);
         state.manual_scroll();
@@ -362,6 +655,7 @@ mod tests {
         state.observe(&[row(10)], &[row(11)], true, true, true, now);
         assert!(state.progress(11, now).is_none());
         assert!(state.after_layout(now, true));
+        state.after_scroll_layout(now, true);
         state.observe(&[row(11)], &[row(12)], true, true, false, now);
         state.visibility(false, false);
         assert!(!state.following());
@@ -385,6 +679,7 @@ mod tests {
         assert!(!state.after_layout(layout, false));
         let visible = layout + FOLLOW;
         assert!(state.after_layout(visible, false));
+        state.after_scroll_layout(visible, true);
         assert_eq!(state.progress(11, visible), Some(0.));
         assert_eq!(state.progress(11, visible + ENTRY / 2), Some(0.5));
         assert!(state.animate_next_frame(visible + ENTRY / 2));

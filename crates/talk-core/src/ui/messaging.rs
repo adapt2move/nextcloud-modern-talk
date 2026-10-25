@@ -1,7 +1,7 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
-use super::{Decision, Page, Text};
+use super::{Decision, Page, Text, UnavailableReason};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
@@ -46,6 +46,12 @@ pub struct Reply {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageMetadata {
+    /// Opaque correlation for the local outbox and a validated own-message
+    /// reference. It never establishes identity from text or timestamps.
+    pub local_operation: Option<u128>,
+    /// Opaque, room-scoped actor identity; display names do not identify senders.
+    /// Missing or oversized protocol identities deliberately prevent grouping.
+    pub author_key: Option<Text<256>>,
     pub expires_at: Option<u64>,
     pub timestamp: u64,
     pub truncated: bool,
@@ -63,6 +69,8 @@ pub struct MessageMetadata {
 impl Default for MessageMetadata {
     fn default() -> Self {
         Self {
+            local_operation: None,
+            author_key: None,
             expires_at: None,
             timestamp: 0,
             truncated: false,
@@ -113,9 +121,41 @@ pub struct ContextLoad {
     pub state: RemoteState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MessageActionError {
+    Failed(UnavailableReason),
+    /// A possibly applied write is retained for read-only reconciliation.
+    Uncertain,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailedDraftKind {
+    Send,
+    Edit(u128),
+    Schedule(u64),
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FailedDraft {
+    pub operation: u128,
+    pub body: Text<4096>,
+    pub target: ComposeTarget,
+    pub kind: FailedDraftKind,
+    pub retrying: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagePanel {
+    pub failed_drafts: Page<FailedDraft, 64>,
+    /// Local durable intent admission only, never a server permission grant.
+    pub queue_available: bool,
+    pub queued_actions: u32,
+    /// Latest scoped outbox failure, identified independently from user request
+    /// counters so a late rejection cannot complete another action.
+    pub action_error: Option<(u64, MessageActionError)>,
     pub pinned_messages: Page<super::presentation::MessageView, 50>,
+    pub pins_state: RemoteState,
+    pub pins_loaded: bool,
+    pub pin_change: Decision,
     pub shared_files: Page<super::presentation::MessageView, 50>,
     pub file_limit: u64,
     pub uploaded: Option<UploadedFile>,
@@ -127,6 +167,8 @@ pub struct MessagePanel {
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
     pub state: RemoteState,
+    /// One admitted reaction mutation, cleared only by its correlated result.
+    pub reaction_pending: Option<u128>,
     pub history: RemoteState,
     pub older: Option<u128>,
     pub latest: Option<u128>,
@@ -147,7 +189,14 @@ pub struct MessagePanel {
 impl MessagePanel {
     pub fn new(context: ConversationRef) -> Self {
         Self {
+            failed_drafts: Page::empty(),
+            queue_available: false,
+            queued_actions: 0,
+            action_error: None,
             pinned_messages: Page::empty(),
+            pins_state: RemoteState::Idle,
+            pins_loaded: false,
+            pin_change: Decision::Unknown,
             shared_files: Page::empty(),
             file_limit: 0,
             uploaded: None,
@@ -158,6 +207,7 @@ impl MessagePanel {
             thread_messages: Page::empty(),
             context,
             state: RemoteState::Idle,
+            reaction_pending: None,
             history: RemoteState::Idle,
             older: None,
             latest: None,
@@ -191,6 +241,8 @@ pub struct ComposeTarget {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    RetryQueued(u128),
+    DiscardQueued(u128),
     PickUpload,
     Download {
         message: u128,

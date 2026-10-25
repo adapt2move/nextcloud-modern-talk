@@ -46,6 +46,8 @@ zip = { version = "=9.0.4", default-features = false, features = ["deflate"] }
 # resolution at libc 0.2.186 until that upstream chain is updated and compiled.
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
 unicode-segmentation = "=1.12.0"
+# Pure bounded message formatting; no HTML renderer or external resource loading.
+pulldown-cmark = { version = "=0.13.5", default-features = false }
 # Application-owned physical devices; native APIs remain in safe dependency bindings.
 cpal = { version = "=0.18.2", default-features = false, features = ["pulseaudio"] }
 gstreamer = { version = "=0.25.4", default-features = false, features = ["v1_24"] }
@@ -57,6 +59,8 @@ enigo = { version = "=0.6.1", default-features = false }
 windows = { version = "=0.61.3", default-features = false, features = ["UI_ViewManagement"] }
 # Reuse the locked safe CoreGraphics preflight API; it neither prompts nor captures.
 core-graphics = { version = "=0.24.0", default-features = false, features = ["link"] }
+# Read the OS motion preference in both bundled and cargo-run builds.
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }
 
 # Linux read-only screen portal; capture consent belongs to each share.
 ashpd = { version = "=0.12.3", default-features = false, features = ["async-std"] }
@@ -76,6 +80,12 @@ features = ["bundled", "limits"]
 [workspace.dependencies.dirs]
 version = "=5.0.1"
 default-features = false
+
+# Snapshot the system timezone off the UI thread; formatting uses the cached zone.
+[workspace.dependencies.jiff]
+version = "=0.2.38"
+default-features = false
+features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"]
 
 [workspace.dependencies.rustix]
 version = "=1.1.5"

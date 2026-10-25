@@ -1514,3 +1514,188 @@ async fn ambiguous_account_rejection_preserves_eligibility_and_other_account_unt
             .is_some()
     );
 }
+
+#[test]
+fn connected_history_survives_restart_without_restoring_authority() {
+    let fixture = Fixture::new();
+    let account = {
+        let mut ledger = fixture.ledger();
+        let a = ledger.reserve("https://example.invalid/".into()).unwrap();
+        assert!(!a.connected_once);
+        ledger.remember_connection(a.id).unwrap();
+        a.id
+    };
+    let mut ledger = fixture.ledger();
+    let restored = ledger.account(account).unwrap();
+    assert!(restored.connected_once);
+    assert_eq!(restored.disposition, 0);
+    assert!(restored.eligible.is_none());
+    ledger.suppress(account, false, None, true).unwrap();
+    assert!(ledger.account(account).unwrap().connected_once);
+    ledger.forget(account).unwrap();
+    assert!(ledger.account(account).is_err());
+}
+
+#[test]
+fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
+    use super::avatars::Store;
+    use crate::nextcloud::avatars::{AvatarStore, TTL};
+    use std::sync::Mutex;
+    let fixture = Fixture::new();
+    let mut ledger = fixture.ledger();
+    let mut accounts = Vec::new();
+    for user in ["synthetic-a", "synthetic-b"] {
+        let a = ledger.reserve(format!("https://{user}.invalid/")).unwrap();
+        let op = ledger
+            .stage(
+                a.id,
+                LoginAttemptId::from_local(random().unwrap()),
+                StorageBackend::PrivateFile,
+                user,
+            )
+            .unwrap();
+        ledger.settle(op, true).unwrap();
+        let revision = ledger.account(a.id).unwrap().revision;
+        ledger.activate(op, revision).unwrap();
+        accounts.push(a.id);
+    }
+    let session = ledger
+        .reserve("https://session.invalid/".into())
+        .unwrap()
+        .id;
+    let ledger = Arc::new(Mutex::new(ledger));
+    let mut a = Store::new(ledger.clone(), accounts[0]);
+    let mut b = Store::new(ledger.clone(), accounts[1]);
+    let mut temporary = Store::new(ledger.clone(), session);
+    let key = format!("u-{:064x}", 159);
+    assert!(temporary.put(&key, b"temporary", 100).is_err());
+    a.put(&key, b"account-a", 100).unwrap();
+    b.put(&key, b"account-b", 100).unwrap();
+    assert_eq!(a.get(&key, 101).unwrap().unwrap().0, b"account-a");
+    assert_eq!(b.get(&key, 101).unwrap().unwrap().0, b"account-b");
+    for n in 0..150 {
+        a.put(&format!("u-{n:064x}"), b"x", 101).unwrap();
+    }
+    assert!(
+        a.get(&key, 102).unwrap().is_none(),
+        "oldest is evicted at 128 entries"
+    );
+    a.put(&key, b"after-eviction", 102).unwrap();
+    drop((a, b, temporary, ledger));
+    let ledger = Arc::new(Mutex::new(fixture.ledger()));
+    let mut a = Store::new(ledger.clone(), accounts[0]);
+    let mut b = Store::new(ledger.clone(), accounts[1]);
+    assert_eq!(a.get(&key, 103).unwrap().unwrap().0, b"after-eviction");
+    let lost_room = format!("r-{:064x}", 1);
+    let retained_room = format!("r-{:064x}", 2);
+    a.put(&lost_room, b"removed-room", 103).unwrap();
+    a.put(&retained_room, b"retained-room", 103).unwrap();
+    a.retain_rooms(std::slice::from_ref(&retained_room))
+        .unwrap();
+    assert!(a.get(&lost_room, 104).unwrap().is_none());
+    assert_eq!(
+        a.get(&retained_room, 104).unwrap().unwrap().0,
+        b"retained-room"
+    );
+    assert!(
+        a.get(&key, 104).unwrap().is_some(),
+        "room cleanup keeps person avatars"
+    );
+    assert!(a.get(&key, 102 + TTL).unwrap().is_none());
+    assert!(
+        b.get(&key, 99).unwrap().is_none(),
+        "clock rollback expires rather than extends"
+    );
+    let full = vec![7; 1024 * 1024];
+    for n in 200..220 {
+        a.put(&format!("u-{n:064x}"), &full, 150).unwrap();
+    }
+    assert!(a.get(&format!("u-{:064x}", 200), 151).unwrap().is_none());
+    assert_eq!(
+        a.get(&format!("u-{:064x}", 219), 151)
+            .unwrap()
+            .unwrap()
+            .0
+            .len(),
+        full.len()
+    );
+    assert!(
+        fixture
+            .0
+            .join(format!("avatars-{:032x}.sqlite", accounts[0].as_local()))
+            .metadata()
+            .unwrap()
+            .len()
+            <= 16 * 1024 * 1024
+    );
+    a.put(&key, &vec![0; 1024 * 1024 + 1], 151).unwrap();
+    assert!(
+        a.get(&key, 152).unwrap().is_none(),
+        "oversized images stay out of disk"
+    );
+    a.put(&key, b"before-logout", 200).unwrap();
+    ledger
+        .lock()
+        .unwrap()
+        .suppress(accounts[0], false, None, true)
+        .unwrap();
+    assert!(a.get(&key, 201).is_err());
+    assert!(a.put(&key, b"late-write", 201).is_err());
+    assert!(
+        !fixture
+            .0
+            .join(format!("avatars-{:032x}.sqlite", accounts[0].as_local()))
+            .exists()
+    );
+    assert!(
+        fixture
+            .0
+            .join(format!("avatars-{:032x}.sqlite", accounts[1].as_local()))
+            .exists()
+    );
+    assert!(
+        !fixture
+            .0
+            .join(format!("avatars-{:032x}.sqlite", session.as_local()))
+            .exists()
+    );
+}
+
+#[test]
+fn schema_six_upgrade_recovers_historical_connection_without_changing_eligibility() {
+    let fixture = Fixture::new();
+    let (account, operation, revision) = {
+        let mut ledger = fixture.ledger();
+        let account = ledger
+            .reserve("https://example.invalid/".into())
+            .unwrap()
+            .id;
+        let op = ledger
+            .stage(
+                account,
+                LoginAttemptId::from_local(random().unwrap()),
+                StorageBackend::PrivateFile,
+                "synthetic",
+            )
+            .unwrap();
+        ledger.settle(op, true).unwrap();
+        ledger
+            .activate(op, ledger.account(account).unwrap().revision)
+            .unwrap();
+        let revision = ledger.account(account).unwrap().revision;
+        (account, op, revision)
+    };
+    let db = rusqlite::Connection::open(fixture.0.join("restoration.sqlite")).unwrap();
+    db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE accounts DROP COLUMN connected_once; UPDATE meta SET schema=6; COMMIT;").unwrap();
+    drop(db);
+    let ledger = fixture.ledger();
+    let account = ledger.account(account).unwrap();
+    assert!(account.connected_once);
+    assert_eq!(account.revision, revision);
+    assert_eq!(account.disposition, 2);
+    assert_eq!(account.eligible, Some(operation.id));
+    assert_eq!(
+        ledger.operation(account.id, operation.id).unwrap().item,
+        operation.item
+    );
+}

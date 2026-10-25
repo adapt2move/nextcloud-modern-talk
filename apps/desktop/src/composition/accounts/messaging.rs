@@ -7,30 +7,52 @@ use talk_core::ui::{conversation::RemoteState, messaging as view};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Work {
     Thread,
-    Capabilities,
     History,
     Latest,
+    Prefetch,
     Older,
     Poll,
     Action,
+    Forward(ConversationRef),
+    Reminder(u128),
+    CancelScheduled(u128),
+    Reaction(u128),
     Files,
+    Search,
+    Reminders,
+    Scheduled,
     Pins,
-    PinChange,
+    PinChange { message: u128, pinned: bool },
     Share,
     Send,
     Read(u128),
     Unread,
     Typing,
     Context(u128),
+    Recovery,
 }
 impl Work {
+    fn foreground_result(self) -> bool {
+        matches!(
+            self,
+            Self::Action
+                | Self::Forward(_)
+                | Self::Reminder(_)
+                | Self::CancelScheduled(_)
+                | Self::Reaction(_)
+                | Self::PinChange { .. }
+                | Self::Share
+                | Self::Send
+        )
+    }
     pub(super) fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
         Some(match self {
             Self::History => DiagnosticOperation::History,
             Self::Older => DiagnosticOperation::Older,
             Self::Context(_) => DiagnosticOperation::Context,
             Self::Thread => DiagnosticOperation::Thread,
-            Self::Latest | Self::Poll => DiagnosticOperation::Poll,
+            Self::Latest | Self::Prefetch | Self::Poll => DiagnosticOperation::Poll,
+            Self::Recovery => DiagnosticOperation::Context,
             Self::Send => DiagnosticOperation::Send,
             _ => return None,
         })
@@ -38,14 +60,105 @@ impl Work {
     fn backward(self) -> bool {
         matches!(
             self,
-            Self::History | Self::Latest | Self::Older | Self::Context(_)
+            Self::History
+                | Self::Latest
+                | Self::Prefetch
+                | Self::Older
+                | Self::Context(_)
+                | Self::Recovery
         )
     }
     pub(super) fn background(self) -> bool {
-        matches!(self, Self::Latest | Self::Poll)
+        matches!(
+            self,
+            Self::Latest | Self::Prefetch | Self::Poll | Self::Recovery
+        )
+    }
+}
+
+/// One application-wide pre-dispatch send, at most 4 KiB plus compose metadata.
+/// Only synchronous Busy non-admissions are retried; admitted writes immediately
+/// leave this slot and retain their existing operation/uncertainty lifecycle.
+pub(super) struct QueuedSend {
+    request: RequestId,
+    context: ConversationRef,
+    body: Text<4096>,
+    target: view::ComposeTarget,
+    deadline: Instant,
+}
+impl QueuedSend {
+    fn attempt(
+        &self,
+        selected: Option<ConversationRef>,
+        now: Instant,
+        dispatch: impl FnOnce(&Self) -> Result<(), SubmitError>,
+    ) -> Result<bool, SubmitError> {
+        if selected != Some(self.context) {
+            return Err(SubmitError::StaleScope);
+        }
+        if now >= self.deadline {
+            return Err(SubmitError::Unavailable(UnavailableReason::Busy));
+        }
+        match dispatch(self) {
+            Ok(()) => Ok(true),
+            Err(SubmitError::Busy) => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 }
 impl Accounts {
+    pub(super) fn tick_queued_send(&mut self, now: Instant) {
+        // Never overwrite a retained completion. Its acknowledgement is local
+        // and does not require another transport slot. This also bounds a slow
+        // UI consumer to one queued body and one retained result.
+        if self.snapshot.submission.is_some() {
+            return;
+        }
+        let Some(queued) = self.queued_send.take() else {
+            return;
+        };
+        match queued.attempt(self.snapshot.selected, now, |queued| {
+            if let Some(failure) = self
+                .snapshot
+                .accounts
+                .as_slice()
+                .iter()
+                .find(|account| account.scope == queued.context.account)
+                .and_then(|account| account.connection_failure)
+            {
+                return Err(SubmitError::Unavailable(UnavailableReason::Connection(
+                    failure,
+                )));
+            }
+            if self.snapshot.content != ContentState::Ready {
+                return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+            }
+            self.dispatch_message_action(
+                queued.request,
+                queued.context,
+                view::MessageAction::Send {
+                    body: queued.body.clone(),
+                    target: queued.target.clone(),
+                },
+            )
+        }) {
+            Ok(true) => (),
+            Ok(false) => self.queued_send = Some(queued),
+            Err(error) => {
+                let reason = match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    SubmitError::Busy => UnavailableReason::Busy,
+                    SubmitError::StaleScope => UnavailableReason::PolicyStale,
+                };
+                self.snapshot.submission = Some(SubmissionResult {
+                    request: queued.request,
+                    context: queued.context,
+                    result: Completion::Failed(reason),
+                });
+                self.touch();
+            }
+        }
+    }
     pub(super) fn restore_messages(&mut self, context: ConversationRef) {
         self.history.open(context);
         self.history.expire(history::now_unix());
@@ -53,6 +166,16 @@ impl Accounts {
         self.project_history(context);
     }
     pub(super) fn start_messages(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        // Interactive navigation takes priority over speculative reads in the
+        // serialized account lane. Cancelling a GET never marks a room read.
+        if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                if matches!(pending.purpose, Purpose::Message(_, c, _, Work::Prefetch) if c != context)
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
         self.restore_messages(context);
         let (command, work) = self.live_message_request(context)?;
         match self.start_message(RequestId(0), context, command, work) {
@@ -69,12 +192,6 @@ impl Accounts {
                 }
             }
         }
-        let _ = self.start_message(
-            RequestId(0),
-            context,
-            wire::MessagingCommand::Capabilities,
-            Work::Capabilities,
-        );
         let _ = self.room_action(
             RequestId(0),
             context,
@@ -118,12 +235,6 @@ impl Accounts {
             }
             return Err(error);
         }
-        let _ = self.start_message(
-            RequestId(0),
-            context,
-            wire::MessagingCommand::Capabilities,
-            Work::Capabilities,
-        );
         let _ = self.room_action(
             RequestId(0),
             context,
@@ -197,8 +308,17 @@ impl Accounts {
                 self.touch();
             }
         }
+        self.project_cache(context);
+        self.project_queued_read(context);
+        self.project_outbox(context);
     }
     pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
+        if self.snapshot.selected == Some(context) {
+            self.queued_read.clear();
+        }
+        if state == ContentState::Denied {
+            self.invalidate_cached_room(context);
+        }
         self.history.remove(context);
         self.notices.remove_room(context);
         if self.snapshot.selected == Some(context) {
@@ -218,17 +338,78 @@ impl Accounts {
         command: wire::MessagingCommand,
         work: Work,
     ) -> Result<(), SubmitError> {
+        self.start_message_inner(request, context, command, work, None)
+    }
+    pub(super) fn start_outbox_message(
+        &mut self,
+        context: ConversationRef,
+        operation: OperationId,
+        command: wire::MessagingCommand,
+        work: Work,
+    ) -> Result<(), SubmitError> {
+        self.start_message_inner(RequestId(0), context, command, work, Some(operation))
+    }
+    fn start_message_inner(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        command: wire::MessagingCommand,
+        work: Work,
+        queued: Option<OperationId>,
+    ) -> Result<(), SubmitError> {
         if self.pending.iter().any(|p| {
             matches!(p.purpose, Purpose::Message(_, c, _, w)
                 if c == context && (w == work || w.backward() && work.backward()
+                    || matches!((w, work), (Work::Reaction(_), Work::Reaction(_)))
                     || work == Work::Poll && w == Work::History
                         && !self.history.get(context).is_some_and(|h| h.loaded)))
         }) {
             return Err(SubmitError::Busy);
         }
-        let operation = self.operation(context)?;
+        let operation = if let Some(operation) = queued {
+            self.current(context.account)?;
+            operation
+        } else if work == Work::Prefetch {
+            // This exception to selected-room admission is deliberately limited
+            // to a newest-page GET. It cannot authorize any receipt or mutation.
+            if !matches!(
+                &command,
+                wire::MessagingCommand::History {
+                    before: None,
+                    thread: None
+                }
+            ) {
+                return Err(SubmitError::StaleScope);
+            }
+            self.current(context.account)?;
+            if !self
+                .background
+                .account(context.account)
+                .is_some_and(|a| a.rooms.as_slice().iter().any(|r| r.context == context))
+            {
+                return Err(SubmitError::StaleScope);
+            }
+            self.connection
+                .as_ref()
+                .map_err(|e| submit_error(*e))?
+                .new_operation_id(context.account)
+                .map_err(submit_error)?
+        } else {
+            self.operation(context)?
+        };
         if self.history.get(context).is_none() {
-            self.history.open(context);
+            if work == Work::Prefetch {
+                if !self.history.prefetch(context) {
+                    return Err(SubmitError::Busy);
+                }
+            } else {
+                self.history.open(context);
+            }
+        }
+        if let Work::Reaction(message) = work
+            && !self.history.can_react(context, message)
+        {
+            return Err(SubmitError::Busy);
         }
         self.request(
             context.account,
@@ -241,13 +422,18 @@ impl Accounts {
         )?;
         self.history
             .admitted(context, operation, work, request, self.next_request);
-        if let Some(panel) = self
-            .snapshot
-            .message_panel
-            .as_mut()
-            .filter(|p| p.context == context)
+        if queued.is_none()
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|p| p.context == context)
         {
             match work {
+                Work::Reaction(message) => {
+                    panel.reaction_pending = Some(message);
+                    panel.state = RemoteState::Saving(request);
+                }
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
                 Work::Thread => panel.thread_state = RemoteState::Loading(request),
                 Work::Context(target) => {
@@ -257,13 +443,20 @@ impl Accounts {
                     });
                     panel.located = None;
                 }
-                Work::Action | Work::PinChange | Work::Share | Work::Send => {
-                    panel.state = RemoteState::Saving(request)
+                Work::Pins => panel.pins_state = RemoteState::Loading(request),
+                Work::Files | Work::Search | Work::Reminders | Work::Scheduled => {
+                    if !matches!(
+                        panel.state,
+                        RemoteState::Saving(_) | RemoteState::Uncertain(_)
+                    ) {
+                        panel.state = RemoteState::Loading(request);
+                    }
                 }
+                work if work.foreground_result() => panel.state = RemoteState::Saving(request),
                 _ => (),
             }
         }
-        if work == Work::Send {
+        if work == Work::Send && queued.is_none() {
             self.unresolved.push(Unresolved {
                 request,
                 context,
@@ -288,6 +481,14 @@ impl Accounts {
         if self.snapshot.content == ContentState::Denied {
             return;
         }
+        if self.history.get(context).is_some_and(|h| h.needs_pins()) {
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Pins,
+                Work::Pins,
+            );
+        }
         let Ok((command, work)) = self.live_message_request(context) else {
             return;
         };
@@ -295,6 +496,46 @@ impl Accounts {
         let _ = self.start_message(RequestId(self.message_poll_request), context, command, work);
     }
     pub(super) fn message_action(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        action: view::MessageAction,
+    ) -> Result<(), SubmitError> {
+        if let Some(result) = self.deliberate_read(request, context, &action) {
+            return result;
+        }
+        if let Some(result) = self.queue_message_action(request, context, &action) {
+            return result;
+        }
+        let view::MessageAction::Send { body, target } = &action else {
+            return self.dispatch_message_action(request, context, action);
+        };
+        self.current(context.account)?;
+        if self.snapshot.selected != Some(context) {
+            return Err(SubmitError::StaleScope);
+        }
+        // An unresolved write must reconcile; it cannot become a new queued
+        // send. The single local slot also refuses replacement by another click.
+        if self.queued_send.is_some() || self.unresolved.iter().any(|u| u.context == context) {
+            return Err(SubmitError::Busy);
+        }
+        let queued = QueuedSend {
+            request,
+            context,
+            body: body.clone(),
+            target: target.clone(),
+            deadline: Instant::now() + Duration::from_secs(10),
+        };
+        match self.dispatch_message_action(request, context, action) {
+            Err(SubmitError::Busy) => {
+                self.queued_send = Some(queued);
+                self.touch();
+                Ok(())
+            }
+            result => result,
+        }
+    }
+    fn dispatch_message_action(
         &mut self,
         request: RequestId,
         context: ConversationRef,
@@ -332,6 +573,9 @@ impl Accounts {
         }
         let work = match &action {
             V::Files => Work::Files,
+            V::Search(_) | V::SearchNext => Work::Search,
+            V::Reminders => Work::Reminders,
+            V::Scheduled => Work::Scheduled,
             V::Pins => Work::Pins,
             V::ShareUpload { .. } => Work::Share,
             V::Thread(_) => Work::Thread,
@@ -341,25 +585,40 @@ impl Accounts {
             V::MarkRead(id) => Work::Read(*id),
             V::MarkUnread => Work::Unread,
             V::Typing(_) => Work::Typing,
-            V::Pin(_) | V::Unpin(_) => Work::PinChange,
+            V::Pin(message) => Work::PinChange {
+                message: *message,
+                pinned: true,
+            },
+            V::Unpin(message) => Work::PinChange {
+                message: *message,
+                pinned: false,
+            },
+            V::React { message, .. } => Work::Reaction(*message),
             V::Context(id) => Work::Context(*id),
+            V::Forward { destination, .. } => Work::Forward(*destination),
+            V::Reminder { message, .. } => Work::Reminder(*message),
+            V::CancelScheduled(id) => Work::CancelScheduled(*id),
             _ => Work::Action,
         };
         if work == Work::Send
             && (self.snapshot.submission.is_some()
                 || self.unresolved.len() >= 8
-                || self.unresolved.iter().any(|u| u.context == context))
+                || self.unresolved.iter().any(|u| u.context == context)
+                || self.pending.iter().any(|pending| {
+                    matches!(
+                        pending.purpose,
+                        Purpose::Send(..) | Purpose::Message(_, _, _, Work::Send)
+                    )
+                }))
         {
             return Err(SubmitError::Busy);
         }
-        if matches!(
-            work,
-            Work::Action | Work::PinChange | Work::Share | Work::Send
-        ) && self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|p| p.context == context && p.state.pending())
+        if work.foreground_result()
+            && self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .is_some_and(|p| p.context == context && p.state.pending())
         {
             return Err(SubmitError::Busy);
         }
@@ -369,6 +628,7 @@ impl Accounts {
             None
         };
         let command = match action {
+            V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
             V::PickUpload | V::Download { .. } | V::DismissUpload => {
                 return Err(SubmitError::StaleScope);
             }
@@ -509,6 +769,7 @@ impl Accounts {
     ) {
         let event = diagnostic_result(diagnostic_request, context, operation, work, &reply);
         if self.current(context.account).is_err() {
+            self.outbox.lost_scope(operation);
             if let Some(mut event) = event {
                 event.outcome = DiagnosticOutcome::Ignored;
                 event.error = Some(ErrorKind::WrongScope);
@@ -584,6 +845,17 @@ impl Accounts {
                             })
                     })
             }
+            Work::Files | Work::Search | Work::Reminders | Work::Scheduled => {
+                self.snapshot.selected == Some(context)
+                    && self
+                        .queued_read
+                        .current_shared(context, request, work)
+                        .unwrap_or_else(|| {
+                            self.snapshot.message_panel.as_ref().is_some_and(|p| {
+                                p.context == context && p.state == RemoteState::Loading(request)
+                            })
+                        })
+            }
             _ => true,
         };
         if !current_target {
@@ -608,7 +880,7 @@ impl Accounts {
         );
         let room_read = matches!(
             work,
-            Work::History | Work::Latest | Work::Older | Work::Poll
+            Work::History | Work::Latest | Work::Prefetch | Work::Older | Work::Poll
         );
         // A denial is authoritative only for the current room observation.
         // Context/thread endpoints can deny one target while the chat remains
@@ -630,26 +902,71 @@ impl Accounts {
                 result,
             })) if conversation == context.conversation
                 && returned == operation
-                && canonical_scope(&result, context) =>
+                && match (work, &result) {
+                    (Work::Forward(destination), wire::MessagingResult::Send(receipt)) => {
+                        receipt.operation == operation && canonical_scope(&result, destination)
+                    }
+                    (Work::Forward(_), _) => false,
+                    _ => canonical_scope(&result, context),
+                } =>
             {
                 Ok(result)
             }
             Err(IdentityError::Request(ErrorKind::WrongScope | ErrorKind::Cancelled))
-                if work == Work::Send =>
+                if work.foreground_result() =>
             {
                 Err(Completion::Uncertain)
             }
             Err(error) => Err(completion_error(error)),
-            _ if work == Work::Send => Err(Completion::Uncertain),
+            _ if work.foreground_result() => Err(Completion::Uncertain),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
-        let result = if matches!(work, Work::Thread | Work::Context(_))
+        let mut result = if matches!(work, Work::Thread | Work::Context(_))
             && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
         {
             Err(Completion::Failed(UnavailableReason::PolicyStale))
         } else {
             result
         };
+        if result.is_ok()
+            && !match (work, &result) {
+                (Work::Search, Ok(wire::MessagingResult::Search { .. }))
+                | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
+                | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::Files | Work::Pins, Ok(wire::MessagingResult::Messages { .. })) => true,
+                (
+                    Work::Search | Work::Reminders | Work::Scheduled | Work::Files | Work::Pins,
+                    _,
+                ) => false,
+                _ => true,
+            }
+        {
+            result = Err(Completion::Failed(UnavailableReason::PolicyStale));
+        }
+        if let Work::Reaction(target) = work
+            && !matches!(&result, Ok(wire::MessagingResult::Reactions { message, .. })
+                if u128::from(message.sequence) == target)
+            && result.is_ok()
+        {
+            result = Err(Completion::Uncertain);
+        }
+        if matches!(work, Work::PinChange { .. })
+            && !matches!(
+                &result,
+                Ok(wire::MessagingResult::Message(_) | wire::MessagingResult::Changed) | Err(_)
+            )
+        {
+            result = Err(Completion::Uncertain);
+        }
+        if work == Work::Send
+            && matches!(&result, Ok(wire::MessagingResult::Message(message))
+                if !message.own || message.message.own_operation != Some(operation))
+        {
+            result = Err(Completion::Uncertain);
+        }
+        self.history
+            .reconcile_reactions(context, operation, work, &mut result);
+        let queued = self.outbox_result(operation, &result);
         if !self.history.complete(
             context,
             operation,
@@ -676,12 +993,18 @@ impl Accounts {
             return;
         }
         self.history.expire(history::now_unix());
+        self.observed_deliberate_read(context, work, result.is_ok());
         self.project_history(context);
         let changed: Vec<u128> = match &result {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
                     work,
-                    Work::History | Work::Latest | Work::Older | Work::Poll | Work::Context(_)
+                    Work::History
+                        | Work::Latest
+                        | Work::Prefetch
+                        | Work::Older
+                        | Work::Poll
+                        | Work::Context(_)
                 ) =>
             {
                 messages
@@ -692,6 +1015,9 @@ impl Accounts {
             }
             Ok(wire::MessagingResult::Message(message)) => {
                 vec![u128::from(message.message.id.sequence)]
+            }
+            Ok(wire::MessagingResult::Reactions { message, .. }) => {
+                vec![u128::from(message.sequence)]
             }
             _ => Vec::new(),
         };
@@ -709,21 +1035,9 @@ impl Accounts {
                 let mut completion = Completion::ServerAccepted;
                 match result {
                     wire::MessagingResult::Capabilities(capabilities) => {
-                        panel.file_limit = capabilities.file_limit;
-                        panel.message_limit = capabilities.message_limit.unwrap_or(4096).min(4096);
-                        panel.features = page(capabilities.actions.as_slice().iter().filter_map(
-                            |(feature, value)| {
-                                feature_view(*feature).map(|feature| {
-                                    (feature, super::conversations::availability(*value))
-                                })
-                            },
-                        ));
+                        project_capabilities(panel, &capabilities);
                     }
-                    wire::MessagingResult::Messages {
-                        messages,
-                        cursor: _,
-                        common_read: _,
-                    } => {
+                    wire::MessagingResult::Messages { messages, .. } => {
                         if let Work::Context(id) = work {
                             if messages
                                 .as_slice()
@@ -734,9 +1048,6 @@ impl Accounts {
                             } else {
                                 completion = Completion::Failed(UnavailableReason::PolicyUnknown);
                             }
-                        } else if work == Work::Pins {
-                            panel.pinned_messages =
-                                page(messages.as_slice().iter().map(message_view));
                         } else if work == Work::Files {
                             panel.shared_files = page(messages.as_slice().iter().map(message_view));
                         } else if work == Work::Thread {
@@ -744,7 +1055,22 @@ impl Accounts {
                                 page(messages.as_slice().iter().map(message_view));
                         }
                     }
+                    wire::MessagingResult::Message(message) if work == Work::Send => {
+                        completion =
+                            if message.own && message.message.own_operation == Some(operation) {
+                                Completion::ServerAccepted
+                            } else {
+                                Completion::Uncertain
+                            };
+                    }
                     wire::MessagingResult::Message(_) => (),
+                    wire::MessagingResult::Reactions { message, reactions } => {
+                        reconcile_related_reactions(
+                            panel,
+                            u128::from(message.sequence),
+                            &reactions,
+                        );
+                    }
                     wire::MessagingResult::Send(receipt) if receipt.operation == operation => {
                         completion = match receipt.state {
                             SendState::ServerAccepted(_) => Completion::ServerAccepted,
@@ -753,7 +1079,8 @@ impl Accounts {
                             }
                             SendState::Uncertain => Completion::Uncertain,
                         };
-                        reload = completion == Completion::ServerAccepted;
+                        reload = completion == Completion::ServerAccepted
+                            && !matches!(work, Work::Forward(_));
                     }
                     wire::MessagingResult::Send(_) => completion = Completion::Uncertain,
                     wire::MessagingResult::Search { hits, cursor } => {
@@ -787,10 +1114,23 @@ impl Accounts {
                             }));
                     }
                     wire::MessagingResult::Reminder(reminder) => {
-                        panel.reminders = page(reminder.into_iter().map(|r| view::Reminder {
-                            message: u128::from(r.message.sequence),
-                            timestamp: r.timestamp,
-                        }));
+                        let target = match work {
+                            Work::Reminder(message) => Some(message),
+                            _ => reminder.as_ref().map(|r| u128::from(r.message.sequence)),
+                        };
+                        panel.reminders = page(
+                            panel
+                                .reminders
+                                .as_slice()
+                                .iter()
+                                .filter(|r| Some(r.message) != target)
+                                .take(if reminder.is_some() { 99 } else { 100 })
+                                .cloned()
+                                .chain(reminder.into_iter().map(|r| view::Reminder {
+                                    message: u128::from(r.message.sequence),
+                                    timestamp: r.timestamp,
+                                })),
+                        );
                     }
                     wire::MessagingResult::Scheduled(schedules) => {
                         panel.scheduled =
@@ -801,11 +1141,20 @@ impl Accounts {
                             }));
                     }
                     wire::MessagingResult::Schedule(schedule) => {
-                        panel.scheduled = page(std::iter::once(view::Scheduled {
-                            id: u128::from(schedule.id.sequence),
-                            body: text(schedule.text.as_str()),
-                            timestamp: schedule.send_at,
-                        }));
+                        panel.scheduled = page(
+                            panel
+                                .scheduled
+                                .as_slice()
+                                .iter()
+                                .filter(|s| s.id != u128::from(schedule.id.sequence))
+                                .take(99)
+                                .cloned()
+                                .chain(std::iter::once(view::Scheduled {
+                                    id: u128::from(schedule.id.sequence),
+                                    body: text(schedule.text.as_str()),
+                                    timestamp: schedule.send_at,
+                                })),
+                        );
                     }
                     wire::MessagingResult::Uploaded { path, bytes } => {
                         let name = panel.upload_name.take().unwrap_or_else(|| text("File"));
@@ -819,6 +1168,16 @@ impl Accounts {
                         panel.file_saved = Some(u64::from(bytes))
                     }
                     wire::MessagingResult::Changed => {
+                        if let Work::CancelScheduled(id) = work {
+                            panel.scheduled = page(
+                                panel
+                                    .scheduled
+                                    .as_slice()
+                                    .iter()
+                                    .filter(|s| s.id != id)
+                                    .cloned(),
+                            );
+                        }
                         reload = !matches!(work, Work::Read(_) | Work::Typing | Work::Unread);
                         if let Work::Read(id) = work {
                             let reached_latest = self
@@ -861,7 +1220,7 @@ impl Accounts {
             Err(error) => error,
         };
         let state = match completion {
-            Completion::ServerAccepted => RemoteState::Idle,
+            Completion::Queued | Completion::ServerAccepted => RemoteState::Idle,
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };
@@ -876,14 +1235,23 @@ impl Accounts {
         {
             load.state = state;
         }
+        let owns_reaction = matches!(work, Work::Reaction(message)
+            if panel.reaction_pending == Some(message) && panel.state == RemoteState::Saving(request));
         if matches!(
             work,
-            Work::Action | Work::PinChange | Work::Share | Work::Send
-        ) {
+            Work::Files | Work::Search | Work::Reminders | Work::Scheduled
+        ) && panel.state == RemoteState::Loading(request)
+        {
+            panel.state = state;
+        }
+        if work.foreground_result() && panel.state == RemoteState::Saving(request) {
             panel.state = state;
             panel.result = Some((request, completion));
         }
-        if work == Work::Send {
+        if owns_reaction {
+            panel.reaction_pending = None;
+        }
+        if work == Work::Send && !queued {
             if completion != Completion::Uncertain {
                 self.unresolved.retain(|u| u.operation != operation);
             }
@@ -933,9 +1301,6 @@ impl Accounts {
         if reload && let Ok((command, work)) = self.live_message_request(context) {
             let _ = self.start_message(request, context, command, work);
         }
-        if work == Work::PinChange && completion == Completion::ServerAccepted {
-            let _ = self.start_message(request, context, wire::MessagingCommand::Pins, Work::Pins);
-        }
         self.touch();
     }
     fn settle_retained_send(
@@ -953,6 +1318,11 @@ impl Accounts {
             return;
         }
         let completion = match result {
+            Ok(wire::MessagingResult::Message(message))
+                if message.own && message.message.own_operation == Some(operation) =>
+            {
+                Completion::ServerAccepted
+            }
             Ok(wire::MessagingResult::Send(receipt)) if receipt.operation == operation => {
                 match receipt.state {
                     SendState::ServerAccepted(_) => Completion::ServerAccepted,
@@ -975,6 +1345,9 @@ impl Accounts {
     }
 }
 
+#[cfg(test)]
+mod send_tests;
+
 // Only scalar facts from a scope-validated reply cross into diagnostics. A
 // received history page is not a claim that an obsolete cache ticket was applied.
 fn diagnostic_result(
@@ -996,6 +1369,14 @@ fn diagnostic_result(
             && canonical_scope(result, context) =>
         {
             match result {
+                wire::MessagingResult::Message(message)
+                    if work == Work::Send
+                        && message.own
+                        && message.message.own_operation == Some(operation) =>
+                {
+                    event.outcome = DiagnosticOutcome::Accepted;
+                    event.count = 1;
+                }
                 wire::MessagingResult::Messages { messages, .. } if work != Work::Send => {
                     event.count = messages.as_slice().len() as u64
                 }
@@ -1056,12 +1437,34 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
             messages,
             cursor,
             common_read,
+            ..
         } => {
             messages.as_slice().iter().all(message)
                 && cursor.is_none_or(|id| id.conversation == context.conversation)
                 && common_read.is_none_or(|id| id.conversation == context.conversation)
         }
         wire::MessagingResult::Message(value) => message(value),
+        wire::MessagingResult::Reactions { message, .. } => {
+            message.conversation == context.conversation
+        }
+        wire::MessagingResult::Reminder(reminder) => reminder
+            .as_ref()
+            .is_none_or(|r| r.message.conversation == context.conversation),
+        wire::MessagingResult::Reminders(reminders) => reminders
+            .as_slice()
+            .iter()
+            .all(|r| r.message.conversation == context.conversation),
+        wire::MessagingResult::Schedule(schedule) => {
+            schedule.id.conversation == context.conversation
+        }
+        wire::MessagingResult::Scheduled(schedules) => schedules
+            .as_slice()
+            .iter()
+            .all(|s| s.id.conversation == context.conversation),
+        wire::MessagingResult::Search { hits, .. } => hits
+            .as_slice()
+            .iter()
+            .all(|hit| hit.message.conversation == context.conversation),
         wire::MessagingResult::Send(protocol::SendReceipt {
             state: SendState::ServerAccepted(id),
             ..
@@ -1112,6 +1515,31 @@ fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
             .cloned(),
     );
 }
+pub(super) fn reaction_views(reactions: &Page<wire::Reaction, 64>) -> Page<view::Reaction, 64> {
+    page(reactions.as_slice().iter().map(|reaction| view::Reaction {
+        emoji: reaction.emoji.clone(),
+        count: reaction.count,
+        own: reaction.own,
+    }))
+}
+
+fn reconcile_related_reactions(
+    panel: &mut view::MessagePanel,
+    target: u128,
+    reactions: &Page<wire::Reaction, 64>,
+) {
+    let reconcile = |message: &MessageView| {
+        let mut message = message.clone();
+        if message.local_id == target && !message.metadata.deleted {
+            message.metadata.reactions = reaction_views(reactions);
+        }
+        message
+    };
+    panel.thread_messages = page(panel.thread_messages.as_slice().iter().map(reconcile));
+    panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().map(reconcile));
+    panel.shared_files = page(panel.shared_files.as_slice().iter().map(reconcile));
+}
+
 /// Canonical edits/tombstones invalidate every retained excerpt in this room.
 fn reconcile_related(
     panel: &mut view::MessagePanel,
@@ -1194,6 +1622,24 @@ fn message_id(context: ConversationRef, id: u128) -> Result<protocol::MessageId,
         sequence: u64::try_from(id).map_err(|_| SubmitError::StaleScope)?,
     })
 }
+pub(super) fn project_capabilities(
+    panel: &mut view::MessagePanel,
+    capabilities: &wire::MessagingCapabilities,
+) {
+    panel.pin_change = capabilities.pin_change;
+    panel.file_limit = capabilities.file_limit;
+    panel.message_limit = capabilities.message_limit.unwrap_or(4096).min(4096);
+    panel.features = page(
+        capabilities
+            .actions
+            .as_slice()
+            .iter()
+            .filter_map(|(feature, value)| {
+                feature_view(*feature)
+                    .map(|feature| (feature, super::conversations::availability(*value)))
+            }),
+    );
+}
 pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
     let deleted = m.message.kind == protocol::MessageKind::Deleted;
     let (body, truncated) = rich_body(m);
@@ -1208,6 +1654,8 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
         attachments: Page::empty(),
         reply_count: 0,
         metadata: view::MessageMetadata {
+            local_operation: m.message.own_operation.map(OperationId::as_local),
+            author_key: m.author_key.clone(),
             expires_at: m.message.expires_at,
             timestamp: m.message.timestamp,
             truncated,
@@ -1329,9 +1777,8 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         _ => return None,
     })
 }
-// UTC is explicit until native locale-aware timestamp formatting is available.
-fn time_label(seconds: u64) -> String {
-    format!("{:02}:{:02} UTC", seconds / 3600 % 24, seconds / 60 % 60)
+pub(super) fn time_label(seconds: u64) -> String {
+    talk_adapters::system_time::time_label(seconds).unwrap_or_else(|| "–".into())
 }
 
 #[cfg(test)]
@@ -1356,6 +1803,7 @@ mod tests {
             Work::History,
             RequestId(1),
             &Ok(wire::MessagingResult::Messages {
+                capabilities: None,
                 messages: Page::empty(),
                 cursor: None,
                 common_read: None
@@ -1373,6 +1821,7 @@ mod tests {
             Work::Poll,
             RequestId(2),
             &Ok(wire::MessagingResult::Messages {
+                capabilities: None,
                 messages: Page::empty(),
                 cursor: Some(protocol::MessageId {
                     conversation: context.conversation,
@@ -1407,6 +1856,7 @@ mod tests {
         let context = super::super::super::fixtures::context(1);
         let operation = OperationId::from_local(99);
         let message = wire::MessageDetails {
+            author_key: Some(text("4:user:fixture")),
             message: protocol::Message {
                 id: protocol::MessageId {
                     conversation: context.conversation,
@@ -1437,6 +1887,7 @@ mod tests {
             conversation: context.conversation,
             operation,
             result: wire::MessagingResult::Messages {
+                capabilities: None,
                 messages: page([message]),
                 cursor: None,
                 common_read: None,
@@ -1537,5 +1988,106 @@ mod tests {
         let parent = merged.as_slice()[1].metadata.parent.as_ref().unwrap();
         assert!(parent.unavailable);
         assert_eq!(parent.text.as_str(), "");
+    }
+}
+
+#[cfg(test)]
+mod immediate_send_tests {
+    use super::*;
+    #[test]
+    fn canonical_send_reply_is_visible_and_settled_without_a_history_reload() {
+        let mut model = super::super::tests::model();
+        let context = super::super::super::fixtures::context(1);
+        model.snapshot.active_account = Some(context.account);
+        model.snapshot.selected = Some(context);
+        model.restore_messages(context);
+        let operation = OperationId::from_local(77);
+        let request = RequestId(4);
+        model
+            .history
+            .admitted(context, operation, Work::Send, request, 1);
+        model.unresolved.push(Unresolved {
+            request,
+            context,
+            operation,
+        });
+        let reply = RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Message(Box::new(wire::MessageDetails {
+                author_key: Some(text("5:users:synthetic")),
+                message: protocol::Message {
+                    id: protocol::MessageId {
+                        conversation: context.conversation,
+                        sequence: 99,
+                    },
+                    author: text("Synthetic sender"),
+                    text: text("Accepted body"),
+                    kind: protocol::MessageKind::Comment,
+                    timestamp: 1,
+                    expires_at: None,
+                    edited_at: None,
+                    own_operation: Some(operation),
+                },
+                own: true,
+                notify: Decision::Denied,
+                replyable: Some(true),
+                parent: None,
+                thread: None,
+                reactions: Page::empty(),
+                rich: Page::empty(),
+                system: None,
+                edit: Decision::Allowed,
+                delete: Decision::Allowed,
+            })),
+        });
+        model.apply_message(request, context, operation, Work::Send, Ok(reply.clone()));
+        assert_eq!(model.snapshot.messages.as_slice().len(), 1);
+        assert_eq!(model.snapshot.messages.as_slice()[0].local_id, 99);
+        assert!(model.snapshot.messages.as_slice()[0].own);
+        assert_eq!(
+            model.snapshot.submission.unwrap().result,
+            Completion::ServerAccepted
+        );
+        assert!(model.unresolved.is_empty());
+        assert!(model.pending.is_empty());
+
+        // A different send's row must neither enter history nor acknowledge this one.
+        let other_operation = OperationId::from_local(78);
+        let other_request = RequestId(5);
+        model
+            .history
+            .admitted(context, other_operation, Work::Send, other_request, 2);
+        model.unresolved.push(Unresolved {
+            request: other_request,
+            context,
+            operation: other_operation,
+        });
+        let mut wrong = reply;
+        if let RuntimeReply::Protocol(ProtocolReply::Messaging {
+            operation,
+            result: wire::MessagingResult::Message(message),
+            ..
+        }) = &mut wrong
+        {
+            *operation = other_operation;
+            message.message.id.sequence = 100;
+        } else {
+            panic!("fixture message reply");
+        }
+        model.apply_message(
+            other_request,
+            context,
+            other_operation,
+            Work::Send,
+            Ok(wrong),
+        );
+        assert_eq!(model.snapshot.messages.as_slice().len(), 1);
+        assert_eq!(model.snapshot.messages.as_slice()[0].local_id, 99);
+        assert_eq!(
+            model.snapshot.submission.unwrap().result,
+            Completion::Uncertain
+        );
+        assert_eq!(model.unresolved.len(), 1);
     }
 }

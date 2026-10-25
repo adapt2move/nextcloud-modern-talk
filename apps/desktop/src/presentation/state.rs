@@ -20,7 +20,18 @@ pub(super) fn composer_send_decision(
     snapshot: &PresentationSnapshot,
     row: &ConversationView,
 ) -> Decision {
-    if snapshot.content == ContentState::Ready
+    if snapshot
+        .message_panel
+        .as_ref()
+        .is_some_and(|p| p.context == row.context && p.queue_available)
+        && matches!(
+            snapshot.content,
+            ContentState::Ready | ContentState::Offline
+        )
+        && row.send != Decision::Denied
+    {
+        Decision::Allowed
+    } else if snapshot.content == ContentState::Ready
         && account_connection_failure(&snapshot.accounts, row.context.account).is_none()
     {
         row.send
@@ -164,7 +175,7 @@ impl PendingEdit {
         body: &str,
     ) -> Option<bool> {
         let submitted = pending.as_ref().filter(|edit| edit.request == request)?;
-        let restore = result == Completion::ServerAccepted
+        let restore = matches!(result, Completion::ServerAccepted | Completion::Queued)
             && editing == Some((submitted.message, submitted.generation))
             && body == submitted.body.as_str();
         *pending = None;
@@ -178,6 +189,8 @@ struct Draft {
     text: Text<4096>,
     target: talk_core::ui::messaging::ComposeTarget,
     pending: Option<(RequestId, Text<4096>)>,
+    pending_origin: Option<ConversationRef>,
+    pending_may_clear: bool,
     uncertain: bool,
 }
 #[derive(Default)]
@@ -187,6 +200,60 @@ pub struct Drafts {
     targets: Vec<(ConversationRef, talk_core::ui::messaging::ComposeTarget)>,
 }
 impl Drafts {
+    /// Cached contexts carry no dispatch authority. Only an explicit stable
+    /// room key can move their local text to a newly projected context.
+    pub fn rebind_cached(&mut self, previous: &PresentationSnapshot, next: &PresentationSnapshot) {
+        let mut contexts = Vec::with_capacity(MAX_DRAFTS);
+        for context in self
+            .entries
+            .iter()
+            .map(|draft| draft.context)
+            .chain(self.targets.iter().map(|(context, _)| *context))
+        {
+            if contexts.len() < MAX_DRAFTS && !contexts.contains(&context) {
+                contexts.push(context);
+            }
+        }
+        for old in contexts {
+            let Some(new) = cached_draft_context(previous, next, old) else {
+                continue;
+            };
+            while let Some(index) = self.entries.iter().position(|draft| draft.context == old) {
+                let mut draft = self.entries.remove(index);
+                if draft.pending.is_some() && draft.pending_origin.is_none() {
+                    draft.pending_origin = Some(old);
+                }
+                draft.context = new;
+                if let Some(destination) = self.entries.iter_mut().find(|current| {
+                    current.context == new && same_draft_target(&current.target, &draft.target)
+                }) {
+                    // The destination already owns newer text and its active
+                    // compose options. Transfer receipt ownership only.
+                    if draft.pending.is_some() && destination.pending.is_none() {
+                        destination.pending = draft.pending;
+                        destination.pending_origin = draft.pending_origin;
+                        destination.pending_may_clear = false;
+                        destination.uncertain = draft.uncertain;
+                    } else if let Some((_, submitted)) = draft.pending.as_ref() {
+                        // Two admitted operations keep separate receipts. The
+                        // existing destination stays first for editor lookup.
+                        draft.text = submitted.clone();
+                        draft.pending_may_clear = true;
+                        self.entries.push(draft);
+                    }
+                } else {
+                    self.entries.insert(index.min(self.entries.len()), draft);
+                }
+            }
+            if let Some(index) = self.targets.iter().position(|(context, _)| *context == old) {
+                let (_, target) = self.targets.remove(index);
+                if !self.targets.iter().any(|(context, _)| *context == new) {
+                    self.targets.push((new, target));
+                }
+            }
+        }
+    }
+
     pub fn target(&self, context: ConversationRef) -> talk_core::ui::messaging::ComposeTarget {
         self.targets
             .iter()
@@ -234,6 +301,17 @@ impl Drafts {
             .iter()
             .find(|d| d.context == context && same_draft_target(&d.target, &self.target(context)))
             .map_or("", |d| d.text.as_str())
+    }
+    pub fn has_text_for_target(
+        &self,
+        context: ConversationRef,
+        target: &talk_core::ui::messaging::ComposeTarget,
+    ) -> bool {
+        self.entries.iter().any(|draft| {
+            draft.context == context
+                && same_draft_target(&draft.target, target)
+                && !draft.text.as_str().is_empty()
+        })
     }
     pub fn uncertain(&self, context: ConversationRef) -> bool {
         self.entries
@@ -285,6 +363,8 @@ impl Drafts {
                 text,
                 target,
                 pending: None,
+                pending_origin: None,
+                pending_may_clear: false,
                 uncertain: false,
             });
         }
@@ -296,6 +376,9 @@ impl Drafts {
         gate: Decision,
         port: &mut dyn NativeDesktopPort,
     ) -> Result<RequestId, SubmitError> {
+        if self.pending(context) {
+            return Err(SubmitError::Busy);
+        }
         match gate {
             Decision::Allowed => (),
             Decision::Denied => {
@@ -334,11 +417,25 @@ impl Drafts {
         })?;
         self.next_request = request.0;
         draft.pending = Some((request, draft.text.clone()));
+        draft.pending_origin = Some(context);
+        draft.pending_may_clear = true;
         Ok(request)
+    }
+    pub fn submission_context(&self, result: SubmissionResult) -> Option<ConversationRef> {
+        self.entries
+            .iter()
+            .find(|draft| {
+                draft.pending_origin.unwrap_or(draft.context) == result.context
+                    && draft
+                        .pending
+                        .as_ref()
+                        .is_some_and(|(request, _)| *request == result.request)
+            })
+            .map(|draft| draft.context)
     }
     pub fn complete(&mut self, result: SubmissionResult) -> bool {
         let Some(draft) = self.entries.iter_mut().find(|d| {
-            d.context == result.context
+            d.pending_origin.unwrap_or(d.context) == result.context
                 && d.pending
                     .as_ref()
                     .is_some_and(|(request, _)| *request == result.request)
@@ -352,16 +449,20 @@ impl Drafts {
             return false;
         }
         match result.result {
-            Completion::ServerAccepted => {
+            Completion::Queued | Completion::ServerAccepted => {
                 // Never erase text the user changed while the operation was in flight.
-                if draft.text == *submitted {
+                if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
                 }
                 draft.pending = None;
+                draft.pending_origin = None;
+                draft.pending_may_clear = false;
                 draft.uncertain = false;
             }
             Completion::Failed(_) => {
                 draft.pending = None;
+                draft.pending_origin = None;
+                draft.pending_may_clear = false;
                 draft.uncertain = false;
             }
             Completion::Uncertain => {
@@ -465,8 +566,8 @@ pub fn error_label(error: SubmitError) -> &'static str {
         SubmitError::Unavailable(UnavailableReason::Connection(failure)) => {
             connection_failure_copy(failure).1
         }
-        SubmitError::Busy => {
-            "Gerade ausgelastet. Dein Entwurf bleibt erhalten; bitte erneut versuchen."
+        SubmitError::Busy | SubmitError::Unavailable(UnavailableReason::Busy) => {
+            "Die App ist gerade ausgelastet. Bitte kurz warten und erneut versuchen."
         }
         SubmitError::StaleScope => {
             "Dieser Stand ist überholt. Bitte das Gespräch neu öffnen; dein Text bleibt erhalten."
@@ -496,9 +597,419 @@ fn same_draft_target(
     a.reply_to == b.reply_to && a.thread == b.thread
 }
 
+pub(super) fn cached_draft_context(
+    previous: &PresentationSnapshot,
+    next: &PresentationSnapshot,
+    old: ConversationRef,
+) -> Option<ConversationRef> {
+    if old.account.runtime.as_local() != 0 && old.conversation.host.as_local() != 0 {
+        return None;
+    }
+    let mut source = previous
+        .conversations
+        .as_slice()
+        .iter()
+        .filter(|row| row.context == old);
+    let key = source.next()?.navigation_key.as_ref()?;
+    if source.any(|row| row.navigation_key.as_ref() != Some(key)) {
+        return None;
+    }
+    let mut destinations = next.conversations.as_slice().iter().filter(|row| {
+        row.context.is_consistent()
+            && row.context.account.account == old.account.account
+            && row.navigation_key.as_ref() == Some(key)
+            && next
+                .accounts
+                .as_slice()
+                .iter()
+                .any(|account| account.scope == row.context.account)
+    });
+    let destination = destinations.next()?.context;
+    if destination == old || destinations.any(|row| row.context != destination) {
+        return None;
+    }
+    Some(destination)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_page<T, const N: usize>(
+        values: impl IntoIterator<Item = T>,
+    ) -> talk_core::ui::Page<T, N> {
+        let mut page = talk_core::ui::Page::empty();
+        for value in values {
+            assert!(page.try_push(value).is_ok());
+        }
+        page
+    }
+    fn draft_snapshot() -> PresentationSnapshot {
+        use talk_core::ui::presentation::{
+            AccountConnectionState, AccountView, ConversationListState, LoginPhase, LoginView,
+            NativeStoreState, Presence, StorageStatus,
+        };
+        let context = context(1);
+        let row = ConversationView {
+            context,
+            navigation_key: None,
+            title: Text::new("Synthetic room").unwrap(),
+            initials: Text::new("S").unwrap(),
+            subtitle: Text::new("").unwrap(),
+            updated_label: Text::new("").unwrap(),
+            kind: ConversationKind::Group,
+            unread: 0,
+            favorite: None,
+            tags: None,
+            organization: Default::default(),
+            archived: Some(false),
+            archive: Decision::Unknown,
+            presence: Presence::Unknown,
+            participants: None,
+            send: Decision::Unknown,
+            attach: Decision::Unknown,
+            draft_clipboard: Decision::Unknown,
+            call: Decision::Unknown,
+            call_scope: None,
+        };
+        PresentationSnapshot {
+            content_panel: Default::default(),
+            create_panel: None,
+            revision: 1,
+            login: LoginView {
+                phase: LoginPhase::EnterServer,
+                attempt: None,
+                server_label: Text::new("").unwrap(),
+                account_label: Text::new("").unwrap(),
+                native_store: NativeStoreState::Unknown,
+                storage: StorageStatus::NotSaved,
+                storage_failure: None,
+            },
+            accounts: test_page([AccountView {
+                scope: context.account,
+                navigation_key: None,
+                connection: AccountConnectionState::Disconnected,
+                connection_failure: None,
+                label: Text::new("Synthetic account").unwrap(),
+                server_label: Text::new("example.invalid").unwrap(),
+                self_name: Text::new("Synthetic user").unwrap(),
+                initials: Text::new("S").unwrap(),
+                presence: Presence::Unknown,
+                storage: StorageStatus::NotSaved,
+            }]),
+            saved_accounts: Page::empty(),
+            account_removal: None,
+            active_account: Some(context.account),
+            conversations: test_page([row]),
+            conversation_list: ConversationListState {
+                content: ContentState::Ready,
+                complete: true,
+            },
+            tags: Page::empty(),
+            tag_state: ContentState::Ready,
+            organization_result: None,
+            selected: Some(context),
+            content: ContentState::Ready,
+            messages: Page::empty(),
+            files: Page::empty(),
+            participants: Page::empty(),
+            conversation_panel: None,
+            message_panel: None,
+            call: None,
+            submission: None,
+            mutation: None,
+        }
+    }
+    fn cached_snapshots(
+        count: usize,
+    ) -> (
+        PresentationSnapshot,
+        PresentationSnapshot,
+        PresentationSnapshot,
+    ) {
+        let mut cached = draft_snapshot();
+        let template = cached.conversations.as_slice()[0].clone();
+        let mut account = cached.accounts.as_slice()[0].clone();
+        account.scope.runtime = RuntimeGeneration::from_local(0);
+        let cached_scope = account.scope;
+        cached.accounts = test_page([account]);
+        cached.active_account = Some(cached_scope);
+        cached.conversations = test_page((1..=count).map(|id| {
+            let mut row = template.clone();
+            row.context.account = cached_scope;
+            row.context.conversation.host = HostId::from_local(0);
+            row.context.conversation.local = id as u128;
+            row.navigation_key = Some(
+                talk_core::preferences::navigation::NavigationRoomKey::new(&format!(
+                    "r1:{id:032x}"
+                ))
+                .unwrap(),
+            );
+            row
+        }));
+        cached.selected = cached
+            .conversations
+            .as_slice()
+            .first()
+            .map(|row| row.context);
+        let mut restored = cached.clone();
+        let mut account = restored.accounts.as_slice()[0].clone();
+        account.scope.runtime = RuntimeGeneration::from_local(9);
+        let live_scope = account.scope;
+        restored.accounts = test_page([account]);
+        restored.active_account = Some(live_scope);
+        restored.conversations = test_page(restored.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                row.context.account = live_scope;
+                row.context.conversation.local += 100;
+                row
+            },
+        ));
+        restored.selected = restored
+            .conversations
+            .as_slice()
+            .first()
+            .map(|row| row.context);
+        let mut fresh = restored.clone();
+        fresh.conversations = test_page(fresh.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                row.context.conversation.host = HostId::from_local(7);
+                row.context.conversation.local += 100;
+                row
+            },
+        ));
+        fresh.selected = fresh
+            .conversations
+            .as_slice()
+            .first()
+            .map(|row| row.context);
+        (cached, restored, fresh)
+    }
+
+    #[test]
+    fn eight_cached_drafts_and_reply_targets_rebind_by_room_key_through_both_restore_stages() {
+        let (cached, restored, fresh) = cached_snapshots(MAX_DRAFTS);
+        let mut drafts = Drafts::default();
+        for (index, row) in cached.conversations.as_slice().iter().enumerate() {
+            assert!(drafts.set_target(
+                row.context,
+                talk_core::ui::messaging::ComposeTarget {
+                    reply_to: Some(7 + index as u128),
+                    silent: true,
+                    ..Default::default()
+                }
+            ));
+            drafts.save(row.context, &format!("draft {index}")).unwrap();
+        }
+        drafts.rebind_cached(&cached, &restored);
+        drafts.retain_accounts(&restored);
+        drafts.rebind_cached(&restored, &fresh);
+        drafts.retain_accounts(&fresh);
+        assert_eq!(drafts.entries.len(), MAX_DRAFTS);
+        assert_eq!(drafts.targets.len(), MAX_DRAFTS);
+        for (index, row) in fresh.conversations.as_slice().iter().enumerate() {
+            assert_eq!(drafts.text(row.context), format!("draft {index}"));
+            assert_eq!(drafts.target(row.context).reply_to, Some(7 + index as u128));
+            assert!(drafts.target(row.context).silent);
+        }
+        assert!(
+            cached
+                .conversations
+                .as_slice()
+                .iter()
+                .all(|row| drafts.text(row.context).is_empty())
+        );
+    }
+
+    #[test]
+    fn an_original_context_receipt_settles_a_rebound_send_without_double_send_or_erasing_newer_text()
+     {
+        for newer_text in [false, true] {
+            let (cached, restored, fresh) = cached_snapshots(1);
+            let old = cached.selected.unwrap();
+            let current = fresh.selected.unwrap();
+            let mut drafts = Drafts::default();
+            let mut port = Port {
+                fail: None,
+                submissions: 0,
+            };
+            drafts.save(old, "submitted body").unwrap();
+            let request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+            drafts.rebind_cached(&cached, &restored);
+            drafts.retain_accounts(&restored);
+            drafts.rebind_cached(&restored, &fresh);
+            drafts.retain_accounts(&fresh);
+            assert!(drafts.pending(current));
+            assert_eq!(
+                drafts.send(current, Decision::Allowed, &mut port),
+                Err(SubmitError::Busy)
+            );
+            assert!(!drafts.complete(SubmissionResult {
+                request,
+                context: current,
+                result: Completion::Queued
+            }));
+            if newer_text {
+                drafts.save(current, "newer body").unwrap();
+            }
+            let result = SubmissionResult {
+                request,
+                context: old,
+                result: Completion::Queued,
+            };
+            assert_eq!(drafts.submission_context(result), Some(current));
+            assert!(drafts.complete(result));
+            assert!(!drafts.complete(result));
+            assert_eq!(
+                drafts.text(current),
+                if newer_text { "newer body" } else { "" }
+            );
+            assert!(!drafts.pending(current));
+            assert_eq!(port.submissions, 1);
+        }
+    }
+
+    #[test]
+    fn rebinding_never_replaces_a_newer_destination_text_or_its_compose_options() {
+        let (cached, _, fresh) = cached_snapshots(1);
+        let old = cached.selected.unwrap();
+        let current = fresh.selected.unwrap();
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts
+            .save(old, "same body deliberately typed again")
+            .unwrap();
+        let request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.set_target(
+            current,
+            talk_core::ui::messaging::ComposeTarget {
+                silent: true,
+                ..Default::default()
+            }
+        ));
+        drafts
+            .save(current, "same body deliberately typed again")
+            .unwrap();
+        drafts.rebind_cached(&cached, &fresh);
+        drafts.retain_accounts(&fresh);
+        assert!(drafts.target(current).silent);
+        assert!(drafts.pending(current));
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: old,
+            result: Completion::Queued
+        }));
+        assert_eq!(drafts.text(current), "same body deliberately typed again");
+        assert!(drafts.target(current).silent);
+        assert_eq!(drafts.entries.len(), 1);
+    }
+
+    #[test]
+    fn two_preexisting_pending_receipts_keep_their_origins_and_never_clear_each_others_editor() {
+        let (cached, _, fresh) = cached_snapshots(1);
+        let old = cached.selected.unwrap();
+        let current = fresh.selected.unwrap();
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts.save(old, "older submitted body").unwrap();
+        let old_request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+        drafts.save(current, "newer submitted body").unwrap();
+        let current_request = drafts.send(current, Decision::Allowed, &mut port).unwrap();
+        drafts.rebind_cached(&cached, &fresh);
+        drafts.retain_accounts(&fresh);
+        assert_eq!(drafts.text(current), "newer submitted body");
+        assert!(drafts.complete(SubmissionResult {
+            request: old_request,
+            context: old,
+            result: Completion::Queued
+        }));
+        assert_eq!(drafts.text(current), "newer submitted body");
+        assert!(drafts.pending(current));
+        assert!(drafts.complete(SubmissionResult {
+            request: current_request,
+            context: current,
+            result: Completion::Queued
+        }));
+        assert_eq!(drafts.text(current), "");
+        assert!(!drafts.has_unsent());
+        assert_eq!(port.submissions, 2);
+    }
+
+    #[test]
+    fn real_runtime_changes_ambiguous_keys_other_accounts_and_forgotten_accounts_do_not_rebind() {
+        let (cached, _, fresh) = cached_snapshots(1);
+        let old = cached.selected.unwrap();
+        let mut wrong_key = fresh.clone();
+        wrong_key.conversations = test_page(fresh.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                row.navigation_key = Some(
+                    talk_core::preferences::navigation::NavigationRoomKey::new(
+                        "r1:ffffffffffffffffffffffffffffffff",
+                    )
+                    .unwrap(),
+                );
+                row
+            },
+        ));
+        assert!(cached_draft_context(&cached, &wrong_key, old).is_none());
+        let mut other_account = fresh.clone();
+        let mut account = other_account.accounts.as_slice()[0].clone();
+        account.scope.account = AccountId::from_local(2);
+        let foreign_scope = account.scope;
+        other_account.accounts = test_page([account]);
+        other_account.conversations = test_page(
+            fresh
+                .conversations
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut row| {
+                    row.context.account = foreign_scope;
+                    row.context.conversation.account = foreign_scope.account;
+                    row
+                }),
+        );
+        assert!(cached_draft_context(&cached, &other_account, old).is_none());
+        let mut ambiguous = fresh.clone();
+        let one = fresh.conversations.as_slice()[0].clone();
+        let mut two = one.clone();
+        two.context.conversation.local += 1;
+        ambiguous.conversations = test_page([one, two]);
+        assert!(cached_draft_context(&cached, &ambiguous, old).is_none());
+        assert!(cached_draft_context(&fresh, &fresh, fresh.selected.unwrap()).is_none());
+        let mut forgotten = fresh.clone();
+        forgotten.accounts = Page::empty();
+        forgotten.saved_accounts = Page::empty();
+        let mut drafts = Drafts::default();
+        drafts.save(old, "retire with forgotten account").unwrap();
+        drafts.rebind_cached(&cached, &forgotten);
+        drafts.retain_accounts(&forgotten);
+        assert!(!drafts.has_unsent());
+    }
+    #[test]
+    fn recovery_detects_a_hidden_reply_draft_without_replacing_the_current_target() {
+        let room = context(1);
+        let reply = talk_core::ui::messaging::ComposeTarget {
+            reply_to: Some(7),
+            ..Default::default()
+        };
+        let mut drafts = Drafts::default();
+        assert!(drafts.set_target(room, reply.clone()));
+        drafts.save(room, "Existing reply text").unwrap();
+        assert!(drafts.set_target(room, Default::default()));
+        assert!(drafts.text(room).is_empty());
+        assert!(drafts.has_text_for_target(room, &reply));
+        assert!(!drafts.has_text_for_target(room, &Default::default()));
+        assert!(!drafts.has_text_for_target(context(2), &reply));
+        assert_eq!(drafts.target(room), Default::default());
+        assert!(drafts.set_target(room, reply));
+        assert_eq!(drafts.text(room), "Existing reply text");
+    }
     #[test]
     fn edit_receipts_only_restore_the_unchanged_admitted_editor() {
         let pending = || {
@@ -524,35 +1035,34 @@ mod tests {
             edit.is_some(),
             "an unrelated receipt cannot release the admitted edit"
         );
-        assert_eq!(
-            PendingEdit::complete(
-                &mut edit,
-                RequestId(7),
-                Completion::ServerAccepted,
-                Some((42, 1)),
-                "submitted edit"
-            ),
-            Some(true)
-        );
-        assert!(edit.is_none());
+        for completion in [Completion::ServerAccepted, Completion::Queued] {
+            let mut edit = pending();
+            assert_eq!(
+                PendingEdit::complete(
+                    &mut edit,
+                    RequestId(7),
+                    completion,
+                    Some((42, 1)),
+                    "submitted edit"
+                ),
+                Some(true)
+            );
+            assert!(edit.is_none());
+        }
         for (message, body) in [
             (Some((42, 2)), "submitted edit"),
             (Some((42, 1)), "newer edit"),
             (Some((43, 1)), "submitted edit"),
             (None, "submitted edit"),
         ] {
-            let mut edit = pending();
-            assert_eq!(
-                PendingEdit::complete(
-                    &mut edit,
-                    RequestId(7),
-                    Completion::ServerAccepted,
-                    message,
-                    body
-                ),
-                Some(false)
-            );
-            assert!(edit.is_none());
+            for completion in [Completion::ServerAccepted, Completion::Queued] {
+                let mut edit = pending();
+                assert_eq!(
+                    PendingEdit::complete(&mut edit, RequestId(7), completion, message, body),
+                    Some(false)
+                );
+                assert!(edit.is_none());
+            }
         }
         for completion in [
             Completion::Failed(UnavailableReason::PermissionDenied),
@@ -575,7 +1085,7 @@ mod tests {
             );
         }
     }
-    use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};
+    use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration};
     fn context(n: u128) -> ConversationRef {
         ConversationRef {
             account: AccountScope {

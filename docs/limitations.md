@@ -18,23 +18,43 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
-- Typing indicators, voice messages, video and complete document viewers, account-wide
+- Markdown covers bounded CommonMark, strikethrough and task markers. Tables
+  remain readable source; HTML and Markdown images do not execute or load.
+  The composer shows and styles the original Markdown characters. Full rich-text
+  editing with hidden syntax is not implemented. Native Markdown/link/IME
+  interaction still needs platform qualification.
+- Typing indicators, voice messages, complete document viewers, account-wide
   content search and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
   offer the Cloud web view and download. Office document previews also depend on
-  the server's providers. Original-image fallback is limited to supported raster
-  files up to 4 MiB.
+  the server's providers. Online raster previews use originals up to 4 MiB,
+  8192 pixels per dimension and 16 Mi pixels. GIF/WebP render a still frame.
+- The media gallery and local video player are implemented but await native GUI,
+  real-server and packaged-runtime qualification. The player accepts MP4
+  H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders
+  are available. Other containers/codecs use the Cloud web view or download.
+  Inputs are limited to 32 MiB, 1920×1080, 30 fps and a 30-minute player lifetime.
+  Playback starts paused. Offline viewing uses a cached thumbnail only.
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
-- Loaded history is retained in session memory for up to 32 rooms, with up to
-  100 messages per room. It does not survive an app restart, and inactive rooms
-  are refreshed when reopened rather than continuously mirrored in full.
-  There is no persistent offline message cache or durable outgoing-message
-  replay. An uncertain send is never silently retried.
+- Session history retains up to 32 rooms with 100 messages per room. Eligible
+  durable accounts also restore up to eight ordinary-room histories, member
+  counts and deliberately staged outgoing intents from private, unencrypted
+  storage. Restricted, unknown-policy and session-only content stays in memory.
+  Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
+  session-local. Small reencoded previews persist for up to seven days, with
+  at most 24 entries and 4 MiB per account; original attachments are not cached.
+- The outgoing queue is bounded to 64 intents and 512 KiB per account. It
+  revalidates current server authority before dispatch. Read-only uncertainty
+  checks have finite windows, including the latest 200 messages for send/forward
+  correlation. An unresolved effect stays retained and is never blindly replayed.
+  Scheduled creation has no operation correlation and may remain uncertain.
+  The reminder backend uses server reminders; there is no standalone local OS
+  reminder fallback.
 
 ## Platforms
 

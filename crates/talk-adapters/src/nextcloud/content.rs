@@ -71,6 +71,38 @@ impl NextcloudClient {
         caps: &Capabilities,
     ) -> Result<ContentResult, PortError> {
         match command {
+            ContentCommand::Video {
+                message,
+                placeholder,
+            } => {
+                let object = self.attachment(c, message, &placeholder, caps).await?;
+                let format = match object.mime_type.as_deref() {
+                    Some("video/mp4") => api::content::VideoFormat::Mp4,
+                    Some("video/webm") => api::content::VideoFormat::WebM,
+                    _ => return Err(self.error(ErrorKind::Unsupported)),
+                };
+                if object
+                    .size
+                    .is_some_and(|bytes| bytes > api::content::MAX_VIDEO_BYTES as u64)
+                {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                let raw = object
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+                let path =
+                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                // Reuse the authenticated, cancelable DAV owner. Original video
+                // bytes never enter the raster decoder, server preview lane or
+                // a URL/playlist-aware player source.
+                let bytes = self.transport.video(c, path, format).await?;
+                self.transport.validate(c)?;
+                Ok(ContentResult::Video(
+                    VideoBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
             ContentCommand::SelfProfile => {
                 let reply = self.transport.api_request(c, api::Request::Account).await?;
                 let api::Reply::Account(profile) = reply else {
@@ -109,12 +141,16 @@ impl NextcloudClient {
             }
             ContentCommand::Asset(request) => {
                 use api::content::ImageRequest as I;
+                let mut durable = true;
+                let mut room_key = None;
                 let image = match request {
                     AssetRequest::SelfAvatar => I::UserAvatar {
                         user: self.transport.user().to_owned(),
                     },
                     AssetRequest::ConversationAvatar(id) => {
-                        self.content_room(c, id, caps).await?;
+                        let room = self.content_room(c, id, caps).await?;
+                        room_key = Some(avatars::key("room", self.check_room(id)?));
+                        durable = !room.classified && !room.sensitive;
                         if !caps.has("avatar") {
                             return Err(self.error(ErrorKind::Unsupported));
                         }
@@ -124,7 +160,8 @@ impl NextcloudClient {
                         )
                     }
                     AssetRequest::MessageAvatar(message) => {
-                        self.content_room(c, message.conversation, caps).await?;
+                        let room = self.content_room(c, message.conversation, caps).await?;
+                        durable = !room.classified && !room.sensitive;
                         let message = self.target(c, message).await?;
                         if message.actor_type.as_deref() != Some("users") {
                             return Err(self.error(ErrorKind::Unsupported));
@@ -136,7 +173,8 @@ impl NextcloudClient {
                         }
                     }
                     AssetRequest::ParticipantAvatar(member) => {
-                        self.content_room(c, member.conversation, caps).await?;
+                        let room = self.content_room(c, member.conversation, caps).await?;
+                        durable = !room.classified && !room.sensitive;
                         let actor = self
                             .members
                             .iter()
@@ -183,7 +221,24 @@ impl NextcloudClient {
                             .await;
                     }
                 };
-                let bytes = self.transport.image(c, image).await?;
+                let key = match &image {
+                    I::UserAvatar { user } => avatars::key("user", user),
+                    I::ConversationAvatar(_) => {
+                        room_key.ok_or_else(|| self.error(ErrorKind::WrongScope))?
+                    }
+                    _ => return Err(self.error(ErrorKind::Unsupported)),
+                };
+                self.transport.validate(c)?;
+                let now = messaging::now_unix();
+                let bytes = if let Some(bytes) = self.avatars.get(&key, now, durable) {
+                    bytes
+                } else {
+                    let bytes = self.transport.image(c, image).await?;
+                    self.transport.validate(c)?;
+                    self.avatars.put(&key, &bytes, now, durable);
+                    bytes
+                };
+                self.transport.validate(c)?;
                 if let Some((emoji, color)) = server_emoji(&bytes) {
                     return Ok(ContentResult::Emoji {
                         text: Text::new(emoji).map_err(|_| self.error(ErrorKind::TooLarge))?,
@@ -221,6 +276,17 @@ impl NextcloudClient {
             .and_then(|id| id.parse::<u64>().ok())
             .filter(|id| *id > 0)
             .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+        if large
+            && matches!(
+                object.mime_type.as_deref(),
+                Some("image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf")
+            )
+        {
+            // Opening the gallery requests the original, not a server-generated
+            // 1600px thumbnail. Its failure must stay visible: falling back here
+            // would silently present reduced content as the requested original.
+            return self.attachment_original(c, &object, large).await;
+        }
         let result = self
             .transport
             .image(c, api::content::ImageRequest::FilePreview { file, large })
@@ -240,13 +306,10 @@ impl NextcloudClient {
                 // A disabled/missing preview provider must not hide an otherwise
                 // supported image. DAV still enforces the fresh account's file
                 // permissions; denial, redirects and cancellation never fallback.
-                let raw = object.path.as_deref().ok_or(error)?;
-                let path =
-                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
-                        .map_err(|kind| self.error(transport::kind(kind)))?;
-                self.transport
-                    .image(c, api::content::ImageRequest::FileImage(path))
-                    .await?
+                if object.path.is_none() {
+                    return Err(error);
+                }
+                return self.attachment_original(c, &object, large).await;
             }
             #[cfg(target_os = "macos")]
             Err(error)
@@ -256,10 +319,54 @@ impl NextcloudClient {
                         .size
                         .is_none_or(|bytes| bytes <= api::content::MAX_IMAGE_BYTES as u64) =>
             {
-                let raw = object.path.as_deref().ok_or(error)?;
-                let path =
-                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
-                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                if object.path.is_none() {
+                    return Err(error);
+                }
+                return self.attachment_original(c, &object, large).await;
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(ContentResult::Image(
+            ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+        ))
+    }
+    async fn attachment_original(
+        &mut self,
+        c: &OperationContext,
+        object: &api::chat::RichObject,
+        large: bool,
+    ) -> Result<ContentResult, PortError> {
+        self.transport.validate(c)?;
+        if object
+            .size
+            .is_some_and(|bytes| bytes > api::content::MAX_IMAGE_BYTES as u64)
+        {
+            return Err(self.error(ErrorKind::TooLarge));
+        }
+        let raw = object
+            .path
+            .as_deref()
+            .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+        // Only the path on the freshly read attachment is accepted. The API
+        // scopes DAV to this authenticated account and rejects traversal; rich
+        // object links and guessed filename/file-id URLs never enter this lane.
+        let path = api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+            .map_err(|kind| self.error(transport::kind(kind)))?;
+        match object.mime_type.as_deref() {
+            Some("image/png" | "image/jpeg" | "image/gif" | "image/webp") => {
+                // Both a declared Content-Length and streamed chunks enforce
+                // the same 4 MiB cap before bytes reach the native decoder.
+                let bytes = self
+                    .transport
+                    .image(c, api::content::ImageRequest::FileImage(path))
+                    .await?;
+                self.transport.validate(c)?;
+                Ok(ContentResult::Image(
+                    ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
+            #[cfg(target_os = "macos")]
+            Some("application/pdf") => {
                 let bytes = self.transport.preview_pdf(c, path).await?;
                 self.transport.validate(c)?;
                 let timeout = std::time::Duration::from_millis(
@@ -278,13 +385,16 @@ impl NextcloudClient {
                 .await
                 .map_err(|kind| self.error(kind))?;
                 self.transport.validate(c)?;
-                return Ok(ContentResult::Image(image));
+                Ok(ContentResult::Image(image))
             }
-            Err(error) => return Err(error),
-        };
-        Ok(ContentResult::Image(
-            ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
-        ))
+            _ => {
+                // No document/player implementation is inferred from a server
+                // thumbnail or a MIME label. Other formats keep their explicit
+                // preview/download/external-open paths.
+                let _ = (path, large);
+                Err(self.error(ErrorKind::Unsupported))
+            }
+        }
     }
     async fn poll_content(
         &mut self,

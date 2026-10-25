@@ -206,6 +206,8 @@ pub enum SavedAccountPhase {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SavedAccountView {
+    /// Historical metadata; this flag never grants an authenticated scope.
+    pub connected_once: bool,
     pub id: AccountId,
     pub navigation_key: NavigationAccountKey,
     pub label: Option<Text<128>>,
@@ -436,6 +438,10 @@ pub struct CallView {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Completion {
+    /// The local outbox accepted the intent. Normal saved accounts commit it
+    /// durably; restricted/session-only contexts retain it for this session.
+    /// No server acceptance, recipient delivery or read is implied.
+    Queued,
     /// Server accepted the request. This does not mean recipient delivery/read.
     ServerAccepted,
     Failed(UnavailableReason),
@@ -523,6 +529,14 @@ pub struct ConversationListState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    /// Deliberate activation of one link in the exact displayed message body.
+    /// Composition revalidates the room, source and ordinal before OS handoff.
+    OpenMessageLink {
+        context: ConversationRef,
+        message: u128,
+        source: Text<4096>,
+        ordinal: u16,
+    },
     Content {
         request: RequestId,
         account: AccountScope,

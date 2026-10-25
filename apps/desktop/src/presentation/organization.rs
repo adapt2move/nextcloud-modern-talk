@@ -1,6 +1,6 @@
 //! Account-scoped layout edits are admitted only with durable keys and known fallback.
 use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
-use gpui::{Context, Div, Focusable, div, prelude::*, px};
+use gpui::{Context, Div, div, prelude::*};
 use talk_core::preferences::navigation::{
     NavigationEdit, NavigationGroup, NavigationGroupId, RemoteNavigationSupport,
 };
@@ -124,8 +124,7 @@ impl Desktop {
         );
         let mut body = div().flex().flex_col().gap_3()
             .child(self.hint(self.l("Eigene Gruppen gelten für dieses Konto auf diesem Computer, wenn der Server keine Gesprächs-Tags anbietet.")))
-            .child(div().relative().rounded(px(7.)).border_1().border_color(self.theme.input_border).p_3()
-                .child(self.field_ring(self.group_name.focus_handle(cx), 7.)).child(self.group_name.clone()))
+            .child(self.input_surface(&self.group_name, cx).child(self.group_name.clone()))
             .child(self.button("create-group", "Gruppe hinzufügen", ButtonStyle::Secondary, gate, LocalAction::CreateGroup, cx));
         if let Some(row) = self.selected() {
             body = body.child(self.button(
@@ -378,13 +377,7 @@ impl Desktop {
                 self.hint(self.l("Diese Gruppen werden auf deinem Nextcloud-Server gespeichert.")),
             )
             .child(
-                div()
-                    .relative()
-                    .rounded(px(7.))
-                    .border_1()
-                    .border_color(self.theme.input_border)
-                    .p_3()
-                    .child(self.field_ring(self.group_name.focus_handle(cx), 7.))
+                self.input_surface(&self.group_name, cx)
                     .child(self.group_name.clone()),
             )
             .child(self.button(

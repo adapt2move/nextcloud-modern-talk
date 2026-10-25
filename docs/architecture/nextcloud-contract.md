@@ -8,7 +8,7 @@ The independent [`nextcloud-talk-api`](../../crates/nextcloud-talk-api/README.md
 
 The identity owner consumes an app credential through an opaque intake. Login orchestration and durable storage do not move into the protocol crate. Validated origin, exact login name, canonical identity and cancellation stay private. The application uses collision-resistant account/runtime/operation IDs and rejects stale or wrong-scope results.
 
-One shared network runtime bounds accounts and HTTP admissions. Request futures own their I/O; dropping one does not destroy the account or erase an uncertain mutation. An already dispatched write can have changed the server even when local observation is cancelled. Uncertain sends/creates are retained and reconciled without automatic replay. The current journals are memory-only, not a durable offline outbox.
+One shared network runtime bounds accounts and HTTP admissions. Request futures own their I/O; dropping one does not destroy the account or erase an uncertain mutation. An already dispatched write can have changed the server even when local observation is cancelled. Uncertain writes remain retained and use read-only reconciliation without automatic replay. Desktop composition owns the bounded optimistic intent queue; the identity worker owns its account-scoped persistence and dispatch markers under [AUTH-009](../product/accounts.md#auth-009). A local queued result is distinct from a protocol receipt. The transport never infers safe replay from an absent recent-history match or restores authority from cached content.
 
 Origin/subpath validation, normal certificate trust, no authenticated redirects, typed routes and bounded response parsing apply before policy projection. The public interface does not expose arbitrary authenticated URLs. Ordinary requests, destructive signaling polls and binary transfers have distinct finite deadlines and still honor an earlier caller cancellation/deadline. Exact limits live in the crate's API documentation and tests.
 
@@ -17,6 +17,16 @@ Origin/subpath validation, normal certificate trust, no authenticated redirects,
 Room IDs, recipient IDs, member IDs and call scopes are application-local handles. The adapter resolves only current bindings. Local/server defaults, unknown restrictions and role-specific permissions remain distinct. A capability name or successful REST response alone cannot authorize capture, server moderation or a different room.
 
 Conversation and message writes return correlated results. Composition retains results until acknowledgement, refreshes the affected server projection and prevents a stale completion from repopulating another room. File transfers use bounded streaming, explicit server sharing and staged non-overwriting local downloads.
+
+User-authored message links are separate from authenticated Cloud handoffs. Presentation emits the exact source and a bounded link ordinal. Composition resolves that ordinal through the pure text owner only after checking the current account, room, source, retention and exposure policy, then repeats those checks when draining its single two-second handoff slot. Only a canonical public HTTP/HTTPS value reaches the OS opener. Parsing or rendering never starts network or external-resource work.
+
+## Attachment presentation and playback
+
+The content adapter validates current room, attachment, retention and origin before resolving an original. Original raster/PDF reads and the separate bounded `VideoBytes` result never expose a remote route to presentation. Composition decodes raster images off the UI executor and owns their finite resident pixel budget: 64 MiB for one original and 96 MiB across admitted rasters. Preview generations distinguish closing and reopening the same file, in addition to account/runtime/room and exact descriptor checks.
+
+One local video owner consumes finite in-memory bytes through explicit GStreamer demuxers and decoders. A single worker, one latest-frame slot and coalesced play/seek controls bound work; stop has priority. Frames move directly to composition-owned render images and never enter chat/event serialization or the durable content cache. Native teardown retains the single-player lease until the worker exits. Starting/seeking has a ten-second deadline; stop is reported unconfirmed after three seconds. Explicit process quit waits at most five seconds without fabricating resource-stop confirmation. The packaged native plugin/source closure remains owned by the release runtime definition.
+
+The existing private account-data owner stores only reencoded, descriptor-bound thumbnails under [AUTH-009](../product/accounts.md#auth-009). Reads are length/dimension checked before decode and retirement fences late completions. Failed required removals collapse to one retained account clear, retried on the existing owner tick with a five-second cooldown. Disposable previews yield to required history and outgoing work within the database ceiling. Cached presentation never grants network or attachment authority.
 
 ## Calls
 

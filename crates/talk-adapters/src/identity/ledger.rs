@@ -107,6 +107,7 @@ pub(super) struct Account {
     pub disposition: u8,
     pub mode: u8,
     pub eligible: Option<OperationId>,
+    pub connected_once: bool,
 }
 
 #[cfg(test)]
@@ -238,7 +239,7 @@ impl Ledger {
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             ))?;
-            if !matches!(tuple.0, 5 | 6) || tuple.1 != id(profile.as_local()) || tuple.3 != binding
+            if !matches!(tuple.0, 5..=7) || tuple.1 != id(profile.as_local()) || tuple.3 != binding
             {
                 return Err(IdentityError::RecoveryRequired);
             }
@@ -260,6 +261,15 @@ impl Ledger {
                 UPDATE meta SET schema=6 WHERE schema=5;
                 COMMIT;"))?;
         }
+        let schema: i64 =
+            db(connection.query_row("SELECT schema FROM meta", [], |row| row.get(0)))?;
+        if schema == 6 {
+            db(connection.execute_batch("BEGIN IMMEDIATE;
+                ALTER TABLE accounts ADD COLUMN connected_once INTEGER NOT NULL DEFAULT 0 CHECK(connected_once IN (0,1));
+                UPDATE accounts SET connected_once=1 WHERE EXISTS(SELECT 1 FROM operations WHERE operations.account=accounts.id AND activated=1);
+                UPDATE meta SET schema=7 WHERE schema=6;
+                COMMIT;"))?;
+        }
         let ledger = Self {
             db: connection,
             dir,
@@ -271,6 +281,17 @@ impl Ledger {
             return Err(IdentityError::RecoveryRequired);
         }
         Ok(ledger)
+    }
+    /// Historical local metadata only. Never used for eligibility, credential
+    /// selection or runtime authority; suppression deliberately retains it.
+    pub fn remember_connection(&mut self, account: AccountId) -> Result<()> {
+        self.dir.check()?;
+        self.account(account)?;
+        db(self.db.execute(
+            "UPDATE accounts SET connected_once=1 WHERE id=?1",
+            [id(account.as_local())],
+        ))?;
+        Ok(())
     }
     pub fn account_key(&self, account: AccountId) -> Result<NavigationAccountKey> {
         NavigationAccountKey::new(&format!(
@@ -367,9 +388,24 @@ impl Ledger {
             .map(Some)
             .map_err(|_| IdentityError::RecoveryRequired)
     }
+    /// Stable room keys are account-qualified lookup identities, never grants.
+    pub(super) fn owns_room_key(
+        &self,
+        account: AccountId,
+        room: &NavigationRoomKey,
+    ) -> Result<bool> {
+        let Some(local) = room.as_str().strip_prefix("r1:") else {
+            return Ok(false);
+        };
+        db(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM navigation_rooms WHERE account=?1 AND local_key=?2)",
+            params![id(account.as_local()), local],
+            |row| row.get(0),
+        ))
+    }
     pub fn accounts(&self) -> Result<Vec<Account>> {
         let mut query = db(self.db.prepare(
-            "SELECT id,host,origin,user,revision,disposition,mode,eligible FROM accounts LIMIT 9",
+            "SELECT id,host,origin,user,revision,disposition,mode,eligible,connected_once FROM accounts LIMIT 9",
         ))?;
         let mut rows = db(query.query([]))?;
         let mut result = Vec::new();
@@ -384,6 +420,7 @@ impl Ledger {
                 disposition: db(row.get(5))?,
                 mode: db(row.get(6))?,
                 eligible: raw.map(number).transpose()?.map(OperationId::from_local),
+                connected_once: db(row.get(8))?,
             };
             if a.origin.len() > 2048
                 || a.user.len() > 256
@@ -416,10 +453,11 @@ impl Ledger {
             disposition: 0,
             mode: 0,
             eligible: None,
+            connected_once: false,
         };
         self.dir.check()?;
         db(self.db.execute(
-            "INSERT INTO accounts VALUES(?1,?2,?3,'','0000000000000000',0,0,NULL)",
+            "INSERT INTO accounts VALUES(?1,?2,?3,'','0000000000000000',0,0,NULL,0)",
             params![id(a.id.as_local()), id(a.host.as_local()), a.origin],
         ))?;
         Ok(a)
@@ -671,7 +709,14 @@ impl Ledger {
         } else if let Some(op) = attempted {
             db(tx.execute("UPDATE operations SET abandoned=1 WHERE account=?1 AND id=?2 AND cleanup=0 AND activated=0",params![id(account.as_local()),id(op.as_local())]))?;
         }
-        db(tx.commit()).map_err(|_| IdentityError::SuppressionUnconfirmed)
+        db(tx.commit()).map_err(|_| IdentityError::SuppressionUnconfirmed)?;
+        if cleanup_all || session {
+            super::avatars::remove(&self.dir, account)?;
+        }
+        // Ordinary chat content and pending intents belong to this saved-account
+        // eligibility lifetime, including a plain logout without credential removal.
+        super::data::remove(&self.dir, account)?;
+        Ok(())
     }
     /// Cancels N and deliberately retains the exact validated P; never issued by timeout.
     pub fn retain(
@@ -770,6 +815,8 @@ impl Ledger {
             return Err(IdentityError::RecoveryRequired);
         }
         self.dir.check()?;
+        super::avatars::remove(&self.dir, account)?;
+        super::data::remove(&self.dir, account)?;
         let tx = db(self.db.transaction())?;
         db(tx.execute(
             "DELETE FROM operations WHERE account=?1",

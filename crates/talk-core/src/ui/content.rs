@@ -105,6 +105,24 @@ pub struct DownloadView {
     pub total: Option<u64>,
     pub state: DownloadState,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaybackState {
+    Loading,
+    Paused,
+    Playing,
+    Ended,
+    Stopping,
+    Failed(UnavailableReason),
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlaybackView {
+    pub attachment: AttachmentRef,
+    pub generation: u64,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub stop_unconfirmed: bool,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
     pub self_name: Option<Text<256>>,
@@ -116,6 +134,7 @@ pub struct ContentPanel {
     pub poll_create: Availability,
     pub poll_state: RemoteState,
     pub preview: Option<AttachmentRef>,
+    pub playback: Option<PlaybackView>,
     pub transfer: Option<DownloadView>,
     pub result: Option<(RequestId, Completion)>,
 }
@@ -131,6 +150,7 @@ impl Default for ContentPanel {
             poll_create: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,
             preview: None,
+            playback: None,
             transfer: None,
             result: None,
         }
@@ -141,10 +161,26 @@ pub enum ContentAction {
     Load(AssetTarget),
     Preview(AttachmentRef),
     ClosePreview,
+    PlayPreview {
+        attachment: AttachmentRef,
+        generation: u64,
+    },
+    PausePreview {
+        attachment: AttachmentRef,
+        generation: u64,
+    },
+    SeekPreview {
+        attachment: AttachmentRef,
+        generation: u64,
+        position_ms: u64,
+    },
     OpenCloud(AttachmentRef),
     RefreshPoll(u64),
     CreatePoll(PollDraft),
-    Vote { poll: u64, options: Page<u16, 100> },
+    Vote {
+        poll: u64,
+        options: Page<u16, 100>,
+    },
     ClosePoll(u64),
     CancelDownload,
     Acknowledge,

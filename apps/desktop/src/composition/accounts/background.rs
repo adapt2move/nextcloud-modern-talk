@@ -7,6 +7,15 @@ const IN_FLIGHT: usize = 4;
 const MIN_INTERVAL: Duration = Duration::from_secs(2);
 const LIVE_FALLBACK_INTERVAL: Duration = Duration::from_secs(30);
 pub(super) const SOURCE_LIFETIME: Duration = Duration::from_secs(12);
+const MEMBER_COUNT_LIFETIME: Duration = Duration::from_secs(10 * 60);
+const MEMBER_COUNT_RETRY: Duration = Duration::from_secs(60);
+
+struct MemberCount {
+    context: ConversationRef,
+    count: Option<u16>,
+    observed: Option<Instant>,
+    requested: Option<Instant>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Observation {
@@ -55,8 +64,12 @@ pub(super) struct Account {
     due: [Instant; 4],
     last: [Option<Instant>; 4],
     sources: [Option<Instant>; 2],
+    prefetch: Vec<ConversationRef>,
+    prefetch_planned: bool,
+    prefetch_deadline: Option<Instant>,
     live: Option<Result<protocol::AccountLiveState, IdentityError>>,
     first_transport_failure: Option<ErrorKind>,
+    member_counts: Vec<MemberCount>,
     pub(super) rooms: Page<ConversationView, 100>,
     pub(super) state: ConversationListState,
 }
@@ -74,8 +87,12 @@ impl Background {
                     due: [now; 4],
                     last: [None; 4],
                     sources: [None; 2],
+                    prefetch: Vec::new(),
+                    prefetch_planned: false,
+                    prefetch_deadline: None,
                     live: None,
                     first_transport_failure: None,
+                    member_counts: Vec::new(),
                     rooms: Page::empty(),
                     state: ConversationListState {
                         content: ContentState::Loading,
@@ -90,6 +107,103 @@ impl Background {
     }
     pub(super) fn account_mut(&mut self, scope: AccountScope) -> Option<&mut Account> {
         self.accounts.iter_mut().find(|a| a.scope == scope)
+    }
+    pub(super) fn member_count(&self, context: ConversationRef) -> Option<u16> {
+        self.account(context.account)?
+            .member_counts
+            .iter()
+            .find(|m| m.context == context)?
+            .count
+    }
+    pub(super) fn members_need_refresh(&self, context: ConversationRef, now: Instant) -> bool {
+        let Some(count) = self
+            .account(context.account)
+            .and_then(|a| a.member_counts.iter().find(|m| m.context == context))
+        else {
+            return true;
+        };
+        !count
+            .observed
+            .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_LIFETIME)
+            && !count
+                .requested
+                .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_RETRY)
+    }
+    pub(super) fn member_count_requested(&mut self, context: ConversationRef, now: Instant) {
+        if let Some(slot) = self.member_slot(context) {
+            slot.requested = Some(now);
+        }
+    }
+    pub(super) fn remember_member_count(
+        &mut self,
+        context: ConversationRef,
+        count: u16,
+        now: Instant,
+    ) {
+        self.restore_member_count(context, count, Some(Duration::ZERO), now);
+    }
+    /// Restored observations affect presentation only. A missing/old wall-clock
+    /// age keeps the value visible while permitting a silent fresh observation.
+    pub(super) fn restore_member_count(
+        &mut self,
+        context: ConversationRef,
+        count: u16,
+        age: Option<Duration>,
+        now: Instant,
+    ) {
+        if let Some(slot) = self.member_slot(context) {
+            slot.count = Some(count);
+            slot.observed = age.and_then(|age| now.checked_sub(age));
+        }
+        if let Some(account) = self.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participants = Some(count);
+                }
+                row
+            }));
+        }
+    }
+    pub(super) fn forget_member_count(&mut self, context: ConversationRef) {
+        if let Some(account) = self.account_mut(context.account) {
+            account.member_counts.retain(|m| m.context != context);
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participants = None;
+                }
+                row
+            }));
+        }
+    }
+    fn member_slot(&mut self, context: ConversationRef) -> Option<&mut MemberCount> {
+        let account = self.account_mut(context.account)?;
+        let index = if let Some(index) = account
+            .member_counts
+            .iter()
+            .position(|m| m.context == context)
+        {
+            index
+        } else {
+            if account.member_counts.len() == 100 {
+                let oldest = account
+                    .member_counts
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, m)| m.observed)
+                    .map(|(i, _)| i)?;
+                account.member_counts.remove(oldest);
+            }
+            account.member_counts.push(MemberCount {
+                context,
+                count: None,
+                observed: None,
+                requested: None,
+            });
+            account.member_counts.len() - 1
+        };
+        account.member_counts.get_mut(index)
     }
     pub(super) fn invalidate(&mut self, scope: AccountScope, kind: Observation, now: Instant) {
         if let Some(a) = self.account_mut(scope) {
@@ -144,6 +258,31 @@ impl Background {
                 };
         }
     }
+}
+
+fn recent_rooms(scope: AccountScope, list: &protocol::ConversationList) -> Vec<ConversationRef> {
+    let mut rooms: Vec<_> = list
+        .rooms
+        .as_slice()
+        .iter()
+        .filter(|r| {
+            r.actions.read_messages == Decision::Allowed
+                && !r.classified
+                && !r.sensitive
+                && !r.unknown_restrictions
+                && r.archived != Some(true)
+                && r.last_activity.is_some_and(|at| at > 0)
+        })
+        .collect();
+    rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
+    rooms
+        .into_iter()
+        .take(4)
+        .map(|r| ConversationRef {
+            account: scope,
+            conversation: r.id,
+        })
+        .collect()
 }
 
 fn live_interval(state: Option<Result<protocol::AccountLiveState, IdentityError>>) -> Duration {
@@ -237,6 +376,69 @@ impl Accounts {
             now,
         );
         let _ = self.request(scope, kind.request(), kind.purpose(scope));
+    }
+    /// Four recent policy-approved rooms per newly connected runtime, one
+    /// newest page (at most 50 messages) each. One global speculative read,
+    /// no retries/queue growth, and no receipt, typing, join or mutation request.
+    pub(super) fn tick_prefetch(&mut self) {
+        let now = Instant::now();
+        for account in &mut self.background.accounts {
+            if account.prefetch_deadline.is_some_and(|at| now >= at) {
+                account.prefetch.clear();
+                account.prefetch_deadline = None;
+            }
+        }
+        if self.pending.len() >= 8
+            || self.pending.iter().any(|p| {
+                matches!(
+                    p.purpose,
+                    Purpose::Message(_, _, _, messaging::Work::Prefetch)
+                )
+            })
+        {
+            return;
+        }
+        let active = self.snapshot.active_account;
+        let next = self
+            .background
+            .accounts
+            .iter()
+            .filter(|a| !a.prefetch.is_empty())
+            .filter(|a| {
+                !self
+                    .pending
+                    .iter()
+                    .any(|p| p.purpose.account() == Some(a.scope))
+            })
+            .min_by_key(|a| Some(a.scope) != active)
+            .map(|a| (a.scope, a.prefetch[0]));
+        let Some((scope, context)) = next else {
+            return;
+        };
+        if self.snapshot.selected == Some(context)
+            || self.history.get(context).is_some_and(|h| h.loaded)
+            || self.current(scope).is_err()
+            || !self.history.prefetch(context)
+        {
+            if let Some(account) = self.background.account_mut(scope) {
+                account.prefetch.remove(0);
+            }
+            return;
+        }
+        let result = self.start_message(
+            RequestId(0),
+            context,
+            protocol::messaging::MessagingCommand::History {
+                before: None,
+                thread: None,
+            },
+            messaging::Work::Prefetch,
+        );
+        if result != Err(SubmitError::Busy)
+            && let Some(account) = self.background.account_mut(scope)
+        {
+            account.prefetch.remove(0);
+        }
     }
     pub(super) fn sync_background(&mut self) {
         let scopes: Vec<_> = self
@@ -367,7 +569,24 @@ impl Accounts {
         };
         match list {
             Ok(list) => {
-                let rows = page(list.rooms.as_slice().iter().map(|r| conversation(r, scope)));
+                let rows = page(list.rooms.as_slice().iter().map(|r| {
+                    let mut row = conversation(r, scope);
+                    if r.actions.read_messages == Decision::Allowed {
+                        row.participants = cache
+                            .member_counts
+                            .iter()
+                            .find(|m| m.context == row.context)
+                            .and_then(|m| m.count)
+                            .or(row.participants);
+                    }
+                    row
+                }));
+                cache.member_counts.retain(|m| {
+                    list.rooms.as_slice().iter().any(|r| {
+                        r.id == m.context.conversation
+                            && r.actions.read_messages == Decision::Allowed
+                    })
+                });
                 let removed: Vec<_> = cache
                     .rooms
                     .as_slice()
@@ -375,12 +594,24 @@ impl Accounts {
                     .filter(|old| !rows.as_slice().iter().any(|r| r.context == old.context))
                     .map(|r| r.context)
                     .collect();
+                let recent = recent_rooms(scope, &list);
+                cache.prefetch.retain(|c| recent.contains(c));
+                if !cache.prefetch_planned {
+                    cache.prefetch = recent;
+                    cache.prefetch_planned = true;
+                    cache.prefetch_deadline = Some(Instant::now() + Duration::from_secs(60));
+                }
                 cache.rooms = rows.clone();
                 cache.state = ConversationListState {
                     content: ContentState::Ready,
                     complete: true,
                 };
                 let state = cache.state;
+                self.observe_cache_rooms(scope, &list);
+                let rows = self
+                    .background
+                    .account(scope)
+                    .map_or(rows, |a| a.rooms.clone());
                 for room in removed {
                     self.cancel_room_work(room);
                 }
@@ -407,6 +638,7 @@ impl Accounts {
                 if self.snapshot.active_account == Some(scope) {
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
+                    self.restore_cache_selection();
                     if list
                         .rooms
                         .as_slice()
@@ -496,6 +728,50 @@ mod tests {
             account: AccountId::from_local(n),
             runtime: RuntimeGeneration::from_local(1),
         }
+    }
+    #[test]
+    fn member_counts_remain_visible_during_refresh_and_retry_on_a_bounded_schedule() {
+        let now = Instant::now();
+        let mut model = super::super::tests::model();
+        model.background.sync(&[scope(1)], now);
+        model.snapshot.active_account = Some(scope(1));
+        model.apply_room_refresh(scope(1), rooms(vec![room(1)]));
+        let context = model.snapshot.conversations.as_slice()[0].context;
+        model.background.remember_member_count(context, 7, now);
+        assert!(!model.background.members_need_refresh(
+            context,
+            now + MEMBER_COUNT_LIFETIME - Duration::from_secs(1)
+        ));
+        model.apply_room_refresh(scope(1), rooms(vec![room(1)]));
+        assert_eq!(
+            model.snapshot.conversations.as_slice()[0].participants,
+            Some(7)
+        );
+        model.apply_room_refresh(scope(1), Err(IdentityError::Request(ErrorKind::Transport)));
+        assert_eq!(
+            model.snapshot.conversations.as_slice()[0].participants,
+            Some(7)
+        );
+        let stale = now + MEMBER_COUNT_LIFETIME;
+        assert!(model.background.members_need_refresh(context, stale));
+        model.background.member_count_requested(context, stale);
+        assert!(
+            !model
+                .background
+                .members_need_refresh(context, stale + MEMBER_COUNT_RETRY - Duration::from_secs(1))
+        );
+        assert!(
+            model
+                .background
+                .members_need_refresh(context, stale + MEMBER_COUNT_RETRY)
+        );
+        assert_eq!(model.background.member_count(context), Some(7));
+        model.background.forget_member_count(context);
+        assert_eq!(model.background.member_count(context), None);
+        assert_eq!(
+            model.background.account(scope(1)).unwrap().rooms.as_slice()[0].participants,
+            None
+        );
     }
     #[test]
     fn eight_accounts_get_all_slots_even_with_continuous_active_hints() {
@@ -888,8 +1164,73 @@ mod tests {
         model.select(Some(scope(1)));
         assert_eq!(model.snapshot.conversations.as_slice()[0].unread, 4);
         assert!(
-            !model.snapshot.conversation_list.complete,
-            "selection revalidates cached state"
+            model.snapshot.conversation_list.complete,
+            "selection preserves the last confirmed projection while revalidation runs in the background"
         );
+        assert_eq!(
+            model.load_rooms,
+            Some(scope(1)),
+            "selection still schedules a fresh policy observation"
+        );
+    }
+    #[test]
+    fn prefetch_plans_four_recent_safe_rooms_once_per_runtime_and_retires_access_loss() {
+        let mut model = super::super::tests::model();
+        model.background.sync(&[scope(1)], Instant::now());
+        let mut items: Vec<_> = (1..=10)
+            .map(|n| {
+                let mut r = room(n);
+                r.archived = Some(false);
+                r.last_activity = Some(n as u64);
+                r
+            })
+            .collect();
+        items[9].classified = true;
+        items[8].sensitive = true;
+        items[7].unknown_restrictions = true;
+        items[6].actions.read_messages = Decision::Denied;
+        model.apply_room_refresh(scope(1), rooms(items.clone()));
+        let planned = &model.background.account(scope(1)).unwrap().prefetch;
+        assert_eq!(
+            planned
+                .iter()
+                .map(|c| c.conversation.local)
+                .collect::<Vec<_>>(),
+            vec![6, 5, 4, 3]
+        );
+        assert!(model.snapshot.selected.is_none());
+        assert!(model.snapshot.messages.as_slice().is_empty());
+        items[5].classified = true;
+        model.apply_room_refresh(scope(1), rooms(items));
+        assert_eq!(
+            model.background.account(scope(1)).unwrap().prefetch.len(),
+            3
+        );
+        model
+            .background
+            .account_mut(scope(1))
+            .unwrap()
+            .prefetch_deadline = Some(Instant::now() - Duration::from_secs(1));
+        model.tick_prefetch();
+        assert!(
+            model
+                .background
+                .account(scope(1))
+                .unwrap()
+                .prefetch
+                .is_empty(),
+            "queued reads expire without another admission"
+        );
+        model.apply_room_refresh(scope(1), rooms(vec![room(1)]));
+        assert!(
+            model
+                .background
+                .account(scope(1))
+                .unwrap()
+                .prefetch
+                .is_empty()
+        );
+        model.background.sync(&[], Instant::now());
+        assert!(model.background.accounts.is_empty());
     }
 }

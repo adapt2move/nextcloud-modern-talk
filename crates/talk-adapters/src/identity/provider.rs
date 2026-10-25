@@ -140,6 +140,8 @@ impl Providers {
         }
     }
     pub fn read(&self, item: QualifiedItem) -> Result<Zeroizing<String>> {
+        #[cfg(test)]
+        let _fault = self.faults.before_read();
         let value = if item.provider.backend == StorageBackend::PrivateFile {
             let bytes = self.directory.read(&filename(item), RECORD_LIMIT)?;
             let s = std::str::from_utf8(&bytes).map_err(|_| error::corrupt())?;
@@ -315,6 +317,7 @@ pub(super) mod faults {
         #[cfg(target_os = "linux")]
         preflight: Mutex<Option<Arc<Gate>>>,
         suppression: Mutex<Option<Arc<Gate>>>,
+        reads: Mutex<Option<Arc<Gate>>>,
     }
     #[derive(Default)]
     pub struct ReplyGate {
@@ -335,6 +338,14 @@ pub(super) mod faults {
         }
     }
     impl Faults {
+        pub fn arm_read(&self) -> Arc<Gate> {
+            let gate = Arc::new(Gate::default());
+            assert!(self.reads.lock().unwrap().replace(gate.clone()).is_none());
+            gate
+        }
+        pub fn before_read(&self) -> Option<Completion> {
+            self.reads.lock().unwrap().take().map(Gate::wait)
+        }
         #[cfg(unix)]
         pub fn arm_suppression(&self) -> Arc<Gate> {
             let gate = Arc::new(Gate::default());

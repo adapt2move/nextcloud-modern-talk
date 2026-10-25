@@ -15,6 +15,8 @@ pub use crate::ids::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, HostId, RuntimeGeneration,
     VaultGeneration,
 };
+/// Bounded, pure user-text formatting and safe web-link values.
+pub use crate::markup;
 pub use crate::policy::Decision;
 
 pub const MAX_VISIBLE_CONVERSATIONS: usize = 100;
@@ -23,6 +25,8 @@ pub const MAX_INTENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnavailableReason {
+    /// A locally accepted action exhausted its bounded pre-dispatch wait.
+    Busy,
     Connection(presentation::ConnectionFailure),
     Unconfigured,
     Unsupported,

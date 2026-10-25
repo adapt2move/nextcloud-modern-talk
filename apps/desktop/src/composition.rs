@@ -2,6 +2,7 @@
 mod accounts;
 mod assets;
 mod content_images;
+mod content_video;
 mod files;
 mod fixtures;
 mod preferences;
@@ -143,7 +144,7 @@ pub fn run() {
             quit_services.request_shutdown();
             let services = quit_services.clone();
             async move {
-                while !services.stopped() {
+                while services.waiting_for_shutdown() {
                     gpui::Timer::after(Duration::from_millis(20)).await;
                 }
                 crate::diagnostics::request_shutdown();
@@ -327,14 +328,32 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                         let job=accounts.borrow_mut().take_content_image();
                         if let Some(job)=job {
                             let copy=job.clone();
-                            let decoded=cx.background_executor().spawn(async move { content_images::decode(&copy) }).await;
-                            let accepted=accounts.borrow_mut().finish_content_image(&job,decoded.as_ref().map(|(_,bytes)|*bytes));
-                            if accepted && let Some((image,_))=decoded {
+                            let decoded=cx.background_executor().spawn(async move {
+                                let (image,bytes)=content_images::decode(&copy)?;
+                                let thumbnail=matches!(copy.target,talk_core::ui::content::AssetTarget::Thumbnail(_)).then(||content_images::thumbnail_bytes(&image)).flatten();
+                                Some((image,bytes,thumbnail))
+                            }).await;
+                            let accepted=accounts.borrow_mut().finish_content_image(&job,decoded.as_ref().map(|(_,bytes,_)|*bytes));
+                            if accepted && let Some((image,_,thumbnail))=decoded {
+                                if let Some(thumbnail)=thumbnail {accounts.borrow_mut().persist_thumbnail(&job,thumbnail);}
                                 let _=view.update(cx,|view,cx| {
                                     view.refresh(cx);
                                     view.set_content_images(Some(job.account),vec![(job.key,gpui::ImageSource::Render(image))],cx);
                                 });
                             }
+                        }
+                        let video_job={accounts.borrow_mut().take_video_frame()};
+                        if let Some(job)=video_job {
+                            let receipt=job.receipt;
+                            let image=cx.background_executor().spawn(async move{content_images::video_frame(job.frame)}).await;
+                            let accepted=image.is_some()&&accounts.borrow_mut().finish_video_frame(&receipt);
+                            if accepted && let Some(image)=image {
+                                let _=view.update(cx,|view,cx|{view.refresh(cx);view.set_content_images(Some(receipt.account),vec![(receipt.key,gpui::ImageSource::Render(image))],cx);});
+                            }
+                        }
+                        let message_link={accounts.borrow_mut().take_message_link()};
+                        if let Some(link)=message_link {
+                            let _=cx.update(|cx|cx.open_url(link.as_str()));
                         }
                         if let Some(link)=accounts.borrow_mut().take_cloud_link() {
                             let _=cx.update(|cx|cx.open_url(link.as_str()));
@@ -411,7 +430,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             preview_services.install.borrow_mut().relaunch_failed();
                         }
                     }
-                    interval = Duration::from_millis(if devices_open { 33 } else { 100 });
+                    interval = Duration::from_millis(if devices_open || preview_services.accounts.as_ref().is_some_and(|a|a.borrow().video_active()) { 33 } else { 100 });
                     if requested != surface {
                         surface = requested;
                         sequence = 0;
@@ -484,7 +503,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             services.request_shutdown();
             let services = services.clone();
             cx.spawn(async move |cx| {
-                while !services.stopped() {
+                while services.waiting_for_shutdown() {
                     gpui::Timer::after(Duration::from_millis(20)).await;
                 }
                 let _ = cx.update(|cx| cx.quit());

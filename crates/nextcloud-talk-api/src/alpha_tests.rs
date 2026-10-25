@@ -38,25 +38,103 @@ async fn dropped_direct_creation_remains_uncertain_and_cannot_replay() {
     assert_eq!(server.count(), 1);
 }
 #[test]
-fn future_history_cannot_mark_read_or_clear_notifications() {
-    let p = plan(&Request::Chat {
-        room: room(),
-        command: chat::Command::Poll {
-            after: 7,
-            thread: Some(4),
-        },
-    })
-    .unwrap();
-    assert_eq!(p.0, Method::GET);
-    for pair in [
-        ("lookIntoFuture", "1"),
-        ("timeout", "0"),
-        ("setReadMarker", "0"),
-        ("noStatusUpdate", "1"),
-        ("markNotificationsAsRead", "0"),
-        ("threadId", "4"),
+fn history_and_poll_request_common_read_without_marking_content_read() {
+    for (command, future) in [
+        (
+            chat::Command::History {
+                before: Some(7),
+                thread: Some(4),
+            },
+            "0",
+        ),
+        (
+            chat::Command::Poll {
+                after: 7,
+                thread: Some(4),
+            },
+            "1",
+        ),
     ] {
-        assert!(p.2.iter().any(|(k, v)| *k == pair.0 && v == pair.1));
+        let p = plan(&Request::Chat {
+            room: room(),
+            command,
+        })
+        .unwrap();
+        assert_eq!(p.0, Method::GET);
+        for pair in [
+            ("lookIntoFuture", future),
+            ("lastCommonReadId", "0"),
+            ("timeout", "0"),
+            ("setReadMarker", "0"),
+            ("noStatusUpdate", "1"),
+            ("markNotificationsAsRead", "0"),
+            ("threadId", "4"),
+        ] {
+            assert!(p.2.iter().any(|(k, v)| *k == pair.0 && v == pair.1));
+        }
+        assert!(!p.5, "observing receipts remains a read-only operation");
+    }
+}
+
+#[tokio::test]
+async fn history_and_poll_common_read_query_survives_http_dispatch_without_read_effects() {
+    let server = Server::start(vec![reply(json!([])), reply(json!([]))]).await;
+    let (mut client, runtime) = client(&server);
+    for command in [
+        chat::Command::History {
+            before: None,
+            thread: None,
+        },
+        chat::Command::Poll {
+            after: 7,
+            thread: None,
+        },
+    ] {
+        let result = client
+            .request(
+                &context(&runtime),
+                Request::Chat {
+                    room: room(),
+                    command,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                result,
+                Reply::History {
+                    common_read: None,
+                    ..
+                }
+            ),
+            "an absent receipt header remains unknown"
+        );
+    }
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    for (index, request) in requests.iter().enumerate() {
+        let mut line = request.lines().next().unwrap().split_whitespace();
+        assert_eq!(line.next(), Some("GET"));
+        let url =
+            url::Url::parse(&format!("http://fixture.invalid{}", line.next().unwrap())).unwrap();
+        assert!(url.path().ends_with("/chat/testroom"));
+        let pairs: Vec<_> = url.query_pairs().collect();
+        for (key, value) in [
+            ("lastCommonReadId", "0"),
+            ("setReadMarker", "0"),
+            ("markNotificationsAsRead", "0"),
+            ("noStatusUpdate", "1"),
+            ("timeout", "0"),
+            ("lookIntoFuture", if index == 0 { "0" } else { "1" }),
+        ] {
+            assert_eq!(pairs.iter().filter(|(name, _)| name == key).count(), 1);
+            assert!(
+                pairs
+                    .iter()
+                    .any(|(name, item)| name == key && item == value)
+            );
+        }
     }
 }
 #[test]
@@ -81,6 +159,60 @@ fn message_decode_preserves_rich_reactions_and_canonical_update() {
     assert_eq!(parent.message.as_deref(), Some(""));
     assert!(parent.rich.is_empty());
     assert!(parent.reactions.is_empty());
+}
+
+#[tokio::test]
+async fn reaction_mutations_decode_authoritative_counts_in_the_original_response() {
+    let actors = json!({"👍":[
+        {"actorType":"users","actorId":"synthetic-user","actorDisplayName":"Fixture","timestamp":1},
+        {"actorType":"users","actorId":"another-user","actorDisplayName":"Other","timestamp":2}
+    ]});
+    let server = Server::start(vec![reply(actors), reply(json!({}))]).await;
+    let (mut client, runtime) = client(&server);
+    for (add, expected) in [(true, 2), (false, 0)] {
+        let result = client
+            .request(
+                &context(&runtime),
+                Request::Chat {
+                    room: room(),
+                    command: chat::Command::React {
+                        message: 7,
+                        reaction: "👍".into(),
+                        add,
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let Reply::Chat(chat::Response::ReactionAuthors(authors)) = result else {
+            panic!("reaction mutation must preserve its accepted actor map");
+        };
+        assert_eq!(authors.len(), expected);
+    }
+    assert_eq!(server.count(), 2, "no follow-up history GET is needed");
+}
+
+#[tokio::test]
+async fn malformed_reaction_mutation_response_remains_effect_uncertain() {
+    let server = Server::start(vec![reply(json!({"👍": "malformed"}))]).await;
+    let (mut client, runtime) = client(&server);
+    let error = client
+        .request(
+            &context(&runtime),
+            Request::Chat {
+                room: room(),
+                command: chat::Command::React {
+                    message: 7,
+                    reaction: "👍".into(),
+                    add: true,
+                },
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, ErrorKind::Uncertain);
+    assert_eq!(server.count(), 1);
 }
 #[test]
 fn malformed_or_cross_room_parent_cannot_smuggle_context() {

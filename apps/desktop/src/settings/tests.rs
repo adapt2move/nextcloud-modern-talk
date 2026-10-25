@@ -136,6 +136,10 @@ fn preferences_survive_process_restart() {
         sidebar_density: SidebarDensity::Compact,
         locale: LocalePreference::German,
         notifications: mixed_notifications(),
+        recent_reactions: talk_core::preferences::reactions::RecentReactions::from_ordered(
+            ["🤖", "🫡", "❤️"].map(|emoji| Text::new(emoji).unwrap()),
+        )
+        .unwrap(),
         ..LocalPreferences::default()
     };
     if let Ok(mode) = std::env::var(MODE) {
@@ -255,6 +259,114 @@ fn controlled(
     .unwrap();
     ready(&runtime);
     (runtime, writes, release)
+}
+
+fn remember(runtime: &SettingsRuntime, request: u64, emoji: &str) -> Revision {
+    runtime
+        .submit(PreferenceCommand::RememberReaction {
+            generation: runtime.snapshot().generation,
+            request: RequestId(request),
+            emoji: Text::new(emoji).unwrap(),
+        })
+        .unwrap()
+}
+
+#[test]
+fn recent_reactions_merge_with_coalesced_settings_and_survive_restart() {
+    let dir = Directory::new();
+    let path = dir.0.join("preferences");
+    let (runtime, entered, release) = controlled(path.clone());
+    let values = LocalPreferences {
+        palette: Palette::Sage,
+        locale: LocalePreference::German,
+        ..LocalPreferences::default()
+    };
+    set(&runtime, 1, values.clone());
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    remember(&runtime, 2, "🤖");
+    let revision = remember(&runtime, 3, "👍");
+    let mut expected = values;
+    expected
+        .recent_reactions
+        .remember(Text::new("🤖").unwrap())
+        .unwrap();
+    expected
+        .recent_reactions
+        .remember(Text::new("👍").unwrap())
+        .unwrap();
+    assert_eq!(runtime.snapshot().active, expected);
+    release.send(Ok(())).unwrap();
+    assert_eq!(
+        entered.recv_timeout(Duration::from_secs(5)).unwrap(),
+        expected
+    );
+    release.send(Ok(())).unwrap();
+    wait(&runtime, |s| {
+        s.durable_revision == revision && s.startup.state != EffectState::Pending
+    });
+    stop(&runtime);
+    let restarted = start(path);
+    assert_eq!(ready(&restarted).active, expected);
+    stop(&restarted);
+}
+
+#[test]
+fn recent_reactions_do_not_repeat_native_startup_registration() {
+    struct Counting(Arc<AtomicU64>);
+    impl StartupEffect for Counting {
+        fn apply(&mut self, values: &LocalPreferences) -> StartupSnapshot {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Applied.apply(values)
+        }
+    }
+    let dir = Directory::new();
+    let path = dir.0.join("preferences");
+    let calls = Arc::new(AtomicU64::new(0));
+    let worker_calls = calls.clone();
+    let runtime = SettingsRuntime::spawn(move || {
+        Ok((
+            Box::new(storage::FileStore(path)),
+            Box::new(Counting(worker_calls)),
+        ))
+    })
+    .unwrap();
+    ready(&runtime);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let revision = remember(&runtime, 1, "🎉");
+    let saved = wait(&runtime, |s| s.durable_revision == revision);
+    assert_eq!(saved.startup.state, EffectState::Applied);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    stop(&runtime);
+}
+
+#[test]
+fn schema_six_migrates_with_empty_recents_and_invalid_recent_rows_are_rejected() {
+    let values = LocalPreferences {
+        palette: Palette::Sage,
+        locale: LocalePreference::Spanish,
+        ..LocalPreferences::default()
+    };
+    let old = storage::encode(&values)
+        .replace("preferences 7", "preferences 6")
+        .replace("recent_reactions=none\n", "");
+    assert_eq!(
+        storage::decode(old.as_bytes()).unwrap(),
+        (values.clone(), LoadState::Migrated)
+    );
+    for row in ["", "ff", "f09f918d,f09f918d", "20", "0a", "xyz"] {
+        let bad = storage::encode(&values)
+            .replace("recent_reactions=none", &format!("recent_reactions={row}"));
+        assert!(storage::decode(bad.as_bytes()).is_err(), "accepted {row:?}");
+    }
+    let over_capacity = (0..13)
+        .map(|n| format!("{n:02x}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let bad = storage::encode(&values).replace(
+        "recent_reactions=none",
+        &format!("recent_reactions={over_capacity}"),
+    );
+    assert!(storage::decode(bad.as_bytes()).is_err());
 }
 #[test]
 fn failed_save_restores_confirmed_and_explicit_retry_retains_only_draft() {
@@ -456,7 +568,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
                     (expected.clone(), LoadState::Migrated)
                 );
                 let v3 = storage::encode(&expected);
-                assert!(v3.starts_with("nextcloud-modern-talk-preferences 6\n"));
+                assert!(v3.starts_with("nextcloud-modern-talk-preferences 7\n"));
                 assert_eq!(
                     storage::decode(v3.as_bytes()).unwrap(),
                     (expected, LoadState::Loaded)
@@ -469,7 +581,7 @@ fn codec_bounds_corruption_and_conservative_v1_v2_migration() {
     assert!(storage::decode(v3.replace("calendar_sounds=0\n", "").as_bytes()).is_err());
     assert!(storage::decode(format!("{v3}sounds=0\n").as_bytes()).is_err());
     assert_eq!(
-        storage::decode(v3.replace("preferences 6", "preferences 99").as_bytes()),
+        storage::decode(v3.replace("preferences 7", "preferences 99").as_bytes()),
         Err(PreferenceError::UnsupportedVersion)
     );
     assert_eq!(
@@ -732,7 +844,8 @@ fn schema_three_migrates_without_activating_quick_switch_or_losing_choices() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 6", "preferences 3")
+        .replace("preferences 7", "preferences 3")
+        .replace("recent_reactions=none\n", "")
         .replace("quick_switcher=auto\n", "")
         .replace("update_channel=stable\n", "")
         .replace("onboarding_resume=none\n", "");
@@ -751,7 +864,8 @@ fn update_channel_persists_and_migrates_without_changing_other_preferences() {
         ..LocalPreferences::default()
     };
     let old = storage::encode(&values)
-        .replace("preferences 6", "preferences 4")
+        .replace("preferences 7", "preferences 4")
+        .replace("recent_reactions=none\n", "")
         .replace("update_channel=stable\n", "")
         .replace("onboarding_resume=none\n", "");
     assert_eq!(
@@ -805,7 +919,8 @@ fn restart_handoff_is_durable_bounded_and_old_autostart_false_is_preserved() {
     assert_eq!(store.load().unwrap().0.onboarding_resume, None);
     assert!(!store.load().unwrap().0.launch_at_login);
     let previous = storage::encode(&values)
-        .replace("preferences 6", "preferences 5")
+        .replace("preferences 7", "preferences 5")
+        .replace("recent_reactions=none\n", "")
         .replace("onboarding_resume=none\n", "");
     let (restored, state) = storage::decode(previous.as_bytes()).unwrap();
     assert_eq!(state, LoadState::Migrated);

@@ -94,7 +94,9 @@ fn note_to_self_object_recognition_preserves_every_existing_policy_fence() {
 #[tokio::test]
 async fn authorized_note_to_self_reaches_history_and_send_on_both_families() {
     for major in [34, 35] {
-        let mut sent = Reply::data(message());
+        let mut accepted = message();
+        accepted["message"] = json!("Synthetic note");
+        let mut sent = Reply::data(accepted);
         sent.echo_reference = true;
         let server = Server::start(vec![
             Reply::data(note_capabilities(major)),
@@ -143,12 +145,10 @@ async fn authorized_note_to_self_reaches_history_and_send_on_both_families() {
         assert!(matches!(
             sent,
             ProtocolReply::Messaging {
-                result: MessagingResult::Send(SendReceipt {
-                    state: SendState::ServerAccepted(_),
-                    ..
-                }),
+                result: MessagingResult::Message(ref message),
                 ..
-            }
+            } if message.own && message.message.own_operation.is_some()
+                && message.message.text.as_str() == "Synthetic note"
         ));
         assert_eq!(server.count(), 6);
         let seen = server.seen.lock().unwrap();

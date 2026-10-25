@@ -6,15 +6,23 @@ The GPUI desktop has an ordinary account-connected mode and explicitly labelled 
 
 The composition layer owns window lifetime, embedded assets and the injected application port. Presentation consumes `talk_core::ui` snapshots and typed intents. Views do not import protocol DTOs, adapters, credentials, poll/login URLs, media frames or worker APIs. The application owner projects domain state, maintains policy freshness and clears denied content across every surface.
 
+The private controls module owns buttons, icon actions, switches, selection controls and shared form surfaces/rows/sections. Forms compose retained input entities with those surfaces instead of duplicating border, padding, pointer and focus behavior. Each input owns one cancellable caret task using GPUI’s platform-dispatched timer; paint receipts prevent an unmounted editor from continuing its timer. The settings worker reads macOS Reduce Motion through the pinned safe AppKit binding, including for `cargo run`; no platform call enters a view.
+
+Composite fields own one background and border; transparent editors preserve selection and caret behavior. Focus strengthens the existing border inward without an additional outer outline. Initial collection loads use static bounded skeletons; refresh keeps confirmed content mounted without a routine loading banner.
+
+The conversation header applies a 16-point renderer backdrop blur, with tint opacity from 84% to 80%, before painting its controls. Windows retains its opaque white fallback. Blur does not blur child text, create an idle redraw loop or allow hidden rows to receive input.
+
+The same content-card component frames conversations, Inbox, onboarding and call surfaces. It owns the 12-point radius and subtle outward elevation, with the shadow outside the content's overflow mask. Full-bleed fills and the chat backdrop share that radius at exposed corners because GPUI's overflow mask is rectangular. Modal dialogs retain their separate geometry and elevation.
+
 The [product specifications](../../product/README.md), [flows](../flows.md) and [tokens](../tokens.md) govern intended behavior. Mockups remain illustrative. Use the [development guide](../../development.md#native-ui-entrypoint) for the native entrypoint; launch commands do not imply a current integrated build pass.
 
 ## State and resource boundaries
 
 Snapshots, input strings, drafts, focus identities and completion retention must have finite capacity and explicit account/runtime/host/conversation scope. Removed controls retire their handles; stale completions cannot overwrite a newer state. Busy means no admission. Uncertain sends cannot be replayed as if they failed safely. Keep detailed limits and implementation rationale with the owning code and its API documentation.
 
-A draft clears only after its matching server-accepted result if the user has not edited it since submission. Server acceptance does not mean delivery or read. Unknown, stale or denied policy keeps gated actions unavailable. A preview cannot invent a successful backend operation or grant device capture.
+A draft or edit clears only after its matching queue-staged or server-accepted result, if the user has not edited it since submission. Durable queue staging requires a committed transaction; local acceptance does not mean server acceptance, delivery or read. Supported message actions may stage under unknown cached policy when their scoped queue is available, while known denial and unsupported behavior remain unavailable. The owner validates fresh authority before network dispatch. A preview cannot invent a successful backend operation or grant device capture.
 
-Update activation carries the displayed release generation and is hidden during nonterminal calls. Before restart, every retained draft and unresolved submission, the current editor and any active text composition must be clear. Once the composition owner admits installation, presentation immediately makes editors and ordinary actions inert while leaving native window close available. A later install failure does not reopen drained services; the composition owner provides the native restart/quit outcome.
+Update activation carries the displayed release generation and is hidden during nonterminal calls. Before restart, unsent drafts, unfinished staging, the current editor and any active text composition must be clear. Already committed durable intents may remain in their account queue; drain local storage work and preserve dispatch uncertainty across restart. Once the composition owner admits installation, presentation immediately makes editors and ordinary actions inert while leaving native window close available. A later install failure does not reopen drained services; the composition owner provides the native restart/quit outcome.
 
 ## Settings contract
 

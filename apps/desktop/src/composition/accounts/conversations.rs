@@ -104,10 +104,18 @@ impl Accounts {
         let mut invalidate_history = None;
         let mut reload_messages = false;
         let mut load_members = false;
+        let mut observed_count = None;
+        let mut invalidate_cache = false;
         let completion = match result {
             Ok(result) => {
                 match result {
                     wire::ConversationResult::Details(details) => {
+                        invalidate_cache = details.conversation.actions.read_messages
+                            != Decision::Allowed
+                            || details.conversation.classified
+                            || details.conversation.sensitive
+                            || details.conversation.unknown_restrictions
+                            || details.conversation.organization.classified == Some(true);
                         if details.conversation.actions.read_messages != Decision::Allowed {
                             invalidate_history = Some(
                                 if details.conversation.actions.read_messages == Decision::Denied {
@@ -120,9 +128,18 @@ impl Accounts {
                             reload_messages = true;
                         }
                         let mut row = conversation(&details.conversation, context.account);
+                        if let Some(count) = details
+                            .participant_count
+                            .and_then(|count| u16::try_from(count).ok())
+                        {
+                            self.background
+                                .remember_member_count(context, count, Instant::now());
+                            observed_count = Some(count);
+                        }
                         row.participants = details
                             .participant_count
                             .and_then(|count| u16::try_from(count).ok())
+                            .or_else(|| self.background.member_count(context))
                             .or_else(|| {
                                 self.snapshot
                                     .conversations
@@ -140,6 +157,9 @@ impl Accounts {
                                 }
                             }));
                         load_members = details.participant_count.is_none()
+                            && self
+                                .background
+                                .members_need_refresh(context, Instant::now())
                             && !matches!(
                                 row.kind,
                                 ConversationKind::Direct | ConversationKind::NoteToSelf
@@ -163,6 +183,11 @@ impl Accounts {
                         panel.members_loaded = true;
                         // This endpoint is authoritative and unpaged; the adapter rejects overflow.
                         let count = u16::try_from(panel.members.as_slice().len()).ok();
+                        if let Some(count) = count {
+                            self.background
+                                .remember_member_count(context, count, Instant::now());
+                            observed_count = Some(count);
+                        }
                         self.snapshot.conversations =
                             page(self.snapshot.conversations.as_slice().iter().map(|row| {
                                 let mut row = row.clone();
@@ -234,7 +259,7 @@ impl Accounts {
             Err(error) => error,
         };
         panel.state = match completion {
-            Completion::ServerAccepted => view::RemoteState::Idle,
+            Completion::ServerAccepted | Completion::Queued => view::RemoteState::Idle,
             Completion::Failed(reason) => view::RemoteState::Failed(request, reason),
             Completion::Uncertain => view::RemoteState::Uncertain(request),
         };
@@ -254,6 +279,7 @@ impl Accounts {
             }
             panel.members = Page::empty();
             panel.members_loaded = false;
+            self.background.forget_member_count(context);
             self.snapshot.conversations =
                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
                     let mut row = row.clone();
@@ -289,6 +315,15 @@ impl Accounts {
                 completion,
             });
         }
+        if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
+            self.forget_cached_member_count(context);
+        }
+        if invalidate_cache {
+            self.invalidate_cached_room(context);
+        }
+        if let Some(count) = observed_count {
+            self.remember_cached_member_count(context, count);
+        }
         if let Some(state) = invalidate_history {
             self.invalidate_history(context, state);
         }
@@ -299,6 +334,8 @@ impl Accounts {
             let _ = self.room_action(request, context, view::ConversationAction::Read);
         }
         if load_members {
+            self.background
+                .member_count_requested(context, Instant::now());
             let _ = self.room_action(request, context, view::ConversationAction::Members);
         }
         self.touch();

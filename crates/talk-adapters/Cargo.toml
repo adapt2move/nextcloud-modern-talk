@@ -34,6 +34,7 @@ getrandom.workspace = true
 keyring-core.workspace = true
 rusqlite.workspace = true
 dirs.workspace = true
+jiff.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

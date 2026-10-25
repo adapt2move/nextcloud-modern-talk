@@ -89,7 +89,10 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     case('positive-consumer', lambda root: (root / 'apps/bootstrap/src/presentation.rs').write_text(positive), compile_positive=True)
     grouped = positive.replace('use talk_core::ui::{', 'use talk_core::{ui::{').replace('    MediaIntent, Page, PersistenceState, Text, UserIntent,\n};', '    MediaIntent, Page, PersistenceState, Text, UserIntent,\n}};')
     case('positive-grouped-consumer', lambda root: (root / 'apps/bootstrap/src/presentation.rs').write_text(grouped), compile_positive=True)
-    case('core-adapter-edge', lambda root: append(root, 'crates/talk-core/Cargo.toml', '[dependencies]\ntalk-adapters = { workspace = true }'), 1, 'forbidden/missing dependency edge')
+    case('core-adapter-edge', lambda root: (root / 'crates/talk-core/Cargo.toml').write_text(
+        (root / 'crates/talk-core/Cargo.toml').read_text().replace(
+            '[dependencies]', '[dependencies]\ntalk-adapters = { workspace = true }', 1)),
+        1, 'forbidden/missing dependency edge')
     case('target-specific-edge', lambda root: append(root, 'crates/talk-core/Cargo.toml', "[target.'cfg(unix)'.dependencies]\ntalk-adapters = { workspace = true }"), 1, 'unreviewed manifest section')
     case('presentation-adapter', lambda root: append(root, 'apps/bootstrap/src/presentation.rs', 'use talk_adapters::identity::UnconfiguredIdentity;'), 1, 'presentation import')
     case('unbounded-vec', lambda root: append(root, 'crates/talk-core/src/ui.rs', 'pub struct FixtureUnbounded { pub rows: Vec<u64> }'), 1, 'unbounded container')

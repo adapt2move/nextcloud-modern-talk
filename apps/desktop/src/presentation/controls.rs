@@ -1,5 +1,10 @@
 //! Private native control vocabulary; all icons are fixed embedded SVG assets.
+mod forms;
+mod skeletons;
+mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
+pub(super) use crate::presentation::controls::skeletons::Skeleton;
+pub(super) use crate::presentation::controls::surfaces::CONTENT_RADIUS;
 use gpui::{
     Context, Div, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, SharedString, Stateful,
     div, prelude::*, px, svg,
@@ -187,32 +192,22 @@ impl From<bool> for Availability {
 
 // Availability-aware kit surfaces and text resolve here. Always-active custom
 // navigation/thread links own explicit roles; conditional composites use the kit.
-fn control_colors(t: super::Theme, style: ButtonStyle, enabled: bool) -> (Hsla, Hsla, Hsla) {
+fn control_colors(t: super::Theme, style: ButtonStyle, enabled: bool) -> (Hsla, Hsla) {
     if !enabled {
         return match style {
-            ButtonStyle::Quiet => (
-                gpui::transparent_black(),
-                t.disabled_fg,
-                gpui::transparent_black(),
-            ),
-            ButtonStyle::Primary | ButtonStyle::Danger => (t.subtle, t.disabled_fg, t.border),
-            ButtonStyle::Secondary => (t.surface, t.disabled_fg, t.border),
-            ButtonStyle::Stage | ButtonStyle::StageDanger => {
-                (t.stage_panel, t.stage_disabled, t.stage_panel)
-            }
+            ButtonStyle::Quiet => (gpui::transparent_black(), t.disabled_fg),
+            ButtonStyle::Primary | ButtonStyle::Danger => (t.subtle, t.disabled_fg),
+            ButtonStyle::Secondary => (t.surface, t.disabled_fg),
+            ButtonStyle::Stage | ButtonStyle::StageDanger => (t.stage_panel, t.stage_disabled),
         };
     }
     match style {
-        ButtonStyle::Primary => (t.accent, t.on_accent, t.accent),
-        ButtonStyle::Danger => (t.danger_bg, t.danger, t.danger),
-        ButtonStyle::Stage => (t.stage_panel, t.stage_text, t.stage_panel),
-        ButtonStyle::StageDanger => (t.danger, t.danger_bg, t.danger),
-        ButtonStyle::Quiet => (
-            gpui::transparent_black(),
-            t.sidebar_secondary,
-            gpui::transparent_black(),
-        ),
-        ButtonStyle::Secondary => (t.surface, t.text, t.border),
+        ButtonStyle::Primary => (t.accent, t.on_accent),
+        ButtonStyle::Danger => (t.danger_bg, t.danger),
+        ButtonStyle::Stage => (t.stage_panel, t.stage_text),
+        ButtonStyle::StageDanger => (t.danger, t.danger_bg),
+        ButtonStyle::Quiet => (gpui::transparent_black(), t.sidebar_secondary),
+        ButtonStyle::Secondary => (t.surface, t.text),
     }
 }
 
@@ -222,6 +217,16 @@ fn icon_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hsla {
         t.muted
     } else {
         control_colors(t, style, enabled).1
+    }
+}
+
+fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hsla {
+    match (style, enabled) {
+        (ButtonStyle::Primary, true) => t.on_accent,
+        (ButtonStyle::Danger, true) => t.danger,
+        (ButtonStyle::StageDanger, true) => t.danger_bg,
+        (ButtonStyle::Stage | ButtonStyle::StageDanger, _) => t.stage_text,
+        _ => t.focus,
     }
 }
 
@@ -247,30 +252,55 @@ fn switch_hover(t: super::Theme, value: bool) -> Hsla {
     }
 }
 
-// Standalone input fallback. Composite fields use Desktop::field_ring so their
-// whole container owns focus and scroll revelation.
+// Standalone input fallback. Composite fields highlight their containing border
+// with Desktop::field_ring; the editor itself stays transparent and borderless.
 pub(super) fn focus_ring(
     handle: FocusHandle,
     theme: super::Theme,
     radius: f32,
 ) -> impl IntoElement {
-    native_focus_ring(
-        Some(handle),
-        theme,
-        radius - 1.,
-        5.,
-        true,
-        super::navigation::Reveal::default(),
-    )
+    native_field_border(handle, theme, radius, super::navigation::Reveal::default())
 }
 
-/// Border-only native ring. Its prepaint bounds also feed the single focused
-/// control into its owning scroll viewport; no item-index geometry is cached.
+fn native_field_border(
+    handle: FocusHandle,
+    theme: super::Theme,
+    radius: f32,
+    reveal: super::navigation::Reveal,
+) -> impl IntoElement {
+    let prepaint_handle = handle.clone();
+    gpui::canvas(
+        move |bounds, window, _| {
+            if prepaint_handle.is_focused(window) {
+                reveal.record(bounds);
+            }
+        },
+        move |bounds, _, window, _| {
+            if handle.is_focused(window) {
+                window.paint_quad(gpui::quad(
+                    bounds,
+                    px(radius),
+                    gpui::transparent_black(),
+                    px(2.),
+                    theme.focus,
+                    gpui::BorderStyle::default(),
+                ));
+            }
+        },
+    )
+    .absolute()
+    // Absolute layout begins inside the field's one-point border. Include that
+    // border in this element's bounds, then paint entirely inside those bounds.
+    .inset(px(-1.))
+}
+
+/// Keyboard focus stays inside the control, including at clipped list edges.
+/// Its bounds also reveal the focused control in its owning scroll viewport.
 fn native_focus_ring(
     handle: Option<FocusHandle>,
     theme: super::Theme,
     radius: f32,
-    dilation: f32,
+    inset_y: f32,
     visible: bool,
     reveal: super::navigation::Reveal,
 ) -> impl IntoElement {
@@ -281,14 +311,14 @@ fn native_focus_ring(
                 .as_ref()
                 .is_some_and(|h| h.is_focused(window))
             {
-                reveal.record(bounds.dilate(px(dilation.max(0.))));
+                reveal.record(bounds);
             }
         },
         move |bounds, _, window, _| {
             if visible && handle.as_ref().is_some_and(|h| h.is_focused(window)) {
                 window.paint_quad(gpui::quad(
-                    bounds.dilate(px(dilation)),
-                    px(radius + dilation),
+                    bounds,
+                    px(radius.max(0.)),
                     gpui::transparent_black(),
                     px(2.),
                     theme.focus,
@@ -298,7 +328,57 @@ fn native_focus_ring(
         },
     )
     .absolute()
-    .inset_0()
+    .left_0()
+    .right_0()
+    .top(px(inset_y))
+    .bottom(px(inset_y))
+}
+
+/// A compact visual surface may keep a larger pointer target. Background,
+/// hover and keyboard focus share these bounds instead of painting a halo in
+/// the otherwise empty hit padding.
+pub(super) struct ControlGeometry {
+    border: f32,
+    radius: f32,
+    inset_y: f32,
+    background: Option<Hsla>,
+    hover_background: bool,
+}
+impl ControlGeometry {
+    pub(super) fn bare() -> Self {
+        Self {
+            border: 0.,
+            radius: 8.,
+            inset_y: 0.,
+            background: Some(gpui::transparent_black()),
+            hover_background: false,
+        }
+    }
+    pub(super) fn inset_background(
+        border: f32,
+        radius: f32,
+        inset_y: f32,
+        background: Hsla,
+    ) -> Self {
+        Self {
+            border,
+            radius,
+            inset_y,
+            background: Some(background),
+            hover_background: true,
+        }
+    }
+}
+impl From<(f32, f32)> for ControlGeometry {
+    fn from((border, radius): (f32, f32)) -> Self {
+        Self {
+            border,
+            radius,
+            inset_y: 0.,
+            background: None,
+            hover_background: true,
+        }
+    }
 }
 
 #[derive(IntoElement)]
@@ -514,11 +594,11 @@ impl Desktop {
         // Header controls use the same opaque Windows fallback as their host.
         // Keep this on the shared control path so icon, disabled and focus
         // colors resolve together instead of inheriting dark-theme foregrounds.
-        if matches!(id, ElementId::Name(name) if matches!(name.as_ref(),
+        if matches!(id, ElementId::Name(name) if name.starts_with("pin-banner-") || matches!(name.as_ref(),
             "conversation-title" | "favorite-conversation" | "history-search"
             | "call" | "room-info" | "room-members"))
         {
-            self.theme.chat_header_theme(self.palette)
+            super::shell::chat_header::theme(self.theme, self.palette)
         } else {
             self.theme
         }
@@ -602,15 +682,7 @@ impl Desktop {
         self.control_focus.get(id.into(), cx)
     }
     pub(super) fn field_ring(&self, handle: FocusHandle, radius: f32) -> impl IntoElement {
-        // Editable fields retain their caret/focus feedback for both modalities.
-        native_focus_ring(
-            Some(handle),
-            self.theme,
-            radius - 1.,
-            5.,
-            true,
-            self.navigation.reveal.clone(),
-        )
+        native_field_border(handle, self.theme, radius, self.navigation.reveal.clone())
     }
     /// Reveal the complete explanatory region when its child action is focused.
     /// Place last in a relative container so its bounds replace the child's ring
@@ -649,10 +721,12 @@ impl Desktop {
         style: ButtonStyle,
         availability: impl Into<Availability>,
         action: LocalAction,
-        geometry: (f32, f32),
+        geometry: impl Into<ControlGeometry>,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let (border_width, corner_radius) = geometry;
+        let geometry = geometry.into();
+        let border_width = geometry.border;
+        let corner_radius = geometry.radius;
         let availability = availability.into();
         let id = id.into();
         let t = self.control_theme(&id);
@@ -665,7 +739,7 @@ impl Desktop {
         let focus = self.control_focus(id.clone(), cx);
         let anchor_focus = focus.clone();
         let enabled = availability.enabled && focus.is_some();
-        let (bg, fg, border) = control_colors(t, style, enabled);
+        let (bg, fg) = control_colors(t, style, enabled);
         let room_row = matches!(&action, LocalAction::Navigate(_));
         let navigation_row = matches!(style, ButtonStyle::Quiet)
             && (room_row || matches!(&action, LocalAction::Destination(_)));
@@ -733,15 +807,44 @@ impl Desktop {
                     FontWeight::NORMAL
                 },
             )
-            .bg(bg)
-            .text_color(fg)
-            .border_1()
-            .border_color(border)
-            .when(pointer_hovered && enabled && !self.background_inert, |d| {
-                d.child(self.control_wash(hover_bg, corner_radius - border_width))
+            .bg(if geometry.background.is_some() {
+                gpui::transparent_black()
+            } else {
+                bg
             })
-            // Absolute bounds begin inside the host border: external gap 2 +
-            // stroke 2, radius concentric with the actual host, for every width.
+            .text_color(fg)
+            .border(px(border_width))
+            .border_color(gpui::transparent_black())
+            .when_some(geometry.background, |d, background| {
+                d.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(px(geometry.inset_y))
+                        .bottom(px(geometry.inset_y))
+                        .rounded(px(corner_radius))
+                        .bg(background),
+                )
+            })
+            .when(
+                pointer_hovered && enabled && !self.background_inert && geometry.hover_background,
+                |d| {
+                    // Cover the transparent layout border too; leaving the old
+                    // background at the edge would resemble a pointer outline.
+                    d.child(
+                        div()
+                            .absolute()
+                            .left(px(-border_width))
+                            .right(px(-border_width))
+                            .top(px(geometry.inset_y - border_width))
+                            .bottom(px(geometry.inset_y - border_width))
+                            .child(self.control_wash(hover_bg, corner_radius, 0.)),
+                    )
+                },
+            )
+            // Retain the layout border without a pointer outline. The focus
+            // stroke is painted inside this border, so overflow cannot cut it.
             .child(
                 gpui::canvas(
                     move |bounds, window, _| {
@@ -759,16 +862,12 @@ impl Desktop {
             )
             .child(native_focus_ring(
                 focus,
-                if matches!(style, ButtonStyle::Stage | ButtonStyle::StageDanger) {
-                    super::Theme {
-                        focus: t.stage_text,
-                        ..t
-                    }
-                } else {
-                    t
+                super::Theme {
+                    focus: control_focus_color(t, style, enabled),
+                    ..t
                 },
                 corner_radius - border_width,
-                border_width + 4.,
+                geometry.inset_y,
                 self.keyboard_navigation,
                 self.navigation.reveal.clone(),
             ))
@@ -875,7 +974,9 @@ impl Desktop {
         let label: SharedString = label.into();
         let label: SharedString = self.l(label.as_ref()).to_owned().into();
         self.control(id.clone(), style, availability, action, cx)
-            .child(label)
+            // An empty label is not a flex item. Custom icon/row contents
+            // otherwise gain a phantom gap and lose their shared alignment.
+            .when(!label.is_empty(), |d| d.child(label))
             .when(
                 !availability.enabled
                     && !availability.explained_elsewhere
@@ -932,7 +1033,7 @@ impl Desktop {
         .min_h(height)
         .p_0()
         .bg(track)
-        .border_color(if enabled { track } else { t.border })
+        .border_color(gpui::transparent_black())
         .child(
             self.switch_thumb(
                 &id,
@@ -975,10 +1076,10 @@ impl Desktop {
         self.control(id, ButtonStyle::Secondary, availability, action, cx)
             .min_w_0()
             .justify_between()
-            .border_color(if expanded {
-                self.theme.focus
+            .bg(if expanded {
+                self.theme.selected
             } else {
-                self.theme.input_border
+                self.theme.subtle
             })
             .child(div().flex_1().min_w_0().text_ellipsis().child(label))
             .child(self.scaled_icon(
@@ -1000,7 +1101,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let availability = availability.into();
-        let (_, foreground, _) =
+        let (_, foreground) =
             control_colors(self.theme, ButtonStyle::Secondary, availability.enabled);
         self.button(
             id,
@@ -1060,7 +1161,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let availability = availability.into();
-        let (_, foreground, _) = control_colors(self.theme, style, availability.enabled);
+        let (_, foreground) = control_colors(self.theme, style, availability.enabled);
         self.button(id, content.0, style, availability, action, cx)
             .justify_between()
             .child(self.scaled_icon(content.1, 18., foreground))
@@ -1075,7 +1176,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let availability = availability.into();
-        let (_, foreground, _) = control_colors(self.theme, style, availability.enabled);
+        let (_, foreground) = control_colors(self.theme, style, availability.enabled);
         self.button(id, "", style, availability, action, cx)
             .justify_start()
             .child(self.scaled_icon(content.1, 18., foreground))
@@ -1158,11 +1259,6 @@ impl Desktop {
             } else {
                 gpui::transparent_black()
             })
-            .border_color(if selected {
-                t.input_border
-            } else {
-                gpui::transparent_black()
-            })
             .text_color(if selected {
                 t.text
             } else {
@@ -1222,6 +1318,33 @@ mod tests {
         };
         let (a, b) = (luminance(a), luminance(b));
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+    #[test]
+    fn inset_keyboard_focus_contrasts_with_each_control_surface() {
+        for palette in [Palette::Blue, Palette::Sage] {
+            for appearance in [Appearance::Light, Appearance::Dark] {
+                let theme = Theme::resolve(palette, appearance, gpui::WindowAppearance::Light);
+                for style in [
+                    ButtonStyle::Primary,
+                    ButtonStyle::Secondary,
+                    ButtonStyle::Quiet,
+                    ButtonStyle::Danger,
+                    ButtonStyle::Stage,
+                    ButtonStyle::StageDanger,
+                ] {
+                    for enabled in [false, true] {
+                        let (bg, _) = control_colors(theme, style, enabled);
+                        let surface = if bg.a == 0. { theme.surface } else { bg };
+                        let ratio = contrast(control_focus_color(theme, style, enabled), surface);
+                        assert!(
+                            ratio >= 3.,
+                            "palette={palette:?} appearance={appearance:?} style={} enabled={enabled} ratio={ratio}",
+                            style as u8
+                        );
+                    }
+                }
+            }
+        }
     }
     #[test]
     fn switch_hover_keeps_both_tracks_distinct_from_the_thumb() {
@@ -1407,7 +1530,7 @@ mod tests {
                     ButtonStyle::Secondary,
                     ButtonStyle::Quiet,
                 ] {
-                    let (bg, _, _) = control_colors(t, style, true);
+                    let (bg, _) = control_colors(t, style, true);
                     for parent in [t.surface, t.subtle, t.canvas, t.chrome_end] {
                         assert!(
                             contrast(
@@ -1426,13 +1549,13 @@ mod tests {
             for a in [Appearance::Light, Appearance::Dark] {
                 let t = Theme::resolve(p, a, gpui::WindowAppearance::Light);
                 for style in [ButtonStyle::Stage, ButtonStyle::StageDanger] {
-                    let (bg, fg, _) = control_colors(t, style, false);
+                    let (bg, fg) = control_colors(t, style, false);
                     let ratio = contrast(bg, fg);
                     assert!(
                         (2.0..=3.6).contains(&ratio),
                         "{p:?}/{a:?}: unavailable stage {ratio}"
                     );
-                    let (active_bg, active_fg, _) = control_colors(t, style, true);
+                    let (active_bg, active_fg) = control_colors(t, style, true);
                     assert!(contrast(active_bg, active_fg) >= 4.5);
                 }
                 assert!(
@@ -1453,7 +1576,7 @@ mod tests {
                     ButtonStyle::Secondary,
                     ButtonStyle::Quiet,
                 ] {
-                    let (bg, fg, _) = control_colors(t, style, false);
+                    let (bg, fg) = control_colors(t, style, false);
                     for parent in [t.surface, t.subtle, t.canvas, t.chrome_end] {
                         let drawn = if bg.a == 0. { parent } else { bg };
                         let ratio = contrast(fg, drawn);
@@ -1465,7 +1588,7 @@ mod tests {
                             ratio < contrast(t.muted, drawn) * 0.7,
                             "unavailable must remain weaker than active"
                         );
-                        let (active_bg, active_fg, _) = control_colors(t, style, true);
+                        let (active_bg, active_fg) = control_colors(t, style, true);
                         let active_drawn = if active_bg.a == 0. { parent } else { active_bg };
                         let active_ratio = contrast(active_fg, active_drawn);
                         assert!(

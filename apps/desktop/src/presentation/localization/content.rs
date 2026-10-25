@@ -1,5 +1,6 @@
 //! Native content and account-directory interface copy.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
+    ("Abspielen", "Play", "Reproducir"),
     ("Antwortoption", "Answer option", "Opción de respuesta"),
     (
         "Datei wird gespeichert …",
@@ -119,12 +120,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Search messages, conversations and people…",
         "Buscar mensajes, conversaciones y personas…",
     ),
+    ("Nächste Datei", "Next file", "Archivo siguiente"),
     ("Option hinzufügen", "Add option", "Añadir opción"),
     (
         "PDF-Vorschau · erste Seite",
         "PDF preview · first page",
         "Vista previa del PDF · primera página",
     ),
+    ("Pause", "Pause", "Pausa"),
     ("Personen", "People", "Personas"),
     ("Personen suchen", "Search people", "Buscar personas"),
     (
@@ -151,6 +154,17 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Guardando encuesta…",
     ),
     ("Umfrage öffnen", "Open poll", "Abrir encuesta"),
+    (
+        "Videowiedergabe fehlgeschlagen.",
+        "Video playback failed.",
+        "La reproducción de vídeo ha fallado.",
+    ),
+    (
+        "Videowiedergabe konnte noch nicht beendet werden.",
+        "Video playback has not stopped yet.",
+        "La reproducción de vídeo aún no se ha detenido.",
+    ),
+    ("Vorherige Datei", "Previous file", "Archivo anterior"),
     (
         "Vorschau erneut laden",
         "Reload preview",

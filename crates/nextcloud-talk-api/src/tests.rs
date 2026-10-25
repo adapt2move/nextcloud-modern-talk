@@ -124,6 +124,9 @@ impl Server {
     pub(super) fn count(&self) -> usize {
         self.seen.lock().unwrap().len()
     }
+    pub(super) fn requests(&self) -> Vec<String> {
+        self.seen.lock().unwrap().clone()
+    }
 }
 pub(super) fn reply(data: Value) -> (u16, String, Duration) {
     (

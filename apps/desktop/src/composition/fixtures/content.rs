@@ -246,6 +246,9 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
     ]
     .into_iter()
     .map(|(key, bytes)| super::super::accounts::content::ImageJob {
+        cached: false,
+        attachment: None,
+        preview_generation: None,
         account: scope(),
         target: if key == 1 {
             AssetTarget::SelfAvatar

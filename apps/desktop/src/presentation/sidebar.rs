@@ -320,7 +320,7 @@ impl Desktop {
         } else {
             &[]
         };
-        let mut list = div().flex_none().flex().flex_col().pt_2().pl_3();
+        let mut list = div().flex_none().flex().flex_col().pt_1();
         if let Some(scope) = self.snapshot.active_account {
             list = list.child(self.collection_feedback(
                 state,
@@ -350,10 +350,12 @@ impl Desktop {
                     .items_center()
                     .gap_2()
                     .px_2()
-                    .py_2()
+                    .min_h(px(32.))
+                    .mt_2()
+                    .font_weight(FontWeight::MEDIUM)
                     .text_size(self.sp(12.))
                     .text_color(t.sidebar_secondary)
-                    .child(self.scaled_icon("star-filled", 13., t.accent))
+                    .child(self.scaled_icon("star-filled", 12., t.accent))
                     .child(self.l("Favoriten")),
             );
             visible += favorites.len();
@@ -403,9 +405,11 @@ impl Desktop {
                     .justify_start()
                     .gap_2()
                     .mt_2()
-                    .min_h(px(28.))
+                    .min_h(px(32.))
                     .py_1()
                     .px_2()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.sidebar_secondary)
                     .text_size(self.sp(12.))
                     .child(self.scaled_icon(
                         if tag.collapsed && query.is_empty() {
@@ -463,9 +467,11 @@ impl Desktop {
                     .justify_start()
                     .gap_2()
                     .mt_2()
-                    .min_h(px(28.))
+                    .min_h(px(32.))
                     .py_1()
                     .px_2()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.sidebar_secondary)
                     .text_size(self.sp(12.))
                     .child(self.scaled_icon(
                         if group.collapsed && query.is_empty() {
@@ -519,9 +525,10 @@ impl Desktop {
                 .justify_start()
                 .gap_2()
                 .mt_2()
-                .min_h(px(28.))
+                .min_h(px(32.))
                 .py_1()
                 .px_2()
+                .font_weight(FontWeight::MEDIUM)
                 .text_size(self.sp(12.))
                 .text_color(t.sidebar_secondary)
                 .child(self.scaled_icon(
@@ -660,6 +667,8 @@ impl Desktop {
             LocalAction::Destination(destination),
             cx,
         )
+        .flex_none()
+        .w_full()
         .justify_start()
         .min_h(px(32.))
         .py_1()
@@ -698,7 +707,7 @@ impl Desktop {
             .gap_2()
             .px_2()
             .py_1()
-            .min_h(self.sp(24.).max(px(if self.compact { 32. } else { 38. })))
+            .min_h(self.sp(20.) + px(12.))
             .when(selected, |d| d.bg(t.selected).text_color(t.selected_text))
             .child(
                 if let Some(avatar) = self.projected_avatar(
@@ -772,7 +781,13 @@ impl Desktop {
                             .rounded_full()
                             .bg(t.accent)
                             .text_color(t.on_accent)
+                            .font_family("Google Sans Code")
+                            .font_weight(FontWeight::MEDIUM)
                             .text_size(px(11.))
+                            .line_height(px(14.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .text_center()
                             .child(if row.unread > 99 {
                                 "99+".to_owned()
@@ -784,14 +799,16 @@ impl Desktop {
                     },
                 )
             });
-        div().flex_none().child(control)
+        // One small indent is enough to show group membership. The list shares
+        // the top-level gutter; stacked container/row insets waste that space.
+        div()
+            .flex_none()
+            .when(namespace == "room", |d| d.pl(px(4.)))
+            .child(control)
     }
 
     pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {
         let mut page = div()
-            .size_full()
-            .rounded(px(12.))
-            .bg(self.theme.surface)
             .flex()
             .flex_col()
             .p_5()
@@ -839,7 +856,7 @@ impl Desktop {
                 .min_h_0()
                 .child(rows),
         );
-        page
+        self.content_card(page)
     }
 }
 

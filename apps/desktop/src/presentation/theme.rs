@@ -1,4 +1,4 @@
-use gpui::{Hsla, WindowAppearance, prelude::*, rgb};
+use gpui::{Hsla, WindowAppearance, rgb};
 
 pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
@@ -77,52 +77,6 @@ impl Theme {
         )
     }
 
-    /// A shallow inset edge, painted inside the card after its contents. Three
-    /// one-pixel strokes replace a blurred offscreen shadow. GPUI's style painter
-    /// clips borders to edge strips, avoiding full-card transparent overdraw.
-    pub fn inset_card_edge(self, radius: f32) -> impl gpui::IntoElement {
-        gpui::canvas(
-            |_, _, _| {},
-            move |bounds, _, window, cx| {
-                let shadow: Hsla = if self.dark {
-                    gpui::black()
-                } else {
-                    color(0x31465f)
-                };
-                for (inset, opacity) in [0.14, 0.07, 0.025].into_iter().enumerate() {
-                    let inset = gpui::px(inset as f32);
-                    gpui::Style {
-                        corner_radii: gpui::Corners::all((gpui::px(radius) - inset).into()),
-                        border_widths: gpui::Edges {
-                            top: gpui::px(1.).into(),
-                            left: gpui::px(1.).into(),
-                            right: gpui::px(0.).into(),
-                            bottom: gpui::px(0.).into(),
-                        },
-                        border_color: Some(
-                            shadow.opacity(opacity * if self.dark { 2. } else { 1. }),
-                        ),
-                        ..Default::default()
-                    }
-                    .paint(bounds.dilate(-inset), window, cx, |_, _| {});
-                }
-                gpui::Style {
-                    corner_radii: gpui::Corners::all(gpui::px(radius).into()),
-                    border_widths: gpui::Edges {
-                        top: gpui::px(0.).into(),
-                        left: gpui::px(0.).into(),
-                        right: gpui::px(1.).into(),
-                        bottom: gpui::px(1.).into(),
-                    },
-                    border_color: Some(gpui::white().opacity(if self.dark { 0.045 } else { 0.55 })),
-                    ..Default::default()
-                }
-                .paint(bounds, window, cx, |_, _| {});
-            },
-        )
-        .absolute()
-        .inset_0()
-    }
     pub fn avatar(self, seed: usize) -> (Hsla, Hsla) {
         let (bg, fg) = if self.dark {
             [

@@ -10,12 +10,13 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
     KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, SharedString, Style, Subscription, Task, TextRun, Timer, UTF16Selection,
-    UnderlineStyle, Window, WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
+    Pixels, Point, SharedString, Style, Subscription, Task, TextRun, UTF16Selection, Window,
+    WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
 mod edit;
+mod markdown;
 #[cfg(test)]
 use super::input::edit::from_utf16;
 use super::input::edit::{
@@ -64,7 +65,6 @@ actions!(
 );
 
 const CARET_INTERVAL: Duration = Duration::from_millis(500);
-const CARET_TICKS: u8 = 20;
 
 /// Native clipboard writes belong to the text interaction owner. Both editable
 /// fields and read-only selections require an explicit user Copy action and a
@@ -118,20 +118,23 @@ fn horizontal_scroll(
         .clamp(px(0.), (text_width - visible).max(px(0.)))
 }
 
-/// One finite blink sequence per focused input. A new edit invalidates the old
-/// generation; a hidden view cannot keep blinking without presenting each tick.
+/// One blink task per focused input. After the first tick, each tick requires a
+/// paint receipt; unmount stops it within two intervals. Blur, inactivity and
+/// edits retire the generation without retaining a view.
 struct CaretBlink {
     generation: u64,
-    remaining: u8,
+    tick: u64,
+    running: bool,
     visible: bool,
     restart: bool,
-    painted: Option<(u64, u8)>,
+    painted: Option<(u64, u64)>,
 }
 impl Default for CaretBlink {
     fn default() -> Self {
         Self {
             generation: 0,
-            remaining: 0,
+            tick: 0,
+            running: false,
             visible: true,
             restart: true,
             painted: None,
@@ -141,30 +144,35 @@ impl Default for CaretBlink {
 impl CaretBlink {
     fn reset(&mut self, restart: bool) {
         self.generation = self.generation.wrapping_add(1);
-        self.remaining = 0;
+        self.running = false;
+        self.tick = 0;
         self.visible = true;
         self.restart = restart;
         self.painted = None;
     }
     fn begin(&mut self) -> u64 {
-        self.remaining = CARET_TICKS;
+        self.running = true;
+        self.tick = 0;
         self.restart = false;
         self.generation
     }
     fn presented(&mut self) {
-        self.painted = Some((self.generation, self.remaining));
+        self.painted = Some((self.generation, self.tick));
     }
     fn tick(&mut self, generation: u64) -> bool {
         if generation != self.generation {
             return false;
         }
-        if self.remaining == 0 || self.painted != Some((generation, self.remaining)) {
+        // GPUI focus callbacks may run after paint. The first tick must be
+        // able to request that generation's first redraw; requiring its receipt
+        // here would leave the newly focused caret permanently steady.
+        if !self.running || self.tick > 0 && self.painted != Some((generation, self.tick)) {
             self.reset(false);
             return false;
         }
-        self.remaining -= 1;
-        self.visible = self.remaining == 0 || !self.visible;
-        self.remaining > 0
+        self.tick = self.tick.wrapping_add(1);
+        self.visible = !self.visible;
+        true
     }
 }
 
@@ -175,6 +183,10 @@ pub struct TextInput {
     history: EditHistory,
     pub borderless: bool,
     pub multiline: bool,
+    /// Composer-only styling of the original source. Editing/IME offsets never
+    /// address reconstructed Markdown display text.
+    pub markdown: bool,
+    markdown_cache: Option<(SharedString, talk_core::ui::markup::Document)>,
     focus_handle: FocusHandle,
     pub content: SharedString,
     pub limit: usize,
@@ -364,18 +376,19 @@ impl TextInput {
     }
 
     /// Sole foreground timer seam for this view: one retained weak task, at
-    /// most 20 half-second ticks. No I/O, detached task or animation-frame loop.
-    fn schedule_caret_blink(&mut self, window: &Window, cx: &mut Context<Self>) {
+    /// most one half-second timer while focused, active and painted. Focus and
+    /// activation subscriptions cancel it. Ticks only change this entity's
+    /// visual state and need no separate window transaction.
+    fn schedule_caret_blink(&mut self, cx: &mut Context<Self>) {
         let generation = self.caret.begin();
-        self.caret_task = Some(cx.spawn_in(window, async move |input, cx| {
-            for _ in 0..CARET_TICKS {
-                Timer::after(CARET_INTERVAL).await;
-                let keep_blinking = input.update_in(cx, |input, window, cx| {
+        self.caret_task = Some(cx.spawn(async move |input, cx| {
+            loop {
+                // Use GPUI's platform dispatcher, as Zed's blink manager does.
+                // A foreign reactor timer can be throttled independently of this
+                // foreground editor and cannot participate in GPUI's test clock.
+                cx.background_executor().timer(CARET_INTERVAL).await;
+                let keep_blinking = input.update(cx, |input, cx| {
                     if input.caret.generation != generation {
-                        return false;
-                    }
-                    if !input.caret_can_blink(window) {
-                        input.caret.reset(false);
                         return false;
                     }
                     let keep_blinking = input.caret.tick(generation);
@@ -392,8 +405,14 @@ impl TextInput {
     fn sync_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.caret_subscriptions.is_empty() {
             self.caret_subscriptions = vec![
-                cx.on_focus(&self.focus_handle, window, |input, _, cx| {
+                cx.on_focus(&self.focus_handle, window, |input, window, cx| {
                     input.restart_caret();
+                    // Focus can arrive after this frame's render. Start here,
+                    // rather than waiting for another render after cancelling
+                    // the task that the mouse-down frame already admitted.
+                    if input.caret_can_blink(window) {
+                        input.schedule_caret_blink(cx);
+                    }
                     cx.notify();
                 }),
                 cx.on_blur(&self.focus_handle, window, |input, _, cx| {
@@ -404,6 +423,9 @@ impl TextInput {
                 cx.observe_window_activation(window, |input, window, cx| {
                     if window.is_window_active() && input.focus_handle.is_focused(window) {
                         input.restart_caret();
+                        if input.caret_can_blink(window) {
+                            input.schedule_caret_blink(cx);
+                        }
                     } else {
                         input.stop_caret();
                     }
@@ -414,7 +436,7 @@ impl TextInput {
         if !self.caret_can_blink(window) {
             self.stop_caret();
         } else if self.caret.restart {
-            self.schedule_caret_blink(window, cx);
+            self.schedule_caret_blink(cx);
         }
     }
 
@@ -855,6 +877,7 @@ impl TextInput {
 
     pub fn reset(&mut self) {
         self.restart_caret();
+        self.markdown_cache = None;
         self.history = EditHistory::default();
         self.rejected = false;
         self.rejection = None;
@@ -1233,36 +1256,20 @@ impl Element for TextElement {
             underline: None,
             strikethrough: None,
         };
-        let runs = if let Some(marked) = input.marked_range.as_ref() {
-            let marked = concealed.as_ref().map_or_else(
+        let marked = input.marked_range.as_ref().map(|marked| {
+            concealed.as_ref().map_or_else(
                 || marked.clone(),
                 |c| c.display_offset(marked.start)..c.display_offset(marked.end),
-            );
-            vec![
-                TextRun {
-                    len: marked.start,
-                    ..base.clone()
-                },
-                TextRun {
-                    len: marked.end - marked.start,
-                    underline: Some(UnderlineStyle {
-                        color: Some(color),
-                        thickness: px(1.),
-                        wavy: false,
-                    }),
-                    ..base.clone()
-                },
-                TextRun {
-                    len: text.len() - marked.end,
-                    ..base
-                },
-            ]
-            .into_iter()
-            .filter(|r| r.len > 0)
-            .collect()
-        } else {
-            vec![base]
-        };
+            )
+        });
+        let spans = input
+            .markdown_cache
+            .as_ref()
+            .filter(|(source, _)| {
+                !input.concealed && !input.content.is_empty() && *source == input.content
+            })
+            .map_or(&[][..], |(_, document)| document.source_spans.as_slice());
+        let runs = markdown::runs(&text, base, spans, marked, input.theme);
         let lines = window
             .text_system()
             .shape_text(
@@ -1402,7 +1409,16 @@ impl Element for TextElement {
             window.paint_quad(cursor);
         }
         let changed = self.input.read(cx).visible_rows != prepaint.visible_rows;
+        // A delayed/coalesced frame can miss a receipt and retire the task.
+        // Actual visible paint is the recovery signal; do not wait for another
+        // edit or focus event, and never restart from an unmounted/clipped view.
+        let resume = bounds.intersects(&window.content_mask().bounds)
+            && self.input.read(cx).caret_can_blink(window)
+            && !self.input.read(cx).caret.running;
         self.input.update(cx, |input, _| {
+            if resume {
+                input.restart_caret();
+            }
             input.caret.presented();
             input.scroll_x = prepaint.scroll_x;
             input.scroll_y = prepaint.scroll_y;
@@ -1410,7 +1426,7 @@ impl Element for TextElement {
             input.last_layout = Some(layout);
             input.last_bounds = Some(bounds);
         });
-        if changed {
+        if changed || resume {
             let input = self.input.downgrade();
             window.on_next_frame(move |_, cx| {
                 let _ = input.update(cx, |_, cx| cx.notify());
@@ -1422,6 +1438,20 @@ impl Element for TextElement {
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_caret(window, cx);
+        if self.markdown && !self.concealed && !self.content.is_empty() {
+            if self
+                .markdown_cache
+                .as_ref()
+                .is_none_or(|(source, _)| *source != self.content)
+            {
+                self.markdown_cache = Some((
+                    self.content.clone(),
+                    talk_core::ui::markup::parse(&self.content),
+                ));
+            }
+        } else {
+            self.markdown_cache = None;
+        }
         div()
             .flex()
             .flex_1()
@@ -1472,22 +1502,20 @@ impl Render for TextInput {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .w_full()
             .rounded_md()
-            .border_1()
-            .border_color(if self.borderless {
-                gpui::transparent_black()
-            } else if self.rejected {
-                self.theme.danger
-            } else {
-                self.theme.input_border
-            })
             .when(!self.borderless, |d| {
-                d.child(super::controls::focus_ring(
-                    self.focus_handle.clone(),
-                    self.theme,
-                    6.,
-                ))
+                d.border_1()
+                    .border_color(if self.rejected {
+                        self.theme.danger
+                    } else {
+                        self.theme.input_border
+                    })
+                    .bg(self.theme.surface)
+                    .child(super::controls::focus_ring(
+                        self.focus_handle.clone(),
+                        self.theme,
+                        6.,
+                    ))
             })
-            .bg(self.theme.surface)
             .text_color(self.theme.text)
             .line_height(px(24. * self.text_scale))
             .text_size(px(14. * self.text_scale))
@@ -1534,6 +1562,8 @@ impl TextInput {
             history: EditHistory::default(),
             borderless: true,
             multiline: false,
+            markdown: false,
+            markdown_cache: None,
             content: "".into(),
             placeholder: placeholder.to_owned().into(),
             limit,
@@ -1718,9 +1748,9 @@ fn closest_grapheme(text: &str, offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        CARET_TICKS, CaretBlink, EditHistory, EditSnapshot, admitted_selection, caret_height,
-        closest_grapheme, current_boundary, from_utf16, horizontal_scroll, mention_range,
-        next_grapheme, previous_grapheme, replacement_fits, to_utf16, visual_row,
+        CaretBlink, EditHistory, EditSnapshot, admitted_selection, caret_height, closest_grapheme,
+        current_boundary, from_utf16, horizontal_scroll, mention_range, next_grapheme,
+        previous_grapheme, replacement_fits, to_utf16, visual_row,
     };
     use unicode_segmentation::UnicodeSegmentation;
     #[test]
@@ -1789,7 +1819,7 @@ mod tests {
         }
     }
     #[test]
-    fn caret_blink_settles_visible_and_stale_ticks_cannot_hide_a_new_edit() {
+    fn caret_blinks_while_presented_and_stale_ticks_cannot_hide_a_new_edit() {
         let mut caret = CaretBlink::default();
         let old = caret.begin();
         caret.presented();
@@ -1800,15 +1830,35 @@ mod tests {
         assert!(!caret.tick(old));
         assert!(caret.visible);
         let current = caret.begin();
-        for tick in 0..CARET_TICKS {
+        for tick in 0..100 {
             caret.presented();
-            assert_eq!(caret.tick(current), tick + 1 < CARET_TICKS);
+            assert!(caret.tick(current));
+            assert_eq!(caret.visible, tick % 2 == 1);
         }
         assert!(caret.visible);
-        assert_eq!(caret.remaining, 0);
+        assert!(caret.running);
         assert!(!caret.restart);
     }
 
+    #[test]
+    fn focus_after_paint_starts_blinking_but_an_unmounted_input_cannot_keep_ticking() {
+        let mut caret = CaretBlink::default();
+        caret.presented(); // The mouse-down frame has already painted.
+        caret.reset(true); // Its deferred focus callback starts a new generation.
+        let generation = caret.begin();
+        assert!(caret.tick(generation));
+        assert!(!caret.visible);
+        // First tick requests paint; without that paint, no further blink work.
+        assert!(!caret.tick(generation));
+        assert!(caret.visible);
+        assert!(!caret.running);
+        caret.reset(true);
+        let generation = caret.begin();
+        assert!(caret.tick(generation));
+        caret.presented();
+        assert!(caret.tick(generation));
+        assert!(caret.visible);
+    }
     #[test]
     fn caret_blink_stops_when_hidden_or_cancelled() {
         let mut caret = CaretBlink::default();
@@ -1818,7 +1868,7 @@ mod tests {
         // An unmounted input did not paint the new tick.
         assert!(!caret.tick(generation));
         assert!(caret.visible);
-        assert_eq!(caret.remaining, 0);
+        assert!(!caret.running);
         caret.reset(true);
         let generation = caret.begin();
         caret.presented();

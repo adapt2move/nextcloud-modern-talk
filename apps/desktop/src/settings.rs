@@ -25,6 +25,7 @@ struct Work {
     revision: Revision,
     values: LocalPreferences,
     write: bool,
+    apply_effects: bool,
 }
 struct RetryDraft {
     revision: Revision,
@@ -173,13 +174,40 @@ impl SettingsRuntime {
         if state.snapshot.runtime != RuntimeState::Running {
             return Err(PreferenceError::Closed);
         }
-        let (generation, request, expected, values, write) = match command {
+        let (generation, request, expected, values, write, apply_effects) = match command {
+            PreferenceCommand::RememberReaction {
+                generation,
+                request,
+                emoji,
+            } => {
+                let mut values = state.snapshot.active.clone();
+                values
+                    .recent_reactions
+                    .remember(emoji)
+                    .map_err(|_| PreferenceError::InvalidData)?;
+                // An internal history save must neither re-register startup on
+                // every reaction nor replace a deliberate queued effects retry.
+                let effects = values.launch_at_login != state.snapshot.confirmed.launch_at_login
+                    || values.start_in_background != state.snapshot.confirmed.start_in_background
+                    || state
+                        .pending
+                        .as_ref()
+                        .is_some_and(|work| work.apply_effects);
+                (
+                    generation,
+                    request,
+                    state.snapshot.revision,
+                    values,
+                    true,
+                    effects,
+                )
+            }
             PreferenceCommand::Set {
                 generation,
                 request,
                 expected_revision,
                 values,
-            } => (generation, request, expected_revision, values, true),
+            } => (generation, request, expected_revision, values, true, true),
             PreferenceCommand::Retry {
                 generation,
                 request,
@@ -195,6 +223,7 @@ impl SettingsRuntime {
                     request,
                     failed_revision,
                     draft.values.clone(),
+                    true,
                     true,
                 )
             }
@@ -214,6 +243,7 @@ impl SettingsRuntime {
                     expected_revision,
                     state.snapshot.confirmed.clone(),
                     false,
+                    true,
                 )
             }
         };
@@ -242,12 +272,15 @@ impl SettingsRuntime {
             state.snapshot.revision = revision;
             state.snapshot.save = SaveState::Pending { request, revision };
         }
-        state.snapshot.startup.state = EffectState::Pending;
+        if apply_effects {
+            state.snapshot.startup.state = EffectState::Pending;
+        }
         state.pending = Some(Work {
             request,
             revision,
             values,
             write,
+            apply_effects,
         });
         state.changed();
         self.shared.wake.notify_one();
@@ -392,7 +425,7 @@ fn run(shared: &Shared, store: &mut dyn PreferenceStore, effect: &mut dyn Startu
         };
         // No mutex is held across file/OS work. Effects are separate from durability:
         // a denied registration must not turn a committed preference into "unsaved".
-        let applied = if saved.is_ok() {
+        let applied = if saved.is_ok() && work.apply_effects {
             Some(effect.apply(&work.values))
         } else {
             None
@@ -433,6 +466,12 @@ fn run(shared: &Shared, store: &mut dyn PreferenceStore, effect: &mut dyn Startu
             if state.snapshot.revision == work.revision && state.pending.is_none() {
                 state.snapshot.startup.state = applied.state;
             }
+        }
+        if !work.apply_effects
+            && state.snapshot.revision == work.revision
+            && state.pending.is_none()
+        {
+            state.snapshot.startup = state.confirmed_startup;
         }
         state.changed();
     }

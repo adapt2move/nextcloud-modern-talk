@@ -2,4 +2,5 @@
 pub mod identity;
 pub mod media;
 pub mod nextcloud;
+pub mod system_time;
 pub mod updates;

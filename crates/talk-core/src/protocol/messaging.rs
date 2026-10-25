@@ -32,6 +32,8 @@ pub struct ReplyContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageDetails {
     pub message: Message,
+    /// Opaque actor identity within this conversation; display names are not identity.
+    pub author_key: Option<Text<256>>,
     /// Server-policy eligibility for this fresh poll observation only. The native owner
     /// must additionally enforce freshness, visibility, preview policy and deduplication.
     /// Unknown and Denied never authorize a notification; history is always Denied.
@@ -110,6 +112,8 @@ pub enum MessagingFeature {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagingCapabilities {
     pub actions: Page<(MessagingFeature, ActionAvailability), 32>,
+    /// Changing shared pins is separate from reading the shared pin list.
+    pub pin_change: Decision,
     pub message_limit: Option<u32>,
     pub file_limit: u64,
     pub read_receipts: Option<bool>,
@@ -128,6 +132,9 @@ pub enum MessagingCommand {
         thread: Option<MessageId>,
     },
     Context(MessageId),
+    /// Read-only recovery of one durable send correlation after restart. Absence
+    /// in the bounded search is uncertain and never authorizes a second POST.
+    ReconcileSend,
     Send {
         text: Text<131072>,
         options: ComposeOptions,
@@ -195,6 +202,14 @@ pub enum MessagingCommand {
         source: MessageId,
         destination: ConversationId,
     },
+    /// A durable forward retains the preview that the user approved. A changed
+    /// source must be shown again, never silently substituted during replay.
+    ForwardApproved {
+        source: MessageId,
+        destination: ConversationId,
+        author: Text<256>,
+        body: Text<4096>,
+    },
     SharedFiles {
         before: Option<MessageId>,
     },
@@ -225,6 +240,8 @@ pub enum MessagingCommand {
 pub enum MessagingResult {
     Capabilities(MessagingCapabilities),
     Messages {
+        /// Room capabilities observed by the same read, avoiding a second probe.
+        capabilities: Option<MessagingCapabilities>,
         messages: Page<MessageDetails, 50>,
         cursor: Option<MessageId>,
         common_read: Option<MessageId>,
@@ -233,6 +250,11 @@ pub enum MessagingResult {
     Send(SendReceipt),
     Mentions(Page<Mention, 100>),
     ReactionAuthors(Page<Text<256>, 100>),
+    /// Authoritative counts returned by an admitted add/remove operation.
+    Reactions {
+        message: MessageId,
+        reactions: Page<Reaction, 64>,
+    },
     Search {
         hits: Page<SearchHit, 50>,
         cursor: Option<Text<1024>>,

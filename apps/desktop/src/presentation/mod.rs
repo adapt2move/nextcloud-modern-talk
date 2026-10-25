@@ -2,6 +2,7 @@ mod account_removal;
 mod account_settings;
 mod call;
 mod collection;
+mod connectivity;
 mod content;
 mod controls;
 mod conversation_dialog;
@@ -27,6 +28,7 @@ mod shell;
 mod sidebar;
 mod state;
 pub mod theme;
+mod toast;
 mod window_chrome;
 
 use gpui::{
@@ -92,10 +94,10 @@ pub enum LocalAction {
     Open(Overlay),
     Close,
     DismissFeedback,
+    DismissActionToast(ConversationRef, u64),
     DismissIncoming,
     ShowIncoming,
-    ShowNavigation,
-    HideNavigation,
+    ToggleNavigation,
     ToggleCallChat,
     Navigate(ConversationRef),
     Destination(SidebarDestination),
@@ -200,6 +202,7 @@ use crate::presentation::feedback::Feedback;
 pub struct Desktop {
     text_selection: Entity<selectable::Selection>,
     _text_selection_observer: Subscription,
+    _text_link_subscription: Subscription,
     updates: talk_core::preferences::updates::UpdateSnapshot,
     // Successful install admission drains all service owners. This latch is
     // never cleared by an error snapshot; composition owns restart/quit.
@@ -207,6 +210,8 @@ pub struct Desktop {
     room_ui: conversation_dialog::RoomUi,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
+    offline_notice: connectivity::Notice,
+    action_toasts: toast::Toasts,
     probe: Probe,
     background_inert: bool,
     control_focus: controls::FocusStates,
@@ -264,10 +269,12 @@ pub struct Desktop {
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
     pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
+    startup_account_dialog: bool,
     destination: SidebarDestination,
     collapsed_sections: [bool; 5],
     archive_request: u64,
     pub navigation_open: bool,
+    sidebar_hidden: bool,
     pub call_chat_open: bool,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
@@ -336,15 +343,27 @@ impl Desktop {
             valid_snapshot(&snapshot),
             "composition supplied inconsistent initial projection"
         );
-        let initial_overlay = initial_overlay.or_else(|| {
-            (snapshot.accounts.as_slice().is_empty()
-                && !snapshot.saved_accounts.as_slice().is_empty())
-            .then_some(Overlay::Accounts)
-        });
+        let startup_account_dialog = initial_overlay.is_none()
+            && snapshot.accounts.as_slice().is_empty()
+            && !snapshot.saved_accounts.as_slice().is_empty();
+        let initial_overlay =
+            initial_overlay.or(startup_account_dialog.then_some(Overlay::Accounts));
         let theme = Theme::resolve(palette, appearance, cx.window_appearance());
         let root_focus = cx.focus_handle();
         let text_selection = cx.new(selectable::Selection::new);
         let text_selection_observer = cx.observe(&text_selection, |_, _, cx| cx.notify());
+        let text_link_subscription = cx.subscribe(
+            &text_selection,
+            |this, _, link: &selectable::LinkActivation, cx| {
+                this.submit(UiIntent::OpenMessageLink {
+                    context: link.context,
+                    message: link.message,
+                    source: link.source.clone(),
+                    ordinal: link.ordinal,
+                });
+                cx.notify();
+            },
+        );
         let modal_focus = cx.focus_handle();
         let server = cx.new(|cx| TextInput::new("cloud.example.test/nextcloud", 2048, theme, cx));
         let search = cx.new(|cx| TextInput::new("Geladene Inhalte durchsuchen …", 256, theme, cx));
@@ -352,6 +371,7 @@ impl Desktop {
         let composer = cx.new(|cx| {
             let mut input = TextInput::new("Nachricht schreiben …", 4096, theme, cx);
             input.multiline = true;
+            input.markdown = true;
             input
         });
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
@@ -369,10 +389,7 @@ impl Desktop {
         let composer_focus = cx.focus_handle().tab_stop(false);
         let composer_focus_observers = [
             cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
-            cx.on_focus_out(&composer_focus, window, |this, _, _, cx| {
-                this.content_ui.menu = false;
-                cx.notify();
-            }),
+            cx.on_focus_out(&composer_focus, window, |_, _, _, cx| cx.notify()),
         ];
         let prejoin = if prejoin {
             snapshot
@@ -418,9 +435,12 @@ impl Desktop {
             update_restart_pending: false,
             text_selection,
             _text_selection_observer: text_selection_observer,
+            _text_link_subscription: text_link_subscription,
             room_ui,
             message_ui,
             content_ui,
+            offline_notice: connectivity::Notice::default(),
+            action_toasts: toast::Toasts::default(),
             probe,
             background_inert: false,
             control_focus: controls::FocusStates::default(),
@@ -474,10 +494,12 @@ impl Desktop {
                 preferences::SettingsTab::General
             },
             overlay: initial_overlay,
+            startup_account_dialog,
             destination: SidebarDestination::Conversations,
             collapsed_sections: [false; 5],
             archive_request: 0,
             navigation_open: false,
+            sidebar_hidden: false,
             call_chat_open: true,
             onboarding_open: onboarding,
             prejoin,
@@ -551,6 +573,16 @@ impl Desktop {
         }
     }
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        // Use the existing owner tick even when no new snapshot is published.
+        self.refresh_offline_notice(cx);
+        self.refresh_action_toast(cx);
+        if self
+            .feedback
+            .is_some_and(|f| f.expired(std::time::Instant::now()))
+        {
+            self.feedback = None;
+            cx.notify();
+        }
         self.refresh_composer_mentions(cx);
         self.refresh_content_ui(cx);
         let reduced_motion = self.settings_port.reduced_motion();
@@ -590,13 +622,20 @@ impl Desktop {
         self.projection_blocked = false;
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
+        let selected_rebind = previous
+            .and_then(|context| state::cached_draft_context(&self.snapshot, &next, context))
+            .is_some_and(|context| Some(context) == next.selected);
         if let Some(c) = previous
             && self.message_ui.editing.is_none()
         {
             let body = self.composer.read(cx).committed_value();
             let _ = self.drafts.save(c, body);
         }
+        self.drafts.rebind_cached(&self.snapshot, &next);
         let mut reset_draft = false;
+        let completed_context = next
+            .submission
+            .and_then(|result| self.drafts.submission_context(result));
         if let Some(result) = next.submission {
             self.pending_ack = Some(result);
         }
@@ -604,7 +643,7 @@ impl Desktop {
             && self.drafts.complete(result)
         {
             self.feedback = match result.result {
-                Completion::ServerAccepted => None,
+                Completion::Queued | Completion::ServerAccepted => None,
                 Completion::Failed(_) => Some(Feedback::error(
                     "Nicht gesendet. Dein Entwurf bleibt erhalten.",
                 )),
@@ -612,8 +651,8 @@ impl Desktop {
                     "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
                 )),
             }
-            .map(|feedback| feedback.in_conversation(result.context));
-            reset_draft = Some(result.context) == previous;
+            .map(|feedback| feedback.in_conversation(completed_context.unwrap_or(result.context)));
+            reset_draft = completed_context == next.selected;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
             self.pending_ack = Some(result);
         }
@@ -644,8 +683,17 @@ impl Desktop {
             && !next.saved_accounts.as_slice().is_empty()
             && next.active_account.is_none()
             && next.login.phase == talk_core::ui::presentation::LoginPhase::EnterServer
+            && self.overlay.is_none()
         {
             self.overlay = Some(Overlay::Accounts);
+            self.startup_account_dialog = true;
+            self.pending_modal_focus = true;
+        }
+        if finish_startup_account_dialog(
+            &mut self.startup_account_dialog,
+            &mut self.overlay,
+            next.active_account.is_some(),
+        ) {
             self.pending_modal_focus = true;
         }
         self.drafts.retain_accounts(&next);
@@ -655,10 +703,15 @@ impl Desktop {
         }
         self.refresh_account_removal(&next);
         self.snapshot = next;
+        self.refresh_offline_notice(cx);
+        self.refresh_action_toast(cx);
         self.refresh_content_ui(cx);
         self.refresh_creation(cx);
         self.refresh_room_dialog(cx);
-        self.refresh_message_ui(cx);
+        self.refresh_message_ui_after_rebind(
+            selected_rebind && self.message_ui.editing.is_some(),
+            cx,
+        );
         if self.incoming_visible() {
             self.account_removal.dismiss_confirmation();
             if self.emoji_picker_pending.is_some() || self.emoji_picker_context.is_some() {
@@ -686,7 +739,9 @@ impl Desktop {
             });
             self.thread_parent = None;
         }
-        if previous != self.snapshot.selected || reset_draft {
+        if (previous != self.snapshot.selected || reset_draft)
+            && !(selected_rebind && self.message_ui.editing.is_some())
+        {
             let body = self
                 .snapshot
                 .selected
@@ -713,39 +768,7 @@ impl Desktop {
         cx.notify();
     }
     fn submit(&mut self, intent: UiIntent) -> bool {
-        let unavailable = match &intent {
-            UiIntent::DownloadFile { .. } => {
-                Some("Herunterladen ist in diesem Client noch nicht verfügbar.")
-            }
-            UiIntent::PickAttachment(_) => {
-                Some("Dateien anhängen ist in diesem Client noch nicht verfügbar.")
-            }
-            UiIntent::ReopenBrowser(_) => {
-                Some("Der Browser kann hier noch nicht erneut geöffnet werden.")
-            }
-            _ => None,
-        };
-        match self.port.try_submit(intent) {
-            Ok(()) => true,
-            Err(e) => {
-                self.feedback = Some(
-                    if let Some(label) = unavailable
-                        && matches!(
-                            e,
-                            talk_core::ui::SubmitError::Unavailable(
-                                talk_core::ui::UnavailableReason::Unsupported
-                                    | talk_core::ui::UnavailableReason::Unconfigured
-                            )
-                        )
-                    {
-                        Feedback::info(label)
-                    } else {
-                        Feedback::from_error(e)
-                    },
-                );
-                false
-            }
-        }
+        feedback::submit(self.port.as_mut(), &mut self.feedback, intent, self.overlay)
     }
     fn save_draft(&mut self, cx: &App) -> bool {
         if self.message_ui.editing.is_some() {
@@ -760,7 +783,11 @@ impl Desktop {
         {
             Ok(()) => true,
             Err(e) => {
-                self.feedback = Some(Feedback::from_error(e));
+                self.feedback = Some(
+                    Feedback::from_draft_error(e)
+                        .in_conversation(context)
+                        .on_surface(self.overlay),
+                );
                 false
             }
         }
@@ -835,7 +862,7 @@ impl Desktop {
         if matches!(
             &action,
             LocalAction::Destination(_)
-                | LocalAction::ShowNavigation
+                | LocalAction::ToggleNavigation
                 | LocalAction::ToggleCallChat
                 | LocalAction::Call
                 | LocalAction::Accept
@@ -867,6 +894,7 @@ impl Desktop {
         let previous_feedback = self.feedback;
         let invoker = window.focused(cx);
         let mut server_input_rejected = false;
+        let mut sent_in = None;
         match action {
             LocalAction::RemoveAccount(account, scope) => {
                 self.request_account_removal(account, scope, window, cx)
@@ -943,6 +971,7 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
                     self.return_focus = window.focused(cx);
@@ -1034,6 +1063,9 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::DismissActionToast(context, id) => {
+                self.dismiss_action_toast(context, id, window, cx);
+            }
             LocalAction::DismissFeedback => {
                 self.feedback = None;
                 self.navigation.reveal.request();
@@ -1047,13 +1079,21 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
-            LocalAction::ShowNavigation => {
-                self.navigation_open = true;
-                self.pending_navigation_focus = Some(true);
-            }
-            LocalAction::HideNavigation => {
-                self.navigation_open = false;
-                self.pending_navigation_focus = Some(false);
+            LocalAction::ToggleNavigation => {
+                if self.overlay.is_none()
+                    && self.prejoin.is_none()
+                    && !self.account_removal.confirming()
+                    && !self.incoming_visible()
+                {
+                    let open = if self.narrow_navigation(window) {
+                        self.navigation_open = !self.navigation_open;
+                        self.navigation_open
+                    } else {
+                        self.sidebar_hidden = !self.sidebar_hidden;
+                        !self.sidebar_hidden
+                    };
+                    self.pending_navigation_focus = Some(open);
+                }
             }
             LocalAction::ToggleCallChat => {
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
@@ -1076,6 +1116,7 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                self.startup_account_dialog = false;
                 if self.close_content_overlay() {
                     if self.overlay.is_none() {
                         if let Some(focus) = self
@@ -1187,6 +1228,15 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                // Repeated Enter follows the disabled button while this exact
+                // draft is locally queued, in flight or awaiting reconciliation.
+                if self
+                    .snapshot
+                    .selected
+                    .is_some_and(|context| self.drafts.pending(context))
+                {
+                    return;
+                }
                 // Enter follows the disabled Send button once a confirmed
                 // message has cleared the field; it is not a failed action.
                 if self.composer.read(cx).content.trim().is_empty() {
@@ -1197,13 +1247,15 @@ impl Desktop {
                 {
                     let context = row.context;
                     let gate = state::composer_send_decision(&self.snapshot, row);
-                    self.feedback = Some(
-                        (match self.drafts.send(context, gate, self.port.as_mut()) {
-                            Ok(_) => Feedback::info("Senden wird vorbereitet …"),
-                            Err(e) => Feedback::from_error(e),
-                        })
-                        .in_conversation(context),
-                    );
+                    let result = self.drafts.send(context, gate, self.port.as_mut());
+                    if result.is_ok() {
+                        sent_in = Some(context);
+                    }
+                    self.feedback = result.err().map(|error| {
+                        Feedback::from_draft_error(error)
+                            .in_conversation(context)
+                            .on_surface(self.overlay)
+                    });
                 }
             }
             LocalAction::FinishOnboarding => {
@@ -1447,6 +1499,16 @@ impl Desktop {
         }
         // Immediate fixture updates are projection changes, never invented backend outcomes.
         self.refresh(cx);
+        if let Some(context) = sent_in
+            && self.snapshot.selected == Some(context)
+        {
+            // Apply after the new row projection; anchor preservation during
+            // refresh must not restore the old reading position over this send.
+            self.message_ui.list.scroll_to(gpui::ListOffset {
+                item_ix: self.message_ui.list.item_count(),
+                offset_in_item: px(0.),
+            });
+        }
         if self.feedback.is_some() && self.feedback != previous_feedback {
             self.feedback_return_focus = invoker;
             self.pending_feedback_focus = reveal_result && self.overlay.is_none();
@@ -1775,6 +1837,7 @@ impl Render for Desktop {
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
         self.prepare_message_menu(window, cx);
+        self.prepare_composer_menu(window, cx);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -1861,6 +1924,7 @@ impl Render for Desktop {
             (&self.room_ui.avatar, "Emoji"),
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
+            (&self.message_ui.time_input, "JJJJ-MM-TT HH:MM"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -1917,11 +1981,15 @@ impl Render for Desktop {
             && self
                 .selected()
                 .is_some_and(|r| r.draft_clipboard == Decision::Allowed);
-        let narrow = window.viewport_size().width < px(880.) || self.scale >= 150;
-        // Reserve header, navigation, toolbar/result and a usable history slice.
+        let narrow = self.narrow_navigation(window);
+        if !narrow {
+            self.navigation_open = false;
+        }
+        // Navigation lives in the title bar; reserve the conversation header,
+        // toolbar/result and a usable history slice at every window width.
         // The editor scrolls internally when large text cannot fit five lines.
-        let reserved = px(window_chrome::HEIGHT + if narrow { 230. } else { 180. })
-            + self.sp(if self.feedback.is_some() { 100. } else { 40. })
+        let reserved = px(window_chrome::HEIGHT + 180.)
+            + self.sp(if self.feedback_visible() { 100. } else { 40. })
             + self.sp(72.);
         let max_rows = (f32::from((window.viewport_size().height - reserved).max(px(24.)))
             / f32::from(self.sp(24.)))
@@ -1954,6 +2022,7 @@ impl Render for Desktop {
         // Text scaling is independent of spacing; scaling both exhausts small windows.
         window.set_rem_size(px(16.));
         self.background_inert = self.overlay.is_some() || incoming;
+        let mut shell_visible = false;
         let body = if self.update_restart_pending {
             use talk_core::preferences::updates::UpdateState;
             let status = match self.updates.state {
@@ -2003,6 +2072,7 @@ impl Render for Desktop {
         {
             self.onboarding(window, cx).into_any_element()
         } else {
+            shell_visible = true;
             self.shell(window, cx).into_any_element()
         };
         self.background_inert = incoming || self.account_removal.confirming();
@@ -2020,7 +2090,9 @@ impl Render for Desktop {
             .then(|| self.account_removal_dialog(window, cx))
             .flatten();
         let incoming_card = incoming.then(|| self.incoming(cx));
+        let action_toast = self.action_toast_view(window, cx);
         let message_menu = self.message_menu_popup(window, cx);
+        let composer_menu = self.composer_menu_popup(window, cx);
         let reveal = self.navigation.reveal.clone();
         let view = div()
             .relative()
@@ -2040,6 +2112,7 @@ impl Render for Desktop {
                 reveal.finish();
                 this.control_focus.finish_frame(window, fallback);
                 this.finish_message_menu_frame(window, cx);
+                this.finish_composer_menu_frame(window, cx);
                 if this.hover_hints.retire(|id| this.control_focus.live(id)) {
                     cx.notify();
                 }
@@ -2071,7 +2144,12 @@ impl Render for Desktop {
                         this.keyboard_navigation = true;
                     }
                 }
-                if !composing && this.message_menu_key(event, window, cx) {
+                if !composing
+                    && (this.composer_menu_key(event, window, cx)
+                        || this.message_menu_key(event, window, cx)
+                        || this.message_deadline_key(event, window, cx)
+                        || this.action_toast_key(event, window, cx))
+                {
                     cx.stop_propagation();
                     cx.notify();
                     return;
@@ -2080,7 +2158,7 @@ impl Render for Desktop {
             }))
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
-            .child(self.window_chrome(window, cx))
+            .child(self.window_chrome(window, shell_visible, cx))
             .child(
                 div()
                     .relative()
@@ -2090,7 +2168,9 @@ impl Render for Desktop {
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
                     .when_some(incoming_card, |d, card| d.child(card))
-                    .when_some(message_menu, |d, menu| d.child(menu)),
+                    .when_some(action_toast, |d, toast| d.child(toast))
+                    .when_some(message_menu, |d, menu| d.child(menu))
+                    .when_some(composer_menu, |d, menu| d.child(menu)),
             )
             .children(self.window_resize_edges(window));
         if let Some(scope) = self.pending_prejoin_return.take()
@@ -2105,9 +2185,9 @@ impl Render for Desktop {
         if let Some(open) = self.pending_navigation_focus.take()
             && let Some(focus) = self.control_focus(
                 if open {
-                    "hide-navigation"
+                    "global-search"
                 } else {
-                    "show-navigation"
+                    "toggle-navigation"
                 },
                 cx,
             )
@@ -2166,7 +2246,12 @@ impl Render for Desktop {
                 }
                 Some(_) => Some("close-overlay".into()),
                 None if self.prejoin.is_some() => Some("prejoin-back".into()),
-                None => None,
+                None => {
+                    if self.modal_focus.contains_focused(window, cx) {
+                        self.root_focus.focus(window);
+                    }
+                    None
+                }
             };
             if let Some(id) = id
                 && let Some(focus) = self.control_focus(id, cx)
@@ -2213,9 +2298,87 @@ fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
 }
 
+/// Only the startup-owned account prompt follows automatic restoration. A
+/// deliberate dialog change transfers ownership to the user immediately.
+fn finish_startup_account_dialog(
+    automatic: &mut bool,
+    overlay: &mut Option<Overlay>,
+    active_account: bool,
+) -> bool {
+    if !*automatic {
+        return false;
+    }
+    if *overlay != Some(Overlay::Accounts) {
+        *automatic = false;
+        return false;
+    }
+    if !active_account {
+        return false;
+    }
+    *automatic = false;
+    *overlay = None;
+    true
+}
+
 #[cfg(test)]
 mod interaction_tests {
-    use super::{Overlay, composer_allowed, docked_call_chat};
+    use super::{Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog};
+
+    #[test]
+    fn automatic_account_prompt_waits_for_a_valid_activation_and_then_releases_the_modal() {
+        let mut automatic = true;
+        let mut overlay = Some(Overlay::Accounts);
+        assert!(!finish_startup_account_dialog(
+            &mut automatic,
+            &mut overlay,
+            false
+        ));
+        assert!(automatic);
+        assert_eq!(overlay, Some(Overlay::Accounts));
+        assert!(finish_startup_account_dialog(
+            &mut automatic,
+            &mut overlay,
+            true
+        ));
+        assert!(!automatic);
+        assert!(overlay.is_none());
+        assert!(!finish_startup_account_dialog(
+            &mut automatic,
+            &mut overlay,
+            true
+        ));
+    }
+
+    #[test]
+    fn user_owned_dialogs_and_dismissed_startup_prompts_never_auto_close_on_activation() {
+        for selected in [Overlay::Accounts, Overlay::Settings] {
+            let mut automatic = false;
+            let mut overlay = Some(selected);
+            assert!(!finish_startup_account_dialog(
+                &mut automatic,
+                &mut overlay,
+                true
+            ));
+            assert_eq!(overlay, Some(selected));
+        }
+        for changed in [None, Some(Overlay::Settings)] {
+            let mut automatic = true;
+            let mut overlay = changed;
+            assert!(!finish_startup_account_dialog(
+                &mut automatic,
+                &mut overlay,
+                false
+            ));
+            assert!(!automatic);
+            overlay = Some(Overlay::Accounts);
+            assert!(!finish_startup_account_dialog(
+                &mut automatic,
+                &mut overlay,
+                true
+            ));
+            assert_eq!(overlay, Some(Overlay::Accounts));
+        }
+    }
     #[test]
     fn call_chat_retains_one_editor_owner_through_resize_and_modal_exclusion() {
         for wide in [false, true] {

@@ -1,6 +1,6 @@
 pub(super) mod chat_header;
 
-use super::controls::Availability;
+use super::controls::{Availability, CONTENT_RADIUS, Skeleton};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use gpui::{Context, Div, Focusable, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::Decision;
@@ -10,6 +10,18 @@ use talk_core::ui::presentation::{
 };
 
 impl Desktop {
+    pub(super) fn narrow_navigation(&self, window: &Window) -> bool {
+        window.viewport_size().width < px(880.) || self.scale >= 150
+    }
+
+    pub(super) fn sidebar_visible(&self, window: &Window) -> bool {
+        if self.narrow_navigation(window) {
+            self.navigation_open
+        } else {
+            !self.sidebar_hidden
+        }
+    }
+
     pub(super) fn conversation_avatar(&self, row: &ConversationView) -> Div {
         let t = self.theme;
         let mut avatar = self
@@ -66,85 +78,51 @@ impl Desktop {
         avatar
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {
-        let narrow = window.viewport_size().width < px(880.) || self.scale >= 150;
-        let sidebar = self.sidebar(narrow, cx);
-        let content = div()
-            .tab_group()
-            .tab_index(1)
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .py_3()
-            .pr_3()
-            .when(narrow, |d| d.pl_3())
-            .flex()
-            .flex_col()
-            .gap_2()
-            .when(narrow, |d| {
-                d.child(
-                    div()
-                        .tab_group()
-                        .tab_index(0)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(self.icon_button(
-                            "show-navigation",
-                            ("sidebar", "Gespräche"),
-                            ButtonStyle::Quiet,
-                            Availability::available(),
-                            LocalAction::ShowNavigation,
-                            cx,
-                        ))
-                        .child(self.icon_button(
-                            "small-settings",
-                            ("settings", "Einstellungen"),
-                            ButtonStyle::Quiet,
-                            Availability::available(),
-                            LocalAction::Open(Overlay::Settings),
-                            cx,
-                        )),
-                )
-            })
-            .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
-                if self.destination == super::SidebarDestination::Inbox {
-                    self.inbox(cx)
-                } else {
-                    self.conversation(window.viewport_size().height < self.sp(160.) + px(210.), cx)
-                },
-            ));
-        let layout = div().size_full().relative().flex();
-        let layout = if narrow && self.navigation_open {
-            layout.child(
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        self.button(
-                            "hide-navigation",
-                            "Zurück zum Gespräch",
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::HideNavigation,
+        let narrow = self.narrow_navigation(window);
+        let sidebar_visible = self.sidebar_visible(window);
+        let sidebar = sidebar_visible.then(|| self.sidebar(narrow, cx));
+        let content = (!narrow || !sidebar_visible).then(|| {
+            div()
+                .tab_group()
+                .tab_index(1)
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .py_3()
+                .pr_3()
+                .when(!sidebar_visible || narrow, |d| d.pl_3())
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
+                    if self.destination == super::SidebarDestination::Inbox {
+                        self.inbox(cx)
+                    } else {
+                        self.conversation(
+                            window.viewport_size().height < self.sp(160.) + px(210.),
                             cx,
                         )
-                        .mx_3()
-                        .mt_2(),
-                    )
-                    .child(
+                    },
+                ))
+        });
+        let layout = div().size_full().relative().flex();
+        let layout = if let Some(sidebar) = sidebar {
+            if narrow {
+                layout.child(
+                    div().size_full().flex().flex_col().child(
                         self.scroll_area(super::navigation::Region::Rooms)
                             .flex_1()
                             .min_h_0()
                             .child(sidebar.w_full()),
                     ),
-            )
-        } else if narrow {
-            layout.child(content)
+                )
+            } else {
+                layout
+                    .child(sidebar.tab_group().tab_index(0))
+                    .children(content)
+            }
         } else {
-            layout
-                .child(sidebar.tab_group().tab_index(0))
-                .child(content)
+            layout.children(content)
         };
         layout.when(
             self.snapshot.call.as_ref().is_some_and(|c| {
@@ -175,21 +153,30 @@ impl Desktop {
     fn conversation(&self, constrained: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let Some(row) = self.selected() else {
-            return div()
-                .relative()
-                .size_full()
-                .rounded(px(13.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(t.surface)
-                .flex_col()
-                .gap_4()
-                .child(self.l("Wähle ein Gespräch."))
-                .when(self.local_feedback_visible(), |d| {
-                    d.child(self.feedback_view(cx))
-                })
-                .child(t.inset_card_edge(13.));
+            let state = super::collection::CollectionState::new(
+                self.snapshot.conversation_list.content,
+                !self.snapshot.conversations.as_slice().is_empty(),
+            );
+            if state.initial_loading() {
+                return self.content_card(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(self.collection_skeleton(Skeleton::Messages)),
+                );
+            }
+            return self.content_card(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .flex_col()
+                    .gap_4()
+                    .child(self.l("Wähle ein Gespräch."))
+                    .when(self.local_feedback_visible(), |d| {
+                        d.child(self.feedback_view(cx))
+                    }),
+            );
         };
         let kind = match row.kind {
             ConversationKind::Direct => "Persönliches Gespräch",
@@ -228,11 +215,12 @@ impl Desktop {
             "Favoriten sind für dieses Gespräch nicht verfügbar.",
         );
         let search_availability = self.message_available(MessageFeature::Search);
-        let h = t.chat_header_theme(self.palette);
+        let h = chat_header::theme(t, self.palette);
         let header = div()
             .id("conversation-header")
             .group("conversation-header")
-            .bg(h.chat_header_surface())
+            .rounded_t(px(CONTENT_RADIUS))
+            .bg(chat_header::surface(h))
             .text_color(h.text)
             .flex_none()
             .flex()
@@ -442,7 +430,8 @@ impl Desktop {
             .flex_col()
             .flex_none()
             .child(header)
-            .child(self.conversation_search(cx).bg(t.surface));
+            .children(self.pin_banner(row.context, cx))
+            .child(self.conversation_search(cx).bg(chat_header::surface(h)));
         let timeline = self.conversation_timeline(header, constrained, cx);
         let composer = if (self.snapshot.content == ContentState::Denied
             || row.send == Decision::Denied)
@@ -466,20 +455,12 @@ impl Desktop {
             self.composer_view(row, false, cx)
         };
         let panel = div()
-            .rounded(px(12.))
             .flex()
             .flex_col()
-            .bg(t.surface)
             .child(timeline.tab_group().tab_index(0))
             .child(composer.tab_group().tab_index(1));
-        div()
-            .relative()
-            .size_full()
-            .rounded(px(13.))
-            .overflow_hidden()
-            .border_1()
-            .border_color(t.border)
-            .child(
+        self.content_card(
+            div().child(
                 self.scroll_area(super::navigation::Region::Conversation)
                     .size_full()
                     .child(if constrained {
@@ -487,8 +468,8 @@ impl Desktop {
                     } else {
                         panel.size_full()
                     }),
-            )
-            .child(t.inset_card_edge(12.))
+            ),
+        )
     }
     pub(super) fn composer_view(
         &self,
@@ -523,7 +504,6 @@ impl Desktop {
             .flex_col()
             .gap_2()
             .children(self.composer_context(cx))
-            .children(self.composer_more_menu(cx))
             .child(
                 div()
                     .min_h(px(96.))
@@ -552,10 +532,12 @@ impl Desktop {
                     .gap_2()
                     .child(self.composer.clone())
                     .when(
-                        self.feedback.is_some_and(|f| {
-                            f.context == Some(row.context)
-                                || (f.context.is_none() && self.snapshot.call.is_none())
-                        }) && self.composer_available(),
+                        self.feedback_visible()
+                            && self.feedback.is_some_and(|f| {
+                                f.context == Some(row.context)
+                                    || (f.context.is_none() && self.snapshot.call.is_none())
+                            })
+                            && self.composer_available(),
                         |d| d.child(self.feedback_view(cx)),
                     )
                     .when(!self.background_inert, |d| {
@@ -589,19 +571,22 @@ impl Desktop {
                                     .flex()
                                     .items_center()
                                     .gap_1()
-                                    .child(self.icon_button(
-                                        "attach",
-                                        ("plus", "Weitere Optionen"),
-                                        // The open + menu keeps its trigger visibly pressed.
-                                        if self.content_ui.menu {
-                                            ButtonStyle::Secondary
-                                        } else {
-                                            ButtonStyle::Quiet
-                                        },
-                                        options_availability,
-                                        LocalAction::Content(super::content::Action::Menu),
-                                        cx,
-                                    ))
+                                    .child(
+                                        self.icon_button(
+                                            "attach",
+                                            ("plus", "Weitere Optionen"),
+                                            // The open + menu keeps its trigger visibly pressed.
+                                            if self.content_ui.menu {
+                                                ButtonStyle::Secondary
+                                            } else {
+                                                ButtonStyle::Quiet
+                                            },
+                                            options_availability,
+                                            LocalAction::Content(super::content::Action::Menu),
+                                            cx,
+                                        )
+                                        .child(self.composer_menu_anchor(row.context)),
+                                    )
                                     .child(self.icon_button(
                                         "emoji-picker",
                                         ("smile", "Emoji auswählen"),
@@ -621,25 +606,11 @@ impl Desktop {
                             ))),
                     ),
             )
-            .when_some(connection_failure, |d, failure| {
-                d.child(div().text_color(t.danger).text_size(self.sp(12.)).child(
-                    self.selectable_text(
-                        "composer-connection-error",
-                        self.l(super::state::connection_failure_copy(failure).1),
-                    ),
-                ))
-                .child(self.hint(self.l(
-                    "Dein Entwurf bleibt erhalten. Nachrichten werden nicht automatisch gesendet.",
-                )))
-            })
-            .when(
-                self.snapshot.content == ContentState::Offline && connection_failure.is_none(),
-                |d| {
-                    d.child(
-                        self.hint(self.l("Offline · Entwürfe werden nicht automatisch gesendet.")),
-                    )
-                },
+            .children(
+                connection_failure
+                    .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),
             )
+            .children(self.offline_footer(row.context, cx))
             .when(self.composer.read(cx).rejected, |d| {
                 d.child(
                     div().text_color(t.danger).text_size(self.sp(12.)).child(

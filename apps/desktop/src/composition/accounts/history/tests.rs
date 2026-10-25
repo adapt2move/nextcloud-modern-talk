@@ -3,6 +3,154 @@ use talk_core::ids::{ConversationId, HostId, RuntimeGeneration};
 use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
+#[test]
+fn disk_warmup_does_not_invent_network_failure_or_replace_current_observations() {
+    let original = context(1, 1, 1, 1);
+    let mut source = Cache::default();
+    source.open(original);
+    complete(
+        &mut source,
+        original,
+        1,
+        Work::History,
+        messages(original, [message(original, 7, "disk body")], None),
+    );
+    let durable = source
+        .durable(
+            original,
+            NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap(),
+            now_unix(),
+        )
+        .unwrap();
+    let local = context(1, 0, 0, 1);
+    let mut cached = Cache::default();
+    cached.restore(local, &durable);
+    assert!(!cached.get(local).unwrap().offline);
+    let pending = context(1, 2, 1, 1);
+    cached.open(pending);
+    let operation = admit(&mut cached, pending, 1, Work::History);
+    let state = cached.get(pending).unwrap().state;
+    cached.restore(pending, &durable);
+    assert_eq!(cached.get(pending).unwrap().state, state);
+    assert_eq!(cached.flights.len(), 1);
+    assert_eq!(
+        cached.get(pending).unwrap().messages.as_slice()[0]
+            .body
+            .as_str(),
+        "disk body"
+    );
+    assert!(cached.complete(
+        pending,
+        operation,
+        Work::History,
+        RequestId(1),
+        &Ok(messages(pending, [message(pending, 7, "fresh body")], None)),
+        false
+    ));
+    cached.restore(pending, &durable);
+    assert_eq!(
+        cached.get(pending).unwrap().messages.as_slice()[0]
+            .body
+            .as_str(),
+        "fresh body"
+    );
+    let failed = context(1, 3, 1, 1);
+    cached.open(failed);
+    let operation = admit(&mut cached, failed, 2, Work::History);
+    assert!(cached.complete(
+        failed,
+        operation,
+        Work::History,
+        RequestId(2),
+        &Err(Completion::Failed(UnavailableReason::Unconfigured)),
+        true
+    ));
+    cached.restore(failed, &durable);
+    assert!(
+        cached.get(failed).unwrap().offline,
+        "a real observed transport failure survives cache warmup"
+    );
+    let edited = context(1, 4, 1, 1);
+    cached.open(edited);
+    complete(
+        &mut cached,
+        edited,
+        3,
+        Work::Action,
+        MessagingResult::Message(Box::new(message(edited, 7, "fresh mutation"))),
+    );
+    cached.restore(edited, &durable);
+    assert_eq!(
+        cached.get(edited).unwrap().messages.as_slice()[0]
+            .body
+            .as_str(),
+        "fresh mutation"
+    );
+}
+
+#[test]
+fn durable_roundtrip_preserves_confirmed_content_and_pins_without_permissions_or_live_tickets() {
+    let key = context(1, 1, 1, 1);
+    let mut original = Cache::default();
+    original.open(key);
+    let mut one = message(key, 1, "confirmed");
+    one.edit = Decision::Allowed;
+    one.delete = Decision::Allowed;
+    complete(
+        &mut original,
+        key,
+        1,
+        Work::History,
+        messages(key, [one], None),
+    );
+    let mut pinned = message_view(&message(key, 99, "older pinned excerpt"));
+    pinned.metadata.edit = Decision::Allowed;
+    original.get_mut(key).unwrap().pins = page([pinned]);
+    original.get_mut(key).unwrap().pins_loaded = true;
+    let mut pending = message_view(&message(key, 2, "not confirmed"));
+    pending.delivery = talk_core::ui::presentation::DeliveryState::Pending;
+    original
+        .get_mut(key)
+        .unwrap()
+        .messages
+        .try_push(pending)
+        .unwrap();
+    let stable = NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap();
+    let durable = original.durable(key, stable, now_unix()).unwrap();
+    assert_eq!(durable.messages.as_slice().len(), 1);
+    let restored = context(1, 2, 0, 1);
+    let mut cache = Cache::default();
+    cache.restore(restored, &durable);
+    let room = cache.get(restored).unwrap();
+    assert!(room.loaded && room.pins_loaded);
+    assert_eq!(room.messages.as_slice()[0].body.as_str(), "confirmed");
+    assert_eq!(room.messages.as_slice()[0].metadata.edit, Decision::Unknown);
+    assert_eq!(
+        room.messages.as_slice()[0].metadata.delete,
+        Decision::Unknown
+    );
+    assert_eq!(
+        room.pins.as_slice()[0].body.as_str(),
+        "older pinned excerpt"
+    );
+    assert!(room.capabilities.is_none() && cache.flights.is_empty());
+    // Cached state cannot replace newer canonical data after a network read.
+    complete(
+        &mut cache,
+        restored,
+        2,
+        Work::History,
+        messages(restored, [message(restored, 1, "new canonical")], None),
+    );
+    cache.restore(restored, &durable);
+    assert_eq!(
+        cache.get(restored).unwrap().messages.as_slice()[0]
+            .body
+            .as_str(),
+        "new canonical"
+    );
+}
+
 fn context(account: u128, runtime: u128, host: u128, room: u128) -> ConversationRef {
     let account = AccountId::from_local(account);
     ConversationRef {
@@ -19,6 +167,7 @@ fn context(account: u128, runtime: u128, host: u128, room: u128) -> Conversation
 }
 fn message(context: ConversationRef, id: u64, body: &str) -> MessageDetails {
     MessageDetails {
+        author_key: None,
         message: Message {
             id: MessageId {
                 conversation: context.conversation,
@@ -50,6 +199,7 @@ fn messages(
     cursor: Option<u64>,
 ) -> MessagingResult {
     MessagingResult::Messages {
+        capabilities: None,
         messages: page(rows),
         cursor: cursor.map(|sequence| MessageId {
             conversation: context.conversation,
@@ -1292,4 +1442,754 @@ fn newer_connectivity_observations_keep_warm_rows_and_win_over_late_completions(
         );
         assert_eq!(model.snapshot.messages.as_slice().len(), 2);
     }
+}
+
+#[test]
+fn prefetched_history_is_ready_on_open_and_retired_tickets_cannot_restore_it() {
+    let room = context(1, 2, 3, 4);
+    let mut model = super::super::tests::model();
+    model.history.open(room);
+    complete(
+        &mut model.history,
+        room,
+        1,
+        Work::Prefetch,
+        messages(
+            room,
+            [message(room, 1, "Synthetic prefetched message")],
+            Some(1),
+        ),
+    );
+    assert!(model.snapshot.messages.as_slice().is_empty());
+    assert!(model.snapshot.selected.is_none());
+    select(&mut model, room);
+    assert_eq!(model.snapshot.messages.as_slice().len(), 1);
+    assert_eq!(model.snapshot.content, ContentState::Ready);
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().history,
+        RemoteState::Idle
+    );
+    let operation = admit(&mut model.history, room, 2, Work::Prefetch);
+    model.history.remove_account(room.account.account);
+    assert!(!model.history.complete(
+        room,
+        operation,
+        Work::Prefetch,
+        RequestId(2),
+        &Ok(messages(room, [message(room, 2, "Late")], Some(2))),
+        false
+    ));
+    assert!(model.history.get(room).is_none());
+}
+
+#[test]
+fn speculative_history_never_evicts_previously_opened_rooms_at_capacity() {
+    let mut cache = Cache::default();
+    for room in 1..=ROOMS {
+        cache.open(context(1, 1, 1, room as u128));
+    }
+    let foreground = context(1, 1, 1, 1);
+    let speculative = context(1, 1, 1, 100);
+    assert!(!cache.prefetch(speculative));
+    assert!(cache.get(foreground).is_some());
+    assert!(cache.get(speculative).is_none());
+    assert_eq!(cache.rooms.len(), ROOMS);
+}
+
+#[test]
+fn opened_room_keeps_priority_when_new_navigation_reclaims_a_prefetch_slot() {
+    let mut cache = Cache::default();
+    let opened = context(1, 1, 1, 1);
+    cache.open(opened);
+    for room in 2..=ROOMS {
+        assert!(cache.prefetch(context(1, 1, 1, room as u128)));
+    }
+    cache.open(context(1, 1, 1, 100));
+    assert!(cache.get(opened).is_some());
+    assert!(cache.get(context(1, 1, 1, 2)).is_none());
+    assert_eq!(cache.rooms.len(), ROOMS);
+}
+
+fn with_capabilities(mut result: MessagingResult, allowed: Decision) -> MessagingResult {
+    let MessagingResult::Messages { capabilities, .. } = &mut result else {
+        panic!("fixture history")
+    };
+    *capabilities = Some(protocol::messaging::MessagingCapabilities {
+        pin_change: allowed,
+        actions: page([(
+            protocol::messaging::MessagingFeature::React,
+            protocol::conversation::ActionAvailability {
+                implemented: true,
+                server: protocol::FeatureSupport::Supported,
+                allowed,
+            },
+        )]),
+        message_limit: Some(2048),
+        file_limit: 12_000,
+        read_receipts: Some(true),
+        typing_status: Some(true),
+    });
+    result
+}
+
+#[test]
+fn prefetched_history_restores_recent_composer_capabilities_without_another_probe() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    assert!(cache.prefetch(key));
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::Prefetch,
+        with_capabilities(
+            messages(key, [message(key, 1, "History")], None),
+            Decision::Allowed,
+        ),
+    );
+    cache.open(key);
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(panel.message_limit, 2048);
+    assert_eq!(panel.file_limit, 12_000);
+    assert!(
+        panel
+            .features
+            .as_slice()
+            .iter()
+            .any(
+                |(feature, value)| *feature == talk_core::ui::messaging::MessageFeature::React
+                    && value.allowed == Decision::Allowed
+            )
+    );
+    assert!(cache.get(key).unwrap().loaded);
+}
+
+#[test]
+fn confirmed_pins_fence_older_reads_and_reconcile_edits_deletes_and_reopens() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Original")], None),
+    );
+    let old_list = admit(&mut cache, key, 2, Work::Pins);
+    complete(
+        &mut cache,
+        key,
+        3,
+        Work::PinChange {
+            message: 7,
+            pinned: true,
+        },
+        MessagingResult::Changed,
+    );
+    assert!(cache.complete(
+        key,
+        old_list,
+        Work::Pins,
+        RequestId(2),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(panel.pinned_messages.as_slice()[0].local_id, 7);
+    assert_eq!(panel.pins_state, RemoteState::Idle);
+    complete(
+        &mut cache,
+        key,
+        4,
+        Work::Action,
+        MessagingResult::Message(Box::new(message(key, 7, "Edited"))),
+    );
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(panel.pinned_messages.as_slice()[0].body.as_str(), "Edited");
+    let old_list = admit(&mut cache, key, 5, Work::Pins);
+    complete(
+        &mut cache,
+        key,
+        6,
+        Work::PinChange {
+            message: 7,
+            pinned: false,
+        },
+        MessagingResult::Changed,
+    );
+    assert!(cache.complete(
+        key,
+        old_list,
+        Work::Pins,
+        RequestId(5),
+        &Ok(messages(key, [message(key, 7, "Original")], None)),
+        false
+    ));
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.pinned_messages.as_slice().is_empty());
+    complete(
+        &mut cache,
+        key,
+        7,
+        Work::PinChange {
+            message: 7,
+            pinned: true,
+        },
+        MessagingResult::Changed,
+    );
+    let mut deleted = message(key, 7, "");
+    deleted.message.kind = MessageKind::Deleted;
+    complete(
+        &mut cache,
+        key,
+        8,
+        Work::Action,
+        MessagingResult::Message(Box::new(deleted)),
+    );
+    cache.open(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.pinned_messages.as_slice().is_empty());
+}
+
+#[test]
+fn pin_reads_and_failures_have_separate_state_and_never_invent_confirmed_membership() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let read = admit(&mut cache, key, 1, Work::Pins);
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(panel.pins_state, RemoteState::Loading(RequestId(1)));
+    assert!(!panel.pins_loaded);
+    assert_eq!(panel.state, RemoteState::Idle);
+    assert!(cache.complete(
+        key,
+        read,
+        Work::Pins,
+        RequestId(1),
+        &Err(Completion::Failed(UnavailableReason::PermissionDenied)),
+        false
+    ));
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(
+        panel.pins_state,
+        RemoteState::Failed(RequestId(1), UnavailableReason::PermissionDenied)
+    );
+    assert!(!panel.pins_loaded);
+    complete(&mut cache, key, 2, Work::Pins, messages(key, [], None));
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.pins_loaded);
+    let change = Work::PinChange {
+        message: 7,
+        pinned: true,
+    };
+    let operation = admit(&mut cache, key, 3, change);
+    assert!(cache.complete(
+        key,
+        operation,
+        change,
+        RequestId(3),
+        &Err(Completion::Uncertain),
+        false
+    ));
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.pinned_messages.as_slice().is_empty());
+    let obsolete = admit(&mut cache, key, 4, Work::Pins);
+    cache.remove(key);
+    cache.open(key);
+    assert!(!cache.complete(
+        key,
+        obsolete,
+        Work::Pins,
+        RequestId(4),
+        &Ok(messages(key, [message(key, 7, "Retired")], None)),
+        false
+    ));
+}
+
+#[test]
+fn forwarding_confirms_only_its_named_destination_without_inserting_into_source() {
+    let source = context(1, 1, 1, 1);
+    let destination = context(1, 1, 1, 2);
+    for (returned, expected) in [
+        (destination, Completion::ServerAccepted),
+        (source, Completion::Uncertain),
+    ] {
+        let mut model = super::super::tests::model();
+        select(&mut model, source);
+        complete(
+            &mut model.history,
+            source,
+            1,
+            Work::History,
+            messages(source, [message(source, 7, "Source")], None),
+        );
+        let work = Work::Forward(destination);
+        let operation = admit(&mut model.history, source, 2, work);
+        model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(2));
+        model.apply_message(
+            RequestId(2),
+            source,
+            operation,
+            work,
+            reply(
+                source,
+                operation,
+                MessagingResult::Send(protocol::SendReceipt {
+                    operation,
+                    state: protocol::SendState::ServerAccepted(MessageId {
+                        conversation: returned.conversation,
+                        sequence: 99,
+                    }),
+                }),
+            ),
+        );
+        assert_eq!(
+            model.snapshot.message_panel.as_ref().unwrap().result,
+            Some((RequestId(2), expected))
+        );
+        assert_eq!(model.snapshot.messages.as_slice().len(), 1);
+        assert_eq!(model.snapshot.messages.as_slice()[0].local_id, 7);
+    }
+}
+
+#[test]
+fn reminder_changes_and_schedule_cancellation_preserve_other_confirmed_entries() {
+    let key = context(1, 1, 1, 1);
+    let mut model = super::super::tests::model();
+    select(&mut model, key);
+    model.snapshot.message_panel.as_mut().unwrap().reminders = page([
+        talk_core::ui::messaging::Reminder {
+            message: 7,
+            timestamp: 100,
+        },
+        talk_core::ui::messaging::Reminder {
+            message: 8,
+            timestamp: 200,
+        },
+    ]);
+    let work = Work::Reminder(7);
+    let operation = admit(&mut model.history, key, 1, work);
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(1));
+    model.apply_message(
+        RequestId(1),
+        key,
+        operation,
+        work,
+        reply(
+            key,
+            operation,
+            MessagingResult::Reminder(Some(protocol::messaging::MessageReminder {
+                message: MessageId {
+                    conversation: key.conversation,
+                    sequence: 7,
+                },
+                timestamp: 300,
+            })),
+        ),
+    );
+    let reminders = &model.snapshot.message_panel.as_ref().unwrap().reminders;
+    assert_eq!(reminders.as_slice().len(), 2);
+    assert!(
+        reminders
+            .as_slice()
+            .iter()
+            .any(|r| r.message == 7 && r.timestamp == 300)
+    );
+    let operation = admit(&mut model.history, key, 2, work);
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(2));
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        work,
+        reply(key, operation, MessagingResult::Reminder(None)),
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .reminders
+            .as_slice(),
+        &[talk_core::ui::messaging::Reminder {
+            message: 8,
+            timestamp: 200
+        }]
+    );
+    model.snapshot.message_panel.as_mut().unwrap().scheduled =
+        page([7, 8].map(|id| talk_core::ui::messaging::Scheduled {
+            id,
+            body: text("Scheduled"),
+            timestamp: 100,
+        }));
+    let work = Work::CancelScheduled(7);
+    let operation = admit(&mut model.history, key, 3, work);
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(3));
+    model.apply_message(
+        RequestId(3),
+        key,
+        operation,
+        work,
+        reply(key, operation, MessagingResult::Changed),
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .scheduled
+            .as_slice()
+            .len(),
+        1
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .scheduled
+            .as_slice()[0]
+            .id,
+        8
+    );
+}
+
+#[test]
+fn older_reads_cannot_replace_newer_composer_capabilities_and_expired_sources_stay_unknown() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let first = admit(&mut cache, key, 1, Work::History);
+    let second = admit(&mut cache, key, 2, Work::Poll);
+    assert!(cache.complete(
+        key,
+        second,
+        Work::Poll,
+        RequestId(2),
+        &Ok(with_capabilities(messages(key, [], None), Decision::Denied)),
+        false
+    ));
+    assert!(cache.complete(
+        key,
+        first,
+        Work::History,
+        RequestId(1),
+        &Ok(with_capabilities(
+            messages(key, [], None),
+            Decision::Allowed
+        )),
+        false
+    ));
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(
+        panel
+            .features
+            .as_slice()
+            .iter()
+            .any(|(_, value)| value.allowed == Decision::Denied)
+    );
+    // Freshness starts at admission, so a slow response cannot create a fresh grant.
+    let operation = admit(&mut cache, key, 3, Work::Poll);
+    cache.flights.last_mut().unwrap().started = Instant::now() - Duration::from_secs(13);
+    assert!(cache.complete(
+        key,
+        operation,
+        Work::Poll,
+        RequestId(3),
+        &Ok(with_capabilities(
+            messages(key, [], None),
+            Decision::Allowed
+        )),
+        false
+    ));
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.features.as_slice().is_empty());
+    assert_eq!(panel.file_limit, 0);
+    cache.remove(key);
+    cache.open(key);
+    cache.get(key).unwrap().project(&mut panel);
+    assert!(panel.features.as_slice().is_empty());
+}
+
+fn reaction_result(key: ConversationRef, target: u128, count: u32) -> MessagingResult {
+    MessagingResult::Reactions {
+        message: MessageId {
+            conversation: key.conversation,
+            sequence: target.try_into().unwrap(),
+        },
+        reactions: if count == 0 {
+            Page::empty()
+        } else {
+            page([talk_core::protocol::messaging::Reaction {
+                emoji: text("👍"),
+                count,
+                own: true,
+            }])
+        },
+    }
+}
+
+fn admit_reaction(
+    model: &mut Accounts,
+    key: ConversationRef,
+    serial: u64,
+    target: u128,
+) -> OperationId {
+    assert!(model.history.can_react(key, target));
+    let operation = admit(&mut model.history, key, serial, Work::Reaction(target));
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.state = RemoteState::Saving(RequestId(serial));
+    panel.reaction_pending = Some(target);
+    operation
+}
+
+#[test]
+fn accepted_reactions_update_every_copy_immediately_and_older_reads_cannot_revert_them() {
+    for target in [7, 90] {
+        let key = context(1, 1, 1, 1);
+        let mut model = super::super::tests::model();
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Main")], None),
+        );
+        model.project_history(key);
+        let related = message_view(&message(key, target, "Related"));
+        complete(
+            &mut model.history,
+            key,
+            2,
+            Work::Pins,
+            messages(key, [message(key, target, "Related")], None),
+        );
+        let panel = model.snapshot.message_panel.as_mut().unwrap();
+        panel.thread_root = Some(7);
+        panel.thread_state = RemoteState::Loading(RequestId(4));
+        panel.thread_messages = page([related.clone()]);
+        panel.shared_files = page([related]);
+        let poll = admit(&mut model.history, key, 3, Work::Poll);
+        let thread = admit(&mut model.history, key, 4, Work::Thread);
+        let mutation = admit_reaction(&mut model, key, 5, u128::from(target));
+        model.apply_message(
+            RequestId(5),
+            key,
+            mutation,
+            Work::Reaction(u128::from(target)),
+            reply(key, mutation, reaction_result(key, u128::from(target), 3)),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        for copy in [
+            &panel.thread_messages,
+            &panel.pinned_messages,
+            &panel.shared_files,
+        ] {
+            assert_eq!(copy.as_slice()[0].metadata.reactions.as_slice()[0].count, 3);
+        }
+        assert_eq!(panel.reaction_pending, None);
+        assert_eq!(panel.state, RemoteState::Idle);
+        assert_eq!(
+            panel.result,
+            Some((RequestId(5), Completion::ServerAccepted))
+        );
+        assert_eq!(
+            model.history.flights.len(),
+            2,
+            "accepted response starts no follow-up GET"
+        );
+        model.apply_message(
+            RequestId(3),
+            key,
+            poll,
+            Work::Poll,
+            reply(key, poll, messages(key, [message(key, 7, "Main")], None)),
+        );
+        if target == 7 {
+            assert_eq!(
+                model.snapshot.messages.as_slice()[0]
+                    .metadata
+                    .reactions
+                    .as_slice()[0]
+                    .count,
+                3
+            );
+        }
+        model.apply_message(
+            RequestId(4),
+            key,
+            thread,
+            Work::Thread,
+            reply(
+                key,
+                thread,
+                messages(key, [message(key, target, "Related")], None),
+            ),
+        );
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(
+            panel.thread_messages.as_slice()[0]
+                .metadata
+                .reactions
+                .as_slice()[0]
+                .count,
+            3
+        );
+        assert!(
+            model
+                .history
+                .get(key)
+                .unwrap()
+                .reaction_snapshots
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn reaction_failure_uncertainty_and_wrong_target_preserve_counts_and_settle_only_exact_request() {
+    for failure in [0, 1, 2] {
+        let key = context(1, 1, 1, 1);
+        let mut model = super::super::tests::model();
+        select(&mut model, key);
+        complete(
+            &mut model.history,
+            key,
+            1,
+            Work::History,
+            messages(key, [message(key, 7, "Main")], None),
+        );
+        model.project_history(key);
+        let operation = admit_reaction(&mut model, key, 2, 7);
+        // An unrelated UI request cannot consume this operation's admission or pending marker.
+        model.apply_message(
+            RequestId(99),
+            key,
+            operation,
+            Work::Reaction(7),
+            reply(key, operation, reaction_result(key, 7, 4)),
+        );
+        assert_eq!(
+            model
+                .snapshot
+                .message_panel
+                .as_ref()
+                .unwrap()
+                .reaction_pending,
+            Some(7)
+        );
+        assert_eq!(model.history.flights.len(), 1);
+        let result = match failure {
+            0 => Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+            1 => Err(IdentityError::Request(ErrorKind::Uncertain)),
+            _ => reply(key, operation, reaction_result(key, 8, 4)),
+        };
+        model.apply_message(RequestId(2), key, operation, Work::Reaction(7), result);
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.reaction_pending, None);
+        assert!(
+            model.snapshot.messages.as_slice()[0]
+                .metadata
+                .reactions
+                .as_slice()
+                .is_empty()
+        );
+        assert_eq!(
+            panel.state,
+            if failure == 0 {
+                RemoteState::Failed(RequestId(2), UnavailableReason::PermissionDenied)
+            } else {
+                RemoteState::Uncertain(RequestId(2))
+            }
+        );
+    }
+}
+
+#[test]
+fn reaction_completion_cannot_clear_a_newer_pending_mutation_or_recreate_retired_history() {
+    let key = context(1, 1, 1, 1);
+    let mut model = super::super::tests::model();
+    select(&mut model, key);
+    let old = admit_reaction(&mut model, key, 1, 7);
+    model.snapshot.message_panel.as_mut().unwrap().state = RemoteState::Saving(RequestId(2));
+    model
+        .snapshot
+        .message_panel
+        .as_mut()
+        .unwrap()
+        .reaction_pending = Some(8);
+    model.apply_message(
+        RequestId(1),
+        key,
+        old,
+        Work::Reaction(7),
+        reply(key, old, reaction_result(key, 7, 2)),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.state, RemoteState::Saving(RequestId(2)));
+    assert_eq!(panel.reaction_pending, Some(8));
+    let retired = admit(&mut model.history, key, 3, Work::Reaction(8));
+    model.history.remove(key);
+    model.apply_message(
+        RequestId(3),
+        key,
+        retired,
+        Work::Reaction(8),
+        reply(key, retired, reaction_result(key, 8, 2)),
+    );
+    assert!(model.history.get(key).is_none());
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .reaction_pending,
+        Some(8)
+    );
+}
+
+#[test]
+fn reaction_old_read_protection_is_bounded_and_reclaims_after_reads_settle() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let old_read = admit(&mut cache, key, 1, Work::Poll);
+    for target in 1..=REACTION_SNAPSHOTS {
+        assert!(cache.can_react(key, target as u128));
+        complete(
+            &mut cache,
+            key,
+            target as u64 + 1,
+            Work::Reaction(target as u128),
+            reaction_result(key, target as u128, 1),
+        );
+    }
+    assert!(!cache.can_react(key, 101));
+    assert!(cache.can_react(key, 1));
+    assert_eq!(
+        cache.get(key).unwrap().reaction_snapshots.len(),
+        REACTION_SNAPSHOTS
+    );
+    assert!(cache.complete(
+        key,
+        old_read,
+        Work::Poll,
+        RequestId(1),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert!(cache.get(key).unwrap().reaction_snapshots.is_empty());
+    assert!(cache.can_react(key, 101));
+    cache.remove_account(key.account.account);
+    assert!(!cache.can_react(key, 1));
 }

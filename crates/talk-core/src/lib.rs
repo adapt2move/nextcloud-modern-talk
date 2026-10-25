@@ -7,6 +7,7 @@ pub mod calls;
 pub mod identity;
 pub mod ids;
 pub mod lifecycle;
+pub mod markup;
 pub mod policy;
 pub mod ports;
 pub mod preferences;

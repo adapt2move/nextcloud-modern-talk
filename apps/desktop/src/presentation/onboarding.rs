@@ -119,17 +119,8 @@ impl Desktop {
                                     .child(self.l("Serveradresse")),
                             )
                             .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .px_3()
+                                self.input_surface(&self.server, cx)
                                     .min_h(px(48.))
-                                    .rounded(px(8.))
-                                    .border_1()
-                                    .border_color(t.input_border)
-                                    .relative()
-                                    .child(self.field_ring(self.server.focus_handle(cx), 8.))
                                     .child(self.scaled_icon("globe", 18., t.muted))
                                     // The input is a flex child; retain its allocated
                                     // width when focus/validation rebuilds the form.
@@ -619,36 +610,36 @@ was ihr miteinander besprecht.")),
             })
             .child(
                 div()
-                    .relative()
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
                     .my_3()
                     .mr_3()
                     .when(narrow, |d| d.ml_3())
-                    .rounded(px(13.))
-                    .bg(t.surface)
-                    .overflow_hidden()
                     .child(
-                        self.scroll_area(super::navigation::Region::Onboarding)
-                            .size_full()
-                            // Card is explicitly non-shrinking; it determines scroll extent at large text.
-                            .child(
-                                div()
-                                    .min_h(px(sheet_height))
-                                    .w_full()
-                                    .px_8()
-                                    // Anchor the form to the viewport, not its
-                                    // content height: validation must not move
-                                    // the server field or the submit button.
-                                    .pt(px((sheet_height * 0.14).clamp(32., 80.)))
-                                    .pb_8()
-                                    .flex()
-                                    .flex_col()
-                                    .items_center()
-                                    .justify_start()
-                                    .child(card),
+                        self.content_card(
+                            div().child(
+                                self.scroll_area(super::navigation::Region::Onboarding)
+                                    .size_full()
+                                    // Card is explicitly non-shrinking; it determines scroll extent at large text.
+                                    .child(
+                                        div()
+                                            .min_h(px(sheet_height))
+                                            .w_full()
+                                            .px_8()
+                                            // Anchor the form to the viewport, not its
+                                            // content height: validation must not move
+                                            // the server field or the submit button.
+                                            .pt(px((sheet_height * 0.14).clamp(32., 80.)))
+                                            .pb_8()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .justify_start()
+                                            .child(card),
+                                    ),
                             ),
+                        ),
                     ),
             )
     }

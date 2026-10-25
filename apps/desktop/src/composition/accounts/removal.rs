@@ -178,6 +178,7 @@ impl Accounts {
         ));
         self.preferences.retain(|p| p.scope.account != account);
         self.history.remove_account(account);
+        self.outbox.retire_account(account);
         if self
             .login
             .as_ref()
@@ -363,6 +364,7 @@ mod tests {
             )
             .unwrap(),
             server_label: None,
+            connected_once: true,
             account_label: None,
             attempt: None,
             scope: None,

@@ -30,20 +30,26 @@ MAX_FILES, MAX_BYTES = 128, 256 * 1024 * 1024
 MAIN_IDENTITY = "codesign-remove-signature-sha256-v1"
 DYLIB = re.compile(r"lib[a-zA-Z0-9_.+-]+\.dylib")
 
-# Actual element/device usage, not every codec shipped by the SDK. The engine
-# uses fixed Opus/VP8 RTP pipelines, never decodebin/playbin/autoplugging.
+# Actual element/device usage, not every codec shipped by the SDK. Calls use
+# fixed Opus/VP8 RTP pipelines; local attachment playback explicitly selects its
+# demux/parser/decoder branches. No decodebin/playbin/URI autoplugging or libav.
 # https://gstreamer.freedesktop.org/documentation/deploying/mac-osx.html
 PLUGINS = {
-    "coreelements": ["capsfilter"],
+    "coreelements": ["capsfilter", "queue"],
     "app": ["appsrc", "appsink"],
     "opus": ["opusenc", "opusdec"],
-    "vpx": ["vp8enc", "vp8dec"],
+    "vpx": ["vp8enc", "vp8dec", "vp9dec"],
+    "isomp4": ["qtdemux"],
+    "matroska": ["matroskademux"],
+    "videoparsersbad": ["h264parse", "h265parse"],
+    "audioparsers": ["aacparse"],
+    "osxaudio": ["atdec", "osxaudiosink"],
     "rtp": ["rtpopusdepay", "rtpvp8depay"],
     "audioconvert": ["audioconvert"],
     "audioresample": ["audioresample"],
     "videoconvertscale": ["videoconvert", "videoscale"],
     "videorate": ["videorate"],
-    "applemedia": ["avfvideosrc", "avfdeviceprovider"],
+    "applemedia": ["avfvideosrc", "avfdeviceprovider", "vtdec"],
 }
 
 
@@ -464,7 +470,7 @@ def prepare(root, stage, temporary):
         "schema": 1, "name": "GStreamer", "version": VERSION, "architecture": "arm64",
         "runtime_archive": {"url": RUNTIME_URL, "sha256": RUNTIME_SHA256},
         "plugins": PLUGINS,
-        "plugin_usage_sources": ["crates/talk-adapters/src/media/codecs.rs", "apps/desktop/src/devices/camera.rs"],
+        "plugin_usage_sources": ["crates/talk-adapters/src/media/codecs.rs", "apps/desktop/src/devices/camera.rs", "apps/desktop/src/composition/content_video/pipeline.rs"],
         "files": records, "source_distribution": sources,
         "modifications": "arm64 thinning, loader-relative install names, removed runpaths, ad-hoc signing",
         "qualification": "structural inspection only; no application, plugin or scanner execution",

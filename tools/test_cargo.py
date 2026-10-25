@@ -124,8 +124,18 @@ class CommandTests(unittest.TestCase):
         task = shutil.which("task")
         sentinel = self.root / "must-not-be-created"
         literal = "a 'quote' with $(touch " + str(sentinel) + ")"
+        # Task dispatch is tested without accessing the operator's macOS signing
+        # keychain. test_dev covers the real development runner separately.
+        for name in ("python3", "python"):
+            executable = self.root / name
+            executable.unlink()  # Remove the fixture symlink, never its target.
+            executable.write_text("#!" + sys.executable + "\nimport os,sys,json\nfrom pathlib import Path\n"
+                "if sys.argv[1] == 'tools/dev.py':\n"
+                " Path(os.environ['CARGO_TEST_RECORD']).write_text(json.dumps(sys.argv[1:]))\n"
+                "else:\n os.execv(" + repr(sys.executable) + ", [" + repr(sys.executable) + ", *sys.argv[1:]])\n")
+            executable.chmod(0o700)
         for name, expected in (
-            ("dev", ["run", "--locked", "-p", "talk-desktop", "--", "--ui-scenario", literal]),
+            ("dev", ["tools/dev.py", "--ui-scenario", literal]),
             ("build", ["build", "--locked", "--release", "--no-default-features", "-p", "talk-desktop", "--target-dir", literal]),
         ):
             flag = "--ui-scenario" if name == "dev" else "--target-dir"

@@ -19,6 +19,7 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
             | MessagingCommand::History { .. }
             | MessagingCommand::Poll { .. }
             | MessagingCommand::Context(_)
+            | MessagingCommand::ReconcileSend
             | MessagingCommand::ReactionAuthors { .. }
             | MessagingCommand::Mentions(_)
             | MessagingCommand::Search { .. }
@@ -35,7 +36,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
     use MessagingCommand as C;
     use MessagingFeature as F;
     match c {
-        C::History { .. } | C::Poll { .. } | C::Context(_) => F::Read,
+        C::History { .. } | C::Poll { .. } | C::Context(_) | C::ReconcileSend => F::Read,
         C::Send { .. } => F::Send,
         C::Edit { .. } => F::Edit,
         C::Delete(_) => F::Delete,
@@ -53,7 +54,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Threads | C::Thread(_) | C::RenameThread { .. } | C::ThreadNotifications { .. } => {
             F::Threads
         }
-        C::Forward { .. } => F::Forward,
+        C::Forward { .. } | C::ForwardApproved { .. } => F::Forward,
         C::SharedFiles { .. }
         | C::ShareFile { .. }
         | C::UploadFile { .. }
@@ -122,11 +123,21 @@ fn availability(
         allowed,
     }
 }
-fn now_unix() -> u64 {
+pub(super) fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(u64::MAX)
+}
+// The random operation is committed with the outbox intent before dispatch.
+// A stable reference lets a new process observe a prior POST; it is never a
+// license to repeat a POST whose outcome is unknown.
+fn send_reference(operation: OperationId) -> String {
+    format!(
+        "{:032x}{:032x}",
+        operation.as_local(),
+        operation.as_local() ^ 0x6e6d745f64757261626c655f73656e64
+    )
 }
 // A deliberately finite subset of Talk's server notification policy. Never infer
 // a mention from display text. Group defaults can be changed by the administrator;
@@ -248,6 +259,16 @@ impl NextcloudClient {
         }
         Ok(MessagingCapabilities {
             actions,
+            pin_change: if room.unknown_restrictions {
+                Decision::Unknown
+            } else if matches!(
+                room.role,
+                Role::Owner | Role::Moderator | Role::GuestModerator
+            ) {
+                room.actions.read_messages
+            } else {
+                Decision::Denied
+            },
             message_limit: caps.message_limit,
             file_limit: api::files::MAX_FILE_BYTES,
             read_receipts: caps.read_receipts,
@@ -370,9 +391,18 @@ impl NextcloudClient {
             .map(|s| Text::new(s))
             .transpose()
             .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        // Length-prefix the actor type so guest/user namespaces cannot collide.
+        // Unknown or oversized identity remains ungroupable, never name-based.
+        let author_key = message
+            .actor_type
+            .as_deref()
+            .zip(message.actor_id.as_deref())
+            .filter(|(kind, id)| !kind.is_empty() && !id.is_empty())
+            .and_then(|(kind, id)| Text::new(&format!("{}:{kind}:{id}", kind.len())).ok());
         let message = self.message(&message.project(), id)?;
         Ok(MessageDetails {
             message,
+            author_key,
             notify: Decision::Denied,
             own,
             replyable,
@@ -501,15 +531,18 @@ impl NextcloudClient {
         operation: OperationId,
         text: String,
         options: api::chat::ComposeOptions,
-    ) -> Result<MessagingResult, PortError> {
+    ) -> Result<(SendReceipt, Option<api::models::Message>), PortError> {
         if let Some(s) = self.sends.iter().find(|s| s.operation == operation) {
             if s.conversation != id {
                 return Err(self.error(ErrorKind::WrongScope));
             }
-            return Ok(MessagingResult::Send(SendReceipt {
-                operation,
-                state: s.state,
-            }));
+            return Ok((
+                SendReceipt {
+                    operation,
+                    state: s.state,
+                },
+                None,
+            ));
         }
         if self.sends.len() >= 100 {
             if let Some(index) = self
@@ -522,7 +555,7 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::Busy));
             }
         }
-        let reference = format!("{:032x}{:032x}", self.opaque()?, self.opaque()?);
+        let reference = send_reference(operation);
         let token = api::models::RoomToken::parse(self.check_room(id)?)
             .map_err(|k| self.error(transport::kind(k)))?;
         self.sends.push(PendingSend {
@@ -547,17 +580,17 @@ impl NextcloudClient {
             .await;
         match response {
             Ok(api::Reply::Message(message)) => {
-                let message = self
-                    .message(&message.project(), id)
+                let confirmed = self
+                    .message(&message.clone().project(), id)
                     .map_err(|_| self.error(ErrorKind::Uncertain))?;
-                if message.own_operation != Some(operation) {
+                if confirmed.own_operation != Some(operation) {
                     return Err(self.error(ErrorKind::Uncertain));
                 }
-                let state = SendState::ServerAccepted(message.id);
+                let state = SendState::ServerAccepted(confirmed.id);
                 if let Some(send) = self.sends.iter_mut().find(|s| s.operation == operation) {
                     send.state = state
                 }
-                Ok(MessagingResult::Send(SendReceipt { operation, state }))
+                Ok((SendReceipt { operation, state }, Some(message)))
             }
             Ok(_) => Err(self.error(ErrorKind::Uncertain)),
             Err(e) => {
@@ -569,6 +602,117 @@ impl NextcloudClient {
                 Err(e)
             }
         }
+    }
+    async fn reconcile_durable_send(
+        &mut self,
+        c: &OperationContext,
+        id: ConversationId,
+        operation: OperationId,
+        room: &Conversation,
+        caps: &Capabilities,
+    ) -> Result<MessagingResult, PortError> {
+        if !caps.has("chat-reference-id") {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        if let Some(old) = self.sends.iter().find(|s| s.operation == operation) {
+            if old.conversation != id {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            if let SendState::ServerAccepted(message) = old.state {
+                let response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|k| self.error(transport::kind(k)))?,
+                            command: WireCommand::Context(message.sequence),
+                        },
+                    )
+                    .await?;
+                if let api::Reply::History { messages, .. } = response {
+                    for value in messages {
+                        let details = self.details(value, id, room, caps)?;
+                        if details.own
+                            && details.message.id == message
+                            && details.message.own_operation == Some(operation)
+                        {
+                            return Ok(MessagingResult::Message(Box::new(details)));
+                        }
+                    }
+                }
+                return Ok(MessagingResult::Send(SendReceipt {
+                    operation,
+                    state: SendState::ServerAccepted(message),
+                }));
+            }
+            if old.state == SendState::Rejected {
+                return Ok(MessagingResult::Send(SendReceipt {
+                    operation,
+                    state: old.state,
+                }));
+            }
+        } else {
+            if self.sends.len() >= 100 {
+                let index = self
+                    .sends
+                    .iter()
+                    .position(|s| s.state != SendState::Uncertain)
+                    .ok_or_else(|| self.error(ErrorKind::Busy))?;
+                self.sends.remove(index);
+            }
+            self.sends.push(PendingSend {
+                operation,
+                conversation: id,
+                reference: send_reference(operation),
+                state: SendState::Uncertain,
+            });
+        }
+        let mut before = None;
+        // At most 200 observations, under the original request deadline. An old
+        // unresolved entry stays retained if this finite window cannot find it.
+        for _ in 0..4 {
+            let response = self
+                .transport
+                .api_request(
+                    c,
+                    api::Request::Chat {
+                        room: api::models::RoomToken::parse(self.check_room(id)?)
+                            .map_err(|k| self.error(transport::kind(k)))?,
+                        command: WireCommand::History {
+                            before,
+                            thread: None,
+                        },
+                    },
+                )
+                .await?;
+            let api::Reply::History {
+                messages,
+                last_given,
+                ..
+            } = response
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            let empty = messages.is_empty();
+            for message in messages {
+                let details = self.details(message, id, room, caps)?;
+                if details.own && details.message.own_operation == Some(operation) {
+                    if let Some(send) = self.sends.iter_mut().find(|s| s.operation == operation) {
+                        send.state = SendState::ServerAccepted(details.message.id)
+                    }
+                    return Ok(MessagingResult::Message(Box::new(details)));
+                }
+            }
+            if empty || last_given.is_none() || last_given == before {
+                break;
+            }
+            before = last_given;
+        }
+        Ok(MessagingResult::Send(SendReceipt {
+            operation,
+            state: SendState::Uncertain,
+        }))
     }
     pub(super) async fn messaging(
         &mut self,
@@ -588,6 +732,11 @@ impl NextcloudClient {
             ));
         }
         self.message_action(feature(&command), &room, &data, caps)?;
+        if command == C::ReconcileSend {
+            return self
+                .reconcile_durable_send(c, id, operation, &room, caps)
+                .await;
+        }
         if matches!(command, C::UploadFile { .. } | C::ShareFile { .. }) {
             self.message_action(MessagingFeature::Send, &room, &data, caps)?;
             if caps.conversation_subfolders != Some(true) {
@@ -741,6 +890,11 @@ impl NextcloudClient {
         if let C::Forward {
             source,
             destination,
+        }
+        | C::ForwardApproved {
+            source,
+            destination,
+            ..
         } = &command
         {
             self.message_scope(*source, id)?;
@@ -749,6 +903,12 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
             let original = self.target(c, *source).await?;
+            if let C::ForwardApproved { author, body, .. } = &command
+                && (original.author != author.as_str()
+                    || original.message.as_deref() != Some(body.as_str()))
+            {
+                return Err(self.error(ErrorKind::Conflict));
+            }
             if !original.rich.is_empty() || original.kind.as_deref() != Some("comment") {
                 return Err(self.error(ErrorKind::Unsupported));
             }
@@ -775,7 +935,8 @@ impl NextcloudClient {
                     text,
                     api::chat::ComposeOptions::default(),
                 )
-                .await;
+                .await
+                .map(|(receipt, _)| R::Send(receipt));
         }
         if let C::Send { text, options } = &command {
             self.message_text(text.as_str(), &data, &room, caps)?;
@@ -785,9 +946,18 @@ impl NextcloudClient {
             let options = self
                 .compose_options(c, id, options, &room, &data, caps)
                 .await?;
-            return self
+            let (receipt, message) = self
                 .detailed_send(c, id, operation, text.as_str().into(), options)
-                .await;
+                .await?;
+            // The POST already contains the canonical row, including actor and
+            // reactions. Publish it immediately instead of fetching it again.
+            return match message {
+                Some(message) => self
+                    .details(message, id, &room, caps)
+                    .map(|message| R::Message(Box::new(message)))
+                    .map_err(|_| self.error(ErrorKind::Uncertain)),
+                None => Ok(R::Send(receipt)),
+            };
         }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;
@@ -979,6 +1149,42 @@ impl NextcloudClient {
             }
             r => r?,
         };
+        if let C::Reminder { message, timestamp } = &command {
+            // POST/DELETE acknowledge the write without returning a reminder.
+            // Read the created value once under the same deadline; never turn
+            // the requested timestamp into a fabricated server confirmation.
+            let result = if !matches!(response, api::Reply::Acknowledged) {
+                Err(self.error(ErrorKind::Uncertain))
+            } else if timestamp.is_none() {
+                Ok(R::Reminder(None))
+            } else {
+                let token = api::models::RoomToken::parse(self.check_room(id)?)
+                    .map_err(|kind| self.error(transport::kind(kind)))?;
+                match self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: token,
+                            command: WireCommand::ReadReminder(message.sequence),
+                        },
+                    )
+                    .await
+                {
+                    Ok(api::Reply::Chat(WireResponse::Reminder(value)))
+                        if value.message == message.sequence =>
+                    {
+                        Ok(R::Reminder(Some(MessageReminder {
+                            message: *message,
+                            timestamp: value.timestamp,
+                        })))
+                    }
+                    _ => Err(self.error(ErrorKind::Uncertain)),
+                }
+            };
+            self.settle_action(operation, result.as_ref().err());
+            return result;
+        }
         if let C::SharedFiles { before } = &command {
             // Talk indexes images/videos as `media`, separately from documents.
             // Merge the two bounded pages so the native Files surface includes both.
@@ -1116,6 +1322,7 @@ impl NextcloudClient {
                     .filter(|n| *n > 0)
                     .map(mid);
                 Ok(R::Messages {
+                    capabilities: Some(self.message_capabilities(&room, &data, caps)?),
                     messages: out,
                     cursor,
                     common_read: common_read
@@ -1149,6 +1356,14 @@ impl NextcloudClient {
                 Ok(R::Mentions(out))
             }
             api::Reply::Chat(WireResponse::ReactionAuthors(values)) => {
+                if let C::React { message, .. } = &command {
+                    let reactions = reaction_counts(&values, self.transport.user())
+                        .map_err(|kind| self.error(kind))?;
+                    return Ok(R::Reactions {
+                        message: *message,
+                        reactions,
+                    });
+                }
                 let mut out = Page::empty();
                 for v in values {
                     out.try_push(Text::new(&v.name).map_err(|_| self.error(ErrorKind::TooLarge))?)
@@ -1272,5 +1487,76 @@ impl NextcloudClient {
             unread: None,
             notification_level: t.notification_level.and_then(|n| i8::try_from(n).ok()),
         })
+    }
+}
+
+/// Mutation replies contain the complete actor map. Keep counts and the own-user
+/// marker from that response together; do not guess from the requested delta.
+fn reaction_counts(
+    authors: &[api::chat::ReactionAuthor],
+    user: &str,
+) -> Result<Page<Reaction, 64>, ErrorKind> {
+    if authors.len() > 100 {
+        return Err(ErrorKind::TooLarge);
+    }
+    let mut counts: Vec<Reaction> = Vec::new();
+    for (index, author) in authors.iter().enumerate() {
+        if authors[..index].iter().any(|previous| {
+            previous.emoji == author.emoji
+                && previous.actor_type == author.actor_type
+                && previous.actor_id == author.actor_id
+        }) {
+            continue;
+        }
+        let emoji = Text::new(&author.emoji).map_err(|_| ErrorKind::TooLarge)?;
+        let own = author.actor_type == "users" && author.actor_id == user;
+        if let Some(reaction) = counts.iter_mut().find(|reaction| reaction.emoji == emoji) {
+            reaction.count += 1; // The response contains at most 100 unique actors.
+            reaction.own |= own;
+        } else {
+            if counts.len() == 64 {
+                return Err(ErrorKind::TooLarge);
+            }
+            counts.push(Reaction {
+                emoji,
+                count: 1,
+                own,
+            });
+        }
+    }
+    let mut result = Page::empty();
+    for reaction in counts {
+        result.try_push(reaction).map_err(|_| ErrorKind::TooLarge)?;
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod reaction_tests {
+    use super::*;
+    #[test]
+    fn authoritative_actor_map_sets_exact_counts_and_matches_own_actor_type() {
+        let author = |emoji: &str, actor_type: &str, actor_id: &str| api::chat::ReactionAuthor {
+            emoji: emoji.into(),
+            actor_type: actor_type.into(),
+            actor_id: actor_id.into(),
+            name: "Fixture".into(),
+        };
+        let counts = reaction_counts(
+            &[
+                author("👍", "users", "self"),
+                author("👍", "users", "self"),
+                author("👍", "users", "other"),
+                author("❤️", "guests", "self"),
+            ],
+            "self",
+        )
+        .unwrap();
+        assert_eq!(counts.as_slice().len(), 2);
+        assert_eq!(counts.as_slice()[0].count, 2);
+        assert!(counts.as_slice()[0].own);
+        assert_eq!(counts.as_slice()[1].count, 1);
+        assert!(!counts.as_slice()[1].own);
+        assert!(reaction_counts(&[], "self").unwrap().as_slice().is_empty());
     }
 }

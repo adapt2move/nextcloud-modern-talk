@@ -9,6 +9,8 @@ mod note_tests;
 mod notification_tests;
 #[path = "people_tests.rs"]
 mod people_tests;
+#[path = "reconcile_tests.rs"]
+mod reconcile_tests;
 #[path = "tag_tests.rs"]
 mod tag_tests;
 use serde_json::json;
@@ -27,6 +29,8 @@ struct Reply {
     delay: Duration,
     chunked: bool,
     echo_reference: bool,
+    drop_write_ack: bool,
+    history_reference: bool,
 }
 impl Reply {
     fn data(value: Value) -> Self {
@@ -43,6 +47,8 @@ impl Reply {
             delay: Duration::ZERO,
             chunked: false,
             echo_reference: false,
+            drop_write_ack: false,
+            history_reference: false,
         }
     }
 }
@@ -63,6 +69,7 @@ impl Server {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let observed = seen.clone();
         let job = tokio::spawn(async move {
+            let mut last_reference = None;
             for mut reply in replies {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut request = Vec::new();
@@ -86,6 +93,13 @@ impl Server {
                         }
                     }
                 }
+                let raw = String::from_utf8_lossy(&request);
+                if let Some(reference) = raw.split_once("\r\n\r\n").and_then(|(_, body)| {
+                    body.split('&')
+                        .find_map(|field| field.strip_prefix("referenceId="))
+                }) {
+                    last_reference = Some(reference.to_owned());
+                }
                 if reply.echo_reference {
                     let raw = String::from_utf8_lossy(&request);
                     let body = raw.split_once("\r\n\r\n").unwrap().1;
@@ -97,7 +111,21 @@ impl Server {
                     response["ocs"]["data"]["referenceId"] = json!(reference);
                     reply.body = serde_json::to_vec(&response).unwrap();
                 }
+                if reply.history_reference {
+                    let mut response: Value = serde_json::from_slice(&reply.body).unwrap();
+                    response["ocs"]["data"][0]["referenceId"] = json!(
+                        last_reference
+                            .as_ref()
+                            .expect("a prior mutation supplied the reference")
+                    );
+                    reply.body = serde_json::to_vec(&response).unwrap();
+                }
                 observed.lock().unwrap().push(request);
+                if reply.drop_write_ack {
+                    // The complete mutation reached this fixture. Close without
+                    // an HTTP acknowledgement; recovery must observe, not POST.
+                    continue;
+                }
                 tokio::time::sleep(reply.delay).await;
                 let framing = if reply.chunked {
                     "Transfer-Encoding: chunked".to_owned()

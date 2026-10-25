@@ -1,6 +1,6 @@
 //! Application chrome with native macOS traffic lights and OS window actions.
 use super::controls::Availability;
-use super::{ButtonStyle, Desktop, LocalAction};
+use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use gpui::{
     AnyElement, Context, CursorStyle, Decorations, Div, MouseButton, ResizeEdge, Stateful, Window,
     WindowControlArea, div, prelude::*, px,
@@ -26,7 +26,17 @@ impl Action {
 }
 
 impl Desktop {
-    pub(super) fn window_chrome(&self, window: &Window, cx: &Context<Self>) -> Stateful<Div> {
+    pub(super) fn window_chrome(
+        &self,
+        window: &Window,
+        shell_visible: bool,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        let navigation = shell_visible
+            && self.overlay.is_none()
+            && !self.account_removal.confirming()
+            && !self.incoming_visible();
+        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
         let custom_buttons = cfg!(target_os = "windows")
             || (cfg!(target_os = "linux")
                 && matches!(window.window_decorations(), Decorations::Client { .. }));
@@ -39,9 +49,7 @@ impl Desktop {
             .flex()
             .items_center()
             .px_4()
-            .when(cfg!(target_os = "macos") && !window.is_fullscreen(), |d| {
-                d.pl(px(88.))
-            })
+            .when(traffic_lights && !navigation, |d| d.pl(px(88.)))
             .text_size(px(12.))
             .text_color(self.theme.muted)
             .child(if self.development {
@@ -76,7 +84,48 @@ impl Desktop {
             .flex()
             .items_center()
             .gap_2()
+            .when(navigation, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .pl(px(if traffic_lights { 88. } else { 8. }))
+                        .child(
+                            self.icon_button(
+                                "toggle-navigation",
+                                (
+                                    "sidebar",
+                                    if self.sidebar_visible(window) {
+                                        "Seitenleiste ausblenden"
+                                    } else {
+                                        "Seitenleiste einblenden"
+                                    },
+                                ),
+                                ButtonStyle::Quiet,
+                                Availability::available().below_control(),
+                                LocalAction::ToggleNavigation,
+                                cx,
+                            )
+                            .size(px(30.))
+                            .min_h(px(30.)),
+                        ),
+                )
+            })
             .child(drag)
+            .when(navigation && self.narrow_navigation(window), |d| {
+                d.child(
+                    self.icon_button(
+                        "small-settings",
+                        ("settings", "Einstellungen"),
+                        ButtonStyle::Quiet,
+                        Availability::available().below_control(),
+                        LocalAction::Open(Overlay::Settings),
+                        cx,
+                    )
+                    .size(px(30.))
+                    .min_h(px(30.))
+                    .mr_3(),
+                )
+            })
             .when(self.can_install_update() && !self.projection_blocked, |d| {
                 d.child(
                     self.button_with_icon(

@@ -162,3 +162,64 @@ async fn dav_upload_cancelled_after_admission_before_execute_is_certain() {
     assert_eq!(server.count(), 1);
     assert_eq!(runtime.0.requests.available_permits(), 8);
 }
+
+#[tokio::test]
+async fn original_video_busy_releases_no_request_and_cancelled_admission_returns_its_permit() {
+    for cancel in [false, true] {
+        let (server, mut owner, runtime) = after_ocs_dispatch().await;
+        let mut ctx = context(&runtime);
+        let permits = if cancel {
+            ctx.cancellation = Cancellation::from_signal(CancelAfterAdmission {
+                runtime: runtime.clone(),
+                cancelled: Arc::new(AtomicBool::new(false)),
+            });
+            None
+        } else {
+            Some(
+                runtime
+                    .0
+                    .requests
+                    .clone()
+                    .try_acquire_many_owned(8)
+                    .unwrap(),
+            )
+        };
+        let error = owner
+            .video(
+                &ctx,
+                crate::files::FilePath::parse("/Talk/video.mp4").unwrap(),
+                crate::content::VideoFormat::Mp4,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.kind,
+            if cancel {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Busy
+            }
+        );
+        assert!(!owner.transport.request_dispatched());
+        assert_eq!(server.count(), 1);
+        drop(permits);
+        assert_eq!(runtime.0.requests.available_permits(), 8);
+    }
+}
+
+#[tokio::test]
+async fn original_video_rejects_non_video_mime_and_returns_shared_http_permit() {
+    let server = Server::start(vec![reply(json!({"untrusted": "not video"}))]).await;
+    let (mut owner, runtime) = client(&server);
+    let error = owner
+        .video(
+            &context(&runtime),
+            crate::files::FilePath::parse("/Talk/video.mp4").unwrap(),
+            crate::content::VideoFormat::Mp4,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Unsupported);
+    assert_eq!(server.count(), 1);
+    assert_eq!(runtime.0.requests.available_permits(), 8);
+}

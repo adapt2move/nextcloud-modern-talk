@@ -1,5 +1,6 @@
 //! Nextcloud HTTP/OCS deep module. Wire identifiers, authenticated transport and
 //! correlation journals stay here; core receives bounded normalized observations.
+pub(crate) mod avatars;
 mod call_policy;
 mod content;
 mod conversation;
@@ -100,6 +101,7 @@ struct ActiveConversation {
 /// `request` borrows the owner; dropping it cancels observation/I/O, but a dispatched
 /// mutation remains uncertain in its finite journal. This journal is memory-only.
 pub struct NextcloudClient {
+    avatars: avatars::Avatars,
     account_rejection: Option<AccountRejection>,
     media_service: Option<std::sync::Arc<crate::media::MediaService>>,
     meeting_owner: Option<meeting::CallOwner>,
@@ -200,6 +202,7 @@ impl NextcloudClient {
     }
     fn with_transport(transport: Transport) -> Result<Self, PortError> {
         Ok(Self {
+            avatars: avatars::Avatars::default(),
             account_rejection: None,
             transport,
             media_service: None,
@@ -231,6 +234,9 @@ impl NextcloudClient {
             #[cfg(any(test, feature = "backend-test"))]
             diagnostic_signaling: diagnostics::SignalingState::default(),
         })
+    }
+    pub(crate) fn set_avatar_store(&mut self, store: Box<dyn avatars::AvatarStore>) {
+        self.avatars.store = Some(store);
     }
     pub(crate) fn set_account_rejection_handler(&mut self, handler: AccountRejection) {
         self.account_rejection = Some(handler);
@@ -828,6 +834,23 @@ impl NextcloudClient {
                         .try_push(room)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
+                self.transport.validate(context)?;
+                let retained_avatars: Vec<_> = rooms
+                    .as_slice()
+                    .iter()
+                    .filter(|r| {
+                        r.actions.read_messages == Decision::Allowed
+                            && !r.classified
+                            && !r.sensitive
+                            && !r.unknown_restrictions
+                    })
+                    .filter_map(|r| {
+                        self.check_room(r.id)
+                            .ok()
+                            .map(|token| avatars::key("room", token))
+                    })
+                    .collect();
+                self.avatars.retain_rooms(&retained_avatars);
                 self.creation_uncertain = false;
                 Ok(ProtocolReply::Conversations(ConversationList {
                     scope: context.scope,

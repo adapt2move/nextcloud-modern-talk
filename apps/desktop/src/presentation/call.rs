@@ -158,62 +158,59 @@ impl Desktop {
                 d.child(self.feedback_view(cx))
             });
         div().size_full().p_3().bg(t.chrome()).child(
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .rounded(px(13.))
-                .bg(t.surface)
-                .border_1()
-                .border_color(t.border)
-                .track_focus(&self.modal_focus)
-                .tab_group()
-                .child(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .min_h(px(74.))
-                        .px_6()
-                        .py_3()
-                        .border_b_1()
-                        .border_color(t.border)
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .child(self.button_with_leading_icon(
-                            "prejoin-back",
-                            ("Zurück zum Gespräch", "arrow-left"),
-                            ButtonStyle::Secondary,
-                            Availability::available(),
-                            LocalAction::Close,
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_ellipsis()
-                                        .child(title.to_owned()),
-                                )
-                                .child(self.hint(self.l("Beitritt vorbereiten"))),
-                        ),
-                )
-                .child(
-                    self.scroll_area(super::navigation::Region::Prejoin)
-                        .flex_1()
-                        .min_h_0()
-                        .p_6()
-                        .child(
-                            div()
-                                .flex()
-                                .when(!wide, |d| d.flex_col())
-                                .gap_8()
-                                .child(preview)
-                                .child(devices),
-                        ),
-                ),
+            self.content_card(
+                div()
+                    .flex()
+                    .flex_col()
+                    .track_focus(&self.modal_focus)
+                    .tab_group()
+                    .child(
+                        div()
+                            .relative()
+                            .flex_none()
+                            .min_h(px(74.))
+                            .px_6()
+                            .py_3()
+                            .border_b_1()
+                            .border_color(t.border)
+                            .flex()
+                            .items_center()
+                            .gap_4()
+                            .child(self.button_with_leading_icon(
+                                "prejoin-back",
+                                ("Zurück zum Gespräch", "arrow-left"),
+                                ButtonStyle::Secondary,
+                                Availability::available(),
+                                LocalAction::Close,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_ellipsis()
+                                            .child(title.to_owned()),
+                                    )
+                                    .child(self.hint(self.l("Beitritt vorbereiten"))),
+                            ),
+                    )
+                    .child(
+                        self.scroll_area(super::navigation::Region::Prejoin)
+                            .flex_1()
+                            .min_h_0()
+                            .p_6()
+                            .child(
+                                div()
+                                    .flex()
+                                    .when(!wide, |d| d.flex_col())
+                                    .gap_8()
+                                    .child(preview)
+                                    .child(devices),
+                            ),
+                    ),
+            ),
         )
     }
     pub fn call_view(&self, window: &Window, cx: &Context<Self>) -> Div {
@@ -592,62 +589,62 @@ impl Desktop {
                 ),
         );
         div().size_full().p_3().bg(t.chrome()).child(
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .rounded(px(13.))
-                .overflow_hidden()
-                .bg(t.stage)
-                .text_color(t.stage_text)
-                .child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .px_5()
-                        .py_3()
-                        .min_h(px(64.))
-                        .border_b_1()
-                        .border_color(t.stage_panel)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(self.sp(16.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_ellipsis()
-                                        .child(call.title.as_str().to_owned()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(self.sp(12.))
-                                        .text_color(t.stage_muted)
-                                        .child(format!(
-                                            "{} · {}",
-                                            self.l(status),
-                                            self.count(
-                                                super::localization::Count::VisibleParticipants,
-                                                call.participants.as_slice().len() as u64
-                                            )
-                                        )),
-                                ),
-                        ),
-                )
-                .when(self.local_feedback_visible(), |d| {
-                    d.child(
+            self.content_card(
+                div()
+                    .flex()
+                    .flex_col()
+                    .bg(t.stage)
+                    .text_color(t.stage_text)
+                    .child(
                         div()
                             .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_4()
                             .px_5()
-                            .py_2()
-                            .child(self.feedback_view(cx)),
+                            .py_3()
+                            .min_h(px(64.))
+                            .border_b_1()
+                            .border_color(t.stage_panel)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(self.sp(16.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_ellipsis()
+                                            .child(call.title.as_str().to_owned()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(self.sp(12.))
+                                            .text_color(t.stage_muted)
+                                            .child(format!(
+                                                "{} · {}",
+                                                self.l(status),
+                                                self.count(
+                                                    super::localization::Count::VisibleParticipants,
+                                                    call.participants.as_slice().len() as u64
+                                                )
+                                            )),
+                                    ),
+                            ),
                     )
-                })
-                .child(body)
-                .child(controls),
+                    .when(self.local_feedback_visible(), |d| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .px_5()
+                                .py_2()
+                                .child(self.feedback_view(cx)),
+                        )
+                    })
+                    .child(body)
+                    .child(controls),
+            )
+            .bg(t.stage),
         )
     }
     fn call_outcome(&self, failed: bool, cx: &Context<Self>) -> Div {
@@ -687,8 +684,8 @@ impl Desktop {
                 "Du bist nicht mehr im Anruf.",
             )
         };
-        div().size_full().p_3().bg(t.chrome()).child(
-            div().size_full().rounded(px(13.)).bg(t.surface).text_color(t.text)
+        div().size_full().p_3().bg(t.chrome()).child(self.content_card(
+            div().text_color(t.text)
                 .flex().flex_col()
                 .child(div().flex_none().px_6().py_4().border_b_1().border_color(t.border)
                     .font_weight(FontWeight::MEDIUM).child(call.title.as_str().to_owned()))
@@ -703,7 +700,7 @@ impl Desktop {
                                 super::state::CallEntry::Direct(scope) | super::state::CallEntry::Conference(scope) => scope == call.scope,
                             }), "Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."),
                             LocalAction::Call, cx))
-                        .when(self.local_feedback_visible(), |d| d.child(self.feedback_view(cx))))))
+                        .when(self.local_feedback_visible(), |d| d.child(self.feedback_view(cx)))))))
     }
     pub(super) fn call_chat(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;
