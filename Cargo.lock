@@ -7270,7 +7270,7 @@ dependencies = [
  "talk-adapters",
  "talk-core",
  "unicode-segmentation",
- "windows 0.61.3",
+ "windows 0.62.2",
  "windows-permissions",
 ]
 
