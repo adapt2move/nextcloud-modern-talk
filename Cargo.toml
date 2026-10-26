@@ -73,7 +73,7 @@ version = "=1.0.1"
 default-features = false
 
 [workspace.dependencies.rusqlite]
-version = "=0.40.2"
+version = "=0.41.0"
 default-features = false
 features = ["bundled", "limits"]
 
