@@ -58,7 +58,7 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 enigo = { version = "=0.6.1", default-features = false }
 windows = { version = "=0.61.3", default-features = false, features = ["UI_ViewManagement"] }
 # Reuse the locked safe CoreGraphics preflight API; it neither prompts nor captures.
-core-graphics = { version = "=0.24.0", default-features = false, features = ["link"] }
+core-graphics = { version = "=0.25.0", default-features = false, features = ["link"] }
 # Read the OS motion preference in both bundled and cargo-run builds.
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }
 

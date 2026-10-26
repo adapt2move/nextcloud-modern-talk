@@ -7255,7 +7255,7 @@ dependencies = [
  "ashpd 0.12.3",
  "async-io",
  "atomicwrites",
- "core-graphics 0.24.0",
+ "core-graphics 0.25.0",
  "cpal",
  "enigo",
  "exacl",
