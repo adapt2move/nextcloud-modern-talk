@@ -27,7 +27,7 @@ talk-core = { path = "crates/talk-core" }
 talk-adapters = { path = "crates/talk-adapters" }
 
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "form", "stream"] }
-tokio = { version = "=1.53.3", default-features = false, features = ["rt", "time", "sync", "macros", "net", "io-util", "fs"] }
+tokio = { version = "=1.54.1", default-features = false, features = ["rt", "time", "sync", "macros", "net", "io-util", "fs"] }
 serde = { version = "=1.0.229", default-features = false, features = ["std"] }
 serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
 url = { version = "=2.5.8", default-features = false, features = ["std"] }
