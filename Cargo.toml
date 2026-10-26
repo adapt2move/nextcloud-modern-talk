@@ -17,7 +17,7 @@ publish = false
 webrtc = { version = "=0.21.1", default-features = false, features = ["runtime-tokio", "crypto-ring"] }
 # Exact core types used by the released async crate (media samples/RTP/codecs).
 rtc = { version = "=0.21.1", default-features = false }
-async-trait = "=0.1.89"
+async-trait = "=0.1.92"
 futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
@@ -33,10 +33,10 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["std"
 url = { version = "=2.5.8", default-features = false, features = ["std"] }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
-cookie = { version = "=0.18.1", default-features = false }
+cookie = { version = "=0.18.2", default-features = false }
 semver = { version = "=1.0.28", default-features = false, features = ["std"] }
 # Offline staged installation uses the released updater's transactional bundle swap.
-self_update = { version = "=1.3.1", default-features = false, features = ["reqwest", "rustls", "checksums", "archive-tar", "compression-tar-gz", "archive-zip", "compression-zip-deflate"] }
+self_update = { version = "=1.3.2", default-features = false, features = ["reqwest", "rustls", "checksums", "archive-tar", "compression-tar-gz", "archive-zip", "compression-zip-deflate"] }
 sha2 = { version = "=0.11.1", default-features = false }
 tempfile = { version = "=3.27.0", default-features = false, features = ["getrandom"] }
 flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
