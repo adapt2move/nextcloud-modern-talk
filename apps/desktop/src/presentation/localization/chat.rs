@@ -72,11 +72,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El borrador se está procesando.",
     ),
     (
-        "Die Emoji-Auswahl benötigt die für diesen Entwurf gesperrte Zwischenablage.",
-        "The emoji picker needs clipboard access, which is blocked for this draft.",
-        "El selector de emojis necesita acceso al portapapeles, bloqueado para este borrador.",
-    ),
-    (
         "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
         "The system time zone is unavailable. Please try again shortly.",
         "La zona horaria del sistema no está disponible. Inténtalo de nuevo en un momento.",
@@ -95,6 +90,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die native Emoji-Auswahl konnte nicht geöffnet werden.",
         "The native emoji picker could not be opened.",
         "No se pudo abrir el selector nativo de emojis.",
+    ),
+    (
+        "Die Änderung ist für diese Nachricht zu groß oder nicht als Markdown darstellbar. Dein Entwurf bleibt erhalten.",
+        "This change is too large for this message or cannot be represented as Markdown. Your draft is preserved.",
+        "El cambio es demasiado grande para este mensaje o no se puede representar en Markdown. Se conserva tu borrador.",
     ),
     (
         "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen.",
@@ -144,12 +144,18 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Use the first occurrence",
         "Usar la primera vez",
     ),
+    (
+        "Es werden bis zu 100 geladene Gespräche desselben Kontos angezeigt.",
+        "Up to 100 loaded conversations from the same account are shown.",
+        "Se muestran hasta 100 conversaciones cargadas de la misma cuenta.",
+    ),
     ("Favorit", "Favorite", "Favorito"),
     (
         "Favoriten sind für dieses Gespräch nicht verfügbar.",
         "Favorites are unavailable for this conversation.",
         "Los favoritos no están disponibles para esta conversación.",
     ),
+    ("Fett", "Bold", "Negrita"),
     (
         "Für diese Nachricht sind keine Aktionen verfügbar.",
         "No actions are available for this message.",
@@ -182,23 +188,25 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El contenido compartido no está disponible en este momento.",
     ),
     (
-        "Geteilte Inhalte werden geladen …",
-        "Loading shared content…",
-        "Cargando contenido compartido…",
-    ),
-    (
         "Im Gespräch suchen",
         "Search this conversation",
         "Buscar en esta conversación",
     ),
     ("In 30 Minuten", "In 30 minutes", "Dentro de 30 minutos"),
     ("In einer Stunde", "In one hour", "Dentro de una hora"),
+    ("Inline-Code", "Inline code", "Código en línea"),
     ("JJJJ-MM-TT HH:MM", "YYYY-MM-DD HH:MM", "AAAA-MM-DD HH:MM"),
+    (
+        "Kein Ziel ausgewählt.",
+        "No destination selected.",
+        "Ningún destino seleccionado.",
+    ),
     (
         "Keine Berechtigung für diese Aktion.",
         "You don't have permission for this action.",
         "No tienes permiso para esta acción.",
     ),
+    ("Kursiv", "Italic", "Cursiva"),
     ("Mit 👍 reagieren", "React with 👍", "Reaccionar con 👍"),
     ("Morgen um 09:00", "Tomorrow at 09:00", "Mañana a las 09:00"),
     (
@@ -253,6 +261,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Vorheriger Entwurf", "Previous draft", "Borrador anterior"),
     (
+        "Wartet auf Verbindung",
+        "Waiting for connection",
+        "Esperando conexión",
+    ),
+    (
+        "Wartet auf Versand",
+        "Queued to send",
+        "En cola para enviar",
+    ),
+    (
         "Weiterleiten ist derzeit nicht verfügbar.",
         "Forwarding is currently unavailable.",
         "Reenviar no está disponible en este momento.",
@@ -282,11 +300,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ältere Nachrichten erneut laden",
         "Retry loading older messages",
         "Volver a cargar mensajes anteriores",
-    ),
-    (
-        "Ältere Nachrichten werden geladen …",
-        "Loading older messages…",
-        "Cargando mensajes anteriores…",
     ),
     ("Änderung fehlgeschlagen", "Edit failed", "Error al editar"),
     (

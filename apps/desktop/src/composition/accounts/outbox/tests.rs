@@ -102,6 +102,50 @@ fn model() -> (Accounts, ConversationRef, NavigationRoomKey) {
 }
 
 #[test]
+fn queued_bubbles_distinguish_staging_dispatch_and_uncertain_reconciliation() {
+    let (mut model, context, room) = model();
+    model.outbox.load(
+        context.account.account,
+        &page([stored(
+            1,
+            room,
+            Intent::Send {
+                body: text("Offline message"),
+                options: Default::default(),
+            },
+            OutboxPhase::Queued,
+            1,
+        )]),
+    );
+    for (state, delivery) in [
+        (State::Saving, DeliveryState::Pending),
+        (State::Queued, DeliveryState::Queued),
+        (State::Marking, DeliveryState::Queued),
+        (State::Ready, DeliveryState::Queued),
+        (State::Running, DeliveryState::Pending),
+        (State::Uncertain, DeliveryState::Uncertain),
+        (State::Confirming, DeliveryState::Uncertain),
+    ] {
+        model.outbox.entries[0].state = state;
+        model.project_history(context);
+        let rows = model.snapshot.messages.as_slice();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body.as_str(), "Offline message");
+        assert_eq!(rows[0].delivery, delivery);
+        assert!(rows[0].own);
+    }
+    // A read-only reconciliation flight cannot make an ambiguous write look
+    // like a fresh send, even while it occupies the running transport slot.
+    model.outbox.entries[0].record.phase = OutboxPhase::Uncertain;
+    model.outbox.entries[0].state = State::Running;
+    model.project_history(context);
+    assert_eq!(
+        model.snapshot.messages.as_slice()[0].delivery,
+        DeliveryState::Uncertain
+    );
+}
+
+#[test]
 fn cached_active_scope_without_a_live_room_host_cannot_resolve_for_dispatch_or_marking() {
     use std::cell::Cell;
     use talk_core::ids::{HostId, RuntimeGeneration};
@@ -417,7 +461,7 @@ fn pending_bubbles_are_bounded_without_evicting_canonical_history_and_projection
         first
             .as_slice()
             .iter()
-            .filter(|m| m.delivery == DeliveryState::Pending)
+            .filter(|m| m.delivery == DeliveryState::Queued)
             .count(),
         2
     );
@@ -588,7 +632,7 @@ fn a_correlated_send_receipt_replaces_the_pending_bubble_with_one_canonical_row(
             .messages
             .as_slice()
             .iter()
-            .filter(|m| m.delivery == DeliveryState::Pending)
+            .filter(|m| m.delivery == DeliveryState::Queued)
             .count(),
         1
     );
@@ -626,7 +670,7 @@ fn a_correlated_send_receipt_replaces_the_pending_bubble_with_one_canonical_row(
             .messages
             .as_slice()
             .iter()
-            .all(|m| m.delivery != DeliveryState::Pending)
+            .all(|m| !matches!(m.delivery, DeliveryState::Queued | DeliveryState::Pending))
     );
     assert!(model.outbox.entries[0].state == State::Removing);
 }

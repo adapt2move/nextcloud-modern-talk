@@ -1,5 +1,5 @@
-//! Styling over original source byte ranges. The editable text, native preedit
-//! and selection model stay unchanged; IME underline wins over link decoration.
+//! Styling over visible document byte ranges. IME underline wins over link
+//! decoration; no paint-only syntax removal or hidden caret positions exist.
 use gpui::{FontStyle, FontWeight, StrikethroughStyle, TextRun, UnderlineStyle, px};
 use std::ops::Range;
 use talk_core::ui::markup::Span;
@@ -18,9 +18,10 @@ pub(super) fn runs(
             && text.is_char_boundary(range.end)
     };
     let marked = marked.filter(valid);
-    // The parser supplies at most512 disjoint spans. Never allocate according
-    // to an unchecked external span count, even if a caller violates that API.
-    let spans = spans.get(..spans.len().min(512)).unwrap_or(&[]);
+    // The composer admits at most one span per visible byte (4096 total).
+    let spans = spans
+        .get(..spans.len().min(super::rich::MAX_BYTES))
+        .unwrap_or(&[]);
     let mut edges = Vec::with_capacity(spans.len() * 2 + 4);
     edges.extend([0, text.len()]);
     for span in spans.iter().filter(|span| valid(&span.range)) {

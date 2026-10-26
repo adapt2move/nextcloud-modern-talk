@@ -63,7 +63,7 @@ pub(super) fn connection_failure_copy(
         ),
         ConnectionFailure::RateLimited => (
             "Zu viele Anfragen.",
-            "Der Server begrenzt die Anfragen. Bitte warte und versuche es später erneut.",
+            "Der Server begrenzt die Anfragen. Bitte später erneut versuchen.",
         ),
         ConnectionFailure::InvalidResponse => (
             "Unerwartete Serverantwort.",
@@ -162,22 +162,26 @@ pub struct PendingEdit {
     pub request: RequestId,
     pub message: u128,
     pub generation: u64,
+    pub editor_generation: u64,
     pub body: Text<4096>,
 }
 impl PendingEdit {
     /// Some(true) restores the prior draft. Other correlated outcomes release
     /// admission while retaining the current edit, including newer typed text.
+    /// A missing editor generation denotes active composition and never restores.
     pub fn complete(
         pending: &mut Option<Self>,
         request: RequestId,
         result: Completion,
         editing: Option<(u128, u64)>,
         body: &str,
+        editor_generation: Option<u64>,
     ) -> Option<bool> {
         let submitted = pending.as_ref().filter(|edit| edit.request == request)?;
         let restore = matches!(result, Completion::ServerAccepted | Completion::Queued)
             && editing == Some((submitted.message, submitted.generation))
-            && body == submitted.body.as_str();
+            && body == submitted.body.as_str()
+            && editor_generation == Some(submitted.editor_generation);
         *pending = None;
         Some(restore)
     }
@@ -190,10 +194,11 @@ struct Draft {
     target: talk_core::ui::messaging::ComposeTarget,
     pending: Option<(RequestId, Text<4096>)>,
     pending_origin: Option<ConversationRef>,
+    pending_editor: Option<u64>,
     pending_may_clear: bool,
     uncertain: bool,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Drafts {
     entries: Vec<Draft>,
     next_request: u64,
@@ -232,6 +237,7 @@ impl Drafts {
                     if draft.pending.is_some() && destination.pending.is_none() {
                         destination.pending = draft.pending;
                         destination.pending_origin = draft.pending_origin;
+                        destination.pending_editor = draft.pending_editor;
                         destination.pending_may_clear = false;
                         destination.uncertain = draft.uncertain;
                     } else if let Some((_, submitted)) = draft.pending.as_ref() {
@@ -364,6 +370,7 @@ impl Drafts {
                 target,
                 pending: None,
                 pending_origin: None,
+                pending_editor: None,
                 pending_may_clear: false,
                 uncertain: false,
             });
@@ -418,8 +425,54 @@ impl Drafts {
         self.next_request = request.0;
         draft.pending = Some((request, draft.text.clone()));
         draft.pending_origin = Some(context);
+        draft.pending_editor = None;
         draft.pending_may_clear = true;
         Ok(request)
+    }
+    /// Capture the editor revision immediately after a successful send, only
+    /// for the admitted request in the current compose target.
+    pub fn capture_editor(
+        &mut self,
+        context: ConversationRef,
+        request: RequestId,
+        generation: u64,
+    ) {
+        let target = self.target(context);
+        if let Some(draft) = self.entries.iter_mut().find(|draft| {
+            draft.context == context
+                && same_draft_target(&draft.target, &target)
+                && draft
+                    .pending
+                    .as_ref()
+                    .is_some_and(|(pending, _)| *pending == request)
+        }) {
+            draft.pending_editor = Some(generation);
+        }
+    }
+    /// Gate an editor reset and retain committed text when preedit or a newer
+    /// revision intervenes, even if undo restores the submitted body.
+    pub fn observe_editor(
+        &mut self,
+        context: ConversationRef,
+        generation: u64,
+        composing: bool,
+    ) -> bool {
+        let target = self.target(context);
+        let Some(draft) = self
+            .entries
+            .iter_mut()
+            .find(|draft| draft.context == context && same_draft_target(&draft.target, &target))
+        else {
+            return !composing;
+        };
+        let may_clear = !composing
+            && draft
+                .pending_editor
+                .is_none_or(|pending| pending == generation);
+        if !may_clear && draft.pending.is_some() {
+            draft.pending_may_clear = false;
+        }
+        may_clear
     }
     pub fn submission_context(&self, result: SubmissionResult) -> Option<ConversationRef> {
         self.entries
@@ -448,25 +501,40 @@ impl Drafts {
         if *request != result.request {
             return false;
         }
+        let mut completed_reply = None;
         match result.result {
             Completion::Queued | Completion::ServerAccepted => {
                 // Never erase text the user changed while the operation was in flight.
                 if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
+                    if draft.target.reply_to.is_some() {
+                        completed_reply = Some((draft.context, draft.target.clone()));
+                    }
                 }
                 draft.pending = None;
                 draft.pending_origin = None;
+                draft.pending_editor = None;
                 draft.pending_may_clear = false;
                 draft.uncertain = false;
             }
             Completion::Failed(_) => {
                 draft.pending = None;
                 draft.pending_origin = None;
+                draft.pending_editor = None;
                 draft.pending_may_clear = false;
                 draft.uncertain = false;
             }
             Completion::Uncertain => {
                 draft.uncertain = true;
+            }
+        }
+        if let Some((context, submitted_target)) = completed_reply {
+            let mut target = self.target(context);
+            if same_draft_target(&target, &submitted_target) {
+                // A quote belongs to one submission. Keep the current thread
+                // and delivery option, without retiring a newer reply target.
+                target.reply_to = None;
+                self.set_target(context, target);
             }
         }
         true
@@ -561,23 +629,27 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
     true
 }
 
-pub fn error_label(error: SubmitError) -> &'static str {
-    match error {
+pub fn error_label(error: SubmitError) -> Option<&'static str> {
+    Some(match error {
         SubmitError::Unavailable(UnavailableReason::Connection(failure)) => {
             connection_failure_copy(failure).1
         }
-        SubmitError::Busy | SubmitError::Unavailable(UnavailableReason::Busy) => {
-            "Die App ist gerade ausgelastet. Bitte kurz warten und erneut versuchen."
+        SubmitError::Busy => return None,
+        SubmitError::Unavailable(UnavailableReason::Busy) => {
+            "Die Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen."
         }
         SubmitError::StaleScope => {
             "Dieser Stand ist überholt. Bitte das Gespräch neu öffnen; dein Text bleibt erhalten."
         }
         SubmitError::Unavailable(UnavailableReason::PermissionDenied) => {
-            "Keine Berechtigung für diese Aktion. Dein Entwurf bleibt erhalten."
+            "Keine Berechtigung für diese Aktion."
         }
-        SubmitError::Unavailable(
-            UnavailableReason::PolicyUnknown | UnavailableReason::PolicyStale,
-        ) => "Berechtigungen werden geprüft. Die Aktion ist noch nicht verfügbar.",
+        SubmitError::Unavailable(UnavailableReason::PolicyUnknown) => {
+            "Die Verfügbarkeit ist nicht bekannt. Bitte neu laden."
+        }
+        SubmitError::Unavailable(UnavailableReason::PolicyStale) => {
+            "Berechtigungen müssen erneut geprüft werden."
+        }
         SubmitError::Unavailable(UnavailableReason::ReauthenticationRequired) => {
             "Bitte erneut anmelden. Dein Text wurde nicht gesendet."
         }
@@ -587,7 +659,7 @@ pub fn error_label(error: SubmitError) -> &'static str {
         SubmitError::Unavailable(UnavailableReason::Unsupported) => {
             "Diese Funktion ist in diesem Client noch nicht verfügbar."
         }
-    }
+    })
 }
 
 fn same_draft_target(
@@ -834,11 +906,13 @@ mod tests {
             };
             drafts.save(old, "submitted body").unwrap();
             let request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+            drafts.capture_editor(old, request, 1);
             drafts.rebind_cached(&cached, &restored);
             drafts.retain_accounts(&restored);
             drafts.rebind_cached(&restored, &fresh);
             drafts.retain_accounts(&fresh);
             assert!(drafts.pending(current));
+            assert_eq!(drafts.entries[0].pending_editor, Some(1));
             assert_eq!(
                 drafts.send(current, Decision::Allowed, &mut port),
                 Err(SubmitError::Busy)
@@ -851,6 +925,10 @@ mod tests {
             if newer_text {
                 drafts.save(current, "newer body").unwrap();
             }
+            assert_eq!(
+                drafts.observe_editor(current, if newer_text { 2 } else { 1 }, false),
+                !newer_text
+            );
             let result = SubmissionResult {
                 request,
                 context: old,
@@ -882,6 +960,7 @@ mod tests {
             .save(old, "same body deliberately typed again")
             .unwrap();
         let request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+        drafts.capture_editor(old, request, 1);
         assert!(drafts.set_target(
             current,
             talk_core::ui::messaging::ComposeTarget {
@@ -896,6 +975,8 @@ mod tests {
         drafts.retain_accounts(&fresh);
         assert!(drafts.target(current).silent);
         assert!(drafts.pending(current));
+        assert_eq!(drafts.entries[0].pending_editor, Some(1));
+        assert!(!drafts.observe_editor(current, 2, false));
         assert!(drafts.complete(SubmissionResult {
             request,
             context: old,
@@ -918,11 +999,14 @@ mod tests {
         };
         drafts.save(old, "older submitted body").unwrap();
         let old_request = drafts.send(old, Decision::Allowed, &mut port).unwrap();
+        drafts.capture_editor(old, old_request, 1);
         drafts.save(current, "newer submitted body").unwrap();
         let current_request = drafts.send(current, Decision::Allowed, &mut port).unwrap();
+        drafts.capture_editor(current, current_request, 2);
         drafts.rebind_cached(&cached, &fresh);
         drafts.retain_accounts(&fresh);
         assert_eq!(drafts.text(current), "newer submitted body");
+        assert!(drafts.observe_editor(current, 2, false));
         assert!(drafts.complete(SubmissionResult {
             request: old_request,
             context: old,
@@ -930,6 +1014,7 @@ mod tests {
         }));
         assert_eq!(drafts.text(current), "newer submitted body");
         assert!(drafts.pending(current));
+        assert!(drafts.observe_editor(current, 2, false));
         assert!(drafts.complete(SubmissionResult {
             request: current_request,
             context: current,
@@ -1017,6 +1102,7 @@ mod tests {
                 request: RequestId(7),
                 message: 42,
                 generation: 1,
+                editor_generation: 1,
                 body: Text::new("submitted edit").unwrap(),
             })
         };
@@ -1027,7 +1113,8 @@ mod tests {
                 RequestId(8),
                 Completion::ServerAccepted,
                 Some((42, 1)),
-                "submitted edit"
+                "submitted edit",
+                Some(1)
             ),
             None
         );
@@ -1043,7 +1130,8 @@ mod tests {
                     RequestId(7),
                     completion,
                     Some((42, 1)),
-                    "submitted edit"
+                    "submitted edit",
+                    Some(1)
                 ),
                 Some(true)
             );
@@ -1058,7 +1146,14 @@ mod tests {
             for completion in [Completion::ServerAccepted, Completion::Queued] {
                 let mut edit = pending();
                 assert_eq!(
-                    PendingEdit::complete(&mut edit, RequestId(7), completion, message, body),
+                    PendingEdit::complete(
+                        &mut edit,
+                        RequestId(7),
+                        completion,
+                        message,
+                        body,
+                        Some(1)
+                    ),
                     Some(false)
                 );
                 assert!(edit.is_none());
@@ -1075,7 +1170,8 @@ mod tests {
                     RequestId(7),
                     completion,
                     Some((42, 1)),
-                    "submitted edit"
+                    "submitted edit",
+                    Some(1)
                 ),
                 Some(false)
             );
@@ -1083,6 +1179,32 @@ mod tests {
                 edit.is_none(),
                 "a settled failure retains text and permits a deliberate new edit"
             );
+        }
+    }
+    #[test]
+    fn edit_receipts_never_restore_over_preedit_or_a_newer_revision_with_the_same_body() {
+        for completion in [Completion::ServerAccepted, Completion::Queued] {
+            for editor_generation in [None, Some(2), Some(3)] {
+                let mut edit = Some(PendingEdit {
+                    request: RequestId(7),
+                    message: 42,
+                    generation: 1,
+                    editor_generation: 1,
+                    body: Text::new("submitted edit").unwrap(),
+                });
+                assert_eq!(
+                    PendingEdit::complete(
+                        &mut edit,
+                        RequestId(7),
+                        completion,
+                        Some((42, 1)),
+                        "submitted edit",
+                        editor_generation
+                    ),
+                    Some(false)
+                );
+                assert!(edit.is_none(), "the correlated receipt releases admission");
+            }
         }
     }
     use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration};
@@ -1193,8 +1315,306 @@ mod tests {
         );
         assert!(!drafts.pending(c));
         assert_eq!(drafts.text(c), "Noch nicht gesendet 🧭");
+        drafts.capture_editor(c, RequestId(1), 1);
+        assert!(drafts.observe_editor(c, 2, false));
+        assert_eq!(drafts.entries[0].pending_editor, None);
         assert!(drafts.send(c, Decision::Unknown, &mut port).is_err());
         assert_eq!(port.submissions, 1);
+    }
+    #[test]
+    fn send_receipts_keep_the_same_committed_body_after_preedit_or_undo() {
+        for completion in [Completion::ServerAccepted, Completion::Queued] {
+            for composing in [true, false] {
+                let mut drafts = Drafts::default();
+                let c = context(1);
+                let mut port = Port {
+                    fail: None,
+                    submissions: 0,
+                };
+                drafts.save(c, "A").unwrap();
+                let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+                drafts.capture_editor(c, request, 1);
+                if !composing {
+                    drafts.save(c, "AB").unwrap();
+                    drafts.save(c, "A").unwrap();
+                }
+                assert!(!drafts.observe_editor(c, if composing { 2 } else { 3 }, composing));
+                assert_eq!(drafts.text(c), "A");
+                assert!(drafts.complete(SubmissionResult {
+                    request,
+                    context: c,
+                    result: completion,
+                }));
+                assert_eq!(drafts.text(c), "A");
+                assert!(!drafts.pending(c));
+                assert_eq!(drafts.entries[0].pending_editor, None);
+                assert_eq!(port.submissions, 1);
+            }
+        }
+    }
+    #[test]
+    fn editor_observation_and_capture_only_affect_the_matching_context_target_and_request() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let mut drafts = Drafts::default();
+        let c = context(1);
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts.save(c, "A").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        drafts.capture_editor(c, request, 1);
+        let mut other_host = c;
+        other_host.conversation.host = HostId::from_local(8);
+        let mut other_runtime = c;
+        other_runtime.account.runtime = RuntimeGeneration::from_local(2);
+        for other in [context(2), other_host, other_runtime] {
+            drafts.capture_editor(other, request, 2);
+            assert!(!drafts.observe_editor(other, 2, true));
+            assert!(drafts.observe_editor(other, 2, false));
+            assert!(!drafts.complete(SubmissionResult {
+                request,
+                context: other,
+                result: Completion::ServerAccepted,
+            }));
+        }
+        let other_request = RequestId(request.0 + 1);
+        drafts.capture_editor(c, other_request, 2);
+        assert!(!drafts.complete(SubmissionResult {
+            request: other_request,
+            context: c,
+            result: Completion::ServerAccepted,
+        }));
+        assert!(drafts.set_target(
+            c,
+            ComposeTarget {
+                reply_to: Some(7),
+                ..Default::default()
+            }
+        ));
+        drafts.save(c, "reply draft").unwrap();
+        drafts.capture_editor(c, request, 2);
+        assert!(!drafts.observe_editor(c, 2, true));
+        assert_eq!(drafts.entries.len(), 2);
+        assert!(drafts.set_target(c, ComposeTarget::default()));
+        assert_eq!(drafts.text(c), "A");
+        assert!(drafts.pending(c));
+        assert!(drafts.observe_editor(c, 1, false));
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: c,
+            result: Completion::ServerAccepted,
+        }));
+        assert_eq!(drafts.text(c), "");
+        assert!(drafts.has_text_for_target(
+            c,
+            &ComposeTarget {
+                reply_to: Some(7),
+                ..Default::default()
+            }
+        ));
+        assert_eq!(port.submissions, 1);
+    }
+    #[test]
+    fn unchanged_editor_revisions_clear_normally_and_retire_with_their_submission() {
+        for completion in [Completion::ServerAccepted, Completion::Queued] {
+            let mut drafts = Drafts::default();
+            let c = context(1);
+            let mut port = Port {
+                fail: None,
+                submissions: 0,
+            };
+            drafts.save(c, "A").unwrap();
+            let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+            drafts.capture_editor(c, request, 1);
+            assert!(drafts.observe_editor(c, 1, false));
+            assert!(drafts.complete(SubmissionResult {
+                request,
+                context: c,
+                result: completion,
+            }));
+            assert_eq!(drafts.text(c), "");
+            assert!(!drafts.pending(c));
+            assert!(drafts.observe_editor(c, 2, false));
+            drafts.save(c, "B").unwrap();
+            let next_request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+            assert!(drafts.observe_editor(c, 2, false));
+            drafts.capture_editor(c, next_request, 2);
+            assert!(drafts.observe_editor(c, 2, false));
+            assert!(drafts.complete(SubmissionResult {
+                request: next_request,
+                context: c,
+                result: completion,
+            }));
+            assert_eq!(drafts.text(c), "");
+            assert_eq!(port.submissions, 2);
+        }
+    }
+    #[test]
+    fn successful_reply_retires_the_quote_and_restores_the_destination_draft() {
+        use talk_core::ui::messaging::ComposeTarget;
+        for completion in [Completion::Queued, Completion::ServerAccepted] {
+            for thread in [None, Some(9)] {
+                for silent in [false, true] {
+                    let c = context(1);
+                    let mut drafts = Drafts::default();
+                    let mut port = Port {
+                        fail: None,
+                        submissions: 0,
+                    };
+                    let destination = ComposeTarget {
+                        thread,
+                        silent,
+                        ..Default::default()
+                    };
+                    assert!(drafts.set_target(c, destination.clone()));
+                    drafts.save(c, "Unsent destination draft").unwrap();
+                    let reply = ComposeTarget {
+                        reply_to: Some(7),
+                        ..destination.clone()
+                    };
+                    assert!(drafts.set_target(c, reply.clone()));
+                    drafts.save(c, "Quoted reply").unwrap();
+                    let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+                    drafts.capture_editor(c, request, 1);
+                    assert_eq!(drafts.target(c), reply, "admission alone retains the quote");
+                    assert!(drafts.observe_editor(c, 1, false));
+                    assert!(drafts.complete(SubmissionResult {
+                        request,
+                        context: c,
+                        result: completion,
+                    }));
+                    assert_eq!(drafts.target(c), destination);
+                    assert_eq!(drafts.text(c), "Unsent destination draft");
+                    assert!(!drafts.has_text_for_target(c, &reply));
+                    assert!(!drafts.pending(c));
+                }
+            }
+        }
+    }
+    #[test]
+    fn reply_admission_failure_and_uncertain_receipts_keep_the_quote_for_recovery() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let c = context(1);
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: Some(SubmitError::Busy),
+            submissions: 0,
+        };
+        let reply = ComposeTarget {
+            reply_to: Some(7),
+            ..Default::default()
+        };
+        assert!(drafts.set_target(c, reply.clone()));
+        drafts.save(c, "Quoted reply").unwrap();
+        assert_eq!(
+            drafts.send(c, Decision::Allowed, &mut port),
+            Err(SubmitError::Busy)
+        );
+        assert_eq!(drafts.target(c), reply);
+        assert_eq!(drafts.text(c), "Quoted reply");
+        assert!(!drafts.pending(c));
+        port.fail = None;
+        for completion in [
+            Completion::Failed(UnavailableReason::Unconfigured),
+            Completion::Uncertain,
+        ] {
+            let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+            assert!(drafts.complete(SubmissionResult {
+                request,
+                context: c,
+                result: completion,
+            }));
+            assert_eq!(drafts.target(c), reply);
+            assert_eq!(drafts.text(c), "Quoted reply");
+            assert_eq!(drafts.pending(c), completion == Completion::Uncertain);
+            if completion == Completion::Uncertain {
+                assert!(drafts.complete(SubmissionResult {
+                    request,
+                    context: c,
+                    result: Completion::ServerAccepted,
+                }));
+                assert_eq!(drafts.target(c), ComposeTarget::default());
+                assert_eq!(drafts.text(c), "");
+            }
+        }
+    }
+    #[test]
+    fn reply_receipts_do_not_retire_newer_text_preedit_or_undone_edits() {
+        use talk_core::ui::messaging::ComposeTarget;
+        for completion in [Completion::Queued, Completion::ServerAccepted] {
+            for (body, generation, composing) in [
+                ("New reply draft", 2, false),
+                ("Quoted reply", 2, true),
+                ("Quoted reply", 3, false),
+            ] {
+                let c = context(1);
+                let mut drafts = Drafts::default();
+                let mut port = Port {
+                    fail: None,
+                    submissions: 0,
+                };
+                let reply = ComposeTarget {
+                    reply_to: Some(7),
+                    ..Default::default()
+                };
+                assert!(drafts.set_target(c, reply.clone()));
+                drafts.save(c, "Quoted reply").unwrap();
+                let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+                drafts.capture_editor(c, request, 1);
+                drafts.save(c, body).unwrap();
+                assert!(!drafts.observe_editor(c, generation, composing));
+                assert!(drafts.complete(SubmissionResult {
+                    request,
+                    context: c,
+                    result: completion,
+                }));
+                assert_eq!(drafts.target(c), reply);
+                assert_eq!(drafts.text(c), body);
+                assert!(!drafts.pending(c));
+            }
+        }
+    }
+    #[test]
+    fn reply_receipts_do_not_switch_another_active_compose_target() {
+        use talk_core::ui::messaging::ComposeTarget;
+        for next_target in [
+            ComposeTarget::default(),
+            ComposeTarget {
+                reply_to: Some(8),
+                ..Default::default()
+            },
+            ComposeTarget {
+                thread: Some(9),
+                ..Default::default()
+            },
+        ] {
+            let c = context(1);
+            let mut drafts = Drafts::default();
+            let mut port = Port {
+                fail: None,
+                submissions: 0,
+            };
+            let reply = ComposeTarget {
+                reply_to: Some(7),
+                ..Default::default()
+            };
+            assert!(drafts.set_target(c, reply.clone()));
+            drafts.save(c, "Quoted reply").unwrap();
+            let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+            drafts.capture_editor(c, request, 1);
+            assert!(drafts.set_target(c, next_target.clone()));
+            drafts.save(c, "Different draft").unwrap();
+            assert!(drafts.observe_editor(c, 2, false));
+            assert!(drafts.complete(SubmissionResult {
+                request,
+                context: c,
+                result: Completion::Queued,
+            }));
+            assert_eq!(drafts.target(c), next_target);
+            assert_eq!(drafts.text(c), "Different draft");
+            assert!(!drafts.has_text_for_target(c, &reply));
+        }
     }
     #[test]
     fn only_correlated_confirmation_clears_unchanged_text() {
@@ -1246,11 +1666,13 @@ mod tests {
         };
         drafts.save(c, "behalten").unwrap();
         let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        drafts.capture_editor(c, request, 1);
         drafts.complete(SubmissionResult {
             request,
             context: c,
             result: Completion::Uncertain,
         });
+        assert!(!drafts.observe_editor(c, 2, false));
         assert_eq!(
             drafts.send(c, Decision::Allowed, &mut port),
             Err(SubmitError::Busy)
@@ -1262,6 +1684,7 @@ mod tests {
         });
         assert_eq!(drafts.text(c), "behalten");
         assert!(!drafts.pending(c));
+        assert!(drafts.observe_editor(c, 2, false));
     }
     #[test]
     fn draft_capacity_rejects_navigation_without_eviction_and_scopes_hosts() {
@@ -1269,6 +1692,10 @@ mod tests {
         for i in 1..=8 {
             drafts.save(context(i), "Wichtig").unwrap();
         }
+        drafts.capture_editor(context(9), RequestId(1), 1);
+        assert!(drafts.observe_editor(context(9), 1, false));
+        assert!(!drafts.observe_editor(context(9), 1, true));
+        assert_eq!(drafts.entries.len(), 8);
         assert_eq!(drafts.save(context(9), "Neun"), Err(SubmitError::Busy));
         for i in 1..=8 {
             assert_eq!(drafts.text(context(i)), "Wichtig");
@@ -1428,5 +1855,57 @@ mod tests {
         other = scope;
         other.runtime = RuntimeGeneration::from_local(99);
         assert_eq!(account_connection_failure(&accounts, other), None);
+    }
+
+    #[test]
+    fn offline_sends_stage_multiple_drafts_despite_connection_failure_without_granting_dispatch() {
+        use talk_core::ui::{messaging::MessagePanel, presentation::ConnectionFailure};
+        let mut snapshot = draft_snapshot();
+        let c = snapshot.selected.unwrap();
+        snapshot.content = ContentState::Offline;
+        snapshot.accounts = test_page(snapshot.accounts.as_slice().iter().cloned().map(|mut a| {
+            a.connection_failure = Some(ConnectionFailure::Unreachable);
+            a
+        }));
+        let mut panel = MessagePanel::new(c);
+        panel.queue_available = true;
+        snapshot.message_panel = Some(panel);
+        let mut row = snapshot.conversations.as_slice()[0].clone();
+        row.send = Decision::Unknown;
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        for body in ["First offline message", "Second offline message"] {
+            drafts.save(c, body).unwrap();
+            let decision = composer_send_decision(&snapshot, &row);
+            assert_eq!(
+                decision,
+                Decision::Allowed,
+                "local staging is independent of transport"
+            );
+            let request = drafts.send(c, decision, &mut port).unwrap();
+            assert_eq!(drafts.text(c), body, "keep text until staging completes");
+            assert_eq!(drafts.send(c, decision, &mut port), Err(SubmitError::Busy));
+            assert!(drafts.complete(SubmissionResult {
+                request,
+                context: c,
+                result: Completion::Queued,
+            }));
+            assert_eq!(drafts.text(c), "");
+        }
+        assert_eq!(port.submissions, 2);
+        row.send = Decision::Denied;
+        assert_ne!(composer_send_decision(&snapshot, &row), Decision::Allowed);
+        row.send = Decision::Unknown;
+        snapshot.content = ContentState::Denied;
+        assert_ne!(composer_send_decision(&snapshot, &row), Decision::Allowed);
+        snapshot.content = ContentState::Offline;
+        snapshot.message_panel.as_mut().unwrap().queue_available = false;
+        assert_ne!(composer_send_decision(&snapshot, &row), Decision::Allowed);
+        snapshot.message_panel.as_mut().unwrap().queue_available = true;
+        snapshot.message_panel.as_mut().unwrap().context = context(2);
+        assert_ne!(composer_send_decision(&snapshot, &row), Decision::Allowed);
     }
 }

@@ -109,6 +109,10 @@ impl Desktop {
                         || self.settings_port.notification_source(self.snapshot.active_account, category) == SourceAvailability::Available;
                     let available = if source_available { self.settings_availability() }
                         else { Availability::when(false, "Keine bestätigte Kalenderquelle verfügbar.") };
+                    let testing = self.notification_test.is_some_and(|(request, current)| {
+                        current == category
+                            && matches!(self.notification_state, NotificationState::Pending(pending) if pending == request)
+                    });
                     let mut section = div().flex_none().flex().flex_col().gap_1().py_2()
                         .border_b_1().border_color(self.theme.border)
                         .child(div().flex().items_center().gap_3()
@@ -120,7 +124,7 @@ impl Desktop {
                             .child(div().flex_none().w(column).flex().justify_center()
                                 .child(self.switch(("notification-sound", index), "Ton", Some(delivery.sounds), available,
                                     LocalAction::Preference(PreferenceEdit::NotificationSound(category, !delivery.sounds)), cx)))
-                            .child(self.icon_button(("test-notification", index), ("bell", test), ButtonStyle::Quiet, available,
+                            .child(self.icon_button(("test-notification", index), ("bell", test), ButtonStyle::Quiet, if testing { Availability::pending() } else { available },
                                 LocalAction::TestNotification(category), cx).w(px(36.)).flex_none()));
                     if category == NotificationCategory::IncomingCalls
                         && (!self.settings_port.notification_capabilities().native_call_ui
@@ -128,23 +132,10 @@ impl Desktop {
                         section = section.child(self.hint(self.l("Derzeit werden normale Betriebssystem-Banner und Töne verwendet. Native Anrufaktionen sind noch nicht verfügbar.")));
                     }
                     if !source_available { section = section.child(self.hint(self.l("Keine bestätigte Kalenderquelle verfügbar."))); }
-                    if let Some((request, _)) = self.notification_test.filter(|(_, c)| *c == category) {
-                        let label = if self.notification_error.is_some() { Some("Benachrichtigung konnte nicht ausgegeben werden.") }
-                        else { match self.notification_state {
-                            NotificationState::Pending(current) if current == request => Some("Benachrichtigung wird angefragt …"),
-                            NotificationState::Finished { request: current, banner, sound } if current == request => Some(match (banner, sound) {
-                                (DeliveryOutcome::Failed(NotificationError::PermissionDenied), _) | (_, DeliveryOutcome::Failed(NotificationError::PermissionDenied)) => "Das Betriebssystem hat die Benachrichtigung abgelehnt.",
-                                (DeliveryOutcome::Failed(NotificationError::Unavailable), _) | (_, DeliveryOutcome::Failed(NotificationError::Unavailable)) => "Benachrichtigungen sind auf diesem System nicht verfügbar.",
-                                (DeliveryOutcome::Failed(NotificationError::SourceUnavailable), _) | (_, DeliveryOutcome::Failed(NotificationError::SourceUnavailable)) => "Keine bestätigte Kalenderquelle verfügbar.",
-                                (DeliveryOutcome::Cancelled, _) | (_, DeliveryOutcome::Cancelled) => "Testbenachrichtigung abgebrochen.",
-                                (DeliveryOutcome::Failed(_), _) | (_, DeliveryOutcome::Failed(_)) => "Benachrichtigung konnte nicht ausgegeben werden.",
-                                (DeliveryOutcome::Suppressed, DeliveryOutcome::Suppressed) => "Durch die Benachrichtigungseinstellungen unterdrückt.",
-                                _ => "An das Betriebssystem übergeben. Anzeige und Ton hängen von den Systemeinstellungen ab.",
-                            }), _ => None,
-                        }};
-                        if let Some(label) = label { section = section.child(self.hint(self.l(label))); }
+                    if let Some(label) = notification_feedback(category, self.notification_error, self.notification_test, self.notification_state) {
+                        section = section.child(self.hint(self.l(label)));
                     }
-                    page = page.child(section);
+                page = page.child(section);
                 }
                 page = page.child(self.hint(self.l(
                     "Tests prüfen nur die lokale Ausgabe, nicht den Empfang von Kontoereignissen.",
@@ -164,6 +155,9 @@ impl Desktop {
                         ActionId::PreviousControl => "Vorheriges Element",
                         ActionId::Undo => "Rückgängig",
                         ActionId::Redo => "Wiederholen",
+                        ActionId::FormatBold => "Fett",
+                        ActionId::FormatItalic => "Kursiv",
+                        ActionId::FormatCode => "Inline-Code",
                     };
                     let primary = if cfg!(target_os = "macos") {
                         "⌘"
@@ -212,31 +206,16 @@ impl Desktop {
                     .child(self.hint(self.l("Updates werden automatisch für den gewählten Kanal geprüft und heruntergeladen. Du entscheidest, wann installiert und neu gestartet wird.")))
                     .child(self.dialog_actions().child(self.segmented().children([(UpdateChannel::Stable,"Stable"),(UpdateChannel::Prerelease,"Vorabversionen")].into_iter().enumerate().map(|(i,(channel,label))|
                         self.segment(("update-channel",i),label,p.update_channel==channel,
-                            if installing { Availability::when(false,"Das Update wird installiert …") } else { self.settings_availability() },
+                            if installing { Availability::pending() } else { self.settings_availability() },
                             LocalAction::Preference(PreferenceEdit::UpdateChannel(channel)),cx))))
-                        .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,Availability::when(!checking,"Eine Updateaktion läuft bereits."),LocalAction::CheckUpdates,cx)));
-                let (status, state_key) = match &self.updates.state {
-                    UpdateState::Idle => ("Noch nicht geprüft.", 0usize),
-                    UpdateState::Checking => ("Updates werden geprüft …", 1),
-                    UpdateState::Current => ("Keine neuere Version in diesem Kanal verfügbar.", 2),
-                    UpdateState::Downloading { .. } => ("Das Update wird heruntergeladen …", 3),
-                    UpdateState::Verifying(_) => ("Das Update wird geprüft …", 4),
-                    UpdateState::Ready(_) => ("Das Update ist zur Installation bereit.", 5),
-                    UpdateState::Reserved(_) => ("Die App bereitet die Installation vor …", 6),
-                    UpdateState::Applying(_) => ("Das Update wird installiert …", 7),
-                    UpdateState::Installed(_) => (
-                        "Das Update ist installiert. Der Neustart wird vorbereitet …",
-                        8,
-                    ),
-                    UpdateState::Stopped => ("Die Updateprüfung wurde beendet.", 9),
-                    UpdateState::Failed(error) => {
-                        (super::preferences::update_error_label(*error), 10)
-                    }
-                };
+                        .child(self.button("check-updates","Updates suchen",ButtonStyle::Secondary,if checking { Availability::pending() } else { Availability::available() },LocalAction::CheckUpdates,cx)));
                 // Progress and other data updates keep this variant key; only
                 // the state hint reveals, never the download counter below.
-                page = page
-                    .child(self.reveal(("update-status", state_key), self.hint(self.l(status))));
+                if let Some((status, state_key)) = update_status(&self.updates.state) {
+                    page = page.child(
+                        self.reveal(("update-status", state_key), self.hint(self.l(status))),
+                    );
+                }
                 let release = match &self.updates.state {
                     UpdateState::Downloading { release, .. }
                     | UpdateState::Verifying(release)
@@ -292,6 +271,13 @@ impl Desktop {
         page
     }
     pub(super) fn preference_status(&self, cx: &Context<Self>) -> Div {
+        let Some(message) = preference_status_message(
+            self.preference_error,
+            self.preferences.save,
+            self.preferences.load,
+        ) else {
+            return div();
+        };
         let mut content = div()
             .flex_none()
             .flex()
@@ -300,23 +286,6 @@ impl Desktop {
             .pt_3()
             .border_t_1()
             .border_color(self.theme.border);
-        let message = if let Some(error) = self.preference_error {
-            preference_error_key(error)
-        } else {
-            match self.preferences.save {
-                SaveState::Pending { .. } => return div(),
-                SaveState::Failed { error, .. } => preference_error_key(error),
-                SaveState::Idle => match self.preferences.load {
-                    LoadState::Loading => "Einstellungen werden geladen …",
-                    LoadState::Failed(_) => {
-                        "Die gespeicherten Einstellungen konnten nicht gelesen werden. Die Standardwerte sind aktiv."
-                    }
-                    LoadState::DefaultsBecauseAbsent | LoadState::Loaded | LoadState::Migrated => {
-                        return div();
-                    }
-                },
-            }
-        };
         content = content.child(self.hint(self.l(message)));
         if matches!(
             self.preferences.save,
@@ -335,5 +304,225 @@ impl Desktop {
             )));
         }
         content
+    }
+}
+
+fn update_status(
+    state: &talk_core::preferences::updates::UpdateState,
+) -> Option<(&'static str, usize)> {
+    use talk_core::preferences::updates::UpdateState;
+    Some(match state {
+        UpdateState::Idle => ("Noch nicht geprüft.", 0),
+        UpdateState::Current => ("Keine neuere Version in diesem Kanal verfügbar.", 2),
+        UpdateState::Ready(_) => ("Das Update ist zur Installation bereit.", 5),
+        UpdateState::Installed(_) => ("Das Update ist installiert.", 8),
+        UpdateState::Stopped => ("Die Updateprüfung wurde beendet.", 9),
+        UpdateState::Failed(error) => (super::preferences::update_error_label(*error)?, 10),
+        UpdateState::Checking
+        | UpdateState::Downloading { .. }
+        | UpdateState::Verifying(_)
+        | UpdateState::Reserved(_)
+        | UpdateState::Applying(_) => return None,
+    })
+}
+
+fn preference_status_message(
+    error: Option<talk_core::preferences::PreferenceError>,
+    save: SaveState,
+    load: LoadState,
+) -> Option<&'static str> {
+    error
+        .and_then(preference_error_key)
+        .or_else(|| match save {
+            SaveState::Failed { error, .. } => preference_error_key(error),
+            SaveState::Idle | SaveState::Pending { .. } => None,
+        })
+        .or_else(|| {
+            matches!(load, LoadState::Failed(_)).then_some(
+                "Die gespeicherten Einstellungen konnten nicht gelesen werden. Die Standardwerte sind aktiv.",
+            )
+        })
+}
+
+// Synchronous failures have a category even when no request was admitted.
+// An accepted request identity remains reserved for actual worker progress.
+pub(super) fn record_notification_test(
+    accepted: &mut Option<(talk_core::preferences::RequestId, NotificationCategory)>,
+    failure: &mut Option<(NotificationCategory, NotificationError)>,
+    attempt: (talk_core::preferences::RequestId, NotificationCategory),
+    result: Result<(), NotificationError>,
+) {
+    match result {
+        Ok(()) => {
+            *accepted = Some(attempt);
+            *failure = None;
+        }
+        Err(NotificationError::Busy) => {}
+        Err(error) => *failure = Some((attempt.1, error)),
+    }
+}
+fn notification_feedback(
+    category: NotificationCategory,
+    failure: Option<(NotificationCategory, NotificationError)>,
+    accepted: Option<(talk_core::preferences::RequestId, NotificationCategory)>,
+    state: NotificationState,
+) -> Option<&'static str> {
+    if failure.is_some_and(|(scope, error)| scope == category && error != NotificationError::Busy) {
+        return Some("Benachrichtigung konnte nicht ausgegeben werden.");
+    }
+    let (request, _) = accepted.filter(|(_, scope)| *scope == category)?;
+    match state {
+        NotificationState::Finished {
+            request: current,
+            banner,
+            sound,
+        } if current == request => Some(match (banner, sound) {
+            (DeliveryOutcome::Failed(NotificationError::PermissionDenied), _)
+            | (_, DeliveryOutcome::Failed(NotificationError::PermissionDenied)) => {
+                "Das Betriebssystem hat die Benachrichtigung abgelehnt."
+            }
+            (DeliveryOutcome::Failed(NotificationError::Unavailable), _)
+            | (_, DeliveryOutcome::Failed(NotificationError::Unavailable)) => {
+                "Benachrichtigungen sind auf diesem System nicht verfügbar."
+            }
+            (DeliveryOutcome::Failed(NotificationError::SourceUnavailable), _)
+            | (_, DeliveryOutcome::Failed(NotificationError::SourceUnavailable)) => {
+                "Keine bestätigte Kalenderquelle verfügbar."
+            }
+            (DeliveryOutcome::Cancelled, _) | (_, DeliveryOutcome::Cancelled) => {
+                "Testbenachrichtigung abgebrochen."
+            }
+            (DeliveryOutcome::Failed(_), _) | (_, DeliveryOutcome::Failed(_)) => {
+                "Benachrichtigung konnte nicht ausgegeben werden."
+            }
+            (DeliveryOutcome::Suppressed, DeliveryOutcome::Suppressed) => {
+                "Durch die Benachrichtigungseinstellungen unterdrückt."
+            }
+            _ => {
+                "An das Betriebssystem übergeben. Anzeige und Ton hängen von den Systemeinstellungen ab."
+            }
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::preferences::update_error_label;
+    use talk_core::preferences::{
+        PreferenceError, RequestId, Revision,
+        updates::{UpdateError, UpdateState},
+    };
+
+    #[test]
+    fn notification_rejections_keep_their_category_without_faking_an_accepted_request() {
+        let mut accepted = None;
+        let mut failure = None;
+        let a = NotificationCategory::Messages;
+        let b = NotificationCategory::IncomingCalls;
+        record_notification_test(
+            &mut accepted,
+            &mut failure,
+            (RequestId(1), b),
+            Err(NotificationError::Unavailable),
+        );
+        assert!(accepted.is_none());
+        assert!(notification_feedback(b, failure, accepted, NotificationState::Idle).is_some());
+        assert!(notification_feedback(a, failure, accepted, NotificationState::Idle).is_none());
+        record_notification_test(&mut accepted, &mut failure, (RequestId(2), a), Ok(()));
+        assert_eq!(accepted, Some((RequestId(2), a)));
+        record_notification_test(
+            &mut accepted,
+            &mut failure,
+            (RequestId(3), b),
+            Err(NotificationError::Unavailable),
+        );
+        assert_eq!(accepted, Some((RequestId(2), a)));
+        assert!(
+            notification_feedback(
+                b,
+                failure,
+                accepted,
+                NotificationState::Pending(RequestId(2))
+            )
+            .is_some()
+        );
+        assert!(
+            notification_feedback(
+                a,
+                failure,
+                accepted,
+                NotificationState::Pending(RequestId(2))
+            )
+            .is_none()
+        );
+        let retained = (accepted, failure);
+        record_notification_test(
+            &mut accepted,
+            &mut failure,
+            (RequestId(4), b),
+            Err(NotificationError::Busy),
+        );
+        assert_eq!((accepted, failure), retained);
+        assert!(notification_feedback(b, failure, accepted, NotificationState::Idle).is_some());
+    }
+
+    #[test]
+    fn pending_controls_and_rejected_saves_do_not_hide_terminal_failures() {
+        assert_eq!(update_status(&UpdateState::Checking), None);
+        assert_eq!(
+            update_status(&UpdateState::Failed(UpdateError::Busy)),
+            update_error_label(UpdateError::Busy).map(|label| (label, 10)),
+        );
+        assert!(update_status(&UpdateState::Failed(UpdateError::Busy)).is_some());
+        assert!(update_status(&UpdateState::Failed(UpdateError::InstallUncertain)).is_some());
+        let pending = SaveState::Pending {
+            request: RequestId(4),
+            revision: Revision(2),
+        };
+        assert_eq!(
+            preference_status_message(None, pending, LoadState::Loaded),
+            None
+        );
+        assert_eq!(
+            preference_status_message(
+                Some(PreferenceError::Busy),
+                SaveState::Idle,
+                LoadState::Loading
+            ),
+            None,
+        );
+        let failed = SaveState::Failed {
+            request: RequestId(4),
+            revision: Revision(2),
+            error: PreferenceError::PermissionDenied,
+            retry_available: true,
+        };
+        assert_eq!(
+            preference_status_message(Some(PreferenceError::Busy), failed, LoadState::Loaded),
+            preference_error_key(PreferenceError::PermissionDenied),
+        );
+        assert_eq!(
+            preference_status_message(
+                Some(PreferenceError::PermissionDenied),
+                pending,
+                LoadState::Loaded
+            ),
+            preference_error_key(PreferenceError::PermissionDenied),
+        );
+        assert!(
+            preference_status_message(
+                Some(PreferenceError::Busy),
+                SaveState::Failed {
+                    request: RequestId(4),
+                    revision: Revision(2),
+                    error: PreferenceError::Busy,
+                    retry_available: true,
+                },
+                LoadState::Failed(PreferenceError::StorageUnavailable),
+            )
+            .is_some()
+        );
     }
 }

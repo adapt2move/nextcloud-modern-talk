@@ -100,7 +100,7 @@ fn copy(error: MessageActionError) -> &'static str {
             "Diese Aktion ist in diesem Client noch nicht verfügbar."
         }
         UnavailableReason::Busy => {
-            "Die App ist gerade ausgelastet. Bitte kurz warten und erneut versuchen."
+            "Die Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen."
         }
         UnavailableReason::PolicyUnknown | UnavailableReason::PolicyStale => {
             "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen."

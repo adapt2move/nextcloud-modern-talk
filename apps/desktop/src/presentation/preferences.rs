@@ -26,10 +26,14 @@ impl EmojiPickerError {
 
 pub(super) fn update_error_label(
     error: talk_core::preferences::updates::UpdateError,
-) -> &'static str {
+) -> Option<&'static str> {
     use talk_core::preferences::updates::UpdateError;
-    match error {
-        UpdateError::Busy => "Eine Updateaktion läuft bereits.",
+    Some(match error {
+        // Synchronous admission rejects Busy at the caller. In a completed
+        // snapshot it can mean the worker failed to acquire its storage lock.
+        UpdateError::Busy => {
+            "Der Updatedienst konnte nicht gestartet werden. Starte die App neu und versuche es erneut."
+        }
         UpdateError::Network => "Die Updatequelle ist gerade nicht erreichbar.",
         UpdateError::RateLimited => "Zu viele Anfragen. Bitte später erneut prüfen.",
         UpdateError::InvalidResponse => "Die Updateantwort war ungültig.",
@@ -53,7 +57,7 @@ pub(super) fn update_error_label(
         UpdateError::Stale => "Die Updateauswahl hat sich geändert. Bitte erneut prüfen.",
         UpdateError::Cancelled => "Die Updateaktion wurde abgebrochen.",
         UpdateError::Stopped => "Der Updatedienst wurde beendet.",
-    }
+    })
 }
 
 pub trait ComputerSettingsPort {
@@ -234,14 +238,15 @@ impl Desktop {
             return;
         };
         self.settings_request = request;
-        self.preference_error = self
-            .settings_port
-            .submit(PreferenceCommand::RememberReaction {
-                generation: snapshot.generation,
-                request: RequestId(request),
-                emoji,
-            })
-            .err();
+        self.preference_error = preference_submission_error(
+            self.preference_error,
+            self.settings_port
+                .submit(PreferenceCommand::RememberReaction {
+                    generation: snapshot.generation,
+                    request: RequestId(request),
+                    emoji,
+                }),
+        );
         self.preferences = self.settings_port.snapshot();
     }
     pub(super) fn can_install_update(&self) -> bool {
@@ -300,15 +305,15 @@ impl Desktop {
     pub(super) fn commit_preferences(&mut self, values: LocalPreferences, cx: &mut Context<Self>) {
         if let Some(request) = self.settings_request.checked_add(1) {
             self.settings_request = request;
-            self.preference_error = self
-                .settings_port
-                .submit(PreferenceCommand::Set {
+            self.preference_error = preference_submission_error(
+                self.preference_error,
+                self.settings_port.submit(PreferenceCommand::Set {
                     generation: self.preferences.generation,
                     request: RequestId(request),
                     expected_revision: self.preferences.revision,
                     values,
-                })
-                .err();
+                }),
+            );
             self.apply_preferences(self.settings_port.snapshot(), cx);
         } else {
             self.preference_error = Some(PreferenceError::RevisionExhausted);
@@ -364,19 +369,20 @@ impl Desktop {
         } else {
             return;
         };
-        self.preference_error = self.settings_port.submit(command).err();
+        self.preference_error =
+            preference_submission_error(self.preference_error, self.settings_port.submit(command));
         self.apply_preferences(self.settings_port.snapshot(), cx);
     }
     pub(super) fn settings_availability(&self) -> super::controls::Availability {
         let running = self.preferences.runtime == talk_core::preferences::RuntimeState::Running;
-        super::controls::Availability::when(
-            running && self.preferences.load != LoadState::Loading,
-            if running {
-                "Einstellungen werden geladen …"
-            } else {
-                "Der Einstellungsdienst ist nicht verfügbar."
-            },
-        )
+        if running && self.preferences.load == LoadState::Loading {
+            super::controls::Availability::pending()
+        } else {
+            super::controls::Availability::when(
+                running,
+                "Der Einstellungsdienst ist nicht verfügbar.",
+            )
+        }
     }
     pub(super) fn local_preference_action(
         &mut self,
@@ -408,8 +414,18 @@ impl Desktop {
         true
     }
 }
-pub fn preference_error_key(error: PreferenceError) -> &'static str {
-    match error {
+fn preference_submission_error(
+    current: Option<PreferenceError>,
+    result: Result<(), PreferenceError>,
+) -> Option<PreferenceError> {
+    match result {
+        Err(PreferenceError::Busy) => current,
+        result => result.err(),
+    }
+}
+
+pub fn preference_error_key(error: PreferenceError) -> Option<&'static str> {
+    Some(match error {
         PreferenceError::PermissionDenied => {
             "Die Einstellungen konnten nicht gespeichert werden. Bitte prüfe die Zugriffsrechte."
         }
@@ -421,7 +437,7 @@ pub fn preference_error_key(error: PreferenceError) -> &'static str {
         PreferenceError::StartupUnavailable | PreferenceError::ApplyFailed => {
             "Der automatische Start konnte nicht eingerichtet werden."
         }
-        PreferenceError::Busy => "Bitte warte auf den laufenden Vorgang.",
+        PreferenceError::Busy => return None,
         PreferenceError::Stale => "Die Einstellungen haben sich geändert. Bitte erneut versuchen.",
         PreferenceError::Closed | PreferenceError::WorkerUnavailable => {
             "Der Einstellungsdienst ist nicht verfügbar."
@@ -432,5 +448,34 @@ pub fn preference_error_key(error: PreferenceError) -> &'static str {
         PreferenceError::StorageUnavailable => {
             "Die Einstellungen konnten nicht gespeichert werden. Die bestätigten Werte sind wieder aktiv."
         }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talk_core::preferences::updates::UpdateError;
+
+    #[test]
+    fn busy_admission_does_not_replace_a_save_failure_or_claim_success() {
+        assert_eq!(preference_error_key(PreferenceError::Busy), None);
+        assert!(update_error_label(UpdateError::Busy).is_some());
+        assert_eq!(
+            preference_submission_error(
+                Some(PreferenceError::PermissionDenied),
+                Err(PreferenceError::Busy),
+            ),
+            Some(PreferenceError::PermissionDenied),
+        );
+        assert_eq!(
+            preference_submission_error(None, Err(PreferenceError::Busy)),
+            None,
+        );
+        assert_eq!(
+            preference_submission_error(Some(PreferenceError::PermissionDenied), Ok(())),
+            None,
+        );
+        assert!(preference_error_key(PreferenceError::StorageUnavailable).is_some());
+        assert!(update_error_label(UpdateError::InstallUncertain).is_some());
     }
 }

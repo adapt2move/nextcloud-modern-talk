@@ -143,6 +143,7 @@ impl NextcloudClient {
                 use api::content::ImageRequest as I;
                 let mut durable = true;
                 let mut room_key = None;
+                let mut room_identity = None;
                 let image = match request {
                     AssetRequest::SelfAvatar => I::UserAvatar {
                         user: self.transport.user().to_owned(),
@@ -150,6 +151,8 @@ impl NextcloudClient {
                     AssetRequest::ConversationAvatar(id) => {
                         let room = self.content_room(c, id, caps).await?;
                         room_key = Some(avatars::key("room", self.check_room(id)?));
+                        room_identity =
+                            Some(avatars::canonical_identity("room", self.check_room(id)?));
                         durable = !room.classified && !room.sensitive;
                         if !caps.has("avatar") {
                             return Err(self.error(ErrorKind::Unsupported));
@@ -228,17 +231,29 @@ impl NextcloudClient {
                     }
                     _ => return Err(self.error(ErrorKind::Unsupported)),
                 };
+                let identity = match &image {
+                    I::UserAvatar { user } => avatars::canonical_identity("user", user),
+                    I::ConversationAvatar(_) => {
+                        room_identity.ok_or_else(|| self.error(ErrorKind::WrongScope))?
+                    }
+                    _ => return Err(self.error(ErrorKind::Unsupported)),
+                };
                 self.transport.validate(c)?;
                 let now = messaging::now_unix();
-                let bytes = if let Some(bytes) = self.avatars.get(&key, now, durable) {
-                    bytes
+                let (bytes, saved_at) = if let Some(cached) = self.avatars.get(&key, now, durable) {
+                    cached
                 } else {
                     let bytes = self.transport.image(c, image).await?;
                     self.transport.validate(c)?;
                     self.avatars.put(&key, &bytes, now, durable);
-                    bytes
+                    (bytes, now)
                 };
                 self.transport.validate(c)?;
+                let source = AvatarSource {
+                    identity,
+                    saved_at,
+                    restricted: !durable,
+                };
                 if let Some((emoji, color)) = server_emoji(&bytes) {
                     return Ok(ContentResult::Emoji {
                         text: Text::new(emoji).map_err(|_| self.error(ErrorKind::TooLarge))?,
@@ -246,10 +261,12 @@ impl NextcloudClient {
                             .map(Text::new)
                             .transpose()
                             .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        source,
                     });
                 }
                 Ok(ContentResult::Image(
-                    ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                    ImageBytes::avatar(bytes, source)
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?,
                 ))
             }
             ContentCommand::Poll {

@@ -20,9 +20,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 - Markdown covers bounded CommonMark, strikethrough and task markers. Tables
   remain readable source; HTML and Markdown images do not execute or load.
-  The composer shows and styles the original Markdown characters. Full rich-text
-  editing with hidden syntax is not implemented. Native Markdown/link/IME
-  interaction still needs platform qualification.
+  The composer supports direct editing of basic marks, headings, lists, task
+  markers, quotes, links and code with hidden syntax and canonical Markdown
+  serialization. Arbitrary Notion blocks, tables and embedded content are absent.
+  Native rich-editor/link/IME interaction still needs platform qualification.
 - Typing indicators, voice messages, complete document viewers, account-wide
   content search and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
@@ -43,7 +44,7 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   remain incomplete. Unknown notification eligibility stays suppressed.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to eight ordinary-room histories, member
-  counts and deliberately staged outgoing intents from private, unencrypted
+  counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
   storage. Restricted, unknown-policy and session-only content stays in memory.
   Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
   session-local. Small reencoded previews persist for up to seven days, with

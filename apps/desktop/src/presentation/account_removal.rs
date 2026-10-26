@@ -1,14 +1,15 @@
 //! Account removal is a confirmed typed intent; only runtime snapshots remove rows.
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability};
+use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FocusHandle, FontWeight, Window, div, prelude::*, px};
 use talk_core::preferences::navigation::NavigationAccountKey;
 use talk_core::ui::presentation::{
     AccountRemovalFailure, AccountRemovalResult, PresentationSnapshot, RequestId,
     SavedAccountPhase, UiIntent,
 };
-use talk_core::ui::{AccountId, AccountScope};
+use talk_core::ui::{AccountId, AccountScope, SubmitError};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct Target {
     account: AccountId,
     scope: Option<AccountScope>,
@@ -42,25 +43,69 @@ impl AccountRemovalUi {
     pub fn busy(&self) -> bool {
         self.pending.is_some()
     }
+    pub fn pending_for(&self, account: AccountId) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|(_, target)| target.account == account)
+    }
     pub fn dismiss_confirmation(&mut self) {
         self.confirmation = None;
         self.return_focus = None;
         self.focus_cancel = false;
     }
     fn complete(&mut self, result: AccountRemovalResult) -> bool {
-        if !self.pending.as_ref().is_some_and(|(request, target)| {
-            *request == result.request && target.account == result.account
-        }) {
-            return false;
-        }
-        if let Some((_, target)) = self.pending.take() {
-            self.failure = result
-                .result
-                .err()
-                .map(|failure| (target, removal_message(failure)));
-        }
-        true
+        record_removal_completion(&mut self.pending, &mut self.failure, result)
     }
+}
+
+/// Returns whether the confirmation can close. A rejected Busy submission owns
+/// no operation and leaves the confirmation, prior failure and focus untouched.
+fn record_removal_admission(
+    confirmation: &mut Option<Target>,
+    pending: &mut Option<(RequestId, Target)>,
+    failure: &mut Option<(Target, &'static str)>,
+    request: RequestId,
+    result: Result<(), SubmitError>,
+) -> bool {
+    if result == Err(SubmitError::Busy) {
+        return false;
+    }
+    let Some(target) = confirmation.take() else {
+        return false;
+    };
+    match result {
+        Ok(()) => {
+            *failure = None;
+            *pending = Some((request, target));
+        }
+        Err(error) => {
+            let error = match error {
+                SubmitError::StaleScope => AccountRemovalFailure::Changed,
+                _ => AccountRemovalFailure::Unavailable,
+            };
+            *failure = Some((target, removal_message(error)));
+        }
+    }
+    true
+}
+
+fn record_removal_completion(
+    pending: &mut Option<(RequestId, Target)>,
+    failure: &mut Option<(Target, &'static str)>,
+    result: AccountRemovalResult,
+) -> bool {
+    if !pending.as_ref().is_some_and(|(request, target)| {
+        *request == result.request && target.account == result.account
+    }) {
+        return false;
+    }
+    if let Some((_, target)) = pending.take() {
+        *failure = result
+            .result
+            .err()
+            .map(|failure| (target, removal_message(failure)));
+    }
+    true
 }
 
 fn removal_message(error: AccountRemovalFailure) -> &'static str {
@@ -99,13 +144,15 @@ fn removal_message(error: AccountRemovalFailure) -> &'static str {
             "Die Verbindung wurde getrennt, aber die Abmeldung konnte nicht dauerhaft gespeichert werden. Bitte versuche es erneut; nach einem Neustart könnte sich das Konto sonst wieder verbinden."
         }
         AccountRemovalFailure::CleanupPending => {
-            "Ein früherer Speichervorgang für diese Anmeldung ist noch nicht abgeschlossen. Das Konto bleibt abgemeldet. Warte kurz und versuche das Entfernen erneut."
+            "Ein früherer Speichervorgang für diese Anmeldung ist nicht abgeschlossen. Das Konto bleibt abgemeldet. Versuche das Entfernen erneut."
         }
         AccountRemovalFailure::TimedOut => {
-            "Das Entfernen dauert länger als erwartet. Es wurde noch nicht als abgeschlossen bestätigt. Warte kurz und versuche es erneut."
+            "Das Entfernen wurde nicht rechtzeitig bestätigt. Prüfe den Kontostatus und versuche das Entfernen erneut."
         }
         AccountRemovalFailure::Busy => {
-            "Der Kontospeicher wird gerade verwendet. Warte kurz und versuche das Entfernen erneut."
+            // Storage overload may be a terminal cleanup outcome. Keep an
+            // explicit failure and retry without claiming removal completed.
+            "Das Konto konnte nicht entfernt werden. Bitte versuche das Entfernen erneut."
         }
         AccountRemovalFailure::Cancelled => {
             "Das Entfernen wurde unterbrochen. Bitte versuche es erneut."
@@ -242,14 +289,14 @@ impl Desktop {
         cx.notify();
     }
     pub(super) fn confirm_account_removal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(target) = self.account_removal.confirmation.take() else {
+        let Some(target) = self.account_removal.confirmation.clone() else {
             return;
         };
-        self.cancel_account_removal(window, cx);
         if self.account_removal.busy() {
             return;
         }
         if !target_is_current(&self.snapshot, target.account, target.scope) {
+            self.cancel_account_removal(window, cx);
             self.account_removal.failure = Some((
                 target,
                 "Das Konto hat sich geändert. Bitte wähle es erneut aus.",
@@ -257,6 +304,7 @@ impl Desktop {
             return;
         }
         let Some(next) = self.account_removal.request.checked_add(1) else {
+            self.cancel_account_removal(window, cx);
             self.account_removal.failure = Some((
                 target,
                 "Bitte starte die App neu, bevor du weitere Konten entfernst.",
@@ -267,15 +315,20 @@ impl Desktop {
             return;
         }
         if let Some(result) = self.snapshot.account_removal
-            && self
-                .port
-                .try_submit(UiIntent::AcknowledgeAccountRemoval {
-                    request: result.request,
-                    account: result.account,
-                })
-                .is_err()
+            && let Err(error) = self.port.try_submit(UiIntent::AcknowledgeAccountRemoval {
+                request: result.request,
+                account: result.account,
+            })
         {
-            self.account_removal.failure = Some((target, "Bitte warte auf den laufenden Vorgang."));
+            if record_removal_admission(
+                &mut self.account_removal.confirmation,
+                &mut self.account_removal.pending,
+                &mut self.account_removal.failure,
+                RequestId(next),
+                Err(error),
+            ) {
+                self.cancel_account_removal(window, cx);
+            }
             return;
         }
         let clear_resume = self
@@ -304,27 +357,24 @@ impl Desktop {
             });
         let request = RequestId(next);
         self.account_removal.request = next;
-        match self.port.try_submit(UiIntent::RemoveAccount {
+        let result = self.port.try_submit(UiIntent::RemoveAccount {
             request,
             account: target.account,
             scope: target.scope,
-        }) {
-            Ok(()) => {
-                self.account_removal.failure = None;
-                self.account_removal.pending = Some((request, target));
-                if clear_resume {
-                    let mut values = self.preferences.active.clone();
-                    values.onboarding_resume = None;
-                    self.commit_preferences(values, cx);
-                }
-            }
-            Err(error) => {
-                let error = match error {
-                    talk_core::ui::SubmitError::Busy => AccountRemovalFailure::Busy,
-                    talk_core::ui::SubmitError::StaleScope => AccountRemovalFailure::Changed,
-                    _ => AccountRemovalFailure::Unavailable,
-                };
-                self.account_removal.failure = Some((target, removal_message(error)));
+        });
+        let admitted = result.is_ok();
+        if record_removal_admission(
+            &mut self.account_removal.confirmation,
+            &mut self.account_removal.pending,
+            &mut self.account_removal.failure,
+            request,
+            result,
+        ) {
+            self.cancel_account_removal(window, cx);
+            if admitted && clear_resume {
+                let mut values = self.preferences.active.clone();
+                values.onboarding_resume = None;
+                self.commit_preferences(values, cx);
             }
         }
     }
@@ -374,10 +424,11 @@ impl Desktop {
                     "retry-account-removal",
                     "Erneut versuchen",
                     ButtonStyle::Secondary,
-                    Availability::when(
-                        !self.account_removal.busy(),
-                        "Bitte warte auf den laufenden Vorgang.",
-                    ),
+                    if self.account_removal.busy() {
+                        Availability::pending()
+                    } else {
+                        Availability::available()
+                    },
                     LocalAction::RetryAccountRemoval,
                     cx,
                 ));
@@ -393,7 +444,7 @@ impl Desktop {
         let target = self.account_removal.confirmation.as_ref()?;
         Some(div().absolute().inset_0().occlude().bg(self.theme.scrim)
             .flex().items_center().justify_center().p_6()
-            .child(div().id("account-removal-dialog").track_focus(&self.account_removal.focus).tab_group()
+            .child(div().track_focus(&self.account_removal.focus).tab_group()
                 .w(px(440.)).max_w_full().rounded_xl().bg(self.theme.surface)
                 .border_1().border_color(self.theme.border).shadow_xl()
                 .child(self.scroll_area(super::navigation::Region::Overlay)
@@ -412,7 +463,11 @@ impl Desktop {
                     .child(self.button("cancel-account-removal", "Abbrechen", ButtonStyle::Secondary,
                         true, LocalAction::CancelAccountRemoval, cx))
                     .child(self.button("confirm-account-removal", "Aus dieser App entfernen", ButtonStyle::Danger,
-                        true, LocalAction::ConfirmAccountRemoval, cx)))))))
+                        true, LocalAction::ConfirmAccountRemoval, cx)))))
+                .map(|mut panel| {
+                    panel.interactivity().element_id = Some("account-removal-dialog".into());
+                    self.dialog_panel(DialogSurface::AccountRemoval, panel)
+                })))
     }
 }
 
@@ -420,6 +475,84 @@ impl Desktop {
 mod tests {
     use super::*;
     use talk_core::ui::RuntimeGeneration;
+
+    #[test]
+    fn busy_removal_admission_keeps_confirmation_and_failure_until_accepted() {
+        let target = Target {
+            account: AccountId::from_local(1),
+            scope: None,
+            label: "Test account".into(),
+        };
+        let prior_failure = Some((
+            target.clone(),
+            removal_message(AccountRemovalFailure::SuppressionUnconfirmed),
+        ));
+        let mut confirmation = Some(target.clone());
+        let mut pending = None;
+        let mut failure = prior_failure.clone();
+        assert!(!record_removal_admission(
+            &mut confirmation,
+            &mut pending,
+            &mut failure,
+            RequestId(1),
+            Err(SubmitError::Busy),
+        ));
+        assert_eq!(confirmation, Some(target.clone()));
+        assert_eq!(failure, prior_failure);
+        assert!(pending.is_none());
+
+        // The same transition handles a rejected prerequisite acknowledgement;
+        // a fresh attempt without a prior failure must not invent one either.
+        failure = None;
+        assert!(!record_removal_admission(
+            &mut confirmation,
+            &mut pending,
+            &mut failure,
+            RequestId(2),
+            Err(SubmitError::Busy),
+        ));
+        assert_eq!(confirmation, Some(target.clone()));
+        assert!(pending.is_none());
+        assert!(failure.is_none());
+
+        failure = prior_failure;
+        assert!(record_removal_admission(
+            &mut confirmation,
+            &mut pending,
+            &mut failure,
+            RequestId(3),
+            Ok(()),
+        ));
+        assert!(confirmation.is_none());
+        assert_eq!(pending, Some((RequestId(3), target.clone())));
+        assert!(failure.is_none());
+
+        assert!(!record_removal_completion(
+            &mut pending,
+            &mut failure,
+            AccountRemovalResult {
+                request: RequestId(2),
+                account: target.account,
+                result: Err(AccountRemovalFailure::Busy),
+            },
+        ));
+        assert_eq!(pending, Some((RequestId(3), target.clone())));
+        assert!(failure.is_none());
+        assert!(record_removal_completion(
+            &mut pending,
+            &mut failure,
+            AccountRemovalResult {
+                request: RequestId(3),
+                account: target.account,
+                result: Err(AccountRemovalFailure::Busy),
+            },
+        ));
+        assert!(pending.is_none());
+        assert_eq!(
+            failure,
+            Some((target, removal_message(AccountRemovalFailure::Busy)))
+        );
+    }
 
     #[test]
     fn removal_preserves_another_accounts_onboarding_checkpoint() {
@@ -541,18 +674,21 @@ mod tests {
         assert!(!target_matches(account.account, None, None, None));
     }
     #[test]
-    fn removal_feedback_distinguishes_keychain_denial_waiting_and_restart_risk() {
+    fn removal_feedback_preserves_cleanup_uncertainty_and_restart_risk() {
         let locked = removal_message(AccountRemovalFailure::NativeLocked);
         let denied = removal_message(AccountRemovalFailure::NativeDenied);
         let timeout = removal_message(AccountRemovalFailure::TimedOut);
         let pending = removal_message(AccountRemovalFailure::CleanupPending);
         let suppression = removal_message(AccountRemovalFailure::SuppressionUnconfirmed);
+        let busy = removal_message(AccountRemovalFailure::Busy);
         assert!(locked.contains("entsperre") || locked.contains("Entsperre"));
         assert!(denied.contains("verweigert") && denied.contains("Erlaube"));
-        assert!(timeout.contains("länger") && !timeout.contains("abgemeldet"));
+        assert!(timeout.contains("nicht rechtzeitig bestätigt") && !timeout.contains("abgemeldet"));
         assert!(pending.contains("Speichervorgang") && pending.contains("abgemeldet"));
         assert!(suppression.contains("Neustart") && suppression.contains("wieder verbinden"));
-        for key in [locked, denied, timeout, pending, suppression] {
+        assert!(busy.contains("nicht entfernt") && busy.contains("erneut"));
+        for key in [locked, denied, timeout, pending, suppression, busy] {
+            assert!(!key.contains("Warte"));
             for locale in [
                 talk_core::preferences::Locale::English,
                 talk_core::preferences::Locale::Spanish,

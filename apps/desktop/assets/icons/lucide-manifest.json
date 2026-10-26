@@ -130,6 +130,13 @@
       "transformation": "none"
     },
     {
+      "asset": "door-open.svg",
+      "upstream_path": "icons/door-open.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/door-open.svg",
+      "sha256": "dd7d3d092ce2770a2e291050aaa9d7f93e197cd0a4179cd2dc051c7ebc02b703",
+      "transformation": "none"
+    },
+    {
       "asset": "download.svg",
       "upstream_path": "icons/download.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/download.svg",
@@ -288,6 +295,27 @@
       "upstream_path": "icons/phone-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-off.svg",
       "sha256": "0216563fb50f55098d2d7a9ed11ac92a11f3c561ffec92a53657632779ed30f2",
+      "transformation": "none"
+    },
+    {
+      "asset": "phone-incoming.svg",
+      "upstream_path": "icons/phone-incoming.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-incoming.svg",
+      "sha256": "a5c41356a5197644ff96300ae14e63d568b94433bae97c2ea662bf7350c4cf69",
+      "transformation": "none"
+    },
+    {
+      "asset": "phone-missed.svg",
+      "upstream_path": "icons/phone-missed.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-missed.svg",
+      "sha256": "759b876efb659ea490fb6574c9b04720fa7ba3ffdd49a43b17c73343755179f7",
+      "transformation": "none"
+    },
+    {
+      "asset": "phone-outgoing.svg",
+      "upstream_path": "icons/phone-outgoing.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-outgoing.svg",
+      "sha256": "bf09a24fb5b28b3be94569843cd01ac9d859ddcb3a5d765c5838c9dc65886922",
       "transformation": "none"
     },
     {

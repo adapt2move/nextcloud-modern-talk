@@ -117,8 +117,7 @@ impl Desktop {
                 timestamp: Some(moment.timestamp),
             })
         } else if !self.composer.read(cx).composing() {
-            Text::new(self.composer.read(cx).content.as_str())
-                .ok()
+            self.composer_submission(cx)
                 .filter(|body| !body.as_str().trim().is_empty())
                 .map(|body| MessageAction::Schedule {
                     body,

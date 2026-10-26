@@ -3,6 +3,7 @@ use super::projection::Project;
 use super::*;
 use api::conversation::{Command as WireCommand, InvitationSource};
 use nextcloud_talk_api as api;
+use talk_core::ids::AccountScope;
 use talk_core::protocol::conversation::*;
 use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 
@@ -11,6 +12,41 @@ pub(super) struct MemberBinding {
     pub attendee: u64,
     pub actor_type: String,
     pub actor_id: String,
+}
+/// A refreshed participant is the same UI target only while its complete
+/// account/runtime/host/room/attendee/actor binding is unchanged. The current
+/// members list still owns authorization; a reproducible handle grants none.
+fn member_handle(
+    scope: AccountScope,
+    room: ConversationId,
+    attendee: u64,
+    actor_type: &str,
+    actor: &str,
+) -> MemberId {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"participant-avatar-v1");
+    for value in [
+        scope.account.as_local(),
+        scope.runtime.as_local(),
+        room.account.as_local(),
+        room.host.as_local(),
+        room.local,
+    ] {
+        hash.update(value.to_be_bytes());
+    }
+    hash.update(attendee.to_be_bytes());
+    hash.update((actor_type.len() as u64).to_be_bytes());
+    hash.update(actor_type.as_bytes());
+    hash.update(actor.as_bytes());
+    let mut local = [0; 16];
+    for (output, byte) in local.iter_mut().zip(hash.finalize()) {
+        *output = byte;
+    }
+    MemberId {
+        conversation: room,
+        local: u128::from_be_bytes(local),
+    }
 }
 pub(super) struct RecipientBinding {
     pub id: RecipientId,
@@ -40,6 +76,164 @@ pub(super) fn is_mutation(c: &ConversationCommand) -> bool {
             | ConversationCommand::BreakoutRooms
     )
 }
+/// Deliberately bounded CSV subset: one record per physical line, comma,
+/// semicolon or tab separators, optional email header, CSV double-quote escapes.
+/// Multiline quoted fields and arbitrary RFC 4180 documents are unsupported.
+fn preview_email_csv(
+    input: &str,
+) -> Result<(Vec<api::conversation::DirectoryEntry>, u16, u16), ErrorKind> {
+    if input.len() > 65_536 {
+        return Err(ErrorKind::TooLarge);
+    }
+    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
+    let mut entries: Vec<api::conversation::DirectoryEntry> = Vec::new();
+    let mut duplicates = 0u16;
+    let mut invalid = 0u16;
+    let mut format: Option<(char, Option<(usize, usize)>)> = None;
+    for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let delimiter = format.map_or_else(|| csv_delimiter(line), |(delimiter, _)| delimiter);
+        let first = format.is_none();
+        format.get_or_insert((delimiter, None));
+        let Some(fields) = csv_fields(line, delimiter) else {
+            invalid = invalid.saturating_add(1);
+            continue;
+        };
+        if first {
+            let mut header = None;
+            for (index, field) in fields.iter().enumerate() {
+                if matches!(
+                    field.to_ascii_lowercase().as_str(),
+                    "email" | "e-mail" | "email address" | "e-mail address" | "email_address"
+                ) {
+                    if header.is_some() {
+                        return Err(ErrorKind::Malformed);
+                    }
+                    header = Some(index);
+                }
+            }
+            if let Some(index) = header {
+                format = Some((delimiter, Some((index, fields.len()))));
+                continue;
+            }
+        }
+        let header = format.and_then(|(_, header)| header);
+        let email = match header {
+            Some((index, width)) if fields.len() == width => fields.get(index),
+            None if fields.len() == 1 => fields.first(),
+            _ => None,
+        };
+        let Some(email) = email.map(|email| email.trim()) else {
+            invalid = invalid.saturating_add(1);
+            continue;
+        };
+        if email.is_empty()
+            || email.len() > 254
+            || email.matches('@').count() != 1
+            || email.starts_with('@')
+            || email.ends_with('@')
+            || !email.contains('.')
+            || email.chars().any(|c| c.is_whitespace() || c.is_control())
+            || email.contains([',', ';', '<', '>', '"'])
+        {
+            invalid = invalid.saturating_add(1);
+            continue;
+        }
+        if entries
+            .iter()
+            .any(|entry| entry.id.eq_ignore_ascii_case(email))
+        {
+            duplicates = duplicates.saturating_add(1);
+            continue;
+        }
+        if entries.len() >= 100 {
+            return Err(ErrorKind::TooLarge);
+        }
+        entries.push(api::conversation::DirectoryEntry {
+            id: email.into(),
+            label: email.into(),
+            source: "emails".into(),
+            details: None,
+        });
+    }
+    Ok((entries, duplicates, invalid))
+}
+fn csv_delimiter(line: &str) -> char {
+    let mut counts = [0usize; 3];
+    let mut quoted = false;
+    for c in line.chars() {
+        if c == '"' {
+            quoted = !quoted;
+        }
+        if !quoted {
+            match c {
+                ',' => counts[0] += 1,
+                ';' => counts[1] += 1,
+                '\t' => counts[2] += 1,
+                _ => {}
+            }
+        }
+    }
+    if counts[1] > counts[0] && counts[1] >= counts[2] {
+        ';'
+    } else if counts[2] > counts[0] {
+        '\t'
+    } else {
+        ','
+    }
+}
+fn csv_fields(line: &str, delimiter: char) -> Option<Vec<String>> {
+    // The document already has a 64 KiB byte bound. Per-record limits are
+    // checked before pushing/allocating another column or growing a field.
+    const MAX_COLUMNS: usize = 32;
+    const MAX_FIELD_BYTES: usize = 4096;
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut closed = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                } else {
+                    quoted = false;
+                    closed = true;
+                    continue;
+                }
+            }
+        } else if c == delimiter {
+            if fields.len() >= MAX_COLUMNS - 1 {
+                return None;
+            }
+            fields.push(field.trim().to_owned());
+            field.clear();
+            closed = false;
+            continue;
+        } else if c == '"' {
+            if !field.trim().is_empty() || closed {
+                return None;
+            }
+            field.clear();
+            quoted = true;
+            continue;
+        } else if closed {
+            if c == ' ' || c == '\t' {
+                continue;
+            }
+            return None;
+        }
+        if c == '\r' || c == '\n' || field.len() + c.len_utf8() > MAX_FIELD_BYTES {
+            return None;
+        }
+        field.push(c);
+    }
+    if quoted {
+        return None;
+    }
+    fields.push(field.trim().to_owned());
+    Some(fields)
+}
 fn feature(setting: Setting) -> &'static str {
     match setting {
         Setting::Metadata => "room-description",
@@ -57,6 +251,7 @@ fn feature(setting: Setting) -> &'static str {
         Setting::Lobby => "webinary-lobby",
         Setting::RecordingConsent => "recording-consent",
         Setting::Delete | Setting::Members | Setting::Invite | Setting::Roles => "conversation-v4",
+        Setting::CsvImport => "email-csv-import",
         Setting::ClearHistory => "clear-history",
         Setting::Keep => "unbind-conversation",
         Setting::Bots => "bots-v1",
@@ -97,6 +292,26 @@ pub(super) fn control(
     data: &Value,
     caps: &Capabilities,
 ) -> ActionAvailability {
+    if setting == Setting::CsvImport {
+        let invite = control(Setting::Invite, room, data, caps);
+        let csv = caps.feature("email-csv-import");
+        let server = match (invite.server, csv) {
+            (FeatureSupport::Unsupported, _) | (_, FeatureSupport::Unsupported) => {
+                FeatureSupport::Unsupported
+            }
+            (FeatureSupport::Supported, FeatureSupport::Supported) => FeatureSupport::Supported,
+            _ => FeatureSupport::Unknown,
+        };
+        return ActionAvailability {
+            server,
+            allowed: if room.classified {
+                Decision::Denied
+            } else {
+                invite.allowed
+            },
+            ..invite
+        };
+    }
     let server = caps.feature(feature(setting));
     let preserved = wire::integer(data.get("attributes")).is_some_and(|v| v & 2 != 0);
     let direct = matches!(
@@ -123,6 +338,7 @@ pub(super) fn control(
             | Setting::Password
             | Setting::Discoverability
             | Setting::Invite
+            | Setting::CsvImport
             | Setting::Roles
             | Setting::Breakouts
     ) && direct
@@ -160,6 +376,7 @@ pub(super) fn control(
             Setting::GuestAccess
                 | Setting::Discoverability
                 | Setting::Bots
+                | Setting::CsvImport
                 | Setting::RecordingConsent
                 | Setting::Sensitive
         )
@@ -292,6 +509,7 @@ impl NextcloudClient {
             Setting::Keep,
             Setting::Members,
             Setting::Invite,
+            Setting::CsvImport,
             Setting::Roles,
             Setting::Bots,
             Setting::Bans,
@@ -409,14 +627,13 @@ impl NextcloudClient {
             let actor_type = p
                 .actor_type
                 .ok_or_else(|| self.error(ErrorKind::Malformed))?;
-            let handle = MemberId {
-                conversation: id,
-                local: self.opaque()?,
-            };
+            let handle = member_handle(c.scope, id, attendee, &actor_type, &actor_id);
             let role = wire::role(p.participant_type.map(Value::from).as_ref());
             members
                 .try_push(Member {
                     id: handle,
+                    avatar_identity: (actor_type == "users")
+                        .then(|| avatars::canonical_identity("user", &actor_id)),
                     name: Text::new(p.display_name.as_deref().unwrap_or(""))
                         .map_err(|_| self.error(ErrorKind::TooLarge))?,
                     role,
@@ -532,10 +749,8 @@ impl NextcloudClient {
             C::ClearHistory => Setting::ClearHistory,
             C::Keep => Setting::Keep,
             C::Members => Setting::Members,
-            C::Directory { .. }
-            | C::Invite(_)
-            | C::ResendInvitations(_)
-            | C::PreviewEmailCsv(_) => Setting::Invite,
+            C::Directory { .. } | C::Invite(_) | C::ResendInvitations(_) => Setting::Invite,
+            C::PreviewEmailCsv(_) => Setting::CsvImport,
             C::RemoveMember(_) | C::SetRole { .. } => Setting::Roles,
             C::Bots | C::SetBotEnabled { .. } => Setting::Bots,
             C::Bans | C::Ban { .. } | C::Unban(_) => Setting::Bans,
@@ -549,40 +764,8 @@ impl NextcloudClient {
             if !caps.has("email-csv-import") || room.classified {
                 return Err(self.error(ErrorKind::Unsupported));
             }
-            let mut entries = Vec::new();
-            let mut duplicate_count = 0;
-            let mut invalid_count = 0;
-            for line in text.as_str().lines() {
-                let email = line.trim().trim_matches('"');
-                if email.is_empty() {
-                    continue;
-                }
-                if email.len() > 254
-                    || email.matches('@').count() != 1
-                    || !email.contains('.')
-                    || email.chars().any(char::is_whitespace)
-                    || email.contains([',', ';', '<', '>', '"'])
-                {
-                    invalid_count += 1;
-                    continue;
-                }
-                if entries
-                    .iter()
-                    .any(|e: &api::conversation::DirectoryEntry| e.id.eq_ignore_ascii_case(email))
-                {
-                    duplicate_count += 1;
-                    continue;
-                }
-                if entries.len() >= 100 {
-                    return Err(self.error(ErrorKind::TooLarge));
-                }
-                entries.push(api::conversation::DirectoryEntry {
-                    id: email.into(),
-                    label: email.into(),
-                    source: "emails".into(),
-                    details: None,
-                });
-            }
+            let (entries, duplicate_count, invalid_count) =
+                preview_email_csv(text.as_str()).map_err(|kind| self.error(kind))?;
             return Ok(ConversationResult::EmailCsvPreview {
                 recipients: self.recipients(c, entries, None)?,
                 duplicate_count,
@@ -855,5 +1038,72 @@ impl NextcloudClient {
             self.settle_action(operation, result.as_ref().err())
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod csv_tests {
+    use super::*;
+    #[test]
+    fn headers_quoted_columns_bom_and_crlf_select_only_email() {
+        let (entries, duplicates, invalid) = preview_email_csv("\u{feff}\"Name\",\"Email Address\"\r\n\"Doe, Jane\",\"jane@example.test\"\r\n\"A \"\"quoted\"\" name\",\"second@example.test\"\r\n").unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["jane@example.test", "second@example.test"]
+        );
+        assert_eq!((duplicates, invalid), (0, 0));
+    }
+    #[test]
+    fn semicolon_tab_and_plain_address_rows_preserve_validation_and_deduplication() {
+        for input in [
+            "Name;E-Mail\nPerson;a@example.test",
+            "Name\tEMAIL_ADDRESS\nPerson\ta@example.test",
+            "\"a@example.test\"\nA@EXAMPLE.TEST\ninvalid\n",
+        ] {
+            let (entries, duplicates, invalid) = preview_email_csv(input).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].id, "a@example.test");
+            if input.contains("invalid") {
+                assert_eq!((duplicates, invalid), (1, 1));
+            } else {
+                assert_eq!((duplicates, invalid), (0, 0));
+            }
+        }
+    }
+    #[test]
+    fn malformed_and_multiline_quoted_records_are_rejected_without_guessing_columns() {
+        let (entries, _, invalid) = preview_email_csv("Name,Email\n\"unterminated,a@example.test\nName,b@example.test,extra\n\"line\nbreak\",c@example.test\n").unwrap();
+        assert!(entries.is_empty());
+        assert_eq!(invalid, 4);
+        assert_eq!(
+            preview_email_csv("Email,email\na@example.test,b@example.test").unwrap_err(),
+            ErrorKind::Malformed
+        );
+        let (entries, _, invalid) = preview_email_csv("Person,a@example.test").unwrap();
+        assert!(entries.is_empty());
+        assert_eq!(invalid, 1);
+    }
+    #[test]
+    fn document_recipient_column_and_field_limits_are_finite() {
+        assert_eq!(
+            preview_email_csv(&"a".repeat(65_537)).unwrap_err(),
+            ErrorKind::TooLarge
+        );
+        let hundred = (0..100)
+            .map(|i| format!("person{i}@example.test"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(preview_email_csv(&hundred).unwrap().0.len(), 100);
+        assert_eq!(
+            preview_email_csv(&format!("{hundred}\none-more@example.test")).unwrap_err(),
+            ErrorKind::TooLarge
+        );
+        assert!(csv_fields(&vec!["a"; 32].join(","), ',').is_some());
+        assert!(csv_fields(&vec!["a"; 33].join(","), ',').is_none());
+        assert!(csv_fields(&"a".repeat(4096), ',').is_some());
+        assert!(csv_fields(&"a".repeat(4097), ',').is_none());
     }
 }

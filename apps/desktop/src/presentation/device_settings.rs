@@ -39,24 +39,27 @@ impl Desktop {
                     self.applied_devices = Some(value);
                     self.device_error = None;
                 }
+                Err(DeviceError::Busy) => {}
                 Err(error) => self.device_error = Some(error),
             }
         }
     }
     pub(super) fn enumerate_devices(&mut self) {
         if let Some(request) = self.next_device_request() {
-            self.device_error = self
-                .settings_port
-                .submit_device(DeviceIntent::Enumerate { request })
-                .err();
+            self.device_error = device_submission_error(
+                self.device_error,
+                self.settings_port
+                    .submit_device(DeviceIntent::Enumerate { request }),
+            );
         }
     }
     pub(super) fn refresh_device_kind(&mut self, kind: DeviceKind) {
         if let Some(request) = self.next_device_request() {
-            self.device_error = self
-                .settings_port
-                .submit_device(DeviceIntent::Refresh { request, kind })
-                .err();
+            self.device_error = device_submission_error(
+                self.device_error,
+                self.settings_port
+                    .submit_device(DeviceIntent::Refresh { request, kind }),
+            );
         }
         if kind == DeviceKind::Microphone {
             self.microphone_auto_attempted = false;
@@ -137,15 +140,17 @@ impl Desktop {
                 self.device_session = Some(session);
                 self.device_error = None;
             }
+            Err(DeviceError::Busy) => {}
             Err(error) => self.device_error = Some(error),
         }
     }
     pub(super) fn stop_one_device(&mut self, kind: DeviceKind, cx: &mut Context<Self>) {
         if let Some(session) = self.device_session {
-            self.device_error = self
-                .settings_port
-                .submit_device(DeviceIntent::StopDevice { session, kind })
-                .err();
+            self.device_error = device_submission_error(
+                self.device_error,
+                self.settings_port
+                    .submit_device(DeviceIntent::StopDevice { session, kind }),
+            );
         }
         if kind == DeviceKind::Camera {
             self.set_camera_image(None, cx);
@@ -162,6 +167,7 @@ impl Desktop {
                     self.device_session = None;
                     self.device_error = None;
                 }
+                Err(DeviceError::Busy) => {}
                 Err(error) => self.device_error = Some(error),
             }
         }
@@ -399,10 +405,10 @@ impl Desktop {
         let snapshot = match &self.devices {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                return page.child(
-                    self.hint(self.l(device_error_key(*error)))
-                        .text_color(self.theme.danger),
-                );
+                if let Some(message) = device_error_key(*error) {
+                    page = page.child(self.hint(self.l(message)).text_color(self.theme.danger));
+                }
+                return page;
             }
         };
         for kind in [
@@ -491,16 +497,14 @@ impl Desktop {
             );
             let stopping =
                 self.device_stopping.is_some() || matches!(preview, PreviewState::Stopping { .. });
-            let check_availability = Availability::when(
-                available && !active && !stopping,
-                if active {
-                    "Klingelton wird einmal abgespielt …"
-                } else if stopping {
-                    "Gerät wird beendet …"
-                } else {
-                    "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt."
-                },
-            );
+            let check_availability = if active || stopping {
+                Availability::pending()
+            } else {
+                Availability::when(
+                    available,
+                    "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt.",
+                )
+            };
             section = section.child(self.device_selector(
                 kind,
                 chosen,
@@ -509,10 +513,10 @@ impl Desktop {
                 cx,
             ));
             let state_hint = match state {
-                SelectionState::Unknown => Some(self.l("Geräte werden ermittelt …").to_owned()),
+                SelectionState::Unknown => None,
                 SelectionState::DefaultFallback { effective: Some(_), .. } => Some(self.lf("Gespeichertes Gerät fehlt. Verwendet wird: {device}.", &[("device", effective.unwrap_or(self.l("Systemstandard")))])),
                 SelectionState::DefaultFallback { effective: None, .. } => Some(self.l("Gespeichertes Gerät fehlt. Bitte Systemstandard oder ein anderes Gerät wählen.").to_owned()),
-                SelectionState::Unavailable(error) => Some(self.l(device_error_key(*error)).to_owned()),
+                SelectionState::Unavailable(error) => device_error_key(*error).map(|key| self.l(key).to_owned()),
                 SelectionState::Selected(_) => None,
             };
             if let Some(message) = state_hint {
@@ -548,13 +552,8 @@ impl Desktop {
                     );
                 }
             }
-            if let PreviewState::Failed { error, .. } = preview
-                && error != DeviceError::PermissionDenied
-            {
-                section = section.child(
-                    self.hint(self.l(device_error_key(error)))
-                        .text_color(self.theme.danger),
-                );
+            if let Some(message) = device_preview_error(preview) {
+                section = section.child(self.hint(self.l(message)).text_color(self.theme.danger));
             }
             if kind == DeviceKind::Camera {
                 let permitted = self
@@ -581,12 +580,35 @@ impl Desktop {
                     );
                 }
                 if active {
+                    if matches!(preview, PreviewState::Starting { .. }) {
+                        preview_box = preview_box.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .p_4()
+                                .child(self.button_with_leading_icon(
+                                    "camera-start",
+                                    (self.l("Kameravorschau starten"), "video"),
+                                    ButtonStyle::Stage,
+                                    Availability::pending(),
+                                    LocalAction::StartDevice(DeviceKind::Camera),
+                                    cx,
+                                )),
+                        );
+                    }
                     preview_box = preview_box.child(div().absolute().top_2().right_2().child(
                         self.icon_button(
                             "camera-stop",
                             ("square", "Kameravorschau beenden"),
                             ButtonStyle::Stage,
-                            Availability::when(!stopping, "Gerät wird beendet …"),
+                            if stopping {
+                                Availability::pending()
+                            } else {
+                                Availability::available()
+                            },
                             LocalAction::StopDevice(DeviceKind::Camera),
                             cx,
                         ),
@@ -595,8 +617,8 @@ impl Desktop {
                     preview_box = preview_box.child(div().absolute().inset_0().flex().items_center().justify_center().p_4()
                         .child(self.button_with_leading_icon(
                             "camera-start", (self.l("Kameravorschau starten"), "video"), ButtonStyle::Stage,
-                            Availability::when(available && permitted && !stopping,
-                                if stopping { "Gerät wird beendet …" } else { "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt." }),
+                            if stopping { Availability::pending() } else { Availability::when(available && permitted,
+                                "Für diesen Test ist kein verfügbares Gerät mit Freigabe ausgewählt.") },
                             LocalAction::StartDevice(DeviceKind::Camera), cx,
                         )));
                 }
@@ -604,26 +626,46 @@ impl Desktop {
             }
             page = page.child(section);
         }
-        if let Some(error) = self.device_error {
-            page = page.child(
-                self.hint(self.l(device_error_key(error)))
-                    .text_color(self.theme.danger),
-            );
+        if let Some(message) = self.device_error.and_then(device_error_key) {
+            page = page.child(self.hint(self.l(message)).text_color(self.theme.danger));
         }
         page
     }
 }
-pub(super) fn device_error_key(error: DeviceError) -> &'static str {
-    match error {
+fn device_submission_error(
+    current: Option<DeviceError>,
+    result: Result<(), DeviceError>,
+) -> Option<DeviceError> {
+    match result {
+        Err(DeviceError::Busy) => current,
+        result => result.err(),
+    }
+}
+
+pub(super) fn device_error_key(error: DeviceError) -> Option<&'static str> {
+    Some(match error {
         DeviceError::Unavailable => "Kein Gerät verfügbar.",
         DeviceError::PermissionDenied => {
             "Zugriff verweigert. Erlaube Mikrofon oder Kamera in den Systemeinstellungen."
         }
         DeviceError::Removed => "Das ausgewählte Gerät wurde entfernt.",
-        DeviceError::Busy => "Bitte warte, bis der vorherige Gerätetest beendet ist.",
+        // This label describes a terminal native-device result. Busy admission
+        // is handled before storing an immediate submission error.
+        DeviceError::Busy => {
+            "Das Gerät konnte nicht geöffnet werden. Prüfe, ob eine andere App darauf zugreift, und versuche es erneut."
+        }
         DeviceError::Stale => "Die Geräteauswahl hat sich geändert. Bitte erneut versuchen.",
         DeviceError::InvalidSelection => "Bitte wähle ein verfügbares Gerät.",
         DeviceError::CaptureFailed => "Der Gerätetest ist fehlgeschlagen.",
+    })
+}
+
+fn device_preview_error(preview: PreviewState) -> Option<&'static str> {
+    match preview {
+        PreviewState::Failed { error, .. } if error != DeviceError::PermissionDenied => {
+            device_error_key(error)
+        }
+        _ => None,
     }
 }
 
@@ -647,6 +689,47 @@ fn option_destination(current: Option<usize>, count: usize, key: &str) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn busy_device_admission_does_not_replace_a_capture_failure() {
+        assert!(device_error_key(DeviceError::Busy).is_some());
+        assert_eq!(device_submission_error(None, Err(DeviceError::Busy)), None);
+        assert_eq!(
+            device_submission_error(Some(DeviceError::CaptureFailed), Err(DeviceError::Busy)),
+            Some(DeviceError::CaptureFailed),
+        );
+        assert!(device_error_key(DeviceError::CaptureFailed).is_some());
+        assert!(device_error_key(DeviceError::PermissionDenied).is_some());
+        assert_eq!(
+            device_submission_error(Some(DeviceError::CaptureFailed), Ok(())),
+            None
+        );
+    }
+
+    #[test]
+    fn native_busy_preview_failure_remains_visible_after_admission() {
+        assert_eq!(device_submission_error(None, Err(DeviceError::Busy)), None);
+        assert_eq!(
+            device_preview_error(PreviewState::Starting {
+                request: RequestId(4)
+            }),
+            None,
+        );
+        let failed = PreviewState::Failed {
+            request: RequestId(4),
+            error: DeviceError::Busy,
+        };
+        assert_eq!(
+            device_preview_error(failed),
+            device_error_key(DeviceError::Busy)
+        );
+        assert!(device_preview_error(failed).is_some());
+        assert_eq!(
+            device_submission_error(Some(DeviceError::Busy), Err(DeviceError::Busy)),
+            Some(DeviceError::Busy),
+        );
+        assert_eq!(device_preview_error(PreviewState::Stopped), None);
+    }
+
     #[test]
     fn picker_navigation_is_bounded_and_wraps_without_committing_a_selection() {
         assert_eq!(option_destination(None, 0, "down"), None);

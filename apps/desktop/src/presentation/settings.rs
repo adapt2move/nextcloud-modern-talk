@@ -3,6 +3,7 @@ use super::controls::{Availability, icon};
 use super::preferences::SettingsTab;
 use super::theme::{Appearance, Palette, Theme};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
+use crate::presentation::motion::DialogSurface;
 use gpui::{
     Context, Div, FontWeight, Stateful, Window, WindowAppearance, div, prelude::*, px, relative,
 };
@@ -197,7 +198,6 @@ impl Desktop {
             .justify_center()
             .child(
                 div()
-                    .id(frame.id)
                     .relative()
                     .occlude()
                     .w(px(width))
@@ -228,7 +228,26 @@ impl Desktop {
                                 LocalAction::Close,
                                 cx,
                             )),
-                    ),
+                    )
+                    .map(|mut panel| {
+                        // Preserve the frame ID without a Stateful wrapper: the
+                        // shared motion owner accepts the existing Div itself.
+                        panel.interactivity().element_id = Some(frame.id.into());
+                        match self.overlay.filter(|overlay| {
+                            matches!(
+                                overlay,
+                                Overlay::Settings
+                                    | Overlay::Accounts
+                                    | Overlay::RoomInfo
+                                    | Overlay::Participants
+                            )
+                        }) {
+                            Some(overlay) => {
+                                self.dialog_panel(DialogSurface::Overlay(overlay), panel)
+                            }
+                            None => panel.into_any_element(),
+                        }
+                    }),
             )
     }
     /// Wide navigation. The header names the dialog and, where relevant, its context.
@@ -607,7 +626,7 @@ impl Desktop {
                         .child(self.icon_button(
                             super::focus::account_id("remove-account", a.scope),
                             ("trash-2", "Konto aus dieser App entfernen"), ButtonStyle::Quiet,
-                            Availability::when(!self.account_removal.busy(), "Bitte warte auf den laufenden Vorgang."),
+                            if self.account_removal.pending_for(a.scope.account) { Availability::pending() } else if self.account_removal.busy() { Availability::disabled() } else { Availability::available() },
                             LocalAction::RemoveAccount(a.scope.account, Some(a.scope)), cx)),
                 );
             }
@@ -622,7 +641,7 @@ impl Desktop {
                 let status = match saved.phase {
                     SavedAccountPhase::Dormant => "Gespeichert · nicht verbunden",
                     SavedAccountPhase::Restoring => "Verbindung wird wiederhergestellt …",
-                    SavedAccountPhase::WaitingForBrowser => "Warte auf die Browseranmeldung …",
+                    SavedAccountPhase::WaitingForBrowser => "Im Browser anmelden.",
                     SavedAccountPhase::AwaitingStorageChoice => "Speicherwahl erforderlich",
                     SavedAccountPhase::ReauthenticationRequired => "Erneute Anmeldung erforderlich",
                     SavedAccountPhase::RecoveryRequired => "Wiederherstellung erforderlich",
@@ -641,8 +660,7 @@ impl Desktop {
                             "Die Verbindung ist noch nicht bereit."), if saved.phase == SavedAccountPhase::ReauthenticationRequired { LocalAction::Reauthenticate(saved.id) } else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::RestoreAccount(saved.id)) }, cx))
                     .child(self.icon_button(gpui::SharedString::from(format!("remove-saved-account-{}", saved.id.as_local())),
                         ("trash-2", "Konto aus dieser App entfernen"), ButtonStyle::Quiet,
-                        Availability::when(!self.account_removal.busy() && matches!(saved.phase, SavedAccountPhase::Dormant | SavedAccountPhase::ReauthenticationRequired | SavedAccountPhase::RecoveryRequired),
-                            "Bitte warte auf den laufenden Vorgang."), LocalAction::RemoveAccount(saved.id, None), cx)));
+                        if self.account_removal.pending_for(saved.id) { Availability::pending() } else if self.account_removal.busy() || !matches!(saved.phase, SavedAccountPhase::Dormant | SavedAccountPhase::ReauthenticationRequired | SavedAccountPhase::RecoveryRequired) { Availability::disabled() } else { Availability::available() }, LocalAction::RemoveAccount(saved.id, None), cx)));
             }
             if self.snapshot.accounts.as_slice().is_empty()
                 && self.snapshot.saved_accounts.as_slice().is_empty()
@@ -706,7 +724,7 @@ impl Desktop {
                 close: ("close-settings", "Einstellungen schließen"),
                 region: super::navigation::Region::Settings,
                 navigation,
-                page: self.reveal(("settings-page", tab as usize), content),
+                page: self.reveal_from_action(("settings-page", tab as usize).into(), content),
                 footer: None,
             },
             window,

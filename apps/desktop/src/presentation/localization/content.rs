@@ -44,11 +44,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No tienes acceso a esta vista previa.",
     ),
     (
-        "Ein Download läuft bereits.",
-        "A download is already in progress.",
-        "Ya hay una descarga en curso.",
-    ),
-    (
         "Ergebnis unklar. Prüfe das Gespräch vor erneutem Veröffentlichen.",
         "The outcome is uncertain. Check the conversation before publishing again.",
         "El resultado es incierto. Revisa la conversación antes de volver a publicar.",
@@ -148,11 +143,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Publish poll",
         "Publicar encuesta",
     ),
-    (
-        "Umfrage wird gespeichert …",
-        "Saving poll…",
-        "Guardando encuesta…",
-    ),
     ("Umfrage öffnen", "Open poll", "Abrir encuesta"),
     (
         "Videowiedergabe fehlgeschlagen.",
@@ -174,11 +164,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Vorschau nicht verfügbar",
         "Preview unavailable",
         "Vista previa no disponible",
-    ),
-    (
-        "Vorschau wird geladen …",
-        "Loading preview…",
-        "Cargando vista previa…",
     ),
     ("Weitere Optionen", "More options", "Más opciones"),
     (

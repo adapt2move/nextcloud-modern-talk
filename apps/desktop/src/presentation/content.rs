@@ -131,6 +131,14 @@ impl Desktop {
                     None
                 }
             })
+            .chain(
+                self.snapshot
+                    .content_panel
+                    .retained_avatar_keys
+                    .as_slice()
+                    .iter()
+                    .copied(),
+            )
             .collect();
         let mut changed = false;
         let previous_account = self.content_ui.account;
@@ -155,6 +163,12 @@ impl Desktop {
                     .iter()
                     .position(|(old, _)| *old == key)
                 {
+                    if let (Some((_, ImageSource::Render(previous))), ImageSource::Render(next)) =
+                        (self.content_ui.images.get(index), &image)
+                        && std::sync::Arc::ptr_eq(previous, next)
+                    {
+                        continue;
+                    }
                     let (_, previous) = self.content_ui.images.remove(index);
                     if let ImageSource::Render(previous) = previous {
                         cx.drop_image(previous, None);
@@ -672,7 +686,7 @@ impl Desktop {
                 )
             })
         {
-            Availability::when(false, "Ein Download läuft bereits.")
+            Availability::pending()
         } else {
             self.message_available(talk_core::ui::messaging::MessageFeature::Files)
         }
@@ -743,23 +757,6 @@ impl Desktop {
         Some(status)
     }
 
-    pub(super) fn create_poll_button(
-        &self,
-        id: &'static str,
-        cx: &Context<Self>,
-    ) -> gpui::Stateful<Div> {
-        self.button_with_icon(
-            id,
-            ("Umfrage erstellen", "plus"),
-            ButtonStyle::Quiet,
-            Availability::when(
-                self.content_scope_current() && self.snapshot.content_panel.poll_create.enabled(),
-                super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create),
-            ),
-            LocalAction::Content(Action::CreatePoll),
-            cx,
-        )
-    }
     fn poll_draft(&self, cx: &Context<Self>) -> Option<PollDraft> {
         poll_draft_values(
             self.content_ui.question.read(cx).content.as_ref(),
@@ -865,23 +862,34 @@ impl Desktop {
                 self.snapshot.content_panel.poll_create,
             ))));
         }
-        body = body.child(self.button(
-            "poll-submit",
-            "Umfrage veröffentlichen",
-            ButtonStyle::Primary,
-            available && !busy && self.poll_draft(cx).is_some(),
-            LocalAction::Content(Action::SubmitPoll),
-            cx,
-        ));
+        body = body.child(
+            self.button(
+                "poll-submit",
+                "Umfrage veröffentlichen",
+                ButtonStyle::Primary,
+                if poll_creation_pending(
+                    self.content_ui.pending_poll,
+                    self.snapshot
+                        .selected
+                        .filter(|_| self.content_scope_current()),
+                    self.snapshot.content_panel.poll_state,
+                ) {
+                    Availability::pending()
+                } else {
+                    (available && !busy && self.poll_draft(cx).is_some()).into()
+                },
+                LocalAction::Content(Action::SubmitPoll),
+                cx,
+            ),
+        );
         let status = match self.snapshot.content_panel.poll_state {
-            RemoteState::Loading(_) | RemoteState::Saving(_) => Some("Umfrage wird gespeichert …"),
             RemoteState::Failed(_, _) => {
                 Some("Die Umfrage konnte nicht gespeichert werden. Dein Entwurf bleibt erhalten.")
             }
             RemoteState::Uncertain(_) => {
                 Some("Ergebnis unklar. Prüfe das Gespräch vor erneutem Veröffentlichen.")
             }
-            RemoteState::Idle => None,
+            RemoteState::Idle | RemoteState::Loading(_) | RemoteState::Saving(_) => None,
         };
         body.when_some(status, |d, s| d.child(self.hint(self.l(s))))
     }
@@ -988,6 +996,16 @@ impl Desktop {
             ))
         })
     }
+}
+
+fn poll_creation_pending(
+    pending: Option<(ConversationRef, RequestId)>,
+    current: Option<ConversationRef>,
+    state: RemoteState,
+) -> bool {
+    pending.is_some_and(|(context, request)| {
+        Some(context) == current && state == RemoteState::Saving(request)
+    })
 }
 
 fn placeholder_key(value: &str) -> u128 {
@@ -1124,9 +1142,12 @@ fn poll_draft_values<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{message_avatar_alias, poll_draft_values, toggled_poll_votes};
+    use super::{
+        message_avatar_alias, poll_creation_pending, poll_draft_values, toggled_poll_votes,
+    };
     use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
-    use talk_core::ui::presentation::{ConversationRef, DeliveryState, MessageView};
+    use talk_core::ui::conversation::RemoteState;
+    use talk_core::ui::presentation::{ConversationRef, DeliveryState, MessageView, RequestId};
     use talk_core::ui::{
         AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration, Text,
     };
@@ -1254,5 +1275,61 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn poll_creation_progress_requires_its_admitted_save_in_the_current_scope() {
+        let account = AccountId::from_local(1);
+        let context = ConversationRef {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let request = RequestId(7);
+        let pending = Some((context, request));
+        assert!(poll_creation_pending(
+            pending,
+            Some(context),
+            RemoteState::Saving(request),
+        ));
+        for state in [
+            RemoteState::Idle,
+            RemoteState::Loading(request),
+            RemoteState::Saving(RequestId(8)),
+            RemoteState::Failed(request, talk_core::ui::UnavailableReason::PermissionDenied),
+            RemoteState::Uncertain(request),
+        ] {
+            assert!(!poll_creation_pending(pending, Some(context), state));
+        }
+        assert!(!poll_creation_pending(
+            None,
+            Some(context),
+            RemoteState::Saving(request),
+        ));
+        assert!(!poll_creation_pending(
+            pending,
+            None,
+            RemoteState::Saving(request)
+        ));
+        let mut replaced = context;
+        replaced.account.runtime = RuntimeGeneration::from_local(2);
+        assert!(!poll_creation_pending(
+            pending,
+            Some(replaced),
+            RemoteState::Saving(request),
+        ));
+        replaced = context;
+        replaced.conversation.local = 2;
+        assert!(!poll_creation_pending(
+            pending,
+            Some(replaced),
+            RemoteState::Saving(request),
+        ));
     }
 }

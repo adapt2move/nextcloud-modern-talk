@@ -130,6 +130,9 @@ pub struct ContentPanel {
     pub account: Option<AccountScope>,
     pub context: Option<ConversationRef>,
     pub assets: Page<AssetView, 128>,
+    /// Composition-owned avatar images may outlive mounted target aliases.
+    /// These keys retain renderer resources; they authorize no visible target.
+    pub retained_avatar_keys: Page<u64, 128>,
     pub polls: Page<PollView, 20>,
     pub poll_create: Availability,
     pub poll_state: RemoteState,
@@ -146,6 +149,7 @@ impl Default for ContentPanel {
             account: None,
             context: None,
             assets: Page::empty(),
+            retained_avatar_keys: Page::empty(),
             polls: Page::empty(),
             poll_create: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,

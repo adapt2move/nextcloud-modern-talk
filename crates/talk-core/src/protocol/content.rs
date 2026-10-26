@@ -35,6 +35,15 @@ impl VideoBytes {
 pub struct ImageBytes {
     bytes: Arc<[u8]>,
     document_pages: Option<u32>,
+    avatar_source: Option<AvatarSource>,
+}
+/// Adapter-issued canonical identity and original encoded-cache freshness. This
+/// worker value grants no permission and never enters serialized presentation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AvatarSource {
+    pub identity: [u8; 32],
+    pub saved_at: u64,
+    pub restricted: bool,
 }
 impl std::fmt::Debug for ImageBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -51,7 +60,16 @@ impl ImageBytes {
         Ok(Self {
             bytes: bytes.into(),
             document_pages: None,
+            avatar_source: None,
         })
+    }
+    pub fn avatar(bytes: Vec<u8>, source: AvatarSource) -> Result<Self, LimitExceeded> {
+        let mut image = Self::new(bytes)?;
+        image.avatar_source = Some(source);
+        Ok(image)
+    }
+    pub fn avatar_source(&self) -> Option<AvatarSource> {
+        self.avatar_source
     }
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes
@@ -152,6 +170,7 @@ pub enum ContentResult {
     Emoji {
         text: Text<64>,
         color: Option<Text<16>>,
+        source: AvatarSource,
     },
     /// An installation-relative file route constructed by the protocol owner; no credentials.
     CloudLink(Text<2048>),

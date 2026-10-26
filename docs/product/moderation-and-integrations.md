@@ -38,6 +38,8 @@ Acceptance: unsupported proxy operations do not fall back to the wrong local roo
 
 **Bots, commands, and webhooks (P3 consumption/management).** Render bot/command output as untrusted content with actor attribution. List enabled bots and let authorized moderators enable/disable installed bots through `bots-v1`. Show the room/data exposure implication before enabling a bot. Offer server-advertised slash commands with argument help when a supported discovery contract exists.
 
+The room's Bots tab loads its list automatically on entry once connectivity and confirmed authority are available. Show in-place skeletons during the admitted first request and retain a known authorized list across tab changes and refreshes. Do not repeat a successful load on every visit or automatically retry a failed or uncertain request. Offer an explicit retry for those outcomes. Loading and changing bots are unavailable offline.
+
 Acceptance: typing a command does not execute it until send. Bot errors remain visible and do not masquerade as user messages. Classified/restricted rooms cannot enable prohibited bots. Server-wide bot installation, webhook signing, shared secrets, and bot backend operation remain administrator/server concerns; the desktop client never needs a bot's shared secret to manage its ordinary room participation. No local shell commands run from chat.
 
 ## INT-003

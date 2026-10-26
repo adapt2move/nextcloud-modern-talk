@@ -3,6 +3,7 @@ use talk_core::protocol::conversation::{ConversationCommand as C, Setting};
 use talk_core::protocol::messaging::{
     MessagingCommand as M, MessagingFeature, MessagingResult as R,
 };
+use talk_core::protocol::{FeatureSupport, Role};
 fn features(names: &[&str]) -> Value {
     let mut c = caps(35);
     let f = c["capabilities"]["spreed"]["features"]
@@ -549,6 +550,91 @@ fn settings_unknown_attributes_never_grant_owner_mutation() {
     let room = wire::room(&d, id, &c).unwrap();
     let a = conversation::control(Setting::Metadata, &room, &d, &c);
     assert_eq!(a.allowed, Decision::Unknown);
+}
+
+#[test]
+fn csv_import_control_requires_its_feature_and_invitation_authority() {
+    let mut data = room();
+    data["participantType"] = json!(1);
+    let id = ConversationId {
+        account: scope().account,
+        host: HostId::from_local(1),
+        local: 1,
+    };
+    let caps = wire::Capabilities::decode(&features(&[])).unwrap();
+    let ordinary = wire::room(&data, id, &caps).unwrap();
+    let without_csv = conversation::control(Setting::CsvImport, &ordinary, &data, &caps);
+    assert_eq!(without_csv.server, FeatureSupport::Unsupported);
+    let caps = wire::Capabilities::decode(&features(&["email-csv-import"])).unwrap();
+    let mut ordinary = wire::room(&data, id, &caps).unwrap();
+    let available = conversation::control(Setting::CsvImport, &ordinary, &data, &caps);
+    assert_eq!(available.server, FeatureSupport::Supported);
+    assert_eq!(available.allowed, Decision::Allowed);
+    ordinary.role = Role::Member;
+    assert_eq!(
+        conversation::control(Setting::CsvImport, &ordinary, &data, &caps).allowed,
+        Decision::Denied
+    );
+    ordinary.role = Role::Owner;
+    ordinary.classified = true;
+    assert_eq!(
+        conversation::control(Setting::CsvImport, &ordinary, &data, &caps).allowed,
+        Decision::Denied
+    );
+    ordinary.classified = false;
+    ordinary.unknown_restrictions = true;
+    assert_eq!(
+        conversation::control(Setting::CsvImport, &ordinary, &data, &caps).allowed,
+        Decision::Unknown
+    );
+}
+
+#[tokio::test]
+async fn csv_preview_reads_current_policy_and_never_submits_invitations() {
+    for major in [34, 35] {
+        let mut capabilities = caps(major);
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("email-csv-import"));
+        let mut data = room();
+        data["participantType"] = json!(1);
+        let server = Server::start(vec![Reply::data(capabilities), Reply::data(data)]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let reply = client.request(context(&runtime), ProtocolRequest::ConversationSettings {
+            conversation, operation: OperationId::from_local(81),
+            command: C::PreviewEmailCsv(Text::new("Name,Email\r\n\"Person, One\",\"one@example.test\"\r\nOther,ONE@EXAMPLE.TEST\r\nBad,invalid").unwrap()),
+        }).await.unwrap();
+        let ProtocolReply::ConversationSettings {
+            result:
+                talk_core::protocol::conversation::ConversationResult::EmailCsvPreview {
+                    recipients,
+                    duplicate_count,
+                    invalid_count,
+                },
+            ..
+        } = reply
+        else {
+            panic!("expected bounded CSV preview");
+        };
+        assert_eq!(recipients.as_slice().len(), 1);
+        assert_eq!(
+            recipients.as_slice().first().unwrap().label.as_str(),
+            "one@example.test"
+        );
+        assert_eq!((duplicate_count, invalid_count), (1, 1));
+        assert_eq!(server.count(), 2);
+        assert!(
+            server
+                .seen
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|request| request.starts_with(b"GET "))
+        );
+    }
 }
 
 #[tokio::test]

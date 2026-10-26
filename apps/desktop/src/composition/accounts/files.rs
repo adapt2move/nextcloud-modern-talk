@@ -1,11 +1,16 @@
 //! Native selection is scoped before and after the OS dialog. File bytes stay in the adapter.
 use super::*;
 use std::path::PathBuf;
+use talk_adapters::local_files::{CsvRead, CsvReadError};
 use talk_core::protocol::messaging::MessagingCommand;
+use talk_core::ui::conversation::{CsvFileError, CsvFileOutcome, CsvFileResult, RoomSetting};
 use talk_core::ui::{content::DownloadView, messaging::MessageFeature};
 #[derive(Clone)]
 pub(crate) enum Kind {
     Upload,
+    Csv {
+        edit_generation: u64,
+    },
     Download {
         message: u128,
         placeholder: Text<128>,
@@ -18,7 +23,179 @@ pub(crate) struct Picker {
     pub context: ConversationRef,
     pub kind: Kind,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CsvSelection {
+    request: RequestId,
+    context: ConversationRef,
+    edit_generation: u64,
+}
+struct CsvWork {
+    selection: CsvSelection,
+    reader: CsvRead,
+}
+/// One CSV ticket and at most one physical read, including cancelled settlement.
+#[derive(Default)]
+pub(super) struct CsvOwner {
+    current: Option<CsvSelection>,
+    dialog: Option<CsvSelection>,
+    reading: Option<CsvWork>,
+}
+fn csv_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> bool {
+    snapshot.active_account == Some(context.account)
+        && snapshot.selected == Some(context)
+        && snapshot.conversation_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && panel.details.as_ref().is_some_and(|details| {
+                    !details.classified
+                        && details.availability(RoomSetting::CsvImport).enabled()
+                        && details.availability(RoomSetting::Invite).enabled()
+                })
+        })
+}
 impl Accounts {
+    pub(super) fn queue_csv_picker(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        edit_generation: u64,
+    ) -> Result<(), SubmitError> {
+        self.queue_picker(request, context, Kind::Csv { edit_generation })
+    }
+    /// Also acknowledges a published result, so imported personal data is not
+    /// retained by the snapshot after the UI consumes or closes its local form.
+    pub(super) fn cancel_csv_picker(&mut self, context: ConversationRef, pick_request: RequestId) {
+        if self
+            .csv_file_owner
+            .current
+            .is_some_and(|s| s.context == context && s.request == pick_request)
+        {
+            self.csv_file_owner.current = None;
+        }
+        if self.picker.as_ref().is_some_and(|p| {
+            p.context == context && p.request == pick_request && matches!(p.kind, Kind::Csv { .. })
+        }) {
+            self.picker = None;
+        }
+        if let Some(work) = &self.csv_file_owner.reading
+            && work.selection.context == context
+            && work.selection.request == pick_request
+        {
+            work.reader.cancel();
+        }
+        if let Some(panel) = &mut self.snapshot.conversation_panel
+            && panel.context == context
+            && panel
+                .csv_file
+                .as_ref()
+                .is_some_and(|r| r.request == pick_request)
+        {
+            panel.csv_file = None;
+            self.touch();
+        }
+    }
+    pub(super) fn cancel_csv_file(&mut self) {
+        self.csv_file_owner.current = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.kind, Kind::Csv { .. }))
+        {
+            self.picker = None;
+        }
+        if let Some(work) = &self.csv_file_owner.reading {
+            work.reader.cancel();
+        }
+        if let Some(panel) = &mut self.snapshot.conversation_panel {
+            panel.csv_file = None;
+        }
+    }
+    pub(super) fn csv_file_stopped(&self) -> bool {
+        self.csv_file_owner
+            .reading
+            .as_ref()
+            .is_none_or(|w| w.reader.is_finished())
+    }
+    pub(super) fn poll_csv_file(&mut self) {
+        let Some(mut work) = self.csv_file_owner.reading.take() else {
+            return;
+        };
+        let current = self.csv_file_owner.current == Some(work.selection);
+        if !current
+            || self.current(work.selection.context.account).is_err()
+            || !csv_available(&self.snapshot, work.selection.context)
+        {
+            work.reader.cancel();
+        }
+        let mut result = work.reader.try_result();
+        // The worker can finish between the first empty receive and this check.
+        if result.is_none() && work.reader.is_finished() {
+            result = work.reader.try_result();
+        }
+        if let Some(result) = result {
+            self.publish_csv(work.selection, csv_outcome(result));
+        }
+        if !work.reader.is_finished() {
+            self.csv_file_owner.reading = Some(work);
+        }
+    }
+    fn publish_csv(&mut self, selection: CsvSelection, outcome: CsvFileOutcome) {
+        if self.csv_file_owner.current != Some(selection) {
+            return;
+        }
+        self.csv_file_owner.current = None;
+        if self.current(selection.context.account).is_err()
+            || !csv_available(&self.snapshot, selection.context)
+        {
+            return;
+        }
+        if let Some(panel) = &mut self.snapshot.conversation_panel {
+            panel.csv_file = Some(CsvFileResult {
+                request: selection.request,
+                edit_generation: selection.edit_generation,
+                outcome,
+            });
+            self.touch();
+        }
+    }
+    fn finish_csv_selection(
+        &mut self,
+        picker: Picker,
+        edit_generation: u64,
+        result: Result<Option<PathBuf>, ()>,
+    ) {
+        let selection = CsvSelection {
+            request: picker.request,
+            context: picker.context,
+            edit_generation,
+        };
+        if self.csv_file_owner.current != Some(selection) {
+            return;
+        }
+        if self.current(picker.context.account).is_err()
+            || !csv_available(&self.snapshot, picker.context)
+        {
+            self.csv_file_owner.current = None;
+            return;
+        }
+        let path = match result {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                self.publish_csv(selection, CsvFileOutcome::Cancelled);
+                return;
+            }
+            Err(()) => {
+                self.publish_csv(
+                    selection,
+                    CsvFileOutcome::Failed(CsvFileError::PickerUnavailable),
+                );
+                return;
+            }
+        };
+        match CsvRead::start(path) {
+            Ok(reader) => self.csv_file_owner.reading = Some(CsvWork { selection, reader }),
+            Err(error) => self.publish_csv(selection, csv_outcome(Err(error))),
+        }
+    }
     pub(super) fn queue_picker(
         &mut self,
         request: RequestId,
@@ -29,15 +206,34 @@ impl Accounts {
         if self.snapshot.selected != Some(context) {
             return Err(SubmitError::StaleScope);
         }
-        if self.picker.is_some() || self.picker_open || self.file_work_pending(context) {
+        if self.picker.is_some()
+            || self.picker_open
+            || self.csv_file_owner.reading.is_some()
+            || self.file_work_pending(context)
+        {
             return Err(SubmitError::Busy);
         }
-        if !self.snapshot.message_panel.as_ref().is_some_and(|p| {
-            p.context == context && p.availability(MessageFeature::Files).enabled()
-        }) {
+        let permitted = if matches!(kind, Kind::Csv { .. }) {
+            csv_available(&self.snapshot, context)
+        } else {
+            self.snapshot.message_panel.as_ref().is_some_and(|p| {
+                p.context == context && p.availability(MessageFeature::Files).enabled()
+            })
+        };
+        if !permitted {
             return Err(SubmitError::Unavailable(
                 UnavailableReason::PermissionDenied,
             ));
+        }
+        if let Kind::Csv { edit_generation } = &kind {
+            self.csv_file_owner.current = Some(CsvSelection {
+                request,
+                context,
+                edit_generation: *edit_generation,
+            });
+            if let Some(panel) = &mut self.snapshot.conversation_panel {
+                panel.csv_file = None;
+            }
         }
         self.picker = Some(Picker {
             request,
@@ -48,10 +244,32 @@ impl Accounts {
     }
     pub(crate) fn take_picker(&mut self) -> Option<Picker> {
         let p = self.picker.take()?;
+        if let Kind::Csv { edit_generation } = &p.kind {
+            self.csv_file_owner.dialog = Some(CsvSelection {
+                request: p.request,
+                context: p.context,
+                edit_generation: *edit_generation,
+            });
+        }
         self.picker_open = true;
         Some(p)
     }
     pub(crate) fn finish_picker(&mut self, picker: Picker, result: Result<Option<PathBuf>, ()>) {
+        if let Kind::Csv { edit_generation } = &picker.kind {
+            let edit_generation = *edit_generation;
+            let selection = CsvSelection {
+                request: picker.request,
+                context: picker.context,
+                edit_generation,
+            };
+            if self.csv_file_owner.dialog != Some(selection) {
+                return;
+            }
+            self.csv_file_owner.dialog = None;
+            self.picker_open = false;
+            self.finish_csv_selection(picker, edit_generation, result);
+            return;
+        }
         self.picker_open = false;
         if self.snapshot.selected != Some(picker.context)
             || self.current(picker.context.account).is_err()
@@ -102,6 +320,7 @@ impl Accounts {
         let mut upload_name = None;
         let mut download = None;
         let command = match &picker.kind {
+            Kind::Csv { .. } => return Err(SubmitError::StaleScope),
             Kind::Upload => {
                 let name = path
                     .file_name()
@@ -167,11 +386,221 @@ impl Accounts {
     }
 }
 
+fn csv_outcome(result: Result<Text<65536>, CsvReadError>) -> CsvFileOutcome {
+    use CsvReadError as E;
+    match result {
+        Ok(text) => CsvFileOutcome::Loaded(text),
+        Err(E::Cancelled) => CsvFileOutcome::Cancelled,
+        Err(error) => CsvFileOutcome::Failed(match error {
+            E::Busy => CsvFileError::Unavailable(UnavailableReason::Busy),
+            E::TooLarge => CsvFileError::TooLarge,
+            E::InvalidUtf8 => CsvFileError::InvalidUtf8,
+            E::NotRegularFile => CsvFileError::NotRegularFile,
+            E::ReadFailed => CsvFileError::ReadFailed,
+            E::TimedOut => CsvFileError::TimedOut,
+            E::Cancelled => return CsvFileOutcome::Cancelled,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use talk_core::protocol::content::TransferProgress;
     use talk_core::ui::content::{AttachmentRef, DownloadState};
+
+    fn csv_model() -> (Accounts, CsvSelection) {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("details-ready"));
+        let context = model.snapshot.selected.unwrap();
+        model.snapshot.active_account = Some(context.account);
+        model.snapshot.message_panel = None;
+        let selection = CsvSelection {
+            request: RequestId(90),
+            context,
+            edit_generation: 7,
+        };
+        (model, selection)
+    }
+    #[test]
+    fn shutdown_retires_queued_csv_without_releasing_an_open_dialog_slot() {
+        for opened in [false, true] {
+            let (mut model, selection) = csv_model();
+            model.csv_file_owner.current = Some(selection);
+            model.picker = Some(Picker {
+                request: selection.request,
+                context: selection.context,
+                kind: Kind::Csv {
+                    edit_generation: selection.edit_generation,
+                },
+            });
+            let dialog = opened.then(|| model.take_picker().unwrap());
+            model.shutdown();
+            assert!(model.csv_file_owner.current.is_none());
+            assert!(
+                model.take_picker().is_none(),
+                "shutdown cannot launch a cancelled CSV picker"
+            );
+            assert_eq!(model.picker_open, opened);
+            if let Some(dialog) = dialog {
+                model.finish_picker(dialog, Ok(None));
+                assert!(
+                    !model.picker_open,
+                    "only the matching OS completion retires its slot"
+                );
+            }
+        }
+    }
+    #[test]
+    fn csv_gate_is_separate_from_upload_and_rechecks_invitation_policy() {
+        use talk_core::ui::conversation::Availability;
+        let (mut model, selection) = csv_model();
+        assert!(csv_available(&model.snapshot, selection.context));
+        assert!(model.snapshot.message_panel.is_none());
+        for setting in [RoomSetting::CsvImport, RoomSetting::Invite] {
+            let mut denied = model.snapshot.clone();
+            let details = denied
+                .conversation_panel
+                .as_mut()
+                .unwrap()
+                .details
+                .as_mut()
+                .unwrap();
+            details.controls = page(
+                [
+                    (
+                        RoomSetting::CsvImport,
+                        Availability {
+                            implemented: true,
+                            server: FeatureSupport::Supported,
+                            allowed: Decision::Allowed,
+                        },
+                    ),
+                    (
+                        RoomSetting::Invite,
+                        Availability {
+                            implemented: true,
+                            server: FeatureSupport::Supported,
+                            allowed: Decision::Allowed,
+                        },
+                    ),
+                ]
+                .map(|(key, mut value)| {
+                    if key == setting {
+                        value.allowed = Decision::Denied;
+                    }
+                    (key, value)
+                }),
+            );
+            assert!(!csv_available(&denied, selection.context));
+        }
+        model.snapshot.active_account = None;
+        assert!(!csv_available(&model.snapshot, selection.context));
+    }
+    #[test]
+    fn cancellation_acknowledges_only_exact_result_and_preserves_other_ticket() {
+        let (mut model, selection) = csv_model();
+        model.csv_file_owner.current = Some(selection);
+        model.snapshot.conversation_panel.as_mut().unwrap().csv_file = Some(CsvFileResult {
+            request: selection.request,
+            edit_generation: selection.edit_generation,
+            outcome: CsvFileOutcome::Loaded(text("a@example.test")),
+        });
+        model.cancel_csv_picker(selection.context, RequestId(89));
+        assert_eq!(model.csv_file_owner.current, Some(selection));
+        assert!(
+            model
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .unwrap()
+                .csv_file
+                .is_some()
+        );
+        model.cancel_csv_picker(selection.context, selection.request);
+        assert!(model.csv_file_owner.current.is_none());
+        assert!(
+            model
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .unwrap()
+                .csv_file
+                .is_none()
+        );
+    }
+    #[test]
+    fn cancelled_dialog_keeps_os_slot_and_late_reply_cannot_overwrite_new_generation() {
+        let (mut model, selection) = csv_model();
+        model.csv_file_owner.current = Some(selection);
+        model.picker = Some(Picker {
+            request: selection.request,
+            context: selection.context,
+            kind: Kind::Csv {
+                edit_generation: selection.edit_generation,
+            },
+        });
+        let picker = model.take_picker().unwrap();
+        model.cancel_csv_picker(selection.context, selection.request);
+        assert!(
+            model.picker_open,
+            "cancelling a ticket does not close the OS dialog"
+        );
+        let newer = CsvSelection {
+            edit_generation: 8,
+            request: RequestId(91),
+            ..selection
+        };
+        model.csv_file_owner.current = Some(newer);
+        model.finish_picker(picker.clone(), Ok(Some(PathBuf::from("unused.csv"))));
+        assert!(!model.picker_open);
+        assert_eq!(model.csv_file_owner.current, Some(newer));
+        assert!(model.csv_file_owner.reading.is_none());
+        assert!(
+            model
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .unwrap()
+                .csv_file
+                .is_none()
+        );
+        model.picker_open = true;
+        model.finish_picker(picker, Err(()));
+        assert!(
+            model.picker_open,
+            "a duplicate old callback cannot release another dialog's slot"
+        );
+    }
+    #[test]
+    fn stale_success_failure_and_scope_teardown_never_restore_file_contents() {
+        let (mut model, selection) = csv_model();
+        let newer = CsvSelection {
+            edit_generation: 8,
+            ..selection
+        };
+        for outcome in [
+            CsvFileOutcome::Loaded(text("a@example.test")),
+            CsvFileOutcome::Failed(CsvFileError::ReadFailed),
+        ] {
+            model.csv_file_owner.current = Some(newer);
+            model.publish_csv(selection, outcome);
+            assert_eq!(model.csv_file_owner.current, Some(newer));
+            assert!(
+                model
+                    .snapshot
+                    .conversation_panel
+                    .as_ref()
+                    .unwrap()
+                    .csv_file
+                    .is_none()
+            );
+        }
+        model.clear_content();
+        assert!(model.csv_file_owner.current.is_none());
+        model.publish_csv(selection, CsvFileOutcome::Loaded(text("a@example.test")));
+        assert!(model.snapshot.conversation_panel.is_none());
+    }
 
     fn active_download() -> (Accounts, Picker, TransferProgress) {
         let mut model = super::super::tests::model();

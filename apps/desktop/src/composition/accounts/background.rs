@@ -70,6 +70,7 @@ pub(super) struct Account {
     live: Option<Result<protocol::AccountLiveState, IdentityError>>,
     first_transport_failure: Option<ErrorKind>,
     member_counts: Vec<MemberCount>,
+    pub(super) metadata: conversations::Metadata,
     pub(super) rooms: Page<ConversationView, 100>,
     pub(super) state: ConversationListState,
 }
@@ -93,6 +94,7 @@ impl Background {
                     live: None,
                     first_transport_failure: None,
                     member_counts: Vec::new(),
+                    metadata: conversations::Metadata::default(),
                     rooms: Page::empty(),
                     state: ConversationListState {
                         content: ContentState::Loading,
@@ -339,6 +341,14 @@ impl Accounts {
         if self.current(scope).is_err() {
             return;
         }
+        if change == protocol::AccountChange::Conversations
+            && let Some(account) = self.background.account_mut(scope)
+        {
+            let retired = account.metadata.hint();
+            for context in retired {
+                self.retire_room_metadata_read(context);
+            }
+        }
         self.background
             .invalidate(scope, Observation::change(change), Instant::now());
     }
@@ -543,6 +553,14 @@ impl Accounts {
             // Invalidations share the HTTP slots and their minimum interval. A
             // reconnect cannot enqueue room polls, replay alerts or change authority.
             for &change in batch.changes.as_slice() {
+                if change == protocol::AccountChange::Conversations
+                    && let Some(account) = self.background.account_mut(scope)
+                {
+                    let retired = account.metadata.hint();
+                    for context in retired {
+                        self.retire_room_metadata_read(context);
+                    }
+                }
                 self.background
                     .invalidate(scope, Observation::change(change), now);
             }
@@ -569,6 +587,7 @@ impl Accounts {
         };
         match list {
             Ok(list) => {
+                let retired = cache.metadata.reconcile(scope, &list);
                 let rows = page(list.rooms.as_slice().iter().map(|r| {
                     let mut row = conversation(r, scope);
                     if r.actions.read_messages == Decision::Allowed {
@@ -608,6 +627,13 @@ impl Accounts {
                 };
                 let state = cache.state;
                 self.observe_cache_rooms(scope, &list);
+                for (context, policy_changed) in retired {
+                    if policy_changed {
+                        self.revoke_room_metadata(context, UnavailableReason::PolicyStale);
+                    } else {
+                        self.retire_room_metadata_read(context);
+                    }
+                }
                 let rows = self
                     .background
                     .account(scope)
@@ -623,11 +649,13 @@ impl Accounts {
                     .iter()
                     .filter(|room| room.actions.read_messages != Decision::Allowed)
                 {
+                    let context = ConversationRef {
+                        account: scope,
+                        conversation: room.id,
+                    };
+                    self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
                     self.invalidate_history(
-                        ConversationRef {
-                            account: scope,
-                            conversation: room.id,
-                        },
+                        context,
                         if room.actions.read_messages == Decision::Denied {
                             ContentState::Denied
                         } else {
@@ -658,13 +686,9 @@ impl Accounts {
                             self.cancel_room_work(selected);
                             self.clear_content();
                         } else {
-                            // Membership/policy may change without a selected-room action.
-                            // Refresh settings only; preserve history, drafts and scroll state.
-                            let _ = self.room_action(
-                                RequestId(0),
-                                selected,
-                                talk_core::ui::conversation::ConversationAction::Read,
-                            );
+                            // Events, relevant changes and a bounded safety fallback
+                            // revalidate details without making activity-only lists busy.
+                            self.revalidate_room_metadata(selected);
                         }
                     }
                     if self.snapshot.selected.is_none() {
@@ -686,6 +710,7 @@ impl Accounts {
         self.touch();
     }
     fn cancel_room_work(&mut self, context: ConversationRef) {
+        self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
         self.history.remove(context);
         self.notices.remove_room(context);
         if let Ok(connection) = &mut self.connection {

@@ -16,11 +16,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Termina primero la edición actual.",
     ),
     (
-        "Bitte warte einen Moment.",
-        "Please wait a moment.",
-        "Espera un momento.",
-    ),
-    (
         "Deine Berechtigungen können sich geändert haben. Prüfe den Zugriff erneut.",
         "Your permissions may have changed. Check access again.",
         "Es posible que tus permisos hayan cambiado. Vuelve a comprobar el acceso.",
@@ -56,11 +51,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Todavía no se ha cargado el contenido. Comprueba la conexión y vuelve a intentarlo.",
     ),
     ("Kein Zugriff.", "No access.", "Sin acceso."),
-    (
-        "Nachricht wird geöffnet …",
-        "Opening message…",
-        "Abriendo mensaje…",
-    ),
     ("Wird aktualisiert …", "Refreshing…", "Actualizando…"),
     ("Wird geladen …", "Loading…", "Cargando…"),
 ];

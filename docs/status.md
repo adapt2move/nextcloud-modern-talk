@@ -20,7 +20,8 @@ separates implemented paths from remaining parity work.
   Account-scoped connection causes appear during login, in the account overview
   and in the chat footer. Failures preserve drafts and already staged work;
   eligible offline message actions can enter the local queue without claiming
-  network success.
+  network success. Own queued rows show a clock with a waiting-for-connection
+  tooltip, resuming through the existing scoped dispatch checks on reconnect.
 - Compact grouped navigation includes a dedicated favorites group and active/archive views.
   Header actions open members and conversation settings; the title opens shared
   content. Messaging includes history, replies, edits/deletes, reactions, threads,
@@ -29,13 +30,22 @@ separates implemented paths from remaining parity work.
   avatars and emoji icons supplement names; the footer identifies the current user.
   Avatars use canonical account-local byte caches with 24-hour expiry. Durable
   accounts retain bounded private profile-image files; session-only and restricted
-  room images stay in memory. Decoded avatars survive eligible cached-room navigation,
-  share identical authorized pixels and retain footer/sidebar priority under eviction.
-  Matching canonical actors can reuse an approved same-room image while fresh checks
-  continue. Busy admissions have a bounded retry queue; transient failures back off.
+  room images stay in memory. Decoded avatars survive eligible cached-room navigation
+  and member-dialog refreshes, share authorized pixels and retain current navigation
+  priority under eviction. Raster and emoji hits preserve the original source expiry.
+  An authoritative member list supplies canonical user identities so fresh unrestricted
+  profile pixels can satisfy the first member rendering without another content request.
+  Restricted sources and destinations keep their own scoped checks. Busy admissions have a bounded retry queue; transient failures back off.
+  Members use plain name/avatar/role rows with scoped action menus; invitation and
+  CSV previews have separate steps and a bounded native file picker. Bots load on
+  tab entry once online and authorized, retain known lists, use initial skeletons,
+  and remain unavailable offline. Native dialog and server qualification is pending.
 - Recently opened chats restore retained history immediately. Eligible durable
   accounts persist up to 100 ordinary-room metadata/count records and eight
-  recent histories, each with up to 100 messages and 50 pins. The private,
+  recent histories, each with up to 100 messages and 50 pins. Room settings retain
+  eligible description/scalar observations for offline reading without permission
+  grants. Settings revalidate quietly on relevant changes or server hints, with a
+  60-second safety fallback through the existing observation schedule. The private,
   unencrypted content database has a 16 MiB ceiling; history payloads have a
   separate 8 MiB total limit and 30-day cache lifetime. Restricted, unknown-policy
   and session-only content stays in memory. Logout, access loss and expiry retire
@@ -60,11 +70,17 @@ separates implemented paths from remaining parity work.
   server acceptance from a supported common-read marker. Three quick reactions
   follow 12 persistent recent Unicode keys; a 36-emoji palette remains available.
   Custom emoji and complete reaction-author inspection remain unfinished.
-  Pins appear in a header banner with finite cycling motion and a bounded list.
+  Call activity has status icons and red text for missed/unanswered calls,
+  classified from canonical events and retained in ordinary cached history.
+  Pins appear in a header banner with bounded flight/shred decoration, cycling
+  and measured smooth navigation. A lower-right marker unpins directly.
+  Redundant pin activity stays in canonical history and cursors while omitted
+  from visible chat; receipt targets require observed page continuity.
   Reminder/schedule choices use local presets and handle daylight-saving gaps
-  and repeated times. The reminder backend remains server-based. Forwarding is
-  limited to complete plain-text previews; rich objects and truncated bodies
-  remain unavailable in that menu.
+  and repeated times. The reminder backend remains server-based. A separate
+  forwarding dialog filters loaded same-account destinations, previews complete
+  text and requires confirmation. Rich objects and truncated bodies remain
+  unavailable for forwarding. Native pin/dialog interaction remains unqualified.
 - Shared collection feedback distinguishes initial loading, refresh, offline,
   failure and confirmed empty results. Refresh keeps the retained timeline
   mounted, and explicit retry reloads the selected history. Stale failures
@@ -102,7 +118,9 @@ separates implemented paths from remaining parity work.
   The user initiates installation outside calls; workers drain before complete
   package replacement and restart. Windows installation remains unavailable.
 - Google Sans, Lucide actions, contextual tooltips, system emoji entry and finite
-  control/dialog transitions are integrated. The chat header uses renderer-backed
+  control/dialog transitions are integrated. App dialogs share a 180 ms entrance
+  with an eight-point panel rise; nested returns stay settled and close immediately.
+  The chat header uses renderer-backed
   16-point backdrop blur with an 84% to 80% tint on Metal/Linux Blade; Windows
   uses an opaque white header with
   dark controls. Newly appended messages animate once and follow the
@@ -122,11 +140,13 @@ separates implemented paths from remaining parity work.
   macOS development builds read this preference directly without a bundled helper.
 - Ordinary message text uses bounded CommonMark rendering with native emphasis,
   lists, headings, code and quotes. Safe web links open on deliberate activation
-  after source and room revalidation. The composer styles its exact Markdown
-  source live, including native preedit underline, without rewriting sent text.
-  Parsed documents retire with their source/frame scope. Parser, gesture and
-  source-offset regressions are covered; native link/Markdown/IME interaction
-  and semantic accessibility remain unqualified.
+  after source and room revalidation. The composer edits formatted content with
+  hidden Markdown syntax, bounded semantic undo and tentative native preedit.
+  Visible text owns native offsets; canonical Markdown owns draft/submission
+  values. Bold, italic and inline code have scoped keyboard shortcuts. Parsed
+  timeline documents retire with their source/frame scope. Model and input
+  regressions are covered; native link/rich-editor/IME interaction and semantic
+  accessibility remain unqualified.
 
 ## Verification scope
 

@@ -71,6 +71,52 @@ pub struct CacheRoom {
     pub participant_count_at: Option<u64>,
     pub last_activity: Option<u64>,
     pub saved_at: u64,
+    /// Display observations only. Never restore controls or authorization from disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<CacheRoomObservation>,
+}
+
+impl CacheRoom {
+    /// The entire JSON record, including escaping, must fit the metadata budget.
+    /// A disposable detail observation cannot make a complete policy/list write
+    /// fail. False reports its omission; the bounded base room remains intact.
+    pub fn retain_observation(&mut self, observation: CacheRoomObservation) -> bool {
+        self.observation = Some(observation);
+        if codec::encode(self, META_BYTES).is_err() {
+            self.observation = None;
+            false
+        } else {
+            true
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CachedNotificationLevel {
+    Default,
+    Always,
+    Mention,
+    Never,
+}
+
+/// Safe scalar settings from a successful ordinary-room detail read. The source
+/// timestamp is independent of list activity and expires after CACHE_LIFETIME.
+/// Permission masks, roles, membership, links and passwords have no fields here.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheRoomObservation {
+    #[serde(default, with = "codec::optional_text")]
+    pub description: Option<Text<4000>>,
+    pub read_only: Option<bool>,
+    pub notifications: Option<CachedNotificationLevel>,
+    pub call_notifications: Option<bool>,
+    pub important: Option<bool>,
+    pub preserved: Option<bool>,
+    pub message_expiration: Option<u32>,
+    pub lobby: Option<bool>,
+    pub guest_access: Option<bool>,
+    pub observed_at: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -119,6 +165,11 @@ pub struct CachedMessage {
     pub edited: bool,
     pub deleted: bool,
     pub system: bool,
+    /// Stable application classification, independent of protocol tags.
+    #[serde(default, with = "codec::optional_text")]
+    pub system_event: Option<Text<32>>,
+    #[serde(default)]
+    pub pin_notice: bool,
     pub truncated: bool,
     pub replyable: bool,
     pub parent: Option<CachedReply>,
@@ -428,10 +479,18 @@ impl Store {
             if room.kind == CachedRoomKind::Unknown
                 || !fresh(room.saved_at, now)
                 || room.participant_count_at.is_some_and(|at| at > now)
+                || room
+                    .observation
+                    .as_ref()
+                    .is_some_and(|o| !fresh(o.observed_at, now))
             {
                 return Err(DataError::InvalidInput);
             }
-            let bytes = codec::encode(room, META_BYTES)?;
+            let mut room = room.clone();
+            if let Some(observation) = room.observation.take() {
+                room.retain_observation(observation);
+            }
+            let bytes = codec::encode(&room, META_BYTES)?;
             thumbnails::reserve_for_write(&tx, bytes.len())?;
             sql(tx.execute("INSERT INTO rooms(room,saved,bytes) VALUES(?1,?2,?3) ON CONFLICT(room) DO UPDATE SET saved=excluded.saved,bytes=excluded.bytes",
                 params![room.key.as_str(), integer(room.saved_at)?, bytes]))?;
@@ -828,11 +887,12 @@ fn read_rooms(db: &Connection, now: u64) -> Result<Page<CacheRoom, CACHE_ROOM_LI
     let mut query=sql(db.prepare("SELECT room,saved,bytes FROM rooms WHERE length(bytes)<=?1 ORDER BY saved DESC,room LIMIT 101"))?;
     let mut rows = sql(query.query([META_BYTES as i64]))?;
     let mut result = Page::empty();
+    let mut expired = Vec::new();
     while let Some(row) = sql(rows.next())? {
         let key: String = row.get(0).map_err(|_| DataError::Corrupt)?;
         let saved: i64 = row.get(1).map_err(|_| DataError::Corrupt)?;
         let bytes: Vec<u8> = row.get(2).map_err(|_| DataError::Corrupt)?;
-        let value: CacheRoom = codec::decode(&bytes, META_BYTES)?;
+        let mut value: CacheRoom = codec::decode(&bytes, META_BYTES)?;
         let pending: bool = sql(db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outbox WHERE room=?1)",
             [key.as_str()],
@@ -845,7 +905,26 @@ fn read_rooms(db: &Connection, now: u64) -> Result<Page<CacheRoom, CACHE_ROOM_LI
         {
             return Err(DataError::Corrupt);
         }
+        if value
+            .observation
+            .as_ref()
+            .is_some_and(|o| !fresh(o.observed_at, now))
+        {
+            value.observation = None;
+            expired.push((key, codec::encode(&value, META_BYTES)?));
+        }
         result.try_push(value).map_err(|_| DataError::Corrupt)?;
+    }
+    drop(rows);
+    drop(query);
+    // List activity can retain a room for longer than its detail observation.
+    // Scrub expired detail bytes as well as withholding them from presentation.
+    // This temporary batch has the same 100-record / 8-KiB-per-record limits.
+    for (key, bytes) in expired {
+        sql(db.execute(
+            "UPDATE rooms SET bytes=?2 WHERE room=?1",
+            params![key, bytes],
+        ))?;
     }
     Ok(result)
 }

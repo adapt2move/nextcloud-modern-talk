@@ -342,7 +342,8 @@ pub struct ConversationView {
     pub participants: Option<u16>,
     pub send: Decision,
     pub attach: Decision,
-    /// Explicit native privacy-policy projection, not a generic server permission.
+    /// Explicit clipboard-export privacy policy, not a generic server permission
+    /// or permission to paste local text into an editable draft.
     /// Classified/unknown restrictions MUST project Denied/Unknown; never infer from send.
     pub draft_clipboard: Decision,
     pub call: Decision,
@@ -353,6 +354,8 @@ pub struct ConversationView {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeliveryState {
     Received,
+    /// Locally staged; no transport submission or server acceptance is implied.
+    Queued,
     Pending,
     ServerAccepted,
     Failed,

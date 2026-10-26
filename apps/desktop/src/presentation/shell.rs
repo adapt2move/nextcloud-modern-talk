@@ -481,18 +481,24 @@ impl Desktop {
         let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
+        let unloaded = self.message_ui.composer_load_failed == Some(row.context);
         let emoji_availability = self.emoji_availability(cx).above_composer();
         let options_availability = Availability::available().above_composer();
-        let send_availability = Availability::when(
-            ready && !pending,
-            if self.drafts.uncertain(row.context) {
-                "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
-            } else if pending {
-                "Bitte warte auf das Ergebnis. Dein Entwurf bleibt erhalten."
-            } else {
-                "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
-            },
-        )
+        let send_availability = if pending && !self.drafts.uncertain(row.context) {
+            Availability::pending()
+        } else {
+            Availability::when(
+                ready
+                    && !pending
+                    && !unloaded
+                    && self.composer.read(cx).submitted_value().is_some(),
+                if self.drafts.uncertain(row.context) {
+                    "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
+                } else {
+                    "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
+                },
+            )
+        }
         .above_composer();
         div()
             .track_focus(&self.composer_focus)
@@ -530,7 +536,10 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(self.composer.clone())
+                    .when(!unloaded, |d| d.child(self.composer.clone()))
+                    .when(unloaded, |d| {
+                        d.child(self.hint(self.l(crate::presentation::input::RICH_REJECTION)))
+                    })
                     .when(
                         self.feedback_visible()
                             && self.feedback.is_some_and(|f| {
@@ -625,16 +634,13 @@ impl Desktop {
     }
     fn emoji_availability(&self, cx: &Context<Self>) -> Availability {
         let supported = cfg!(target_os = "macos") || self.settings_port.emoji_picker_available();
-        let clipboard = !cfg!(target_os = "linux") || self.composer.read(cx).clipboard_allowed;
         let composing = self.input_composing(cx);
         Availability::when(
-            supported && clipboard && self.composer_available() && !composing,
+            supported && self.composer_available() && !composing,
             if composing {
                 "Beende zuerst die laufende Texteingabe."
             } else if !supported {
                 "Die native Emoji-Auswahl ist auf diesem System nicht verfügbar."
-            } else if !clipboard {
-                "Die Emoji-Auswahl benötigt die für diesen Entwurf gesperrte Zwischenablage."
             } else {
                 "Öffne zuerst das Nachrichtenfeld."
             },
@@ -650,7 +656,6 @@ impl Desktop {
             || self.input_composing(cx)
             || !self.composer.read(cx).interactive
             || self.emoji_picker_pending.is_some()
-            || (cfg!(target_os = "linux") && !self.composer.read(cx).clipboard_allowed)
         {
             return;
         }
@@ -683,7 +688,6 @@ impl Desktop {
                     || this.selected().is_none_or(|row| row.send == Decision::Denied)
                     || this.input_composing(cx)
                     || !this.composer.read(cx).interactive
-                    || (cfg!(target_os = "linux") && !this.composer.read(cx).clipboard_allowed)
                     || !this.composer.focus_handle(cx).is_focused(window)
                 {
                     return;

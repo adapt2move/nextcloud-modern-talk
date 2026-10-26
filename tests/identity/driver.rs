@@ -388,6 +388,11 @@ fn run() -> Result<(), ()> {
                 json!({"phase":"active","storage":match summary.storage{StoredState::Eligible(i)=>if i.provider.backend==talk_core::identity::StorageBackend::PrivateFile{"file"}else{"native"},StoredState::SessionOnly=>"session",_=>"unexpected"},"family":format!("{:?}",probe.family)})
             }
             Ok(RuntimeReply::Protocol(_)) => json!({"phase":"authenticated"}),
+            // This lab sends no account-data commands. Never serialize cached
+            // messages or outgoing payloads into its diagnostic output.
+            Ok(RuntimeReply::AccountData { .. }) => {
+                json!({"error":"Unexpected account-data reply"})
+            }
             Ok(RuntimeReply::Accounts(values)) => {
                 json!({"phase":"state","accounts":values.as_slice().len(),"suppressed":values.as_slice().iter().all(|a|a.storage==StoredState::Suppressed&&a.scope.is_none()),"suppression_unconfirmed":values.as_slice().iter().any(|a|a.suppression_unconfirmed)})
             }

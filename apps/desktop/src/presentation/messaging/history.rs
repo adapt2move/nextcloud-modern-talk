@@ -119,6 +119,11 @@ impl Desktop {
             return false;
         };
         let context = panel.context;
+        // With a fully filtered page there is no row to paint a top boundary.
+        // Its explicit load/retry button is a deliberate paging demand instead.
+        if retry && self.snapshot.messages.as_slice().is_empty() {
+            self.message_ui.history.borrow_mut().layout(true);
+        }
         if self
             .message_ui
             .history
@@ -171,9 +176,19 @@ impl Desktop {
             .borrow()
             .status(panel.older, panel.history)
         {
+            Status::Quiet if self.snapshot.messages.as_slice().is_empty() => {
+                boundary = boundary.child(self.button(
+                    "load-older-hidden-page",
+                    "Ältere Nachrichten laden",
+                    ButtonStyle::Quiet,
+                    self.snapshot.content == ContentState::Ready && panel.older.is_some(),
+                    LocalAction::MessageIn(panel.context, Action::RetryHistory),
+                    cx,
+                ));
+            }
             Status::Quiet => {}
             Status::Loading => {
-                boundary = boundary.child(self.l("Ältere Nachrichten werden geladen …"));
+                boundary = boundary.child(self.pending_dots(self.theme.muted));
             }
             Status::Retry => {
                 boundary = boundary.child(

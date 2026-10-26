@@ -49,6 +49,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Sign-in saved in the secure credential store.",
         "Inicio de sesión guardado en el almacén seguro.",
     ),
+    (
+        "Anmeldung speichern",
+        "Save sign-in",
+        "Guardar inicio de sesión",
+    ),
     ("Annehmen", "Accept", "Aceptar"),
     ("Anruf beendet", "Call ended", "Llamada finalizada"),
     ("Anruf beitreten", "Join call", "Unirse a la llamada"),
@@ -229,11 +234,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "The notification could not be submitted.",
         "No se pudo emitir la notificación.",
     ),
-    (
-        "Benachrichtigung wird angefragt …",
-        "Requesting notification …",
-        "Solicitando notificación…",
-    ),
     ("Benachrichtigungen", "Notifications", "Notificaciones"),
     (
         "Benachrichtigungen des Betriebssystems anzeigen, wenn Talk minimiert ist.",
@@ -254,11 +254,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Benachrichtigungen sind noch nicht verfügbar.",
         "Notifications are not available yet.",
         "Las notificaciones aún no están disponibles.",
-    ),
-    (
-        "Berechtigungen werden geprüft. Die Aktion ist noch nicht verfügbar.",
-        "Permissions are being checked. The action is not available yet.",
-        "Se están comprobando los permisos. La acción aún no está disponible.",
     ),
     (
         "Berechtigungen · {step} von 3",
@@ -329,26 +324,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Reinicia la aplicación antes de eliminar más cuentas.",
     ),
     (
-        "Bitte warte auf das Ergebnis. Dein Entwurf bleibt erhalten.",
-        "Please wait for the result. Your draft is preserved.",
-        "Espera el resultado. Se conserva el borrador.",
-    ),
-    (
-        "Bitte warte auf den laufenden Vorgang.",
-        "Please wait for the current operation.",
-        "Espera a que termine la operación actual.",
-    ),
-    (
-        "Bitte warte auf die ausstehende Freigabe.",
-        "Please wait for the required permission.",
-        "Espera la autorización pendiente.",
-    ),
-    (
-        "Bitte warte, bis der vorherige Gerätetest beendet ist.",
-        "Wait for the previous device check to stop.",
-        "Espera a que termine la prueba anterior.",
-    ),
-    (
         "Bitte wähle ein verfügbares Gerät.",
         "Choose an available device.",
         "Elige un dispositivo disponible.",
@@ -399,9 +374,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El sistema ha rechazado la notificación.",
     ),
     (
-        "Das Entfernen dauert länger als erwartet. Es wurde noch nicht als abgeschlossen bestätigt. Warte kurz und versuche es erneut.",
-        "Removal is taking longer than expected and has not been confirmed complete. Wait briefly and try again.",
-        "La eliminación tarda más de lo esperado y todavía no se ha confirmado. Espera un momento e inténtalo de nuevo.",
+        "Das Entfernen wurde nicht rechtzeitig bestätigt. Prüfe den Kontostatus und versuche das Entfernen erneut.",
+        "Removal was not confirmed in time. Check the account status and try removing it again.",
+        "La eliminación no se confirmó a tiempo. Comprueba el estado de la cuenta y vuelve a intentar eliminarla.",
     ),
     (
         "Das Entfernen wurde unterbrochen. Bitte versuche es erneut.",
@@ -412,6 +387,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Das Ergebnis ist unklar. Bitte lade die Kontoeinstellungen neu, bevor du erneut änderst.",
         "The outcome is uncertain. Reload account settings before making another change.",
         "El resultado es incierto. Recarga los ajustes de la cuenta antes de volver a cambiarlos.",
+    ),
+    (
+        "Das Gerät konnte nicht geöffnet werden. Prüfe, ob eine andere App darauf zugreift, und versuche es erneut.",
+        "The device could not be opened. Check whether another app is using it, then try again.",
+        "No se pudo abrir el dispositivo. Comprueba si otra aplicación lo está usando y vuelve a intentarlo.",
     ),
     (
         "Das Gespräch ist nicht mehr verfügbar.",
@@ -439,6 +419,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La cuenta ha cambiado. Vuelve a seleccionarla.",
     ),
     (
+        "Das Konto konnte nicht entfernt werden. Bitte versuche das Entfernen erneut.",
+        "The account could not be removed. Please try removing it again.",
+        "No se pudo eliminar la cuenta. Vuelve a intentar eliminarla.",
+    ),
+    (
         "Das Konto konnte nicht verbunden werden. Bitte erneut versuchen.",
         "Could not connect the account. Try again.",
         "No se pudo conectar la cuenta. Inténtalo de nuevo.",
@@ -447,6 +432,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Das Konto konnte nicht vollständig aus dieser App entfernt werden. Bitte erneut versuchen oder den Speicherstatus prüfen.",
         "The account could not be fully removed from this app. Try again or check the credential storage status.",
         "No se pudo eliminar por completo la cuenta de esta aplicación. Vuelve a intentarlo o revisa el estado de las credenciales guardadas.",
+    ),
+    (
+        "Das Update ist installiert.",
+        "The update is installed.",
+        "La actualización está instalada.",
     ),
     (
         "Das ausgewählte Gerät wurde entfernt.",
@@ -496,11 +486,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Deine Anmeldung speichern.",
         "Save your sign-in.",
         "Guardar tu inicio de sesión.",
-    ),
-    (
-        "Deine Anmeldung wird gespeichert …",
-        "Saving your sign-in …",
-        "Guardando tu inicio de sesión…",
     ),
     (
         "Deine Anmeldung wurde nicht als gespeichert bestätigt. Bitte versuche es erneut.",
@@ -570,11 +555,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El acceso al dispositivo se comprueba al abrirlo.",
     ),
     (
-        "Der Kontospeicher wird gerade verwendet. Warte kurz und versuche das Entfernen erneut.",
-        "Account storage is busy. Wait briefly and try removing the account again.",
-        "El almacenamiento de la cuenta está ocupado. Espera un momento y vuelve a eliminar la cuenta.",
-    ),
-    (
         "Der Link ist abgelaufen.",
         "The link has expired.",
         "El enlace ha caducado.",
@@ -610,6 +590,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor crea subcarpetas para las conversaciones dentro de ella.",
     ),
     (
+        "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Prüfe den Speicherstatus vor einem erneuten Versuch.",
+        "The save is unconfirmed and may still complete. Check the storage status before trying again.",
+        "El guardado no está confirmado y aún puede completarse. Comprueba el estado del almacenamiento antes de volver a intentarlo.",
+    ),
+    (
         "Der Speicherzustand muss geklärt werden. Wähle bis dahin keine neue Ablage.",
         "The storage state needs checking. Do not choose another store yet.",
         "Hay que comprobar el estado del almacenamiento. No elijas otra opción todavía.",
@@ -623,6 +608,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Text ist zu lang. Dein Entwurf bleibt erhalten.",
         "The text is too long. Your draft is preserved.",
         "El texto es demasiado largo. Se conserva el borrador.",
+    ),
+    (
+        "Der Updatedienst konnte nicht gestartet werden. Starte die App neu und versuche es erneut.",
+        "The update service could not start. Restart the app and try again.",
+        "No se pudo iniciar el servicio de actualizaciones. Reinicia la aplicación y vuelve a intentarlo.",
     ),
     (
         "Der Zugriff auf den Schlüsselspeicher wurde verweigert. Erlaube der App den Zugriff und versuche das Entfernen erneut.",
@@ -690,6 +680,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Actualmente se usan banners y sonidos normales del sistema. Las acciones nativas de llamada aún no están disponibles.",
     ),
     (
+        "Die Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen.",
+        "Could not complete the action. Please try again.",
+        "No se pudo completar la acción. Vuelve a intentarlo.",
+    ),
+    (
         "Die Anmeldung hat zu lange gedauert. Mit einem neuen Link kannst du weitermachen.",
         "Sign-in took too long. Continue with a new link.",
         "El inicio de sesión ha tardado demasiado. Continúa con un enlace nuevo.",
@@ -705,9 +700,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Las respuestas aún no se han cargado. Se conserva el borrador de la conversación.",
     ),
     (
-        "Die App ist gerade ausgelastet. Bitte kurz warten und erneut versuchen.",
-        "The app is busy. Please wait a moment and try again.",
-        "La aplicación está ocupada. Espera un momento y vuelve a intentarlo.",
+        "Die Berechtigung zum Erstellen ist nicht bekannt. Bitte neu laden.",
+        "Permission to create conversations is unknown. Please reload.",
+        "Se desconoce el permiso para crear conversaciones. Vuelve a cargar.",
     ),
     (
         "Die Bereinigung einer früheren Speicherung ist noch offen.",
@@ -795,11 +790,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede comprobar el acceso ahora. Inténtalo más tarde.",
     ),
     (
-        "Die Serveradresse wird geprüft. Bitte warte.",
-        "Checking the server address. Please wait.",
-        "Comprobando la dirección del servidor. Espera, por favor.",
-    ),
-    (
         "Die Sichtbarkeit ist noch nicht bekannt.",
         "Visibility is not known yet.",
         "La visibilidad aún no se conoce.",
@@ -818,6 +808,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Verbindung wurde getrennt, aber die Abmeldung konnte nicht dauerhaft gespeichert werden. Bitte versuche es erneut; nach einem Neustart könnte sich das Konto sonst wieder verbinden.",
         "The connection was closed, but sign-out could not be saved permanently. Please try again; otherwise the account could reconnect after restarting.",
         "Se cerró la conexión, pero no se pudo guardar el cierre de sesión de forma permanente. Inténtalo de nuevo; de lo contrario, la cuenta podría reconectarse al reiniciar.",
+    ),
+    (
+        "Die Verfügbarkeit ist nicht bekannt. Bitte neu laden.",
+        "Availability is unknown. Please reload.",
+        "Se desconoce la disponibilidad. Vuelve a cargar.",
+    ),
+    (
+        "Die Vorschau ist nicht bestätigt. Bitte erneut suchen.",
+        "The preview is unconfirmed. Search again.",
+        "La vista previa no está confirmada. Vuelve a buscar.",
     ),
     (
         "Die Zugangseinstellungen sind noch nicht verfügbar.",
@@ -853,11 +853,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die Zugriffsprüfung ist nicht verfügbar.",
         "The access check is unavailable.",
         "La comprobación de acceso no está disponible.",
-    ),
-    (
-        "Die Zugriffsprüfung ist noch nicht bereit.",
-        "The access check is not ready yet.",
-        "La comprobación de acceso aún no está lista.",
     ),
     (
         "Die Zugriffsprüfung wurde beendet.",
@@ -1073,9 +1068,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Actualmente no está permitida otra llamada en esta conversación.",
     ),
     (
-        "Ein früherer Speichervorgang für diese Anmeldung ist noch nicht abgeschlossen. Das Konto bleibt abgemeldet. Warte kurz und versuche das Entfernen erneut.",
-        "An earlier save for this sign-in has not finished. The account remains signed out. Wait briefly and try removing it again.",
-        "Una operación de guardado anterior de este inicio de sesión no ha terminado. La cuenta sigue desconectada. Espera un momento y vuelve a eliminarla.",
+        "Ein früherer Speichervorgang für diese Anmeldung ist nicht abgeschlossen. Das Konto bleibt abgemeldet. Versuche das Entfernen erneut.",
+        "An earlier save for this sign-in is incomplete. The account remains signed out. Try removing it again.",
+        "Un guardado anterior de este inicio de sesión no se ha completado. La cuenta sigue desconectada. Vuelve a intentar eliminarla.",
     ),
     (
         "Ein gemeinsames Gespräch erstellen",
@@ -1108,24 +1103,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Una política del sistema o de administración bloquea el acceso. Contacta con tu administrador.",
     ),
     (
-        "Eine Zugriffsanfrage läuft bereits. Bitte warte kurz.",
-        "An access request is already in progress. Please wait.",
-        "Ya hay una solicitud de acceso en curso. Espera un momento.",
-    ),
-    (
-        "Eine andere Zugriffsanfrage läuft …",
-        "Another access request is in progress…",
-        "Hay otra solicitud de acceso en curso…",
-    ),
-    (
-        "Eine frühere Speicherung wird noch bereinigt. Bitte warte.",
-        "An earlier save is being cleaned up. Please wait.",
-        "Se está limpiando un almacenamiento anterior. Espera, por favor.",
-    ),
-    (
-        "Einfügen ist für diesen Entwurf nicht freigegeben.",
-        "Pasting is not permitted for this draft.",
-        "No se permite pegar contenido en este borrador.",
+        "Eine frühere Speicherung ist noch nicht vollständig bereinigt.",
+        "An earlier save has not been fully cleaned up.",
+        "Una operación de guardado anterior no se ha limpiado por completo.",
     ),
     ("Eingehende Anrufe", "Incoming calls", "Llamadas entrantes"),
     ("Eingehender Anruf", "Incoming call", "Llamada entrante"),
@@ -1154,11 +1134,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Einstellungen schließen",
         "Close settings",
         "Cerrar ajustes",
-    ),
-    (
-        "Einstellungen werden geladen …",
-        "Loading settings …",
-        "Cargando ajustes…",
     ),
     ("Einstellungen öffnen", "Open settings", "Abrir ajustes"),
     ("Entdecken", "Discover", "Descubrir"),
@@ -1230,6 +1205,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Encuentra conversaciones disponibles para ti en el directorio.",
     ),
     ("Freigabe abgelehnt.", "Access denied.", "Acceso denegado."),
+    (
+        "Freigabe ausstehend",
+        "Permission pending",
+        "Permiso pendiente",
+    ),
     ("Freigabe beenden", "Stop sharing", "Dejar de compartir"),
     ("Freigabe prüfen", "Check permission", "Comprobar permiso"),
     (
@@ -1279,16 +1259,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Buscar en el contenido cargado…",
     ),
     (
-        "Gerade ausgelastet. Dein Entwurf bleibt erhalten; bitte erneut versuchen.",
-        "Busy right now. Your draft is preserved; please try again.",
-        "El servicio está ocupado. Se conserva el borrador; vuelve a intentarlo.",
-    ),
-    (
-        "Gerät wird beendet …",
-        "Stopping device…",
-        "Deteniendo dispositivo…",
-    ),
-    (
         "Gerät wird gestartet …",
         "Starting device…",
         "Iniciando dispositivo…",
@@ -1298,11 +1268,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Geräte aktualisieren",
         "Refresh devices",
         "Actualizar dispositivos",
-    ),
-    (
-        "Geräte werden ermittelt …",
-        "Finding devices…",
-        "Buscando dispositivos…",
     ),
     (
         "Geräte werden für Meetings und Gespräche verwendet.",
@@ -1384,6 +1349,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Gib die Adresse eurer NextCloud ein.",
         "Enter your team's NextCloud address.",
         "Introduce la dirección de vuestra NextCloud.",
+    ),
+    (
+        "Gib einen Namen für das Gespräch ein.",
+        "Enter a conversation name.",
+        "Introduce un nombre para la conversación.",
     ),
     (
         "Gib einen Namen oder einen Suchbegriff ein.",
@@ -1576,11 +1546,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No hay conversaciones sin leer cargadas.",
     ),
     ("Klingelton abspielen", "Play ringtone", "Reproducir tono"),
-    (
-        "Klingelton wird einmal abgespielt …",
-        "Playing ringtone once …",
-        "Reproduciendo el tono una vez …",
-    ),
     ("Kompakt", "Compact", "Compacta"),
     (
         "Konferenzbeitritte und persönliche Erinnerungen.",
@@ -1616,11 +1581,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Kontoeinstellungen neu laden",
         "Reload account settings",
         "Recargar ajustes de la cuenta",
-    ),
-    (
-        "Kontoeinstellungen werden geladen …",
-        "Loading account settings…",
-        "Cargando ajustes de la cuenta…",
     ),
     (
         "Kontoeinstellungen werden gespeichert …",
@@ -1755,11 +1715,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudieron actualizar los mensajes.",
     ),
     ("Nachrichten testen", "Test messages", "Probar mensajes"),
-    (
-        "Nachrichten werden geladen …",
-        "Loading messages …",
-        "Cargando mensajes…",
-    ),
     ("Name", "Name", "Nombre"),
     ("Name der Gruppe", "Group name", "Nombre del grupo"),
     (
@@ -1956,11 +1911,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Envío no disponible",
     ),
     (
-        "Senden wird vorbereitet …",
-        "Preparing to send …",
-        "Preparando el envío…",
-    ),
-    (
         "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich.",
         "Send status is uncertain. It must be checked before sending again.",
         "El estado del envío es incierto. Debe comprobarse antes de volver a enviar.",
@@ -2042,11 +1992,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Strg K", "Ctrl K", "Ctrl K"),
     ("Suchen", "Search", "Buscar"),
     ("System", "System", "Sistema"),
-    (
-        "Systemeinstellungen werden geöffnet …",
-        "Opening System Settings…",
-        "Abriendo los ajustes del sistema…",
-    ),
     (
         "Systemeinstellungen öffnen",
         "Open System Settings",
@@ -2257,11 +2202,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Waiting for you to sign in …",
         "Esperando a que inicies sesión…",
     ),
-    (
-        "Warte auf die Browseranmeldung …",
-        "Waiting for browser sign-in…",
-        "Esperando el inicio de sesión en el navegador…",
-    ),
     ("Webinar", "Webinar", "Seminario web"),
     ("Weiter", "Continue", "Continuar"),
     (
@@ -2391,16 +2331,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Zugriff verweigert. Erlaube Mikrofon oder Kamera in den Systemeinstellungen.",
         "Access denied. Allow microphone or camera access in system settings.",
         "Acceso denegado. Permite el acceso al micrófono o la cámara en los ajustes del sistema.",
-    ),
-    (
-        "Zugriff wird geprüft …",
-        "Checking access…",
-        "Comprobando el acceso…",
-    ),
-    (
-        "Zugriffsanfrage läuft …",
-        "Requesting access…",
-        "Solicitando acceso…",
     ),
     (
         "Zugriffsstatus unbekannt.",

@@ -1,4 +1,6 @@
 //! Native room dialogs keep their originating context and submit typed, correlated intents.
+mod members;
+
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability, input::TextInput};
 use gpui::{Context, Div, Entity, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::conversation::{
@@ -25,6 +27,12 @@ impl Tab {
         Self::Permissions,
         Self::Meeting,
     ];
+    fn applies(self, kind: Option<ConversationKind>) -> bool {
+        !matches!(
+            kind,
+            Some(ConversationKind::Direct | ConversationKind::NoteToSelf)
+        ) || matches!(self, Self::General | Self::Notifications | Self::Privacy)
+    }
     fn label(self) -> &'static str {
         match self {
             Self::General => "Allgemein",
@@ -53,10 +61,15 @@ pub(crate) enum Action {
     SaveDescription,
     Search,
     CsvPreview,
+    PickCsv,
     ShowCsv,
+    AddMembers,
+    MembersBack,
+    MemberMenu(conversation::PersonRef),
+    MemberChoice(members::MenuTarget, members::MemberChoice),
     Confirm(ConversationAction),
-    SubmitConfirmation,
-    CancelConfirmation,
+    SubmitConfirmation(ConversationRef, u64),
+    CancelConfirmation(ConversationRef, u64),
     Avatar,
     Password,
     CopyGuestLink,
@@ -64,13 +77,19 @@ pub(crate) enum Action {
 pub(super) struct RoomUi {
     pub create_direct: bool,
     pub create_account: Option<talk_core::ui::AccountScope>,
+    pub create_people_request: Option<super::creation::PeopleRequest>,
     pub context: Option<ConversationRef>,
     tab: Tab,
-    bots: bool,
+    members: members::Flow,
     loaded: bool,
+    name_observation: Option<(Text<256>, u64)>,
+    description_observation: Option<(Text<4000>, u64)>,
     pub request: u64,
     confirmation: Option<ConversationAction>,
-    csv_open: bool,
+    confirmation_generation: u64,
+    member_focus: gpui::FocusHandle,
+    member_anchor: std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>,
+    pending_member_focus: Option<members::FocusTarget>,
     pub name: Entity<TextInput>,
     pub description: Entity<TextInput>,
     pub search: Entity<TextInput>,
@@ -97,13 +116,19 @@ impl RoomUi {
         Self {
             create_direct: true,
             create_account: None,
+            create_people_request: None,
             context: None,
             tab: Tab::General,
-            bots: false,
+            members: members::Flow::default(),
             loaded: false,
+            name_observation: None,
+            description_observation: None,
             request: 0,
             confirmation: None,
-            csv_open: false,
+            confirmation_generation: 0,
+            member_focus: cx.focus_handle(),
+            member_anchor: std::cell::Cell::new(None),
+            pending_member_focus: None,
             name,
             description,
             search,
@@ -132,22 +157,35 @@ pub(super) fn unavailable(value: conversation::Availability) -> &'static str {
         match value.allowed {
             Decision::Denied => "Du hast dafür keine Berechtigung.",
             Decision::Stale => "Berechtigungen müssen erneut geprüft werden.",
-            _ => "Verfügbarkeit wird geprüft …",
+            _ => "Die Verfügbarkeit ist nicht bekannt. Bitte neu laden.",
         }
     }
 }
 impl Desktop {
+    pub(crate) fn room_members_applicable(&self) -> bool {
+        matches!(
+            self.selected().map(|row| row.kind),
+            Some(ConversationKind::Group | ConversationKind::GuestAccessible)
+        )
+    }
     pub(super) fn open_room_dialog(&mut self, overlay: Overlay, cx: &mut Context<Self>) {
+        if overlay == Overlay::Participants && !self.room_members_applicable() {
+            return;
+        }
+        self.cancel_member_csv_pick();
         let Some(context) = self.snapshot.selected else {
             return;
         };
         self.dismiss_room_feedback();
         self.room_ui.confirmation = None;
+        self.room_ui.members.reset();
+        self.room_ui.pending_member_focus = None;
         if self.room_ui.context != Some(context) {
             self.room_ui.context = Some(context);
             self.room_ui.loaded = false;
+            self.room_ui.name_observation = None;
+            self.room_ui.description_observation = None;
             self.room_ui.confirmation = None;
-            self.room_ui.csv_open = false;
             for input in self.room_ui.inputs() {
                 input.update(cx, |i, _| i.reset());
             }
@@ -161,10 +199,27 @@ impl Desktop {
         self.submit_room(command);
     }
     pub(super) fn refresh_room_dialog(&mut self, cx: &mut Context<Self>) {
+        if !self
+            .room_ui
+            .tab
+            .applies(self.selected().map(|row| row.kind))
+        {
+            self.room_ui.tab = Tab::General;
+            self.room_ui.confirmation = None;
+        }
+        if self.overlay == Some(Overlay::Participants) && !self.room_members_applicable() {
+            self.close_room_dialog_state();
+            self.overlay = None;
+        }
         if self.room_ui.context != self.snapshot.selected {
+            self.cancel_member_csv_pick();
             self.room_ui.context = None;
             self.room_ui.loaded = false;
+            self.room_ui.name_observation = None;
+            self.room_ui.description_observation = None;
             self.room_ui.confirmation = None;
+            self.room_ui.members.reset();
+            self.room_ui.pending_member_focus = None;
             if matches!(
                 self.overlay,
                 Some(Overlay::RoomInfo | Overlay::Participants)
@@ -176,39 +231,48 @@ impl Desktop {
             }
             return;
         }
-        if !self.room_ui.loaded
-            && let Some(details) = self
-                .snapshot
-                .conversation_panel
-                .as_ref()
-                .and_then(|p| p.details.as_ref())
+        self.refresh_member_preview();
+        self.refresh_member_csv_pick(cx);
+        self.load_bots_on_entry();
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .and_then(|p| p.details.as_ref())
         {
-            self.room_ui
-                .name
-                .update(cx, |i, _| i.set_context_value(details.name.as_str()));
-            self.room_ui.description.update(cx, |i, _| {
-                i.set_context_value(details.description.as_ref().map_or("", |v| v.as_str()))
-            });
+            sync_room_field(
+                &self.room_ui.name,
+                &mut self.room_ui.name_observation,
+                details.name.as_str(),
+                !self.room_ui.loaded,
+                cx,
+            );
+            sync_room_field(
+                &self.room_ui.description,
+                &mut self.room_ui.description_observation,
+                details.description.as_ref().map_or("", Text::as_str),
+                !self.room_ui.loaded,
+                cx,
+            );
             self.room_ui.loaded = true;
         }
     }
     fn submit_room(&mut self, action: ConversationAction) {
-        let Some(context) = self
+        self.submit_room_request(action);
+    }
+    fn submit_room_request(&mut self, action: ConversationAction) -> Option<RequestId> {
+        let context = self
             .room_ui
             .context
-            .filter(|c| Some(*c) == self.snapshot.selected)
-        else {
-            return;
-        };
-        let Some(next) = self.room_ui.request.checked_add(1) else {
-            return;
-        };
+            .filter(|c| Some(*c) == self.snapshot.selected)?;
+        let next = self.room_ui.request.checked_add(1)?;
         self.room_ui.request = next;
         self.submit(UiIntent::Conversation {
             request: RequestId(next),
             context,
             action,
-        });
+        })
+        .then_some(RequestId(next))
     }
     fn dismiss_room_feedback(&mut self) {
         if let Some(panel) = &self.snapshot.conversation_panel
@@ -220,9 +284,35 @@ impl Desktop {
             });
         }
     }
-    pub(super) fn room_action(&mut self, action: Action, cx: &mut Context<Self>) {
+    pub(super) fn room_action(
+        &mut self,
+        action: Action,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(
+            &action,
+            Action::People(_)
+                | Action::Search
+                | Action::CsvPreview
+                | Action::PickCsv
+                | Action::ShowCsv
+                | Action::AddMembers
+                | Action::MembersBack
+                | Action::MemberMenu(_)
+                | Action::MemberChoice(..)
+        ) && self.overlay != Some(Overlay::Participants)
+        {
+            return;
+        }
         match action {
             Action::Tab(tab) => {
+                if !tab.applies(self.selected().map(|row| row.kind)) {
+                    return;
+                }
+                if self.room_ui.tab != tab {
+                    self.begin_surface_reveal(("room-page", tab as usize).into());
+                }
                 self.dismiss_room_feedback();
                 self.room_ui.tab = tab;
                 self.room_ui.confirmation = None;
@@ -231,14 +321,25 @@ impl Desktop {
                 }
             }
             Action::People(bots) => {
+                self.cancel_member_csv_pick();
+                if self.room_ui.members.is_bots() != bots {
+                    self.begin_surface_reveal(("room-page", 10 + usize::from(bots)).into());
+                }
                 self.dismiss_room_feedback();
-                self.room_ui.bots = bots;
-                self.room_ui.confirmation = None;
-                self.submit_room(if bots {
-                    ConversationAction::Bots
+                self.room_ui.members.show(if bots {
+                    members::Page::Bots
                 } else {
-                    ConversationAction::Members
+                    members::Page::People
                 });
+                self.room_ui.confirmation = None;
+                self.room_ui.pending_member_focus = None;
+                if let Some(command) = self.room_ui.members.page.navigation_request(
+                    self.room_panel().is_some_and(|p| p.members_loaded),
+                    self.room_available(RoomSetting::Members).is_enabled(),
+                ) {
+                    self.submit_room(command);
+                }
+                self.load_bots_on_entry();
             }
             Action::CopyGuestLink => {
                 if let Some(panel) = &self.snapshot.conversation_panel
@@ -253,6 +354,9 @@ impl Desktop {
                 }
             }
             Action::Command(command) => {
+                if !self.member_command_allowed(&command) {
+                    return;
+                }
                 if command == ConversationAction::Read {
                     self.room_ui.loaded = false;
                 }
@@ -269,24 +373,95 @@ impl Desktop {
                 }
             }
             Action::Search => {
-                if let Ok(search) = Text::new(self.room_ui.search.read(cx).content.as_str()) {
-                    self.submit_room(ConversationAction::Directory {
+                if self.room_ui.members.page == members::Page::Invite
+                    && self.room_available(RoomSetting::Invite).is_enabled()
+                    && let Ok(search) = Text::new(self.room_ui.search.read(cx).content.as_str())
+                {
+                    let request = self.submit_room_request(ConversationAction::Directory {
                         search,
                         source: DirectorySource::User,
                     });
+                    self.room_ui.members.preview(self.room_ui.context, request);
                 }
             }
             Action::CsvPreview => {
-                if let Ok(csv) = Text::new(self.room_ui.csv.read(cx).content.as_str()) {
-                    self.submit_room(ConversationAction::PreviewCsv(csv));
+                if self.room_ui.members.page == members::Page::Csv
+                    && self.csv_available().is_enabled()
+                    && let Ok(csv) = Text::new(self.room_ui.csv.read(cx).content.as_str())
+                {
+                    let request = self.submit_room_request(ConversationAction::PreviewCsv(csv));
+                    self.room_ui.members.preview(self.room_ui.context, request);
                 }
             }
-            Action::ShowCsv => self.room_ui.csv_open = !self.room_ui.csv_open,
-            Action::Confirm(command) => self.room_ui.confirmation = Some(command),
-            Action::CancelConfirmation => self.room_ui.confirmation = None,
-            Action::SubmitConfirmation => {
-                if let Some(command) = self.room_ui.confirmation.take() {
+            Action::PickCsv => self.pick_member_csv(cx),
+            Action::ShowCsv | Action::AddMembers => {
+                let csv = matches!(action, Action::ShowCsv);
+                if if csv {
+                    self.csv_available()
+                } else {
+                    self.room_available(RoomSetting::Invite)
+                }
+                .is_enabled()
+                {
+                    self.cancel_member_csv_pick();
+                    self.dismiss_room_feedback();
+                    self.room_ui.members.show(if csv {
+                        members::Page::Csv
+                    } else {
+                        members::Page::Invite
+                    });
+                    self.begin_surface_reveal(("room-page", if csv { 13usize } else { 12 }).into());
+                    self.room_ui.pending_member_focus = Some(if csv {
+                        members::FocusTarget::Csv
+                    } else {
+                        members::FocusTarget::Search
+                    });
+                }
+            }
+            Action::MembersBack => {
+                self.back_from_members(window, cx);
+            }
+            Action::MemberMenu(person) => self.open_member_menu(person, window, cx),
+            Action::MemberChoice(target, choice) => {
+                self.choose_member_action(target, choice, window, cx);
+            }
+            Action::Confirm(command) => {
+                if !self.member_command_allowed(&command) {
+                    return;
+                }
+                let Some(generation) = self.room_ui.confirmation_generation.checked_add(1) else {
+                    return;
+                };
+                self.room_ui.confirmation_generation = generation;
+                self.room_ui.members.close_menu();
+                self.begin_surface_reveal(("room-page", 20usize).into());
+                self.room_ui.confirmation = Some(command);
+                self.room_ui.pending_member_focus =
+                    Some(members::FocusTarget::Control("room-cancel-confirm".into()));
+            }
+            Action::CancelConfirmation(context, generation) => {
+                if self.room_ui.context != Some(context)
+                    || self.snapshot.selected != Some(context)
+                    || self.room_ui.confirmation_generation != generation
+                {
+                    return;
+                }
+                self.room_ui.confirmation = None;
+                self.restore_member_page_focus();
+            }
+            Action::SubmitConfirmation(context, generation) => {
+                if self.room_ui.context != Some(context)
+                    || self.snapshot.selected != Some(context)
+                    || self.room_ui.confirmation_generation != generation
+                {
+                    return;
+                }
+                if let Some(command) = self.room_ui.confirmation.as_ref()
+                    && self.member_command_allowed(command)
+                    && let Some(command) = self.room_ui.confirmation.take()
+                {
                     self.submit_room(command);
+                    self.restore_member_page_focus();
                 }
             }
             Action::Avatar => {
@@ -304,24 +479,28 @@ impl Desktop {
         cx.notify();
     }
     fn room_available(&self, setting: RoomSetting) -> Availability {
-        let value = self
+        let panel = self
             .snapshot
             .conversation_panel
             .as_ref()
-            .filter(|p| Some(p.context) == self.room_ui.context)
+            .filter(|p| Some(p.context) == self.room_ui.context);
+        let value = panel
             .and_then(|p| p.details.as_ref())
             .map_or(conversation::Availability::UNKNOWN, |d| {
                 d.availability(setting)
             });
-        if self
-            .snapshot
-            .conversation_panel
-            .as_ref()
-            .is_some_and(|p| p.state.pending())
+        if !value.implemented
+            || value.server == FeatureSupport::Unsupported
+            || matches!(value.allowed, Decision::Denied | Decision::Stale)
         {
-            Availability::when(false, "Änderung wird geprüft …")
-        } else {
-            Availability::when(value.enabled(), unavailable(value))
+            return Availability::when(false, unavailable(value));
+        }
+        match panel.map(|p| p.state) {
+            Some(RemoteState::Loading(_) | RemoteState::Saving(_)) => Availability::pending(),
+            Some(RemoteState::Uncertain(_)) => {
+                Availability::when(false, "Ergebnis unklar. Vor erneutem Ändern neu laden.")
+            }
+            _ => Availability::when(value.enabled(), unavailable(value)),
         }
     }
     fn room_heading(&self, label: &str) -> Div {
@@ -403,18 +582,24 @@ impl Desktop {
                     .when_some(action, |d, action| d.child(action.flex_none())),
             )
     }
-    /// Remote state belongs to the dialog, not to one tab: it is the footer.
+    /// Keep actionable failures visible without a routine loading/saving footer.
     fn room_status(&self, cx: &Context<Self>) -> Option<Div> {
         let panel = self
             .snapshot
             .conversation_panel
             .as_ref()
             .filter(|p| Some(p.context) == self.room_ui.context)?;
-        let key = match panel.state {
+        let bots = self.overlay == Some(Overlay::Participants)
+            && self.room_ui.members.is_bots()
+            && matches!(
+                panel.bots_state,
+                RemoteState::Failed(..) | RemoteState::Uncertain(_)
+            );
+        let state = if bots { panel.bots_state } else { panel.state };
+        let key = match state {
             // The controls still follow confirmed/pending authority, but routine
             // saves do not add a status bar or shift the settings page.
-            RemoteState::Idle | RemoteState::Saving(_) => return None,
-            RemoteState::Loading(_) => "Gesprächsdaten werden geladen …",
+            RemoteState::Idle | RemoteState::Saving(_) | RemoteState::Loading(_) => return None,
             RemoteState::Uncertain(_) => "Ergebnis unklar. Vor erneutem Ändern neu laden.",
             RemoteState::Failed(_, reason) => match reason {
                 talk_core::ui::UnavailableReason::PermissionDenied => {
@@ -429,10 +614,7 @@ impl Desktop {
                 _ => "Die Anfrage ist fehlgeschlagen. Der bestätigte Stand bleibt erhalten.",
             },
         };
-        let problem = matches!(
-            panel.state,
-            RemoteState::Failed(..) | RemoteState::Uncertain(_)
-        );
+        let problem = matches!(state, RemoteState::Failed(..) | RemoteState::Uncertain(_));
         Some(
             div()
                 .flex()
@@ -443,7 +625,7 @@ impl Desktop {
                     self.hint(self.l(key))
                         .flex_1()
                         .min_w_0()
-                        .when(matches!(panel.state, RemoteState::Failed(..)), |d| {
+                        .when(matches!(state, RemoteState::Failed(..)), |d| {
                             d.text_color(self.theme.danger)
                         }),
                 )
@@ -452,8 +634,16 @@ impl Desktop {
                         "room-reload",
                         "Erneut laden",
                         ButtonStyle::Secondary,
-                        true,
-                        LocalAction::Room(Action::Command(ConversationAction::Read)),
+                        if bots {
+                            self.bots_available()
+                        } else {
+                            Availability::available()
+                        },
+                        LocalAction::Room(Action::Command(if bots {
+                            ConversationAction::Bots
+                        } else {
+                            ConversationAction::Read
+                        })),
                         cx,
                     ))
                 }),
@@ -478,13 +668,17 @@ impl Desktop {
                         "room-people-tab"
                     },
                     (label, icon),
-                    self.room_ui.bots == bots,
+                    self.room_ui.members.is_bots() == bots,
                     LocalAction::Room(Action::People(bots)),
                     cx,
                 ));
             }
         } else {
-            for (i, tab) in Tab::ALL.into_iter().enumerate() {
+            for (i, tab) in Tab::ALL
+                .into_iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.applies(row.map(|row| row.kind)))
+            {
                 items.push(self.dialog_nav_item(
                     ("room-tab", i),
                     (tab.label(), tab.icon()),
@@ -510,7 +704,7 @@ impl Desktop {
                     .w_full()
                     .min_w_0()
                     .flex()
-                    .items_center()
+                    .items_start()
                     .gap_3()
                     .child(self.conversation_avatar(r))
                     .child(
@@ -525,10 +719,7 @@ impl Desktop {
                                     .min_w_0()
                                     .text_size(self.sp(14.))
                                     .font_weight(FontWeight::MEDIUM)
-                                    // Unlike nowrap truncation, this remeasures
-                                    // text when GPUI resolves the flex width.
-                                    .line_clamp(1)
-                                    .text_ellipsis()
+                                    .whitespace_normal()
                                     .child(r.title.as_str().to_owned()),
                             )
                             .child(self.hint(self.l("Gespräch"))),
@@ -541,7 +732,7 @@ impl Desktop {
             (20, self.room_confirmation(cx))
         } else if members {
             (
-                10 + usize::from(self.room_ui.bots),
+                self.room_ui.members.page.key(),
                 self.members_page(narrow, cx),
             )
         } else {
@@ -556,7 +747,7 @@ impl Desktop {
                 close: ("close-overlay", "Schließen"),
                 region: super::navigation::Region::Overlay,
                 navigation,
-                page: self.reveal(("room-page", key), page),
+                page: self.reveal_from_action(("room-page", key).into(), page),
                 footer: if self.feedback_visible() {
                     Some(
                         div()
@@ -582,19 +773,59 @@ impl Desktop {
     }
     fn room_settings_page(&self, narrow: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;
-        let mut page = self
-            .dialog_page()
-            .child(self.room_page_header(self.room_ui.tab.label(), narrow));
+        let stale = self.room_panel().is_some_and(|panel| panel.details_stale);
+        let mut page = self.dialog_page().child(
+            div()
+                .flex()
+                .items_start()
+                .gap_3()
+                .child(
+                    self.room_page_header(self.room_ui.tab.label(), narrow)
+                        .flex_1()
+                        .min_w_0(),
+                )
+                // Reserve the same passive label geometry after revalidation,
+                // so confirming cached values cannot shift the form beneath it.
+                .child(
+                    self.hint(self.l("Gespeicherter Stand"))
+                        .w(self.sp(144.))
+                        .max_w(gpui::relative(0.4))
+                        .min_w_0()
+                        .whitespace_normal()
+                        .opacity(if stale { 1. } else { 0. }),
+                ),
+        );
         let Some(panel) = self
             .snapshot
             .conversation_panel
             .as_ref()
             .filter(|p| Some(p.context) == self.room_ui.context)
         else {
-            return page.child(self.hint(self.l("Gesprächsdaten werden geladen …")));
+            return page.child(self.button(
+                "room-load-details",
+                "Erneut laden",
+                ButtonStyle::Secondary,
+                true,
+                LocalAction::Room(Action::Command(ConversationAction::Read)),
+                cx,
+            ));
         };
         let Some(d) = panel.details.as_ref() else {
-            return page;
+            if initial_room_load(Some(panel.state), false) {
+                return page.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+            }
+            return page.child(self.button(
+                "room-load-details",
+                "Erneut laden",
+                ButtonStyle::Secondary,
+                if matches!(panel.state, RemoteState::Saving(_)) {
+                    Availability::pending()
+                } else {
+                    Availability::available()
+                },
+                LocalAction::Room(Action::Command(ConversationAction::Read)),
+                cx,
+            ));
         };
         let Some(row) = self.selected() else {
             return page;
@@ -608,7 +839,7 @@ impl Desktop {
         };
         match self.room_ui.tab {
             Tab::General => {
-                let mut about = self.dialog_section(Some("Gespräch"));
+                let mut about = self.dialog_section(Some("Gespräch")).gap_3();
                 if matches!(
                     row.kind,
                     ConversationKind::Direct | ConversationKind::NoteToSelf
@@ -620,8 +851,34 @@ impl Desktop {
                         self.room_ui.name.read(cx).content.as_str() != d.name.as_str();
                     let description_changed = self.room_ui.description.read(cx).content.as_str()
                         != d.description.as_ref().map_or("", |v| v.as_str());
+                    let avatar_changed = !self.room_ui.avatar.read(cx).content.trim().is_empty();
                     about = about
-                        .gap_3()
+                        .child(
+                            div()
+                                .flex()
+                                .items_start()
+                                .gap_3()
+                                .child(self.conversation_avatar(row))
+                                .child(
+                                    self.room_field(
+                                        "Avatar",
+                                        &self.room_ui.avatar,
+                                        avatar_changed.then(|| {
+                                            self.button(
+                                                "room-avatar",
+                                                "Emoji als Avatar setzen",
+                                                ButtonStyle::Secondary,
+                                                self.room_available(RoomSetting::Avatar),
+                                                LocalAction::Room(Action::Avatar),
+                                                cx,
+                                            )
+                                        }),
+                                        cx,
+                                    )
+                                    .flex_1()
+                                    .min_w_0(),
+                                ),
+                        )
                         .child(self.room_field(
                             "Name",
                             &self.room_ui.name,
@@ -651,106 +908,76 @@ impl Desktop {
                                 )
                             }),
                             cx,
-                        ))
-                        .child(self.room_field(
-                            "Avatar",
-                            &self.room_ui.avatar,
-                            Some(self.button(
-                                "room-avatar",
-                                "Emoji als Avatar setzen",
-                                ButtonStyle::Secondary,
-                                self.room_available(RoomSetting::Avatar),
-                                LocalAction::Room(Action::Avatar),
-                                cx,
-                            )),
-                            cx,
                         ));
                 }
-                page = page
-                    .child(about.child(self.room_toggle(
-                        "room-read-only",
-                        "Schreibgeschützt",
-                        "Nachrichten bleiben lesbar. Schreiben folgt der Serverberechtigung.",
-                        d.read_only,
-                        RoomSetting::ReadOnly,
-                        ConversationAction::SetReadOnly(d.read_only != Some(true)),
-                        cx,
-                    )))
+                let personal = self
+                    .dialog_section(Some("Für dich"))
                     .child(
-                        self.dialog_section(None)
-                            .child(
-                                self.dialog_actions()
-                                    .child(self.button(
-                                        "room-archive",
-                                        if row.archived == Some(true) {
-                                            "Aus Archiv holen"
-                                        } else {
-                                            "Archivieren"
-                                        },
-                                        ButtonStyle::Secondary,
-                                        Availability::when(
-                                            row.archive == Decision::Allowed,
-                                            "Du hast dafür keine Berechtigung.",
-                                        ),
-                                        LocalAction::Archive(
-                                            row.context,
-                                            row.archived != Some(true),
-                                        ),
-                                        cx,
-                                    ))
-                                    .child(self.button(
-                                        "room-unread",
-                                        "Als ungelesen markieren",
-                                        ButtonStyle::Secondary,
-                                        Availability::when(
-                                            self.snapshot.content == super::ContentState::Ready,
-                                            "Die Verbindung ist derzeit nicht bereit.",
-                                        ),
-                                        LocalAction::MessageIn(
-                                            row.context,
-                                            super::messaging::Action::Command(
-                                                talk_core::ui::messaging::MessageAction::MarkUnread,
-                                            ),
-                                        ),
-                                        cx,
-                                    ))
-                                    .child(self.button(
-                                        "room-local-groups",
-                                        "Zu Gruppe hinzufügen …",
-                                        ButtonStyle::Secondary,
-                                        true,
-                                        LocalAction::Open(Overlay::Organize),
-                                        cx,
-                                    ))
-                                    .child(self.create_poll_button("room-create-poll", cx)),
-                            )
-                            .child(
-                                self.hint(self.l("Archivieren betrifft nur deine Gesprächsliste.")),
+                        self.button_with_leading_icon(
+                            "room-archive",
+                            (
+                                if row.archived == Some(true) {
+                                    "Aus Archiv holen"
+                                } else {
+                                    "Archivieren"
+                                },
+                                "inbox",
                             ),
+                            ButtonStyle::Quiet,
+                            Availability::when(
+                                row.archive == Decision::Allowed,
+                                "Du hast dafür keine Berechtigung.",
+                            ),
+                            LocalAction::Archive(row.context, row.archived != Some(true)),
+                            cx,
+                        )
+                        .w_full(),
                     )
                     .child(
-                        danger().child(
-                            self.dialog_actions()
-                                .child(self.button(
+                        self.button_with_leading_icon(
+                            "room-local-groups",
+                            ("Zu Gruppe hinzufügen …", "grid"),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Open(Overlay::Organize),
+                            cx,
+                        )
+                        .w_full(),
+                    );
+                page = page
+                    .child(about)
+                    .child(self.dialog_section(Some("Nachrichten")).gap_0().child(
+                        self.room_toggle(
+                            "room-read-only",
+                            "Schreibgeschützt",
+                            "Nachrichten bleiben lesbar. Schreiben folgt der Serverberechtigung.",
+                            d.read_only,
+                            RoomSetting::ReadOnly,
+                            ConversationAction::SetReadOnly(d.read_only != Some(true)),
+                            cx,
+                        ),
+                    ))
+                    .child(personal)
+                    .child(
+                        danger()
+                            .child(self.dialog_actions()
+                                .child(self.button_with_leading_icon(
                                     "room-leave",
-                                    "Gespräch verlassen",
+                                    ("Gespräch verlassen", "door-open"),
                                     ButtonStyle::Secondary,
-                                    Availability::when(
-                                        d.leave == Decision::Allowed,
-                                        "Du hast dafür keine Berechtigung.",
-                                    ),
+                                    Availability::when(d.leave == Decision::Allowed, "Du hast dafür keine Berechtigung."),
                                     LocalAction::Room(Action::Confirm(ConversationAction::Leave)),
                                     cx,
                                 ))
-                                .child(self.button(
+                                .child(self.button_with_leading_icon(
                                     "room-delete",
-                                    "Gespräch für alle löschen",
+                                    ("Gespräch für alle löschen", "trash-2"),
                                     ButtonStyle::Danger,
                                     self.room_available(RoomSetting::Delete),
                                     LocalAction::Room(Action::Confirm(ConversationAction::Delete)),
                                     cx,
-                                )),
-                        ),
+                                )))
+                            .child(self.hint(self.l("Verlassen beendet nur deine Mitgliedschaft. Löschen entfernt das Gespräch für alle."))),
                     );
             }
             Tab::Notifications => {
@@ -1105,228 +1332,10 @@ impl Desktop {
         self.input_surface(input, cx).flex_1().child(input.clone())
     }
 
-    fn members_page(&self, narrow: bool, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_3().child(self.room_page_header(
-            if self.room_ui.bots {
-                "Bots"
-            } else {
-                "Personen"
-            },
-            narrow,
-        ));
-        let Some(panel) = self
-            .snapshot
-            .conversation_panel
-            .as_ref()
-            .filter(|p| Some(p.context) == self.room_ui.context)
-        else {
-            return body;
-        };
-        if self.room_ui.bots {
-            body=body.child(self.hint(self.l("Verfügbare Bots für dieses Gespräch. Registrierung und Zugangsdaten verwaltet die Administration.")))
-                .child(self.dialog_actions().child(self.room_button("reload-room-bots","Bots laden",RoomSetting::Bots,ConversationAction::Bots,cx)));
-            for bot in panel.bots.as_slice() {
-                body = body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(self.theme.border)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(bot.name.as_str().to_owned())
-                                .child(self.hint(bot.description.as_str())),
-                        )
-                        .child(self.switch(
-                            ("room-bot", bot.id.local as usize),
-                            "Bot aktivieren",
-                            bot.enabled,
-                            self.room_available(RoomSetting::Bots),
-                            LocalAction::Room(Action::Command(ConversationAction::SetBotEnabled {
-                                bot: bot.id,
-                                enabled: bot.enabled != Some(true),
-                            })),
-                            cx,
-                        )),
-                );
-            }
-            if panel.bots_loaded && panel.bots.as_slice().is_empty() {
-                body = body.child(self.hint(self.l("Keine verfügbaren Bots.")));
-            }
-            return body;
-        }
-        body = body
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(self.room_input(&self.room_ui.search, cx))
-                    .child(self.button(
-                        "room-directory-search",
-                        "Verzeichnis durchsuchen",
-                        ButtonStyle::Secondary,
-                        self.room_available(RoomSetting::Invite),
-                        LocalAction::Room(Action::Search),
-                        cx,
-                    )),
-            )
-            .child(self.room_heading("Im Gespräch").pt_3());
-        let query = self.room_ui.search.read(cx).content.to_lowercase();
-        let mut matching = 0;
-        for member in panel
-            .members
-            .as_slice()
-            .iter()
-            .filter(|m| query.is_empty() || m.name.as_str().to_lowercase().contains(&query))
-        {
-            matching += 1;
-            let key = match member.role {
-                MemberRole::Owner => "Eigentümer",
-                MemberRole::Moderator | MemberRole::GuestModerator => "Moderation",
-                MemberRole::Guest => "Gast",
-                MemberRole::Following => "Folgt",
-                MemberRole::Member => "Teilnehmend",
-                MemberRole::Unknown => "Unbekannte Rolle",
-            };
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(self.theme.border)
-                    .child(self.content_avatar(
-                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
-                            context: panel.context,
-                            participant: member.id.local,
-                        },
-                        &person_initials(member.name.as_str()),
-                        36.,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(member.name.as_str().to_owned())
-                            .child(self.hint(self.l(key))),
-                    )
-                    .when(!member.self_user && member.role != MemberRole::Owner, |d| {
-                        d.child(self.button(
-                            ("room-role", member.id.local as usize),
-                            if member.role == MemberRole::Moderator {
-                                "Mitglied"
-                            } else {
-                                "Moderation"
-                            },
-                            ButtonStyle::Quiet,
-                            self.room_available(RoomSetting::Roles),
-                            LocalAction::Room(Action::Confirm(ConversationAction::SetRole {
-                                member: member.id,
-                                role: if member.role == MemberRole::Moderator {
-                                    MemberRole::Member
-                                } else {
-                                    MemberRole::Moderator
-                                },
-                            })),
-                            cx,
-                        ))
-                        .child(self.icon_button(
-                            ("room-remove", member.id.local as usize),
-                            ("x", "Person entfernen"),
-                            ButtonStyle::Quiet,
-                            self.room_available(RoomSetting::Invite),
-                            LocalAction::Room(Action::Confirm(ConversationAction::RemoveMember(
-                                member.id,
-                            ))),
-                            cx,
-                        ))
-                    }),
-            );
-        }
-        if panel.members_loaded && matching == 0 {
-            body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
-        }
-        if !panel.members_loaded {
-            body = body.child(self.dialog_actions().child(self.room_button(
-                "room-load-members",
-                "Mitglieder laden",
-                RoomSetting::Members,
-                ConversationAction::Members,
-                cx,
-            )));
-        }
-        body = body
-            .child(self.room_heading("Verzeichnis · Einladungsvorschau").pt_3())
-            .child(
-                self.hint(self.l("Suchergebnisse werden erst nach deiner Bestätigung eingeladen.")),
-            );
-        for person in panel.directory.as_slice() {
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .py_2()
-                    .child(self.avatar(&person_initials(person.name.as_str()), false))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .child(person.name.as_str().to_owned())
-                            .child(self.hint(person.label.as_str())),
-                    )
-                    .child(self.button(
-                        ("room-invite", person.id.local as usize),
-                        "Einladen",
-                        ButtonStyle::Secondary,
-                        self.room_available(RoomSetting::Invite),
-                        LocalAction::Room(Action::Confirm(ConversationAction::Invite(person.id))),
-                        cx,
-                    )),
-            );
-        }
-        if panel.directory_loaded && panel.directory.as_slice().is_empty() {
-            body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
-        }
-        body = body.child(div().flex().justify_start().child(self.button(
-            "room-csv-toggle",
-            "CSV-Import",
-            ButtonStyle::Quiet,
-            true,
-            LocalAction::Room(Action::ShowCsv),
-            cx,
-        )));
-        if self.room_ui.csv_open {
-            body = body
-                .child(self.hint(
-                    self.l("Maximal 100 Adressen und 64 KiB. Einfügen erstellt nur eine Vorschau."),
-                ))
-                .child(self.room_input(&self.room_ui.csv, cx))
-                .child(self.dialog_actions().child(self.button(
-                    "room-csv-preview",
-                    "Importvorschau erstellen",
-                    ButtonStyle::Secondary,
-                    self.room_available(RoomSetting::Invite),
-                    LocalAction::Room(Action::CsvPreview),
-                    cx,
-                )))
-                .child(self.hint(&self.lf(
-                    "{duplicates} doppelte und {invalid} ungültige Zeilen.",
-                    &[
-                        ("duplicates", &panel.csv_duplicates.to_string()),
-                        ("invalid", &panel.csv_invalid.to_string()),
-                    ],
-                )));
-        }
-        body
-    }
     fn room_confirmation(&self, cx: &Context<Self>) -> Div {
+        let Some(context) = self.room_ui.context else {
+            return div();
+        };
         let action = self.room_ui.confirmation.as_ref();
         let key = match action {
             Some(ConversationAction::Delete) => {
@@ -1465,7 +1474,10 @@ impl Desktop {
                         "Abbrechen",
                         ButtonStyle::Secondary,
                         true,
-                        LocalAction::Room(Action::CancelConfirmation),
+                        LocalAction::Room(Action::CancelConfirmation(
+                            context,
+                            self.room_ui.confirmation_generation,
+                        )),
                         cx,
                     ))
                     .child(self.button(
@@ -1476,12 +1488,64 @@ impl Desktop {
                         } else {
                             ButtonStyle::Primary
                         },
-                        true,
-                        LocalAction::Room(Action::SubmitConfirmation),
+                        self.member_confirmation_available(action),
+                        LocalAction::Room(Action::SubmitConfirmation(
+                            context,
+                            self.room_ui.confirmation_generation,
+                        )),
                         cx,
                     )),
             )
     }
+}
+
+fn field_sync_allowed(
+    force: bool,
+    composing: bool,
+    current_generation: u64,
+    baseline_generation: Option<u64>,
+) -> bool {
+    !composing && (force || baseline_generation == Some(current_generation))
+}
+
+// The observation is the editor's baseline, not another metadata cache. Do
+// not reset native selection/history for unrelated snapshots or newer edits.
+fn sync_room_field<const N: usize>(
+    input: &Entity<TextInput>,
+    observed: &mut Option<(Text<N>, u64)>,
+    value: &str,
+    force: bool,
+    cx: &mut Context<Desktop>,
+) {
+    if !force
+        && observed
+            .as_ref()
+            .is_some_and(|(old, _)| old.as_str() == value)
+    {
+        return;
+    }
+    let state = input.read(cx);
+    let same = !state.composing() && state.content.as_str() == value;
+    let allowed = field_sync_allowed(
+        force,
+        state.composing(),
+        state.edit_generation(),
+        observed.as_ref().map(|(_, generation)| *generation),
+    );
+    if !same && !allowed {
+        return;
+    }
+    let Ok(baseline) = Text::new(value) else {
+        return;
+    };
+    if same || input.update(cx, |input, _| input.set_context_value(value)) {
+        *observed = Some((baseline, input.read(cx).edit_generation()));
+    }
+}
+
+fn initial_room_load(state: Option<RemoteState>, has_content: bool) -> bool {
+    // Admission failure and unresolved outcomes never imply an initial load.
+    !has_content && matches!(state, Some(RemoteState::Loading(_)))
 }
 
 // Talk's zero room mask inherits capability defaults, not the moderator's rights.
@@ -1503,6 +1567,61 @@ fn person_initials(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn observed_settings_cannot_overwrite_dirty_edits_or_native_composition() {
+        assert!(field_sync_allowed(false, false, 12, Some(12)));
+        assert!(!field_sync_allowed(false, false, 13, Some(12)));
+        assert!(!field_sync_allowed(false, true, 12, Some(12)));
+        assert!(!field_sync_allowed(true, true, 13, Some(12)));
+        assert!(!field_sync_allowed(false, false, 12, None));
+        assert!(
+            field_sync_allowed(true, false, 13, Some(12)),
+            "explicit reload can replace an uncomposed edit"
+        );
+    }
+    #[test]
+    fn direct_and_note_settings_exclude_group_administration() {
+        for kind in [ConversationKind::Direct, ConversationKind::NoteToSelf] {
+            let visible: Vec<_> = Tab::ALL
+                .into_iter()
+                .filter(|tab| tab.applies(Some(kind)))
+                .collect();
+            assert_eq!(visible, [Tab::General, Tab::Notifications, Tab::Privacy]);
+            assert!(!Tab::Meeting.applies(Some(kind)));
+            assert!(!Tab::Permissions.applies(Some(kind)));
+        }
+        assert!(
+            Tab::ALL
+                .into_iter()
+                .all(|tab| tab.applies(Some(ConversationKind::Group)))
+        );
+    }
+    #[test]
+    fn initial_room_skeleton_requires_admitted_loading_and_preserves_confirmed_content() {
+        let request = RequestId(1);
+        assert!(initial_room_load(
+            Some(RemoteState::Loading(request)),
+            false
+        ));
+        assert!(!initial_room_load(
+            Some(RemoteState::Loading(request)),
+            true
+        ));
+        for state in [
+            None,
+            Some(RemoteState::Idle),
+            Some(RemoteState::Saving(request)),
+            Some(RemoteState::Failed(
+                request,
+                talk_core::ui::UnavailableReason::PermissionDenied,
+            )),
+            Some(RemoteState::Uncertain(request)),
+        ] {
+            assert!(!initial_room_load(state, false));
+            assert!(!initial_room_load(state, true));
+        }
+    }
+
     #[test]
     fn inherited_permissions_preserve_unshown_rights_and_never_guess() {
         let inherited = permission_defaults(Some(0), Some(502)).unwrap();

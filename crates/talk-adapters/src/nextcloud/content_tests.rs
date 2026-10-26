@@ -1078,6 +1078,353 @@ async fn avatar_requests_reuse_encoded_bytes_and_cancelled_hits_never_escape() {
 }
 
 #[tokio::test]
+async fn emoji_disk_and_memory_hits_keep_original_source_timestamp_and_skip_image_gets() {
+    use super::super::avatars::AvatarStore;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use talk_core::protocol::content::AssetRequest;
+    struct Disk {
+        saved_at: u64,
+        reads: Arc<AtomicUsize>,
+    }
+    impl AvatarStore for Disk {
+        fn get(&mut self, _: &str, _: u64) -> Result<Option<(Vec<u8>, u64)>, ()> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(Some((
+                br##"<svg width="512"><rect fill="#123abc"/><text x="50%">sun</text></svg>"##
+                    .to_vec(),
+                self.saved_at,
+            )))
+        }
+        fn put(&mut self, _: &str, _: &[u8], _: u64) -> Result<(), ()> {
+            panic!("a fresh disk/memory hit must not fetch and replace the image")
+        }
+        fn remove(&mut self, _: &str) -> Result<(), ()> {
+            Ok(())
+        }
+        fn retain_rooms(&mut self, _: &[String]) -> Result<(), ()> {
+            Ok(())
+        }
+    }
+    let mut capabilities = features();
+    capabilities["capabilities"]["spreed"]["features"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("avatar"));
+    let server = Server::start(vec![
+        Reply::data(capabilities.clone()),
+        Reply::data(room()),
+        Reply::data(capabilities),
+        Reply::data(room()),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let now = super::super::messaging::now_unix();
+    let saved_at = now - 23 * 60 * 60;
+    let reads = Arc::new(AtomicUsize::new(0));
+    client.set_avatar_store(Box::new(Disk {
+        saved_at,
+        reads: reads.clone(),
+    }));
+    for operation in 1..=2 {
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Content {
+                    operation: OperationId::from_local(operation),
+                    command: C::Asset(AssetRequest::ConversationAvatar(conversation)),
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Content {
+            result: R::Emoji { text, source, .. },
+            ..
+        } = reply
+        else {
+            panic!("emoji")
+        };
+        assert_eq!(text.as_str(), "sun");
+        assert_eq!(source.saved_at, saved_at);
+        assert_eq!(
+            source.identity,
+            super::super::avatars::canonical_identity("room", "testroom")
+        );
+        assert!(!source.restricted);
+        assert_eq!(source.saved_at + super::super::avatars::TTL - now, 60 * 60);
+    }
+    assert_eq!(
+        reads.load(Ordering::Relaxed),
+        1,
+        "the second request uses the memory cache"
+    );
+    assert_eq!(
+        server.count(),
+        4,
+        "only fresh capability and room authorization reads"
+    );
+    let seen = server.seen.lock().unwrap();
+    assert!(
+        seen.iter()
+            .all(|request| !String::from_utf8_lossy(request).contains("/avatar/"))
+    );
+}
+
+#[tokio::test]
+async fn fresh_members_publish_warm_self_and_message_avatar_identity_without_an_image_get() {
+    use talk_core::protocol::content::AssetRequest;
+    use talk_core::protocol::conversation::{ConversationCommand, ConversationResult};
+    for warm_self in [true, false] {
+        let mut binary = Reply::data(json!({}));
+        binary.headers = "Content-Type: image/png\r\n".into();
+        binary.body = b"\x89PNG\r\n\x1a\nsynthetic-profile".to_vec();
+        let mut replies = vec![Reply::data(features())];
+        if !warm_self {
+            replies.extend([Reply::data(room()), Reply::data(json!([message()]))]);
+        }
+        replies.push(binary);
+        for (round, token) in [(0, "testroom"), (1, "testroom"), (2, "secondroom")] {
+            let mut room = room();
+            room["token"] = json!(token);
+            room["id"] = json!(if round == 2 { 8 } else { 7 });
+            replies.extend([
+                Reply::data(features()), Reply::data(room),
+                Reply::data(json!([
+                    {"attendeeId":42,"actorType":"users","actorId":"fixture_user",
+                     "displayName":format!("Synthetic member {round}"),"participantType":3,"permissions":511,"roomToken":token},
+                    {"attendeeId":43,"actorType":"guests","actorId":"fixture_user",
+                     "displayName":"Synthetic guest","participantType":4,"permissions":511,"roomToken":token}
+                ])),
+            ]);
+        }
+        let server = Server::start(replies).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let first_room = bind(&mut client);
+        let mut other = room();
+        other["token"] = json!("secondroom");
+        other["id"] = json!(8);
+        let second_room = client.bind_room(&other).unwrap();
+        let request = if warm_self {
+            AssetRequest::SelfAvatar
+        } else {
+            AssetRequest::MessageAvatar(MessageId {
+                conversation: first_room,
+                sequence: 7,
+            })
+        };
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Content {
+                    operation: OperationId::from_local(1),
+                    command: C::Asset(request),
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Content {
+            result: R::Image(image),
+            ..
+        } = reply
+        else {
+            panic!("warm image")
+        };
+        let source = image.avatar_source().unwrap();
+        let mut previous = None;
+        for (round, conversation) in [(0, first_room), (1, first_room), (2, second_room)] {
+            let reply = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::ConversationSettings {
+                        conversation,
+                        operation: OperationId::from_local(10 + round),
+                        command: ConversationCommand::Members,
+                    },
+                )
+                .await
+                .unwrap();
+            let ProtocolReply::ConversationSettings {
+                result: ConversationResult::Members(members),
+                ..
+            } = reply
+            else {
+                panic!("fresh members")
+            };
+            let user = &members.as_slice()[0];
+            assert_eq!(user.avatar_identity, Some(source.identity));
+            assert_eq!(
+                members.as_slice()[1].avatar_identity,
+                None,
+                "guest namespace supplies no user alias"
+            );
+            if let Some(previous) = previous {
+                assert_eq!(
+                    user.id == previous,
+                    round == 1,
+                    "same user has room-scoped targets and one account-local avatar identity"
+                );
+            }
+            previous = Some(user.id);
+        }
+        let seen = server.seen.lock().unwrap();
+        let image_gets = seen
+            .iter()
+            .filter(|request| String::from_utf8_lossy(request).contains("/avatar/"))
+            .count();
+        assert_eq!(
+            image_gets, 1,
+            "warm Self/Message plus three fresh member reads"
+        );
+        assert_eq!(seen.len(), if warm_self { 11 } else { 13 });
+        assert!(seen.iter().all(|request| request.starts_with(b"GET ")));
+    }
+}
+
+#[tokio::test]
+async fn member_refresh_self_and_message_avatars_share_canonical_source_without_bypassing_denial() {
+    use talk_core::protocol::content::AssetRequest;
+    use talk_core::protocol::conversation::{ConversationCommand, ConversationResult};
+    let participants = json!([{"attendeeId":42,"actorType":"users","actorId":"fixture_user",
+        "displayName":"Synthetic member","participantType":3,"permissions":511,"roomToken":"testroom"}]);
+    let mut refreshed = participants.clone();
+    refreshed[0]["displayName"] = json!("Changed display name");
+    let mut binary = Reply::data(json!({}));
+    binary.headers = "Content-Type: image/png\r\n".into();
+    binary.body = b"\x89PNG\r\n\x1a\nsynthetic-profile".to_vec();
+    let mut denied = room();
+    denied["lobbyState"] = json!(1);
+    denied["permissions"] = json!(0);
+    let server = Server::start(vec![
+        Reply::data(features()),
+        Reply::data(room()),
+        Reply::data(participants.clone()),
+        Reply::data(features()),
+        Reply::data(room()),
+        Reply::data(participants),
+        binary,
+        Reply::data(features()),
+        Reply::data(room()),
+        Reply::data(refreshed.clone()),
+        Reply::data(features()),
+        Reply::data(room()),
+        Reply::data(refreshed),
+        Reply::data(features()),
+        Reply::data(room()),
+        Reply::data(json!([message()])),
+        Reply::data(features()),
+        Reply::data(features()),
+        Reply::data(denied),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let mut previous_member = None;
+    let mut sources = Vec::new();
+    for round in 0..2 {
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::ConversationSettings {
+                    conversation,
+                    operation: OperationId::from_local(10 + round),
+                    command: ConversationCommand::Members,
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::ConversationSettings {
+            result: ConversationResult::Members(members),
+            ..
+        } = reply
+        else {
+            panic!("members")
+        };
+        let member = members.as_slice().first().unwrap().id;
+        if let Some(previous) = previous_member {
+            assert_eq!(
+                previous, member,
+                "refresh/name changes retain the target identity"
+            );
+        }
+        previous_member = Some(member);
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Content {
+                    operation: OperationId::from_local(20 + round),
+                    command: C::Asset(AssetRequest::ParticipantAvatar(member)),
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Content {
+            result: R::Image(image),
+            ..
+        } = reply
+        else {
+            panic!("avatar")
+        };
+        sources.push(image.avatar_source().unwrap());
+    }
+    for (operation, request) in [
+        (
+            30,
+            AssetRequest::MessageAvatar(MessageId {
+                conversation,
+                sequence: 7,
+            }),
+        ),
+        (31, AssetRequest::SelfAvatar),
+    ] {
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Content {
+                    operation: OperationId::from_local(operation),
+                    command: C::Asset(request),
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Content {
+            result: R::Image(image),
+            ..
+        } = reply
+        else {
+            panic!("avatar")
+        };
+        sources.push(image.avatar_source().unwrap());
+    }
+    assert!(
+        sources.windows(2).all(|pair| pair[0] == pair[1]),
+        "every path carries the same canonical identity and original freshness"
+    );
+    let error = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(40),
+                command: C::Asset(AssetRequest::ParticipantAvatar(previous_member.unwrap())),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::PermissionDenied);
+    let seen = server.seen.lock().unwrap();
+    assert_eq!(seen.len(), 19);
+    assert_eq!(
+        seen.iter()
+            .filter(|request| String::from_utf8_lossy(request).contains("/avatar/"))
+            .count(),
+        1
+    );
+    assert!(seen.iter().all(|request| request.starts_with(b"GET ")));
+}
+
+#[tokio::test]
 async fn distinct_message_targets_share_one_canonical_avatar_get_but_revalidate_access() {
     use talk_core::protocol::content::AssetRequest;
     let mut binary = Reply::data(json!({}));

@@ -1,5 +1,6 @@
 //! Bounded media tiles and a room-scoped viewer. No remote routes or byte I/O.
 use super::*;
+use crate::presentation::motion::DialogSurface;
 use talk_core::ui::{content::PlaybackState, messaging::RichObject};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -378,21 +379,29 @@ impl Desktop {
             if let Some(image) = image {
                 stage = stage.child(img(image).size_full().object_fit(ObjectFit::Contain));
             } else {
-                let label = if offline {
-                    "Vorschau nicht verfügbar"
+                let loading = !offline
+                    && matches!(
+                        self.asset(&target).map(|a| a.state),
+                        None | Some(AssetState::Loading | AssetState::Ready { .. })
+                    );
+                if loading {
+                    stage = stage.child(self.pending_dots(self.theme.muted));
                 } else {
-                    match self.asset(&target).map(|a| a.state) {
-                        None | Some(AssetState::Loading | AssetState::Ready { .. }) => {
-                            "Vorschau wird geladen …"
+                    let label = if offline {
+                        "Vorschau nicht verfügbar"
+                    } else {
+                        match self.asset(&target).map(|a| a.state) {
+                            Some(AssetState::Denied) => {
+                                "Du hast keinen Zugriff auf diese Vorschau."
+                            }
+                            Some(AssetState::Failed) => "Die Vorschau konnte nicht geladen werden.",
+                            _ => {
+                                "Keine native Vorschau verfügbar. Öffne die Datei in der Cloud-Webansicht."
+                            }
                         }
-                        Some(AssetState::Denied) => "Du hast keinen Zugriff auf diese Vorschau.",
-                        Some(AssetState::Failed) => "Die Vorschau konnte nicht geladen werden.",
-                        _ => {
-                            "Keine native Vorschau verfügbar. Öffne die Datei in der Cloud-Webansicht."
-                        }
-                    }
-                };
-                stage = stage.child(self.hint(self.l(label)));
+                    };
+                    stage = stage.child(self.hint(self.l(label)));
+                }
             }
             if adjacent(&self.content_ui.gallery, reference, -1).is_some() {
                 stage = stage.child(
@@ -560,9 +569,19 @@ impl Desktop {
                 ));
         }
         dialog
-            .child(stage)
-            .child(footer)
-            .children(self.download_status(cx))
+            .child(
+                self.dialog_panel(
+                    DialogSurface::Overlay(Overlay::ContentPreview),
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(stage)
+                        .child(footer)
+                        .children(self.download_status(cx)),
+                ),
+            )
             .child(
                 self.control_with_geometry(
                     "close-overlay",

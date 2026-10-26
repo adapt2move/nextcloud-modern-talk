@@ -89,16 +89,9 @@ impl Accounts {
             .snapshot
             .create_panel
             .get_or_insert_with(|| CreatePanel::new(account));
-        panel.result = None;
-        if matches!(work, Work::People) {
-            panel.people = Page::empty();
-            panel.people_loaded = false;
-        }
-        panel.state = if write {
-            RemoteState::Saving(request)
-        } else {
-            RemoteState::Loading(request)
-        };
+        // Retained rows remain displayable during a new search. Presentation
+        // requires its matching result before enabling a recipient action.
+        begin_creation(panel, request, work);
         self.touch();
         Ok(())
     }
@@ -119,6 +112,7 @@ impl Accounts {
             return;
         };
         let mut created = None;
+        let mut created_room = None;
         let completion = match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::Account(probe)))
                 if probe.scope == account && matches!(work, Work::Permissions) =>
@@ -161,27 +155,130 @@ impl Accounts {
                     ),
                 );
                 self.load_rooms = Some(account);
+                created_room = Some(room);
                 Completion::ServerAccepted
             }
             Err(error) => completion_error(error),
             _ => Completion::Failed(UnavailableReason::PolicyStale),
         };
-        panel.state = match completion {
-            Completion::Queued | Completion::ServerAccepted => RemoteState::Idle,
-            Completion::Failed(reason) => RemoteState::Failed(request, reason),
-            Completion::Uncertain => RemoteState::Uncertain(request),
-        };
-        if matches!(work, Work::Create) {
-            panel.uncertain = completion == Completion::Uncertain;
-            panel.result = Some(CreationResult {
-                request,
-                completion,
-                conversation: created,
-            });
+        finish_creation(panel, request, work, completion, created);
+        if let Some(room) = created_room {
+            self.observe_created_room(account, room);
         }
         if let Some(context) = created {
             let _ = self.open(context);
         }
         self.touch();
+    }
+}
+fn begin_creation(panel: &mut CreatePanel, request: RequestId, work: Work) {
+    panel.result = None;
+    panel.state = if matches!(work, Work::Create) {
+        RemoteState::Saving(request)
+    } else {
+        RemoteState::Loading(request)
+    };
+}
+fn finish_creation(
+    panel: &mut CreatePanel,
+    request: RequestId,
+    work: Work,
+    completion: Completion,
+    created: Option<ConversationRef>,
+) {
+    if matches!(work, Work::People)
+        && matches!(
+            completion,
+            Completion::Failed(
+                UnavailableReason::PermissionDenied | UnavailableReason::ReauthenticationRequired
+            )
+        )
+    {
+        panel.people = Page::empty();
+        panel.people_loaded = false;
+    }
+    panel.state = match completion {
+        Completion::Queued | Completion::ServerAccepted => RemoteState::Idle,
+        Completion::Failed(reason) => RemoteState::Failed(request, reason),
+        Completion::Uncertain => RemoteState::Uncertain(request),
+    };
+    if matches!(work, Work::Create) {
+        panel.uncertain = completion == Completion::Uncertain;
+    }
+    if matches!(work, Work::Create | Work::People) {
+        panel.result = Some(CreationResult {
+            request,
+            completion,
+            conversation: created,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn people_refresh_retains_rows_and_exposes_its_matching_read_result_without_creating_a_room() {
+        let account = super::super::super::fixtures::scope();
+        let mut panel = CreatePanel::new(account);
+        panel.people_loaded = true;
+        panel.uncertain = true;
+        panel.people = page([AccountPerson {
+            id: AccountPersonRef { account, local: 7 },
+            name: text("Synthetic person"),
+            label: text("example.test"),
+        }]);
+        let rows = panel.people.clone();
+        begin_creation(&mut panel, RequestId(1), Work::People);
+        assert_eq!(panel.people, rows);
+        assert!(panel.people_loaded);
+        assert_eq!(panel.state, RemoteState::Loading(RequestId(1)));
+        finish_creation(
+            &mut panel,
+            RequestId(1),
+            Work::People,
+            Completion::Failed(UnavailableReason::Connection(
+                ConnectionFailure::Unreachable,
+            )),
+            None,
+        );
+        assert_eq!(panel.people, rows);
+        assert_eq!(panel.result.unwrap().request, RequestId(1));
+        assert!(panel.uncertain);
+        begin_creation(&mut panel, RequestId(2), Work::People);
+        assert!(panel.result.is_none());
+        assert_eq!(panel.people, rows);
+        finish_creation(
+            &mut panel,
+            RequestId(2),
+            Work::People,
+            Completion::ServerAccepted,
+            None,
+        );
+        assert_eq!(
+            panel.result,
+            Some(CreationResult {
+                request: RequestId(2),
+                completion: Completion::ServerAccepted,
+                conversation: None
+            })
+        );
+        assert!(
+            panel.uncertain,
+            "A directory read does not resolve an uncertain creation"
+        );
+        begin_creation(&mut panel, RequestId(3), Work::People);
+        finish_creation(
+            &mut panel,
+            RequestId(3),
+            Work::People,
+            Completion::Failed(UnavailableReason::PermissionDenied),
+            None,
+        );
+        assert!(
+            panel.people.as_slice().is_empty(),
+            "Known access loss retires retained directory identities"
+        );
+        assert!(!panel.people_loaded);
     }
 }

@@ -17,12 +17,13 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod edit;
 mod markdown;
-#[cfg(test)]
-use super::input::edit::from_utf16;
+mod rich;
 use super::input::edit::{
-    ConcealedText, EditHistory, EditSnapshot, Insertion, range_from_utf16, replacement,
-    replacement_fits, to_utf16, word_boundary,
+    ConcealedText, EditGeneration, EditHistory, EditSnapshot, Insertion, range_from_utf16,
+    replacement, submitted_text, to_utf16, word_boundary,
 };
+#[cfg(test)]
+use super::input::edit::{from_utf16, replacement_fits};
 
 actions!(
     text_input,
@@ -61,10 +62,14 @@ actions!(
         DeleteWordRight,
         DeleteToHome,
         DeleteToEnd,
+        FormatBold,
+        FormatItalic,
+        FormatCode,
     ]
 );
 
 const CARET_INTERVAL: Duration = Duration::from_millis(500);
+pub(super) const RICH_REJECTION: &str = "Die Änderung ist für diese Nachricht zu groß oder nicht als Markdown darstellbar. Dein Entwurf bleibt erhalten.";
 
 /// Native clipboard writes belong to the text interaction owner. Both editable
 /// fields and read-only selections require an explicit user Copy action and a
@@ -181,12 +186,13 @@ pub struct TextInput {
     pub concealed: bool,
     pub interactive: bool,
     history: EditHistory,
+    generation: EditGeneration,
     pub borderless: bool,
     pub multiline: bool,
-    /// Composer-only styling of the original source. Editing/IME offsets never
-    /// address reconstructed Markdown display text.
+    /// Composer-only rich document. Native editing/IME offsets address visible
+    /// content; semantic formatting and canonical Markdown stay with this owner.
     pub markdown: bool,
-    markdown_cache: Option<(SharedString, talk_core::ui::markup::Document)>,
+    rich: Option<rich::Document>,
     focus_handle: FocusHandle,
     pub content: SharedString,
     pub limit: usize,
@@ -194,8 +200,9 @@ pub struct TextInput {
     pub rejection: Option<&'static str>,
     pub theme: super::theme::Theme,
     pub text_scale: f32,
-    /// User-entry clipboard only. Composer requires explicit projected privacy permission.
-    pub clipboard_allowed: bool,
+    /// Copy/Cut export requires projected privacy permission. Paste is local
+    /// input and follows editability, composition and document-size admission.
+    pub clipboard_export_allowed: bool,
     scroll_x: Pixels,
     scroll_y: Pixels,
     visible_rows: usize,
@@ -216,10 +223,111 @@ pub struct TextInput {
 }
 
 impl TextInput {
-    /// Draft synchronization excludes unfinished platform preedit text. A context
-    /// change may retire composition, but cannot persist its tentative spelling.
+    /// Canonical Markdown for rich composers, plain text for ordinary fields.
+    /// Draft synchronization excludes unfinished platform preedit text; a
+    /// context change cannot persist its tentative spelling.
     pub fn committed_value(&self) -> &str {
-        self.history.committed_value(&self.content)
+        self.history.committed_value(self.wire_value())
+    }
+
+    /// Current canonical Markdown, including tentative preedit. Submission must
+    /// use `submitted_value`; draft persistence uses `committed_value`.
+    fn wire_value(&self) -> &str {
+        self.rich
+            .as_ref()
+            .map_or(self.content.as_ref(), |doc| doc.wire.as_ref())
+    }
+
+    /// Never turns a platform composition-confirming Enter into a submission.
+    pub fn submitted_value(&self) -> Option<&str> {
+        submitted_text(
+            self.committed_value(),
+            self.composing(),
+            self.message_limit(),
+        )
+    }
+
+    /// Changes the current ceiling without truncating the draft, history or
+    /// preedit. A retained over-limit draft remains readable/persistable and
+    /// cannot be submitted until it fits the current server ceiling.
+    pub fn configure_message_limit(&mut self, limit: usize) {
+        let was_over = self.wire_value().len() > self.message_limit();
+        self.limit = limit;
+        if self.wire_value().len() > self.message_limit() {
+            self.rejected = true;
+            self.rejection = Some(RICH_REJECTION);
+        } else if was_over {
+            self.rejected = false;
+            self.rejection = None;
+        }
+    }
+
+    fn finish_edit_rejection(&mut self) {
+        self.rejected = self.wire_value().len() > self.message_limit();
+        self.rejection = self.rejected.then_some(RICH_REJECTION);
+    }
+
+    fn message_limit(&self) -> usize {
+        if self.markdown && !self.concealed {
+            self.limit.min(rich::MAX_BYTES)
+        } else {
+            self.limit
+        }
+    }
+
+    fn editing_limit(&self) -> usize {
+        if self.markdown && !self.concealed {
+            // A new server ceiling never traps an already retained draft or
+            // IME update. Permit recovery edits that do not grow its wire size;
+            // submission still requires fitting the current configured limit.
+            self.message_limit()
+                .max(self.wire_value().len())
+                .min(rich::MAX_BYTES)
+        } else {
+            self.limit
+        }
+    }
+
+    fn clipboard_limit(&self) -> usize {
+        if self.markdown && !self.concealed {
+            rich::MAX_BYTES
+        } else {
+            self.limit
+        }
+    }
+
+    /// Every admitted document/preedit mutation has a newer identity, even if
+    /// its committed draft spelling is unchanged. Selection moves do not edit.
+    pub fn edit_generation(&self) -> u64 {
+        self.generation.value()
+    }
+
+    fn reject_exhausted_generation(&mut self) -> bool {
+        if self.generation.available() {
+            return false;
+        }
+        self.rejected = true;
+        self.rejection = Some(RICH_REJECTION);
+        true
+    }
+
+    fn ensure_rich(&mut self) -> bool {
+        if self.markdown && !self.concealed && self.rich.is_none() {
+            if self.reject_exhausted_generation() {
+                return false;
+            }
+            let candidate = rich::Document::import(&self.content, self.limit);
+            self.rich = self.generation.admit(candidate);
+            if let Some(doc) = &self.rich {
+                self.content = doc.text.clone();
+                self.selected_range = self.content.len()..self.content.len();
+            } else {
+                self.rejected = true;
+                self.rejection = Some(RICH_REJECTION);
+                return false;
+            }
+        }
+        true
     }
 
     fn apply_replacement(
@@ -231,39 +339,82 @@ impl TextInput {
         if !self.interactive {
             return;
         }
+        if !self.ensure_rich() {
+            cx.notify();
+            return;
+        }
         let marking = matches!(insertion, Insertion::Mark { .. });
         let before = self.edit_snapshot();
-        let Some(next) = replacement(
+        let candidate = replacement(
             &before,
             self.marked_range.as_ref(),
             range_utf16,
             insertion,
-            self.limit,
+            self.editing_limit(),
             self.multiline,
-        ) else {
+        );
+        let Some(next) = self.generation.admit(candidate) else {
             self.rejected = true;
-            self.rejection = None;
+            self.rejection = before.rich.as_ref().map(|_| RICH_REJECTION);
             cx.notify();
             return;
         };
         if marking {
             self.history.begin_composition(before);
-        } else if !self.composing() && before.text != next.state.text {
+        } else if !self.composing() && before.value() != next.state.value() {
             self.history.record(before);
         }
+        self.rich = next.state.rich;
         self.content = next.state.text;
         self.selected_range = next.state.selection;
         self.selection_reversed = next.state.reversed;
         self.marked_range = next.marked;
         if self.marked_range.is_none() {
-            self.history.finish_composition(&self.content);
+            let value = self
+                .rich
+                .as_ref()
+                .map_or(self.content.as_ref(), |doc| doc.wire.as_ref());
+            self.history.finish_composition(value);
         }
         self.desired_x = None;
         self.prefer_previous_row = false;
-        self.rejected = false;
-        self.rejection = None;
+        self.finish_edit_rejection();
         self.invalidate_geometry();
         cx.notify();
+    }
+
+    fn toggle_format(&mut self, format: rich::Format, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() || !self.markdown || self.concealed {
+            return;
+        }
+        if !self.ensure_rich() {
+            cx.notify();
+            return;
+        }
+        let Some(doc) = &self.rich else {
+            return;
+        };
+        let candidate = doc.toggle(self.selected_range.clone(), format, self.editing_limit());
+        let Some(next) = self.generation.admit(candidate) else {
+            self.rejected = true;
+            self.rejection = Some(RICH_REJECTION);
+            cx.notify();
+            return;
+        };
+        self.history.record(self.edit_snapshot());
+        self.rich = Some(next);
+        self.finish_edit_rejection();
+        self.invalidate_geometry();
+        cx.notify();
+    }
+    fn format_bold(&mut self, _: &FormatBold, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_format(rich::Format::Bold, cx);
+    }
+    fn format_italic(&mut self, _: &FormatItalic, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_format(rich::Format::Italic, cx);
+    }
+    fn format_code(&mut self, _: &FormatCode, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_format(rich::Format::Code, cx);
     }
 
     fn word_move(&mut self, forward: bool, select: bool, cx: &mut Context<Self>) {
@@ -441,7 +592,13 @@ impl TextInput {
     }
 
     pub(super) fn mention_query(&self) -> Option<&str> {
-        if self.composing() || !self.selected_range.is_empty() {
+        if self.composing()
+            || !self.selected_range.is_empty()
+            || self
+                .rich
+                .as_ref()
+                .is_some_and(|doc| doc.in_code(self.cursor_offset()))
+        {
             return None;
         }
         let range = mention_range(&self.content, self.cursor_offset())?;
@@ -456,33 +613,11 @@ impl TextInput {
             return;
         };
         let replacement = format!("@{identifier} ");
-        if !replacement_fits(
-            &self.content,
-            &range,
-            &replacement,
-            self.limit,
-            self.multiline,
-        ) {
-            self.rejected = true;
-            self.rejection = None;
-            cx.notify();
-            return;
-        }
-        self.history.record(self.edit_snapshot());
-        self.content = format!(
-            "{}{}{}",
-            &self.content[..range.start],
-            replacement,
-            &self.content[range.end..]
-        )
-        .into();
-        let cursor = range.start + replacement.len();
-        self.selected_range = cursor..cursor;
-        self.selection_reversed = false;
-        self.rejected = false;
-        self.rejection = None;
-        self.invalidate_geometry();
-        cx.notify();
+        self.apply_replacement(
+            Some(self.range_to_utf16(&range)),
+            Insertion::Literal(&replacement),
+            cx,
+        );
     }
 
     fn edit_snapshot(&self) -> EditSnapshot {
@@ -490,21 +625,27 @@ impl TextInput {
             text: self.content.clone(),
             selection: self.selected_range.clone(),
             reversed: self.selection_reversed,
+            rich: self.rich.clone(),
         }
     }
     fn history_travel(&mut self, redo: bool, cx: &mut Context<Self>) {
         if !self.interactive || self.composing() {
             return;
         }
-        if let Some(previous) = self.history.travel(self.edit_snapshot(), redo) {
+        if self.reject_exhausted_generation() {
+            cx.notify();
+            return;
+        }
+        let candidate = self.history.travel(self.edit_snapshot(), redo);
+        if let Some(previous) = self.generation.admit(candidate) {
+            self.rich = previous.rich;
             self.content = previous.text;
             self.selected_range = previous.selection;
             self.selection_reversed = previous.reversed;
             self.invalidate_geometry();
             self.desired_x = None;
             self.prefer_previous_row = false;
-            self.rejected = false;
-            self.rejection = None;
+            self.finish_edit_rejection();
             cx.notify();
         }
     }
@@ -630,13 +771,34 @@ impl TextInput {
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         self.vertical(true, true, cx);
     }
-    fn new_line(&mut self, _: &NewLine, window: &mut Window, cx: &mut Context<Self>) {
+    fn new_line(&mut self, _: &NewLine, _: &mut Window, cx: &mut Context<Self>) {
         if self.interactive && self.multiline && !self.composing() {
-            self.replace_text_in_range(None, "\n", window, cx);
+            self.apply_replacement(None, Insertion::Newline, cx);
         }
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.interactive
+            && !self.composing()
+            && self.selected_range.is_empty()
+            && let Some(next) = self
+                .rich
+                .as_ref()
+                .and_then(|doc| doc.leave_empty_block(self.cursor_offset(), self.editing_limit()))
+        {
+            let Some(next) = self.generation.admit(Some(next)) else {
+                self.rejected = true;
+                self.rejection = Some(RICH_REJECTION);
+                cx.notify();
+                return;
+            };
+            self.history.record(self.edit_snapshot());
+            self.rich = Some(next);
+            self.finish_edit_rejection();
+            self.invalidate_geometry();
+            cx.notify();
+            return;
+        }
         self.delete_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
@@ -714,20 +876,16 @@ impl TextInput {
         }
     }
 
-    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         if !self.interactive || self.composing() {
             return;
         }
-        if !self.clipboard_allowed {
-            self.rejected = true;
-            self.rejection = Some("Einfügen ist für diesen Entwurf nicht freigegeben.");
-            cx.notify();
-            return;
-        }
+        // Importing clipboard text exports no room content and works offline.
+        // The outbound privacy decision still gates Copy and Cut below.
         // GPUI materializes the platform clipboard before this finite admission check.
         // This transient native allocation cannot be bounded through the 0.2.2 API.
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            if text.len() > self.limit {
+            if text.len() > self.editing_limit() {
                 self.rejected = true;
                 self.rejection =
                     Some("Der eingefügte Text ist zu lang. Dein Entwurf bleibt erhalten.");
@@ -739,7 +897,7 @@ impl TextInput {
             } else {
                 text.replace(['\n', '\r'], " ")
             };
-            self.replace_text_in_range(None, &text, window, cx);
+            self.apply_replacement(None, Insertion::Paste(&text), cx);
         }
     }
 
@@ -747,7 +905,7 @@ impl TextInput {
         if !self.interactive || self.composing() || self.concealed {
             return;
         }
-        if !self.clipboard_allowed {
+        if !self.clipboard_export_allowed {
             self.rejected = true;
             self.rejection = Some("Kopieren ist für diesen Entwurf nicht freigegeben.");
             cx.notify();
@@ -756,8 +914,8 @@ impl TextInput {
         copy_text_selection(
             &self.content,
             self.selected_range.clone(),
-            self.clipboard_allowed,
-            self.limit,
+            self.clipboard_export_allowed,
+            self.clipboard_limit(),
             cx,
         );
     }
@@ -765,7 +923,7 @@ impl TextInput {
         if !self.interactive || self.composing() {
             return;
         }
-        if !self.clipboard_allowed || self.concealed {
+        if !self.clipboard_export_allowed || self.concealed {
             self.rejected = true;
             self.rejection = Some("Ausschneiden ist für diesen Entwurf nicht freigegeben.");
             cx.notify();
@@ -774,8 +932,8 @@ impl TextInput {
         if copy_text_selection(
             &self.content,
             self.selected_range.clone(),
-            self.clipboard_allowed,
-            self.limit,
+            self.clipboard_export_allowed,
+            self.clipboard_limit(),
             cx,
         ) {
             self.replace_text_in_range(None, "", window, cx)
@@ -789,6 +947,9 @@ impl TextInput {
         let offset = current_boundary(&self.content, offset);
         self.desired_x = None;
         self.prefer_previous_row = false;
+        if let Some(doc) = &mut self.rich {
+            doc.clear_typing();
+        }
         self.selected_range = offset..offset;
         self.selection_reversed = false;
         self.restart_caret();
@@ -839,6 +1000,9 @@ impl TextInput {
         self.desired_x = None;
         self.prefer_previous_row = false;
         let offset = current_boundary(&self.content, offset);
+        if let Some(doc) = &mut self.rich {
+            doc.clear_typing();
+        }
         if self.selection_reversed {
             self.selected_range.start = offset
         } else {
@@ -876,8 +1040,17 @@ impl TextInput {
     }
 
     pub fn reset(&mut self) {
+        self.reset_document();
+    }
+
+    fn reset_document(&mut self) -> bool {
+        if self.generation.admit(Some(())).is_none() {
+            self.rejected = true;
+            self.rejection = Some(RICH_REJECTION);
+            return false;
+        }
         self.restart_caret();
-        self.markdown_cache = None;
+        self.rich = None;
         self.history = EditHistory::default();
         self.rejected = false;
         self.rejection = None;
@@ -893,6 +1066,23 @@ impl TextInput {
         self.last_layout = None;
         self.last_bounds = None;
         self.is_selecting = false;
+        true
+    }
+}
+
+/// Programmatic loads share the same admission as user edits, while ordinary
+/// fields and concealed entries retain their original plain-text semantics.
+fn imported_value(
+    value: &str,
+    limit: usize,
+    markdown: bool,
+    concealed: bool,
+) -> Option<(SharedString, Option<rich::Document>)> {
+    if markdown && !concealed {
+        let doc = rich::Document::import(value, limit)?;
+        Some((doc.text.clone(), Some(doc)))
+    } else {
+        (value.len() <= limit).then(|| (value.to_owned().into(), None))
     }
 }
 
@@ -951,8 +1141,37 @@ impl EntityInputHandler for TextInput {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let next = if let Some(doc) = &self.rich {
+            let Some(next) = doc.commit_preedit(self.selected_range.clone(), self.editing_limit())
+            else {
+                self.rejected = true;
+                self.rejection = Some(RICH_REJECTION);
+                cx.notify();
+                return;
+            };
+            Some(next)
+        } else {
+            None
+        };
+        if self.generation.admit(Some(())).is_none() {
+            self.rejected = true;
+            self.rejection = Some(RICH_REJECTION);
+            cx.notify();
+            return;
+        }
+        if let Some((next, selection)) = next {
+            self.content = next.text.clone();
+            self.rich = Some(next);
+            self.selected_range = selection;
+            self.invalidate_geometry();
+        }
         self.marked_range = None;
-        self.history.finish_composition(&self.content);
+        let value = self
+            .rich
+            .as_ref()
+            .map_or(self.content.as_ref(), |doc| doc.wire.as_ref());
+        self.history.finish_composition(value);
+        self.finish_edit_rejection();
         self.restart_caret();
         cx.notify();
     }
@@ -1044,9 +1263,15 @@ struct TextLayout {
     line_height: Pixels,
     height: Pixels,
     concealed: Option<ConcealedText>,
+    gutter: Pixels,
 }
 impl TextLayout {
-    fn new(lines: Vec<WrappedLine>, line_height: Pixels, concealed: Option<ConcealedText>) -> Self {
+    fn new(
+        lines: Vec<WrappedLine>,
+        line_height: Pixels,
+        concealed: Option<ConcealedText>,
+        gutter: Pixels,
+    ) -> Self {
         let mut starts = Vec::with_capacity(lines.len());
         let mut tops = Vec::with_capacity(lines.len());
         let mut start = 0;
@@ -1064,6 +1289,7 @@ impl TextLayout {
             line_height,
             height,
             concealed,
+            gutter,
         }
     }
     fn display_offset(&self, source: usize) -> usize {
@@ -1084,13 +1310,13 @@ impl TextLayout {
                 let boundaries = visual_row_boundaries(line);
                 let row = visual_row(&boundaries, relative, preceding);
                 return point(
-                    line.unwrapped_layout.x_for_index(relative)
+                    self.gutter + line.unwrapped_layout.x_for_index(relative)
                         - line.unwrapped_layout.x_for_index(boundaries[row]),
                     self.tops[i] + self.line_height * row,
                 );
             }
         }
-        point(px(0.), (self.height - self.line_height).max(px(0.)))
+        point(self.gutter, (self.height - self.line_height).max(px(0.)))
     }
     fn line_edge(&self, index: usize, end: bool, preceding: bool) -> usize {
         let index = self.display_offset(index);
@@ -1115,7 +1341,7 @@ impl TextLayout {
         for (i, line) in self.lines.iter().enumerate() {
             if position.y < self.tops[i] + line.size(self.line_height).height {
                 let result = line.closest_index_for_position(
-                    point(position.x, position.y - self.tops[i]),
+                    point(position.x - self.gutter, position.y - self.tops[i]),
                     self.line_height,
                 );
                 return self.source_offset(self.starts[i] + result.unwrap_or_else(|near| near));
@@ -1150,12 +1376,12 @@ impl TextLayout {
                 let x0 = line.unwrapped_layout.x_for_index(segment[0]);
                 let start = line.unwrapped_layout.x_for_index(a.min(segment[1])) - x0;
                 let end = if selected_newline {
-                    width
+                    (width - self.gutter).max(px(0.))
                 } else {
                     line.unwrapped_layout.x_for_index(b) - x0
                 };
                 rectangles.push(Bounds::new(
-                    point(start, self.tops[i] + self.line_height * row),
+                    point(self.gutter + start, self.tops[i] + self.line_height * row),
                     size((end - start).max(px(2.)), self.line_height),
                 ));
             }
@@ -1193,6 +1419,9 @@ struct PrepaintState {
     scroll_x: Pixels,
     scroll_y: Pixels,
     visible_rows: usize,
+    decorations: Vec<(WrappedLine, Point<Pixels>)>,
+    block_backgrounds: Vec<PaintQuad>,
+    block_markers: Vec<PaintQuad>,
 }
 
 impl IntoElement for TextElement {
@@ -1263,13 +1492,31 @@ impl Element for TextElement {
             )
         });
         let spans = input
-            .markdown_cache
+            .rich
             .as_ref()
-            .filter(|(source, _)| {
-                !input.concealed && !input.content.is_empty() && *source == input.content
-            })
-            .map_or(&[][..], |(_, document)| document.source_spans.as_slice());
-        let runs = markdown::runs(&text, base, spans, marked, input.theme);
+            .filter(|_| input.markdown && !input.concealed && !input.content.is_empty())
+            .map_or(&[][..], |document| document.spans.as_slice());
+        let decorations = input
+            .rich
+            .as_ref()
+            .filter(|_| input.markdown && !input.concealed)
+            .map_or(&[][..], |doc| doc.decorations.as_slice());
+        let gutter = if decorations
+            .iter()
+            .any(|block| block.label.is_some() || block.quote)
+        {
+            let label_columns = decorations
+                .iter()
+                .filter_map(|block| block.label.as_ref())
+                .map(|label| label.chars().count())
+                .max()
+                .unwrap_or(0);
+            px((28_f32).max(label_columns as f32 * 14. + 8.) * input.text_scale)
+                .min((bounds.size.width - px(1.)).max(px(0.)))
+        } else {
+            px(0.)
+        };
+        let runs = markdown::runs(&text, base.clone(), spans, marked, input.theme);
         let lines = window
             .text_system()
             .shape_text(
@@ -1277,7 +1524,7 @@ impl Element for TextElement {
                 style.font_size.to_pixels(window.rem_size()),
                 &runs,
                 if input.multiline {
-                    Some(bounds.size.width.max(px(1.)))
+                    Some((bounds.size.width - gutter).max(px(1.)))
                 } else {
                     None
                 },
@@ -1286,7 +1533,7 @@ impl Element for TextElement {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let layout = TextLayout::new(lines, window.line_height(), concealed);
+        let layout = TextLayout::new(lines, window.line_height(), concealed, gutter);
         let cursor = layout.position(input.cursor_offset(), input.prefer_previous_row);
         let scroll_x = if input.multiline {
             px(0.)
@@ -1346,6 +1593,54 @@ impl Element for TextElement {
                 input.theme.text,
             )
         });
+        let mut painted_decorations = Vec::new();
+        let mut block_backgrounds = Vec::new();
+        let mut block_markers = Vec::new();
+        for (row, block) in decorations.iter().enumerate() {
+            let Some(line) = layout.lines.get(row) else {
+                break;
+            };
+            let top = bounds.top() + layout.tops[row] - scroll_y;
+            let height = line.size(layout.line_height).height;
+            if top + height <= bounds.top() || top >= bounds.bottom() {
+                continue;
+            }
+            if block.code {
+                block_backgrounds.push(fill(
+                    Bounds::new(
+                        point(bounds.left() + gutter, top),
+                        size((bounds.size.width - gutter).max(px(0.)), height),
+                    ),
+                    input.theme.subtle,
+                ));
+            }
+            if block.quote {
+                block_markers.push(fill(
+                    Bounds::new(
+                        point(bounds.left() + (gutter - px(10.)).max(px(0.)), top + px(3.)),
+                        size(px(2.), (height - px(6.)).max(px(1.))),
+                    ),
+                    input.theme.muted,
+                ));
+            }
+            if let Some(label) = &block.label {
+                let run = TextRun {
+                    len: label.len(),
+                    color: input.theme.muted,
+                    ..base.clone()
+                };
+                if let Ok(labels) = window.text_system().shape_text(
+                    label.clone(),
+                    style.font_size.to_pixels(window.rem_size()),
+                    &[run],
+                    None,
+                    None,
+                ) && let Some(label) = labels.into_iter().next()
+                {
+                    painted_decorations.push((label, point(bounds.left() + px(2.), top)));
+                }
+            }
+        }
         PrepaintState {
             layout: Some(layout),
             cursor: caret,
@@ -1353,6 +1648,9 @@ impl Element for TextElement {
             scroll_x,
             scroll_y,
             visible_rows,
+            decorations: painted_decorations,
+            block_backgrounds,
+            block_markers,
         }
     }
     fn paint(
@@ -1382,16 +1680,32 @@ impl Element for TextElement {
             );
         }
         let layout = prepaint.layout.take().unwrap();
+        for background in prepaint.block_backgrounds.drain(..) {
+            window.paint_quad(background);
+        }
         for selection in prepaint.selection.drain(..) {
             window.paint_quad(selection);
         }
         for (i, line) in layout.lines.iter().enumerate() {
             let origin = point(
-                bounds.left() - prepaint.scroll_x,
+                bounds.left() + layout.gutter - prepaint.scroll_x,
                 bounds.top() + layout.tops[i] - prepaint.scroll_y,
             );
             // GPUI applies the containing viewport mask to every native glyph.
             let _ = line.paint(
+                origin,
+                layout.line_height,
+                gpui::TextAlign::Left,
+                Some(bounds),
+                window,
+                cx,
+            );
+        }
+        for marker in prepaint.block_markers.drain(..) {
+            window.paint_quad(marker);
+        }
+        for (label, origin) in prepaint.decorations.drain(..) {
+            let _ = label.paint(
                 origin,
                 layout.line_height,
                 gpui::TextAlign::Left,
@@ -1438,25 +1752,15 @@ impl Element for TextElement {
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_caret(window, cx);
-        if self.markdown && !self.concealed && !self.content.is_empty() {
-            if self
-                .markdown_cache
-                .as_ref()
-                .is_none_or(|(source, _)| *source != self.content)
-            {
-                self.markdown_cache = Some((
-                    self.content.clone(),
-                    talk_core::ui::markup::parse(&self.content),
-                ));
-            }
-        } else {
-            self.markdown_cache = None;
-        }
         div()
             .flex()
             .flex_1()
             .min_w_0()
-            .key_context("TextInput")
+            .key_context(if self.markdown && !self.concealed {
+                "TextInput RichComposer"
+            } else {
+                "TextInput"
+            })
             .track_focus(&self.focus_handle(cx).tab_stop(self.interactive))
             .cursor(if self.interactive {
                 CursorStyle::IBeam
@@ -1465,6 +1769,9 @@ impl Render for TextInput {
             })
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::format_bold))
+            .on_action(cx.listener(Self::format_italic))
+            .on_action(cx.listener(Self::format_code))
             .on_action(cx.listener(Self::delete_to_end))
             .on_action(cx.listener(Self::delete_to_home))
             .on_action(cx.listener(Self::delete_word_right))
@@ -1560,10 +1867,11 @@ impl TextInput {
             focus_handle: cx.focus_handle().tab_stop(true),
             interactive: true,
             history: EditHistory::default(),
+            generation: EditGeneration::default(),
             borderless: true,
             multiline: false,
             markdown: false,
-            markdown_cache: None,
+            rich: None,
             content: "".into(),
             placeholder: placeholder.to_owned().into(),
             limit,
@@ -1571,7 +1879,7 @@ impl TextInput {
             rejection: None,
             theme,
             text_scale: 1.,
-            clipboard_allowed: false,
+            clipboard_export_allowed: false,
             scroll_x: px(0.),
             scroll_y: px(0.),
             visible_rows: 1,
@@ -1590,19 +1898,33 @@ impl TextInput {
             caret_reduced_motion: false,
         }
     }
-    pub fn set_context_value(&mut self, value: &str) {
-        self.reset();
-        self.set_value(value);
+    /// Replaces the document and retires history/preedit only after admission.
+    /// Failure retains the prior document/draft and exposes `rejected`.
+    pub fn set_context_value(&mut self, value: &str) -> bool {
+        self.load_value(value, true)
     }
-    pub fn set_value(&mut self, value: &str) {
-        if value == self.content.as_ref() {
-            return;
+    pub fn set_value(&mut self, value: &str) -> bool {
+        self.load_value(value, false)
+    }
+    fn load_value(&mut self, value: &str, context_change: bool) -> bool {
+        if !context_change && !self.composing() && value == self.wire_value() {
+            // A retained over-limit draft is not a newly admitted load.
+            return value.len() <= self.message_limit();
         }
-        if value.len() <= self.limit {
-            self.reset();
-            self.content = value.to_owned().into();
-            self.selected_range = value.len()..value.len();
+        let Some((content, document)) =
+            imported_value(value, self.message_limit(), self.markdown, self.concealed)
+        else {
+            self.rejected = true;
+            self.rejection = (self.markdown && !self.concealed).then_some(RICH_REJECTION);
+            return false;
+        };
+        if !self.reset_document() {
+            return false;
         }
+        self.content = content;
+        self.rich = document;
+        self.selected_range = self.content.len()..self.content.len();
+        true
     }
     pub fn set_placeholder(&mut self, value: &str) {
         self.placeholder = value.to_owned().into();
@@ -1614,7 +1936,7 @@ impl TextInput {
 pub fn bind_keys(cx: &mut App) {
     super::selectable::bind_keys(cx);
     let context = Some("TextInput");
-    use talk_core::preferences::shortcuts::{ActionId, Modifiers, SHORTCUTS};
+    use talk_core::preferences::shortcuts::{ActionId, KeyContext, Modifiers, SHORTCUTS};
     cx.bind_keys(SHORTCUTS.iter().filter_map(|shortcut| {
         let primary = if cfg!(target_os = "macos") {
             "cmd"
@@ -1628,7 +1950,17 @@ pub fn bind_keys(cx: &mut App) {
             Modifiers::PrimaryShift => format!("{primary}-shift-"),
         };
         let binding = format!("{prefix}{}", shortcut.key);
+        let rich_context = Some("RichComposer");
         match shortcut.action {
+            ActionId::FormatBold if shortcut.context == KeyContext::RichComposer => {
+                Some(KeyBinding::new(&binding, FormatBold, rich_context))
+            }
+            ActionId::FormatItalic if shortcut.context == KeyContext::RichComposer => {
+                Some(KeyBinding::new(&binding, FormatItalic, rich_context))
+            }
+            ActionId::FormatCode if shortcut.context == KeyContext::RichComposer => {
+                Some(KeyBinding::new(&binding, FormatCode, rich_context))
+            }
             ActionId::NewLine => Some(KeyBinding::new(&binding, NewLine, context)),
             ActionId::Undo => Some(KeyBinding::new(&binding, Undo, context)),
             ActionId::Redo => Some(KeyBinding::new(&binding, Redo, context)),
@@ -1753,6 +2085,24 @@ mod tests {
         previous_grapheme, replacement_fits, to_utf16, visual_row,
     };
     use unicode_segmentation::UnicodeSegmentation;
+    #[test]
+    fn programmatic_load_clear_and_plain_modes_share_transactional_admission() {
+        let (visible, rich) = super::imported_value("**Ä🧭**", 4096, true, false).unwrap();
+        assert_eq!(visible.as_ref(), "Ä🧭");
+        assert_eq!(rich.as_ref().unwrap().wire.as_ref(), "**Ä🧭**");
+        assert!(super::imported_value(&"x".repeat(4097), 4096, true, false).is_none());
+        assert_eq!(rich.as_ref().unwrap().wire.as_ref(), "**Ä🧭**");
+        for (markdown, concealed) in [(false, false), (true, true), (false, true)] {
+            let (plain, rich) =
+                super::imported_value("**Ä🧭**", 4096, markdown, concealed).unwrap();
+            assert_eq!(plain.as_ref(), "**Ä🧭**");
+            assert!(rich.is_none());
+        }
+        let (cleared, rich) = super::imported_value("", 4096, true, false).unwrap();
+        assert!(cleared.is_empty());
+        assert_eq!(rich.unwrap().wire.as_ref(), "");
+    }
+
     #[test]
     fn soft_wrap_affinity_distinguishes_row_start_from_previous_row_end() {
         // One byte position represents both sides of a soft wrap. Pointer hits
@@ -1897,12 +2247,14 @@ mod tests {
             text: "A🧭\nB".into(),
             selection: 1..5,
             reversed: true,
+            rich: None,
         };
         history.record(old.clone());
         let current = EditSnapshot {
             text: "AX\nB".into(),
             selection: 2..2,
             reversed: false,
+            rich: None,
         };
         let restored = history.travel(current.clone(), false).unwrap();
         assert_eq!(restored.text, old.text);
@@ -1914,6 +2266,7 @@ mod tests {
                 text: n.to_string().into(),
                 selection: 0..0,
                 reversed: false,
+                rich: None,
             });
         }
         let mut count = 0;

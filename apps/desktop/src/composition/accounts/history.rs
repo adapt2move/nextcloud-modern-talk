@@ -10,7 +10,10 @@ use talk_adapters::identity::{CacheHistory, CachedMessage, CachedReaction, Cache
 use talk_core::preferences::navigation::NavigationRoomKey;
 use talk_core::protocol::messaging::MessagingResult;
 use talk_core::ui::presentation::MessageView;
-use talk_core::ui::{conversation::RemoteState, messaging::MessagePanel};
+use talk_core::ui::{
+    conversation::RemoteState,
+    messaging::{MessagePanel, SystemEvent},
+};
 
 const ROOMS: usize = 32;
 const IN_FLIGHT: usize = 16;
@@ -26,6 +29,8 @@ struct Flight {
     work: Work,
     version: Version,
     started: Instant,
+    poll_after: Option<u128>,
+    tail_repair: bool,
 }
 
 struct ReactionSnapshot {
@@ -48,6 +53,18 @@ pub(super) struct History {
     pub(super) offline: bool,
     connectivity_version: Version,
     versions: Vec<(u128, Version)>,
+    // At most 99 adjacent pairs in the retained 100-row page. Unlike mutation
+    // versions, these preserve observed pagination continuity across polls.
+    read_edges: Vec<(u128, u128)>,
+    // One proven hidden continuation beyond an older retained window. This
+    // stores IDs only, never another message page, and is not restored from disk.
+    read_tail: Option<(u128, u128)>,
+    // One bounded live repair cursor, with a cooldown after empty/failing reads.
+    // Cached continuity is never trusted, even when its content is displayed.
+    tail_probe: Option<(u128, Instant)>,
+    // One legacy classification target per retained room, with a retry cooldown.
+    // This background read never establishes pagination or read continuity.
+    metadata_probe: Option<(u128, Instant)>,
     // Only while an older admitted read can overwrite a confirmed mutation.
     // This also protects thread/pin rows outside the main 100-message page.
     reaction_snapshots: Vec<ReactionSnapshot>,
@@ -76,6 +93,10 @@ impl History {
             offline: false,
             connectivity_version: Version(0, false),
             versions: Vec::new(),
+            read_edges: Vec::new(),
+            read_tail: None,
+            tail_probe: None,
+            metadata_probe: None,
             reaction_snapshots: Vec::new(),
             capabilities: None,
             pins: Page::empty(),
@@ -104,6 +125,156 @@ impl History {
         {
             super::messaging::project_capabilities(panel, capabilities);
         }
+    }
+    pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {
+        page(
+            self.messages
+                .as_slice()
+                .iter()
+                .filter(|message| !message.metadata.pin_notice)
+                .map(|message| {
+                    let mut visible = message.clone();
+                    let target = self.read_through_pin_notices(message.local_id);
+                    visible.metadata.read_through = (target != message.local_id).then_some(target);
+                    visible
+                }),
+        )
+    }
+
+    /// Invisible pin activity carries no additional user content. A deliberate
+    /// read of its preceding visible row may include only that adjacent run,
+    /// never the next ordinary message or an unloaded server gap.
+    pub(super) fn read_through_pin_notices(&self, id: u128) -> u128 {
+        let Some(index) = self
+            .messages
+            .as_slice()
+            .iter()
+            .position(|message| message.local_id == id)
+        else {
+            return id;
+        };
+        let mut target = id;
+        for message in self.messages.as_slice().iter().skip(index + 1) {
+            if !message.metadata.system
+                || !message.metadata.pin_notice
+                || !self.read_edges.contains(&(target, message.local_id))
+            {
+                break;
+            }
+            target = message.local_id;
+        }
+        self.read_tail
+            .filter(|(anchor, _)| *anchor == target)
+            .map_or(target, |(_, end)| end)
+    }
+    /// A response page proves its own adjacency. A forward poll additionally
+    /// proves the edge from its admitted event cursor to the first returned row.
+    /// Independently fetched pages, cached data and mutation results prove no gap.
+    fn observe_read_page(&mut self, incoming: &[(u128, bool)], after: Option<u128>) {
+        let mut edges = Vec::with_capacity(99);
+        for pair in self.messages.as_slice().windows(2) {
+            let edge = (pair[0].local_id, pair[1].local_id);
+            if self.read_edges.contains(&edge)
+                || incoming
+                    .windows(2)
+                    .any(|pair| (pair[0].0, pair[1].0) == edge)
+                || after == Some(edge.0) && incoming.first().map(|row| row.0) == Some(edge.1)
+            {
+                edges.push(edge);
+            }
+        }
+        self.read_edges = edges;
+        let Some(anchor) = self
+            .messages
+            .as_slice()
+            .last()
+            .map(|message| message.local_id)
+        else {
+            self.read_tail = None;
+            return;
+        };
+        self.read_tail = self.read_tail.filter(|(known, _)| *known == anchor);
+        if incoming.iter().any(|(id, _)| *id > anchor) {
+            let start = incoming
+                .iter()
+                .position(|(id, _)| *id == anchor)
+                .map(|index| index + 1)
+                .or_else(|| {
+                    (after == Some(anchor)
+                        || self.read_tail.is_some_and(|(_, end)| after == Some(end)))
+                    .then_some(0)
+                });
+            self.read_tail = start.and_then(|index| {
+                let suffix = incoming.get(index..)?;
+                if suffix.iter().all(|(id, hidden)| *id > anchor && *hidden) {
+                    suffix.last().map(|row| (anchor, row.0))
+                } else {
+                    None
+                }
+            });
+        }
+    }
+    pub(super) fn poll_cursor(&self, now: Instant) -> Option<u128> {
+        let latest = self.latest?;
+        let Some(last_visible) = self
+            .messages
+            .as_slice()
+            .iter()
+            .rev()
+            .find(|message| !message.metadata.pin_notice)
+            .map(|message| message.local_id)
+        else {
+            return Some(latest);
+        };
+        let through = self.read_through_pin_notices(last_visible);
+        let unknown_tail = self.messages.as_slice().last().is_some_and(|message| {
+            message.metadata.system && message.metadata.pin_notice && message.local_id > through
+        });
+        if unknown_tail
+            && self.tail_probe.is_none_or(|(cursor, at)| {
+                cursor != through || now.saturating_duration_since(at) >= Duration::from_secs(30)
+            })
+        {
+            Some(through)
+        } else {
+            Some(latest)
+        }
+    }
+    fn metadata_target(&self) -> Option<u128> {
+        self.loaded
+            .then(|| {
+                self.messages
+                    .as_slice()
+                    .iter()
+                    .rev()
+                    .find(|message| {
+                        message.metadata.system
+                            && message.metadata.system_event == SystemEvent::Unknown
+                    })
+                    .map(|message| message.local_id)
+            })
+            .flatten()
+    }
+    /// At most 50 server rows before the newest unclassified retained row.
+    /// No-progress/failing targets wait 30 seconds; a changed target can progress
+    /// on the next owner tick without retaining another page or a retry queue.
+    pub(super) fn metadata_before(&self, now: Instant) -> Option<u128> {
+        let target = self.metadata_target()?;
+        if self.metadata_probe.is_some_and(|(known, at)| {
+            known == target && now.saturating_duration_since(at) < Duration::from_secs(30)
+        }) {
+            return None;
+        }
+        u64::try_from(target).ok()?.checked_add(1).map(u128::from)
+    }
+    pub(super) fn read_reaches_latest(&self, id: u128) -> bool {
+        self.loaded
+            && self.latest.is_some_and(|latest| latest <= id)
+            && self
+                .messages
+                .as_slice()
+                .last()
+                .is_none_or(|message| message.local_id <= id)
     }
     pub(super) fn needs_pins(&self) -> bool {
         !self.pins_state.pending()
@@ -193,6 +364,11 @@ impl History {
             Some(message)
         }));
         self.versions.retain(|(id, _)| !expired.contains(id));
+        self.read_edges
+            .retain(|(from, to)| !expired.contains(from) && !expired.contains(to));
+        self.read_tail = self
+            .read_tail
+            .filter(|(anchor, _)| !expired.contains(anchor));
     }
 }
 
@@ -203,6 +379,30 @@ pub(super) struct Cache {
     last_admission: u64,
 }
 impl Cache {
+    /// Record the actual dispatched cursor, including a bounded hidden-tail
+    /// repair. The flight must not infer it from a newer canonical event cursor.
+    pub(super) fn poll_admitted(
+        &mut self,
+        context: ConversationRef,
+        operation: OperationId,
+        after: u128,
+    ) {
+        let repair = self
+            .get(context)
+            .is_some_and(|room| room.latest.is_some_and(|latest| after < latest));
+        let Some(flight) = self.flights.iter_mut().find(|flight| {
+            flight.context == context && flight.operation == operation && flight.work == Work::Poll
+        }) else {
+            return;
+        };
+        flight.poll_after = Some(after);
+        flight.tail_repair = repair;
+        if let Some(room) = self.get_mut(context)
+            && room.latest.is_some_and(|latest| after < latest)
+        {
+            room.tail_probe = Some((after, Instant::now()));
+        }
+    }
     fn reap_reactions(&mut self) {
         let flights = &self.flights;
         for room in &mut self.rooms {
@@ -413,14 +613,26 @@ impl Cache {
             return;
         }
         self.last_admission = self.last_admission.max(serial);
+        let poll_after = (work == Work::Poll)
+            .then(|| self.get(context).and_then(|room| room.latest))
+            .flatten();
+        let started = Instant::now();
         self.flights.push(Flight {
             context,
             operation,
             request,
             work,
             version: Version(serial, false),
-            started: Instant::now(),
+            started,
+            poll_after,
+            tail_repair: false,
         });
+        if work == Work::Metadata
+            && let Some(room) = self.get_mut(context)
+            && let Some(target) = room.metadata_target()
+        {
+            room.metadata_probe = Some((target, started));
+        }
         if matches!(work, Work::History | Work::Older)
             && let Some(room) = self.get_mut(context)
         {
@@ -488,6 +700,13 @@ impl Cache {
         let Some(room) = self.get_mut(context) else {
             return false;
         };
+        if work == Work::Metadata
+            && let Some((_, at)) = room.metadata_probe.as_mut()
+        {
+            // Failures and no-progress replies get a full cooldown after the
+            // request settles, including when the GET itself was slow.
+            *at = Instant::now();
+        }
         if work == Work::Pins && flight.version >= room.pins_version {
             match result {
                 Ok(MessagingResult::Messages { messages, .. }) => {
@@ -566,6 +785,24 @@ impl Cache {
             room.connectivity_version = flight.version;
         }
         match result {
+            Ok(MessagingResult::Messages { messages, .. }) if work == Work::Metadata => {
+                // Reconcile only IDs still retained at completion, under the
+                // ordinary row/mutation Version fence. Unseen rows prove no gap
+                // and cannot insert, evict, mark read or move either cursor.
+                let retained: Vec<_> = messages
+                    .as_slice()
+                    .iter()
+                    .take(50)
+                    .filter(|message| {
+                        room.messages
+                            .as_slice()
+                            .iter()
+                            .any(|known| known.local_id == u128::from(message.message.id.sequence))
+                    })
+                    .map(message_view)
+                    .collect();
+                room.merge(retained.into_iter(), flight.version, false);
+            }
             Ok(MessagingResult::Messages {
                 messages,
                 cursor,
@@ -573,13 +810,42 @@ impl Cache {
                 ..
             }) if timeline => {
                 let was_loaded = room.loaded;
+                let incoming: Vec<_> = messages
+                    .as_slice()
+                    .iter()
+                    .take(50)
+                    .map(message_view)
+                    .collect();
+                let mut observed: Vec<_> = incoming
+                    .iter()
+                    .map(|message| {
+                        (
+                            message.local_id,
+                            message.metadata.system && message.metadata.pin_notice,
+                        )
+                    })
+                    .collect();
+                observed.sort_unstable_by_key(|row| row.0);
+                observed.dedup_by_key(|row| row.0);
+                // Invisible activity must not evict the reader's visible
+                // anchor. Its verified continuation uses only the ID proof
+                // below; the retained message window stays capped at 100.
+                let hidden_poll = work == Work::Poll
+                    && incoming
+                        .iter()
+                        .all(|message| message.metadata.system && message.metadata.pin_notice);
                 room.merge(
-                    messages.as_slice().iter().map(message_view),
+                    incoming.into_iter(),
                     flight.version,
-                    work == Work::Older
+                    flight.tail_repair
+                        || hidden_poll
+                        || work == Work::Older
                         || matches!(work, Work::Context(id)
                         if room.messages.as_slice().first().is_some_and(|m| id < m.local_id)),
                 );
+                if !matches!(work, Work::Recovery | Work::Context(_)) {
+                    room.observe_read_page(&observed, flight.poll_after);
+                }
                 if work == Work::Older
                     || work == Work::History && !was_loaded
                     || matches!(work, Work::Latest | Work::Prefetch) && room.latest.is_none()
@@ -730,6 +996,8 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
         edited: message.metadata.edited,
         deleted: message.metadata.deleted,
         system: message.metadata.system,
+        system_event: cached_system_event(message.metadata.system, message.metadata.system_event),
+        pin_notice: message.metadata.system && message.metadata.pin_notice,
         truncated: message.metadata.truncated,
         replyable: message.metadata.replyable,
         parent: message.metadata.parent.as_ref().and_then(|p| {
@@ -793,6 +1061,8 @@ fn restored_message(message: &CachedMessage) -> MessageView {
             edited: message.edited,
             deleted: message.deleted,
             system: message.system,
+            system_event: restored_system_event(message.system, message.system_event.as_ref()),
+            pin_notice: message.system && message.pin_notice,
             replyable: message.replyable,
             parent: message
                 .parent
@@ -813,6 +1083,40 @@ fn restored_message(message: &CachedMessage) -> MessageView {
             })),
             ..Default::default()
         },
+    }
+}
+
+fn cached_system_event(system: bool, event: SystemEvent) -> Option<Text<32>> {
+    if !system {
+        return None;
+    }
+    Some(text(match event {
+        SystemEvent::Unknown => return None,
+        SystemEvent::Other => "other",
+        SystemEvent::CallIncoming => "call_incoming",
+        SystemEvent::CallOutgoing => "call_outgoing",
+        SystemEvent::CallJoined => "call_joined",
+        SystemEvent::CallLeft => "call_left",
+        SystemEvent::CallEnded => "call_ended",
+        SystemEvent::CallMissed => "call_missed",
+        SystemEvent::CallUnanswered => "call_unanswered",
+    }))
+}
+
+fn restored_system_event(system: bool, code: Option<&Text<32>>) -> SystemEvent {
+    if !system {
+        return SystemEvent::Unknown;
+    }
+    match code.map(Text::as_str) {
+        Some("other") => SystemEvent::Other,
+        Some("call_incoming") => SystemEvent::CallIncoming,
+        Some("call_outgoing") => SystemEvent::CallOutgoing,
+        Some("call_joined") => SystemEvent::CallJoined,
+        Some("call_left") => SystemEvent::CallLeft,
+        Some("call_ended") => SystemEvent::CallEnded,
+        Some("call_missed") => SystemEvent::CallMissed,
+        Some("call_unanswered") => SystemEvent::CallUnanswered,
+        _ => SystemEvent::Unknown,
     }
 }
 

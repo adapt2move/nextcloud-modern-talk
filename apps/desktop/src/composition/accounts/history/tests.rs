@@ -3,6 +3,918 @@ use talk_core::ids::{ConversationId, HostId, RuntimeGeneration};
 use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
+fn system_message(key: ConversationRef, id: u64, tag: Option<&str>) -> MessageDetails {
+    let mut row = message(
+        key,
+        id,
+        "Localized call text is not classification evidence",
+    );
+    row.message.kind = MessageKind::System;
+    row.system = tag.map(text);
+    row
+}
+
+#[test]
+fn system_event_projection_uses_verified_tags_and_current_actor_ownership() {
+    let key = context(1, 1, 1, 1);
+    for (tag, expected) in [
+        (None, SystemEvent::Unknown),
+        (Some("call_started"), SystemEvent::CallIncoming),
+        (Some("call_joined"), SystemEvent::CallJoined),
+        (Some("call_left"), SystemEvent::CallLeft),
+        (Some("call_ended"), SystemEvent::CallEnded),
+        (Some("call_ended_everyone"), SystemEvent::CallEnded),
+        (Some("call_missed"), SystemEvent::CallMissed),
+        (Some("call_tried"), SystemEvent::CallUnanswered),
+        (Some("message_pinned"), SystemEvent::Other),
+        (Some("future_system_tag"), SystemEvent::Other),
+        (Some("call_failed"), SystemEvent::Other),
+    ] {
+        let mut row = system_message(key, 7, tag);
+        // Silent and notifying starts use the same actor-based direction.
+        for notify in [Decision::Denied, Decision::Allowed] {
+            row.notify = notify;
+            assert_eq!(message_view(&row).metadata.system_event, expected);
+            row.own = true;
+            assert_eq!(
+                message_view(&row).metadata.system_event,
+                if tag == Some("call_started") {
+                    SystemEvent::CallOutgoing
+                } else {
+                    expected
+                }
+            );
+            row.own = false;
+        }
+        for kind in [MessageKind::Comment, MessageKind::Deleted] {
+            row.message.kind = kind;
+            row.message.text = text("Missed call / Anruf verpasst / Llamada perdida");
+            assert_eq!(
+                message_view(&row).metadata.system_event,
+                SystemEvent::Unknown
+            );
+        }
+    }
+}
+
+#[test]
+fn system_event_cache_uses_domain_codes_and_unknown_never_becomes_other() {
+    let key = context(1, 1, 1, 1);
+    let mut row = message_view(&system_message(key, 7, None));
+    for (event, code) in [
+        (SystemEvent::Unknown, None),
+        (SystemEvent::Other, Some("other")),
+        (SystemEvent::CallIncoming, Some("call_incoming")),
+        (SystemEvent::CallOutgoing, Some("call_outgoing")),
+        (SystemEvent::CallJoined, Some("call_joined")),
+        (SystemEvent::CallLeft, Some("call_left")),
+        (SystemEvent::CallEnded, Some("call_ended")),
+        (SystemEvent::CallMissed, Some("call_missed")),
+        (SystemEvent::CallUnanswered, Some("call_unanswered")),
+    ] {
+        row.metadata.system_event = event;
+        let mut cached = cached_message(&row).unwrap();
+        assert_eq!(cached.system_event.as_ref().map(Text::as_str), code);
+        assert_eq!(restored_message(&cached).metadata.system_event, event);
+        cached.system = false;
+        assert_eq!(
+            restored_message(&cached).metadata.system_event,
+            SystemEvent::Unknown
+        );
+        row.metadata.system = false;
+        assert_eq!(cached_message(&row).unwrap().system_event, None);
+        row.metadata.system = true;
+    }
+    let mut cached = cached_message(&row).unwrap();
+    for code in [
+        None,
+        Some("future_domain_code"),
+        Some("call_tried"),
+        Some("call_started"),
+    ] {
+        cached.system_event = code.map(text);
+        let restored = restored_message(&cached);
+        assert_eq!(restored.metadata.system_event, SystemEvent::Unknown);
+        assert_eq!(cached_message(&restored).unwrap().system_event, None);
+    }
+}
+
+#[test]
+fn metadata_warmup_repairs_legacy_cache_without_new_messages_or_read_side_effects() {
+    let mut model = super::super::tests::model();
+    model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+    let key = model.snapshot.selected.unwrap();
+    let mut source = Cache::default();
+    source.open(key);
+    complete(
+        &mut source,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [
+                system_message(key, 7, Some("call_missed")),
+                system_message(key, 8, Some("message_pinned")),
+            ],
+            Some(3),
+        ),
+    );
+    complete(&mut source, key, 2, Work::Poll, messages(key, [], Some(31)));
+    let mut durable = source
+        .durable(
+            key,
+            NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap(),
+            now_unix(),
+        )
+        .unwrap();
+    // Model the old schema, which retained system/pin flags and localized text.
+    durable.messages = page(durable.messages.as_slice().iter().cloned().map(|mut row| {
+        row.system_event = None;
+        row
+    }));
+    model.history.restore(key, &durable);
+    model.snapshot.message_panel = Some(MessagePanel::new(key));
+    model.project_history(key);
+    let unread: Vec<_> = model
+        .snapshot
+        .conversations
+        .as_slice()
+        .iter()
+        .map(|row| row.unread)
+        .collect();
+    let now = Instant::now();
+    assert_eq!(
+        model.history.get(key).unwrap().metadata_before(now),
+        Some(9)
+    );
+    assert_eq!(model.history.get(key).unwrap().poll_cursor(now), Some(7));
+    // Normal polling still starts after its original event cursor (or its
+    // separate existing hidden-tail repair), and an empty poll repairs no rows.
+    complete(
+        &mut model.history,
+        key,
+        3,
+        Work::Poll,
+        messages(key, [], Some(31)),
+    );
+    assert_eq!(
+        model.history.get(key).unwrap().messages.as_slice()[0]
+            .metadata
+            .system_event,
+        SystemEvent::Unknown
+    );
+    let operation = admit(&mut model.history, key, 4, Work::Metadata);
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.state = RemoteState::Saving(RequestId(66));
+    let mut result = messages(
+        key,
+        [
+            system_message(key, 7, Some("call_missed")),
+            system_message(key, 8, Some("message_pinned")),
+            message(key, 9, "An unretained row is not inserted"),
+        ],
+        Some(999),
+    );
+    if let MessagingResult::Messages { common_read, .. } = &mut result {
+        *common_read = Some(MessageId {
+            conversation: key.conversation,
+            sequence: 999,
+        });
+    }
+    model.apply_message(
+        RequestId(4),
+        key,
+        operation,
+        Work::Metadata,
+        reply(key, operation, result),
+    );
+    let room = model.history.get(key).unwrap();
+    assert_eq!(room.messages.as_slice().len(), 2);
+    assert_eq!(
+        room.messages.as_slice()[0].metadata.system_event,
+        SystemEvent::CallMissed
+    );
+    assert_eq!(
+        room.messages.as_slice()[1].metadata.system_event,
+        SystemEvent::Other
+    );
+    assert_eq!(
+        (room.latest, room.older, room.common_read),
+        (Some(31), Some(3), None)
+    );
+    assert!(room.read_edges.is_empty());
+    assert_eq!(room.read_tail, None);
+    assert_eq!(room.read_through_pin_notices(7), 7);
+    assert!(!room.read_reaches_latest(8));
+    assert_eq!(room.metadata_before(now), None);
+    assert_eq!(room.state, RemoteState::Idle);
+    assert!(!room.offline);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.state, RemoteState::Saving(RequestId(66)));
+    assert_eq!(
+        (panel.latest, panel.older, panel.common_read),
+        (Some(31), Some(3), None)
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .map(|row| row.unread)
+            .collect::<Vec<_>>(),
+        unread
+    );
+    assert_eq!(
+        model
+            .history
+            .durable(key, durable.room, now_unix())
+            .unwrap()
+            .messages
+            .as_slice()[0]
+            .system_event
+            .as_ref()
+            .map(Text::as_str),
+        Some("call_missed")
+    );
+}
+
+#[test]
+fn metadata_warmup_cooldown_is_per_target_and_failure_does_not_block_history() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    assert_eq!(
+        cache.get(key).unwrap().metadata_before(Instant::now()),
+        None
+    );
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [system_message(key, 7, None), system_message(key, 8, None)],
+            None,
+        ),
+    );
+    let operation = admit(&mut cache, key, 2, Work::Metadata);
+    let (_, at) = cache.get(key).unwrap().metadata_probe.unwrap();
+    assert_eq!(cache.get(key).unwrap().state, RemoteState::Idle);
+    assert_eq!(
+        cache
+            .get(key)
+            .unwrap()
+            .metadata_before(at + Duration::from_secs(29)),
+        None
+    );
+    assert_eq!(
+        cache
+            .get(key)
+            .unwrap()
+            .metadata_before(at + Duration::from_secs(30)),
+        Some(9)
+    );
+    assert!(cache.complete(
+        key,
+        operation,
+        Work::Metadata,
+        RequestId(2),
+        &Err(Completion::Failed(UnavailableReason::Unconfigured)),
+        true
+    ));
+    let room = cache.get(key).unwrap();
+    assert_eq!(room.state, RemoteState::Idle);
+    assert!(!room.offline);
+    assert_eq!(room.poll_cursor(at), Some(8));
+    assert_eq!(room.metadata_before(at), None);
+    // An empty, successful metadata read is still no progress for this target.
+    complete(&mut cache, key, 3, Work::Metadata, messages(key, [], None));
+    let (_, at) = cache.get(key).unwrap().metadata_probe.unwrap();
+    assert_eq!(cache.get(key).unwrap().metadata_before(at), None);
+    complete(
+        &mut cache,
+        key,
+        4,
+        Work::Metadata,
+        messages(key, [system_message(key, 8, Some("call_tried"))], None),
+    );
+    let room = cache.get(key).unwrap();
+    let (_, at) = room.metadata_probe.unwrap();
+    assert_eq!(room.metadata_before(at), Some(8));
+    assert_eq!(
+        room.messages.as_slice()[1].metadata.system_event,
+        SystemEvent::CallUnanswered
+    );
+    // Missing protocol tags remain unclassified and use the same cooldown.
+    complete(
+        &mut cache,
+        key,
+        5,
+        Work::Metadata,
+        messages(key, [system_message(key, 7, None)], None),
+    );
+    let room = cache.get(key).unwrap();
+    let (_, at) = room.metadata_probe.unwrap();
+    assert_eq!(room.metadata_before(at), None);
+    assert_eq!(room.metadata_before(at + Duration::from_secs(30)), Some(8));
+    assert_eq!(
+        cached_message(&room.messages.as_slice()[0])
+            .unwrap()
+            .system_event,
+        None
+    );
+}
+
+#[test]
+fn metadata_warmup_only_merges_retained_ids_and_preserves_newer_mutation_authority() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            (101..151).map(|id| system_message(key, id, None)),
+            Some(101),
+        ),
+    );
+    complete(
+        &mut cache,
+        key,
+        2,
+        Work::Older,
+        messages(
+            key,
+            (51..101).map(|id| system_message(key, id, None)),
+            Some(51),
+        ),
+    );
+    let operation = admit(&mut cache, key, 3, Work::Metadata);
+    let mut deleted = message(key, 150, "");
+    deleted.message.kind = MessageKind::Deleted;
+    complete(
+        &mut cache,
+        key,
+        4,
+        Work::Action,
+        MessagingResult::Message(Box::new(deleted)),
+    );
+    let ids: Vec<_> = cache
+        .get(key)
+        .unwrap()
+        .messages
+        .as_slice()
+        .iter()
+        .map(|row| row.local_id)
+        .collect();
+    let latest = cache.get(key).unwrap().latest;
+    let older = cache.get(key).unwrap().older;
+    assert!(cache.complete(
+        key,
+        operation,
+        Work::Metadata,
+        RequestId(3),
+        &Ok(messages(
+            key,
+            [
+                system_message(key, 50, Some("call_missed")),
+                system_message(key, 100, Some("call_joined")),
+                system_message(key, 150, Some("call_missed")),
+                system_message(key, 999, Some("call_missed")),
+            ],
+            Some(999)
+        )),
+        false
+    ));
+    let room = cache.get(key).unwrap();
+    assert_eq!(
+        room.messages
+            .as_slice()
+            .iter()
+            .map(|row| row.local_id)
+            .collect::<Vec<_>>(),
+        ids
+    );
+    assert_eq!(room.messages.as_slice().len(), 100);
+    assert_eq!((room.latest, room.older), (latest, older));
+    assert_eq!(
+        room.messages
+            .as_slice()
+            .iter()
+            .find(|row| row.local_id == 100)
+            .unwrap()
+            .metadata
+            .system_event,
+        SystemEvent::CallJoined
+    );
+    let last = room.messages.as_slice().last().unwrap();
+    assert!(last.metadata.deleted);
+    assert_eq!(last.metadata.system_event, SystemEvent::Unknown);
+    // Removing and reopening a room retires the old metadata ticket too.
+    let operation = admit(&mut cache, key, 5, Work::Metadata);
+    cache.remove(key);
+    cache.open(key);
+    assert!(!cache.complete(
+        key,
+        operation,
+        Work::Metadata,
+        RequestId(5),
+        &Ok(messages(
+            key,
+            [system_message(key, 100, Some("call_missed"))],
+            None
+        )),
+        false
+    ));
+    assert!(cache.get(key).unwrap().messages.as_slice().is_empty());
+}
+
+#[test]
+fn metadata_warmup_rejects_wrong_scope_and_cancelled_or_retired_completions() {
+    let mut model = super::super::tests::model();
+    model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+    let key = model.snapshot.selected.unwrap();
+    model.history.open(key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [system_message(key, 7, None)], None),
+    );
+    let other = context(90, 90, 90, 90);
+    let operation = admit(&mut model.history, key, 2, Work::Metadata);
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        Work::Metadata,
+        reply(
+            key,
+            operation,
+            messages(other, [system_message(other, 7, Some("call_missed"))], None),
+        ),
+    );
+    assert_eq!(
+        model.history.get(key).unwrap().messages.as_slice()[0]
+            .metadata
+            .system_event,
+        SystemEvent::Unknown
+    );
+    let operation = admit(&mut model.history, key, 3, Work::Metadata);
+    model.apply_message(
+        RequestId(3),
+        key,
+        operation,
+        Work::Metadata,
+        Err(IdentityError::Request(ErrorKind::Cancelled)),
+    );
+    assert_eq!(model.history.get(key).unwrap().state, RemoteState::Idle);
+    assert_eq!(
+        model.history.get(key).unwrap().messages.as_slice()[0]
+            .metadata
+            .system_event,
+        SystemEvent::Unknown
+    );
+    let operation = admit(&mut model.history, key, 4, Work::Metadata);
+    model.history.remove_account(key.account.account);
+    model.history.open(key);
+    model.apply_message(
+        RequestId(4),
+        key,
+        operation,
+        Work::Metadata,
+        reply(
+            key,
+            operation,
+            messages(key, [system_message(key, 7, Some("call_missed"))], None),
+        ),
+    );
+    assert!(
+        model
+            .history
+            .get(key)
+            .unwrap()
+            .messages
+            .as_slice()
+            .is_empty()
+    );
+}
+
+#[test]
+fn hidden_tail_repair_at_capacity_keeps_the_recovered_visible_anchor() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let notices = |range: std::ops::Range<u64>| {
+        range.map(|id| {
+            let mut notice = message(key, id, "Pin activity");
+            notice.message.kind = MessageKind::System;
+            notice.system = Some(text("message_unpinned"));
+            notice
+        })
+    };
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(key, notices(100..150), Some(100)),
+    );
+    complete(
+        &mut cache,
+        key,
+        2,
+        Work::Older,
+        messages(key, notices(50..100), Some(50)),
+    );
+    complete(
+        &mut cache,
+        key,
+        3,
+        Work::Older,
+        messages(key, [message(key, 49, "Recovered content")], None),
+    );
+    assert_eq!(cache.get(key).unwrap().messages.as_slice().len(), 100);
+    for (serial, after, range) in [(4, 49, 50..100), (5, 99, 100..150)] {
+        let room = cache.get(key).unwrap();
+        assert_eq!(room.poll_cursor(Instant::now()), Some(after));
+        let operation = admit(&mut cache, key, serial, Work::Poll);
+        cache.poll_admitted(key, operation, after);
+        assert!(cache.complete(
+            key,
+            operation,
+            Work::Poll,
+            RequestId(serial),
+            &Ok(messages(key, notices(range), Some(149))),
+            false
+        ));
+        let room = cache.get(key).unwrap();
+        assert_eq!(room.visible_messages().as_slice()[0].local_id, 49);
+        assert_eq!(room.messages.as_slice().len(), 100);
+    }
+    let room = cache.get(key).unwrap();
+    assert_eq!(room.read_through_pin_notices(49), 149);
+    assert_eq!(room.read_tail, Some((148, 149)));
+    assert_eq!(room.poll_cursor(Instant::now()), Some(149));
+    assert!(room.read_reaches_latest(149));
+    // A normal empty poll retains the live proof, with no second message page.
+    complete(&mut cache, key, 6, Work::Poll, messages(key, [], Some(149)));
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(49), 149);
+    for (serial, id) in [(7, 150), (8, 151)] {
+        complete(
+            &mut cache,
+            key,
+            serial,
+            Work::Poll,
+            messages(key, notices(id..id + 1), Some(id)),
+        );
+        let room = cache.get(key).unwrap();
+        assert_eq!(room.visible_messages().as_slice()[0].local_id, 49);
+        assert_eq!(room.messages.as_slice().len(), 100);
+        assert_eq!(room.read_through_pin_notices(49), u128::from(id));
+        assert_eq!(room.read_tail, Some((148, u128::from(id))));
+        assert_eq!(room.latest, Some(u128::from(id)));
+    }
+    // New ordinary content is a barrier and retires the previous tail proof.
+    complete(
+        &mut cache,
+        key,
+        9,
+        Work::Poll,
+        messages(key, [message(key, 152, "New content")], Some(152)),
+    );
+    assert_eq!(cache.get(key).unwrap().read_tail, None);
+    assert!(!cache.get(key).unwrap().read_reaches_latest(149));
+}
+
+#[test]
+fn a_page_of_hidden_notices_preserves_the_older_cursor_and_earlier_content() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let notices = (100..150).map(|id| {
+        let mut notice = message(key, id, "Pin activity");
+        notice.message.kind = MessageKind::System;
+        notice.system = Some(text("message_unpinned"));
+        notice
+    });
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(key, notices, Some(100)),
+    );
+    let room = cache.get(key).unwrap();
+    assert!(room.visible_messages().as_slice().is_empty());
+    assert_eq!(room.older, Some(100));
+    complete(
+        &mut cache,
+        key,
+        2,
+        Work::Older,
+        messages(key, [message(key, 99, "Earlier content")], None),
+    );
+    let room = cache.get(key).unwrap();
+    assert_eq!(
+        room.visible_messages().as_slice()[0].body.as_str(),
+        "Earlier content"
+    );
+    assert_eq!(room.latest, Some(149));
+    assert_eq!(room.older, None);
+}
+
+#[test]
+fn restored_hidden_tail_requires_a_bounded_live_poll_before_read_extension() {
+    let key = context(1, 1, 1, 1);
+    let mut source = Cache::default();
+    source.open(key);
+    let mut notice = message(key, 8, "Pin activity");
+    notice.message.kind = MessageKind::System;
+    notice.system = Some(text("message_pinned"));
+    complete(
+        &mut source,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [message(key, 7, "Painted content"), notice.clone()],
+            None,
+        ),
+    );
+    let durable = source
+        .durable(
+            key,
+            NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap(),
+            now_unix(),
+        )
+        .unwrap();
+    let mut cache = Cache::default();
+    cache.restore(key, &durable);
+    let now = Instant::now();
+    let room = cache.get(key).unwrap();
+    assert_eq!(room.latest, Some(8));
+    assert_eq!(room.read_through_pin_notices(7), 7);
+    assert_eq!(room.poll_cursor(now), Some(7));
+    let operation = admit(&mut cache, key, 2, Work::Poll);
+    cache.poll_admitted(key, operation, 7);
+    // Unsuccessful/no-progress repairs use normal polling during the cooldown.
+    assert_eq!(cache.get(key).unwrap().poll_cursor(now), Some(8));
+    assert_eq!(
+        cache
+            .get(key)
+            .unwrap()
+            .poll_cursor(now + Duration::from_secs(31)),
+        Some(7)
+    );
+    assert!(cache.complete(
+        key,
+        operation,
+        Work::Poll,
+        RequestId(2),
+        &Ok(messages(key, [notice], Some(8))),
+        false
+    ));
+    let room = cache.get(key).unwrap();
+    assert_eq!(room.read_through_pin_notices(7), 8);
+    assert_eq!(room.poll_cursor(now + Duration::from_secs(31)), Some(8));
+    assert_eq!(
+        room.visible_messages().as_slice()[0].metadata.read_through,
+        Some(8)
+    );
+    assert_eq!(room.latest, Some(8));
+}
+
+#[test]
+fn read_completion_never_clears_unread_content_beyond_the_canonical_cursor() {
+    let mut model = super::super::tests::model();
+    model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+    let key = model.snapshot.selected.unwrap();
+    model.history.open(key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Painted old content")], None),
+    );
+    let mut notice = message(key, 15, "Pin activity after an unobserved gap");
+    notice.message.kind = MessageKind::System;
+    notice.system = Some(text("message_pinned"));
+    complete(
+        &mut model.history,
+        key,
+        2,
+        Work::Latest,
+        messages(key, [notice], None),
+    );
+    model.project_history(key);
+    model.snapshot.conversations =
+        page(model.snapshot.conversations.as_slice().iter().map(|row| {
+            let mut row = row.clone();
+            if row.context == key {
+                row.unread = 4;
+            }
+            row
+        }));
+    let operation = admit(&mut model.history, key, 3, Work::Read(7));
+    model.apply_message(
+        RequestId(3),
+        key,
+        operation,
+        Work::Read(7),
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: key.conversation,
+            operation,
+            result: MessagingResult::Changed,
+        })),
+    );
+    assert_eq!(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|row| row.context == key)
+            .unwrap()
+            .unread,
+        4
+    );
+    assert!(!model.history.get(key).unwrap().read_reaches_latest(7));
+    assert!(model.history.get(key).unwrap().read_reaches_latest(15));
+}
+
+#[test]
+fn pin_notices_are_hidden_without_losing_cursors_cache_or_read_barriers() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let notice = |id, tag| {
+        let mut value = message(key, id, "Localized activity text");
+        value.message.kind = MessageKind::System;
+        value.system = Some(text(tag));
+        value
+    };
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [
+                message(key, 7, "Visible"),
+                notice(8, "message_pinned"),
+                notice(9, "message_unpinned"),
+                message(key, 10, "Must remain unread"),
+                notice(11, "message_pinned"),
+            ],
+            Some(11),
+        ),
+    );
+    let room = cache.get(key).unwrap();
+    assert_eq!(
+        room.visible_messages()
+            .as_slice()
+            .iter()
+            .map(|m| m.local_id)
+            .collect::<Vec<_>>(),
+        [7, 10]
+    );
+    assert_eq!(room.messages.as_slice().len(), 5);
+    assert_eq!(room.latest, Some(11));
+    assert_eq!(room.read_through_pin_notices(7), 9);
+    assert_eq!(room.read_through_pin_notices(10), 11);
+    assert_eq!(room.read_through_pin_notices(6), 6);
+    let durable = cache
+        .durable(
+            key,
+            NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap(),
+            now_unix(),
+        )
+        .unwrap();
+    let restored = context(1, 0, 0, 1);
+    let mut next = Cache::default();
+    next.restore(restored, &durable);
+    assert_eq!(
+        next.get(restored)
+            .unwrap()
+            .visible_messages()
+            .as_slice()
+            .len(),
+        2
+    );
+    assert!(
+        next.get(restored).unwrap().messages.as_slice()[1]
+            .metadata
+            .pin_notice
+    );
+    // A refreshed notice does not invalidate already observed continuity.
+    complete(
+        &mut cache,
+        key,
+        2,
+        Work::Poll,
+        messages(key, [notice(8, "message_pinned")], Some(11)),
+    );
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 9);
+}
+
+#[test]
+fn later_pin_notices_advance_the_painted_read_target_only_across_observed_pages() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Already painted")], None),
+    );
+    let before = cache.get(key).unwrap().visible_messages();
+    assert_eq!(before.as_slice()[0].metadata.read_through, None);
+    let notice = |id| {
+        let mut value = message(key, id, "Pin activity");
+        value.message.kind = MessageKind::System;
+        value.system = Some(text("message_pinned"));
+        value
+    };
+    // Poll is admitted from the known event cursor 7, proving 7 -> 8.
+    complete(
+        &mut cache,
+        key,
+        2,
+        Work::Poll,
+        messages(key, [notice(8)], Some(8)),
+    );
+    let after = cache.get(key).unwrap().visible_messages();
+    assert_eq!(after.as_slice().len(), 1);
+    assert_eq!(after.as_slice()[0].local_id, 7);
+    assert_eq!(after.as_slice()[0].metadata.read_through, Some(8));
+    assert_ne!(before, after); // Projection wakes the receipt observer again.
+    complete(
+        &mut cache,
+        key,
+        3,
+        Work::Poll,
+        messages(key, [notice(10)], Some(10)),
+    );
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
+    // A newest-page fetch does not establish continuity from event cursor 10.
+    complete(
+        &mut cache,
+        key,
+        4,
+        Work::Latest,
+        messages(key, [notice(15)], Some(15)),
+    );
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
+    // Observing the missing ordinary row still cannot acknowledge it by
+    // reading the earlier row, even when a later poll proves adjacency.
+    complete(
+        &mut cache,
+        key,
+        5,
+        Work::Poll,
+        messages(
+            key,
+            [message(key, 16, "Unread content"), notice(17)],
+            Some(17),
+        ),
+    );
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(7), 10);
+    assert_eq!(cache.get(key).unwrap().read_through_pin_notices(16), 17);
+    assert!(cache.get(key).unwrap().read_edges.len() <= 99);
+}
+
+#[test]
+fn pin_notice_classification_never_matches_localized_message_bodies() {
+    let key = context(1, 1, 1, 1);
+    for body in [
+        "Sie haben eine Nachricht angepinnt",
+        "You pinned a message",
+        "Has fijado un mensaje",
+    ] {
+        let mut value = message(key, 7, body);
+        assert!(!message_view(&value).metadata.pin_notice);
+        value.system = Some(text("message_pinned"));
+        assert!(!message_view(&value).metadata.pin_notice);
+        value.message.kind = MessageKind::System;
+        assert!(message_view(&value).metadata.pin_notice);
+        value.system = Some(text("file_shared"));
+        assert!(!message_view(&value).metadata.pin_notice);
+    }
+}
+
 #[test]
 fn disk_warmup_does_not_invent_network_failure_or_replace_current_observations() {
     let original = context(1, 1, 1, 1);

@@ -12,6 +12,7 @@ pub(super) enum Work {
     Prefetch,
     Older,
     Poll,
+    Metadata,
     Action,
     Forward(ConversationRef),
     Reminder(u128),
@@ -51,7 +52,9 @@ impl Work {
             Self::Older => DiagnosticOperation::Older,
             Self::Context(_) => DiagnosticOperation::Context,
             Self::Thread => DiagnosticOperation::Thread,
-            Self::Latest | Self::Prefetch | Self::Poll => DiagnosticOperation::Poll,
+            Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata => {
+                DiagnosticOperation::Poll
+            }
             Self::Recovery => DiagnosticOperation::Context,
             Self::Send => DiagnosticOperation::Send,
             _ => return None,
@@ -71,7 +74,7 @@ impl Work {
     pub(super) fn background(self) -> bool {
         matches!(
             self,
-            Self::Latest | Self::Prefetch | Self::Poll | Self::Recovery
+            Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata | Self::Recovery
         )
     }
 }
@@ -192,11 +195,7 @@ impl Accounts {
                 }
             }
         }
-        let _ = self.room_action(
-            RequestId(0),
-            context,
-            talk_core::ui::conversation::ConversationAction::Read,
-        );
+        self.revalidate_room_metadata(context);
         self.message_poll_at = Instant::now() + Duration::from_secs(1);
         Ok(())
     }
@@ -235,11 +234,10 @@ impl Accounts {
             }
             return Err(error);
         }
-        let _ = self.room_action(
-            RequestId(0),
-            context,
-            talk_core::ui::conversation::ConversationAction::Read,
-        );
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.metadata.invalidate(context);
+        }
+        self.revalidate_room_metadata(context);
         Ok(())
     }
     /// Background reconciliation never starts an explicit history baseline.
@@ -250,7 +248,11 @@ impl Accounts {
         &self,
         context: ConversationRef,
     ) -> Result<(wire::MessagingCommand, Work), SubmitError> {
-        let (command, work) = match self.history.get(context).and_then(|h| h.latest) {
+        let (command, work) = match self
+            .history
+            .get(context)
+            .and_then(|h| h.poll_cursor(Instant::now()))
+        {
             Some(id) => (
                 wire::MessagingCommand::Poll {
                     after: message_id(context, id)?,
@@ -277,7 +279,10 @@ impl Accounts {
             return;
         }
         if let Some(history) = self.history.get(context) {
-            let messages_changed = self.snapshot.messages != history.messages;
+            // Pin activity remains canonical for cursors/read state, while its
+            // already visible banner and marker replace redundant chat prose.
+            let messages = history.visible_messages();
+            let messages_changed = self.snapshot.messages != messages;
             let content = if history.offline {
                 ContentState::Offline
             } else {
@@ -295,7 +300,7 @@ impl Accounts {
                 .map(|m| m.local_id)
                 .collect();
             if messages_changed {
-                self.snapshot.messages = history.messages.clone();
+                self.snapshot.messages = messages;
             }
             if let Some(panel) = self.snapshot.message_panel.as_mut() {
                 history.project(panel);
@@ -317,6 +322,7 @@ impl Accounts {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
+            self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }
         self.history.remove(context);
@@ -357,6 +363,16 @@ impl Accounts {
         work: Work,
         queued: Option<OperationId>,
     ) -> Result<(), SubmitError> {
+        // One optional metadata repair across room switches leaves four
+        // admission slots for required work. Rejection owns no probe or timer.
+        if work == Work::Metadata
+            && (self.pending.len() >= 12
+                || self.pending.iter().any(|pending| {
+                    matches!(pending.purpose, Purpose::Message(_, _, _, Work::Metadata))
+                }))
+        {
+            return Err(SubmitError::Busy);
+        }
         if self.pending.iter().any(|p| {
             matches!(p.purpose, Purpose::Message(_, c, _, w)
                 if c == context && (w == work || w.backward() && work.backward()
@@ -411,6 +427,10 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
+        let poll_after = match &command {
+            wire::MessagingCommand::Poll { after, .. } => Some(u128::from(after.sequence)),
+            _ => None,
+        };
         self.request(
             context.account,
             ProtocolRequest::Messaging {
@@ -422,6 +442,9 @@ impl Accounts {
         )?;
         self.history
             .admitted(context, operation, work, request, self.next_request);
+        if let Some(after) = poll_after {
+            self.history.poll_admitted(context, operation, after);
+        }
         if queued.is_none()
             && let Some(panel) = self
                 .snapshot
@@ -494,6 +517,24 @@ impl Accounts {
         };
         self.message_poll_request = self.message_poll_request.saturating_add(1);
         let _ = self.start_message(RequestId(self.message_poll_request), context, command, work);
+        // Ordinary polling keeps its event cursor. This independent bounded GET
+        // repairs retained legacy classifications without establishing a baseline.
+        if let Some(before) = self
+            .history
+            .get(context)
+            .and_then(|h| h.metadata_before(Instant::now()))
+            .and_then(|id| message_id(context, id).ok())
+        {
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::History {
+                    before: Some(before),
+                    thread: None,
+                },
+                Work::Metadata,
+            );
+        }
     }
     pub(super) fn message_action(
         &mut self,
@@ -543,6 +584,14 @@ impl Accounts {
     ) -> Result<(), SubmitError> {
         use view::MessageAction as V;
         use wire::MessagingCommand as W;
+        let action = match action {
+            V::MarkRead(id) => V::MarkRead(
+                self.history
+                    .get(context)
+                    .map_or(id, |history| history.read_through_pin_notices(id)),
+            ),
+            other => other,
+        };
         match &action {
             V::PickUpload => {
                 return self.queue_picker(request, context, super::files::Kind::Upload);
@@ -880,7 +929,12 @@ impl Accounts {
         );
         let room_read = matches!(
             work,
-            Work::History | Work::Latest | Work::Prefetch | Work::Older | Work::Poll
+            Work::History
+                | Work::Latest
+                | Work::Prefetch
+                | Work::Older
+                | Work::Poll
+                | Work::Metadata
         );
         // A denial is authoritative only for the current room observation.
         // Context/thread endpoints can deny one target while the chat remains
@@ -933,9 +987,17 @@ impl Accounts {
                 (Work::Search, Ok(wire::MessagingResult::Search { .. }))
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
-                | (Work::Files | Work::Pins, Ok(wire::MessagingResult::Messages { .. })) => true,
+                | (
+                    Work::Files | Work::Pins | Work::Metadata,
+                    Ok(wire::MessagingResult::Messages { .. }),
+                ) => true,
                 (
-                    Work::Search | Work::Reminders | Work::Scheduled | Work::Files | Work::Pins,
+                    Work::Search
+                    | Work::Reminders
+                    | Work::Scheduled
+                    | Work::Files
+                    | Work::Pins
+                    | Work::Metadata,
                     _,
                 ) => false,
                 _ => true,
@@ -1004,6 +1066,7 @@ impl Accounts {
                         | Work::Prefetch
                         | Work::Older
                         | Work::Poll
+                        | Work::Metadata
                         | Work::Context(_)
                 ) =>
             {
@@ -1049,10 +1112,21 @@ impl Accounts {
                                 completion = Completion::Failed(UnavailableReason::PolicyUnknown);
                             }
                         } else if work == Work::Files {
-                            panel.shared_files = page(messages.as_slice().iter().map(message_view));
+                            panel.shared_files = page(
+                                messages
+                                    .as_slice()
+                                    .iter()
+                                    .map(message_view)
+                                    .filter(|m| !m.metadata.pin_notice),
+                            );
                         } else if work == Work::Thread {
-                            panel.thread_messages =
-                                page(messages.as_slice().iter().map(message_view));
+                            panel.thread_messages = page(
+                                messages
+                                    .as_slice()
+                                    .iter()
+                                    .map(message_view)
+                                    .filter(|m| !m.metadata.pin_notice),
+                            );
                         }
                     }
                     wire::MessagingResult::Message(message) if work == Work::Send => {
@@ -1181,11 +1255,9 @@ impl Accounts {
                         reload = !matches!(work, Work::Read(_) | Work::Typing | Work::Unread);
                         if let Work::Read(id) = work {
                             let reached_latest = self
-                                .snapshot
-                                .messages
-                                .as_slice()
-                                .last()
-                                .is_some_and(|m| m.local_id <= id);
+                                .history
+                                .get(context)
+                                .is_some_and(|history| history.read_reaches_latest(id));
                             if reached_latest {
                                 self.snapshot.conversations = page(
                                     self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -1662,6 +1734,12 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             edited: m.message.edited_at.is_some(),
             deleted,
             system: m.message.kind == protocol::MessageKind::System,
+            system_event: system_event(m),
+            pin_notice: m.message.kind == protocol::MessageKind::System
+                && m.system.as_ref().is_some_and(|kind| {
+                    matches!(kind.as_str(), "message_pinned" | "message_unpinned")
+                }),
+            read_through: None,
             replyable: m.replyable == Some(true) && !deleted,
             parent: m.parent.as_ref().map(|p| view::Reply {
                 id: u128::from(p.id.sequence),
@@ -1691,6 +1769,28 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             edit: if truncated { Decision::Denied } else { m.edit },
             delete: m.delete,
         },
+    }
+}
+fn system_event(message: &wire::MessageDetails) -> view::SystemEvent {
+    use view::SystemEvent;
+    if message.message.kind != protocol::MessageKind::System {
+        return SystemEvent::Unknown;
+    }
+    // Pinned parser sources rewrite a caller's missed call to call_tried:
+    // https://github.com/nextcloud/spreed/blob/17afc250cf5fe3f7e016739dd3d7a3a44bb2cb79/lib/Chat/Parser/SystemMessage.php
+    // https://github.com/nextcloud/spreed/blob/f35255ab86f31e8ee894641f6970a09ce4b90927/lib/Chat/Parser/SystemMessage.php
+    // No failed-call history tag is established by these pins; localized text
+    // is never classification evidence.
+    match message.system.as_ref().map(Text::as_str) {
+        None => SystemEvent::Unknown,
+        Some("call_started") if message.own => SystemEvent::CallOutgoing,
+        Some("call_started") => SystemEvent::CallIncoming,
+        Some("call_joined") => SystemEvent::CallJoined,
+        Some("call_left") => SystemEvent::CallLeft,
+        Some("call_ended" | "call_ended_everyone") => SystemEvent::CallEnded,
+        Some("call_missed") => SystemEvent::CallMissed,
+        Some("call_tried") => SystemEvent::CallUnanswered,
+        Some(_) => SystemEvent::Other,
     }
 }
 /// Rich templates are rendered as bounded text; names never become markup or URLs.
@@ -1784,6 +1884,167 @@ pub(super) fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn metadata_warmup_is_single_flight_across_room_switches() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let selected = model.snapshot.selected.unwrap();
+        let previous = super::super::super::fixtures::context(2);
+        assert_ne!(previous, selected);
+        model.history.open(selected);
+        model.pending.push(Pending {
+            id: ConnectionRequestId(3),
+            purpose: Purpose::Message(
+                RequestId(0),
+                previous,
+                OperationId::from_local(3),
+                Work::Metadata,
+            ),
+        });
+        assert_eq!(
+            model.start_message(
+                RequestId(0),
+                selected,
+                wire::MessagingCommand::History {
+                    before: Some(protocol::MessageId {
+                        conversation: selected.conversation,
+                        sequence: 8,
+                    }),
+                    thread: None,
+                },
+                Work::Metadata,
+            ),
+            Err(SubmitError::Busy)
+        );
+        assert_eq!(model.pending.len(), 1);
+    }
+
+    #[test]
+    fn metadata_warmup_keeps_forward_polling_independent_and_yields_to_backpressure() {
+        let mut model = super::super::tests::model();
+        let context = super::super::super::fixtures::context(1);
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        model.history.open(context);
+        let message = wire::MessageDetails {
+            author_key: None,
+            message: protocol::Message {
+                id: protocol::MessageId {
+                    conversation: context.conversation,
+                    sequence: 7,
+                },
+                author: text("Synthetic user"),
+                text: text("Localized legacy system text"),
+                kind: protocol::MessageKind::System,
+                timestamp: 1,
+                expires_at: None,
+                edited_at: None,
+                own_operation: None,
+            },
+            notify: Decision::Denied,
+            own: false,
+            replyable: None,
+            parent: None,
+            thread: None,
+            reactions: Page::empty(),
+            rich: Page::empty(),
+            system: None,
+            edit: Decision::Unknown,
+            delete: Decision::Unknown,
+        };
+        for (serial, work, rows, cursor) in [
+            (1_u64, Work::History, page([message]), None),
+            (
+                2,
+                Work::Poll,
+                Page::empty(),
+                Some(protocol::MessageId {
+                    conversation: context.conversation,
+                    sequence: 31,
+                }),
+            ),
+        ] {
+            let operation = OperationId::from_local(u128::from(serial));
+            model
+                .history
+                .admitted(context, operation, work, RequestId(serial), serial);
+            assert!(model.history.complete(
+                context,
+                operation,
+                work,
+                RequestId(serial),
+                &Ok(wire::MessagingResult::Messages {
+                    capabilities: None,
+                    messages: rows,
+                    cursor,
+                    common_read: None
+                }),
+                false
+            ));
+        }
+        let assert_forward = |model: &Accounts| {
+            let (command, work) = model.live_message_request(context).unwrap();
+            assert_eq!(work, Work::Poll);
+            assert!(
+                matches!(command, wire::MessagingCommand::Poll { after, thread: None } if after.sequence == 31)
+            );
+        };
+        assert_forward(&model);
+        let command = || wire::MessagingCommand::History {
+            before: Some(protocol::MessageId {
+                conversation: context.conversation,
+                sequence: 8,
+            }),
+            thread: None,
+        };
+        model.pending.push(Pending {
+            id: ConnectionRequestId(3),
+            purpose: Purpose::Message(
+                RequestId(0),
+                context,
+                OperationId::from_local(3),
+                Work::Metadata,
+            ),
+        });
+        assert_eq!(
+            model.start_message(RequestId(0), context, command(), Work::Metadata),
+            Err(SubmitError::Busy)
+        );
+        assert_forward(&model);
+        // A pending metadata GET does not hold the backward-read or poll guard.
+        let (poll, work) = model.live_message_request(context).unwrap();
+        assert_ne!(
+            model.start_message(RequestId(0), context, poll, work),
+            Err(SubmitError::Busy)
+        );
+        assert_ne!(
+            model.start_message(RequestId(0), context, command(), Work::Older),
+            Err(SubmitError::Busy)
+        );
+        model.pending.clear();
+        for id in 1..=12 {
+            model.pending.push(Pending {
+                id: ConnectionRequestId(id),
+                purpose: Purpose::Tags(context.account),
+            });
+        }
+        assert_eq!(
+            model.start_message(RequestId(0), context, command(), Work::Metadata),
+            Err(SubmitError::Busy)
+        );
+        assert_eq!(model.pending.len(), 12);
+        assert_eq!(
+            model
+                .history
+                .get(context)
+                .unwrap()
+                .metadata_before(Instant::now()),
+            Some(8)
+        );
+        assert_forward(&model);
+        assert!(Work::Metadata.background());
+        assert!(!Work::Metadata.backward());
+    }
+
     #[test]
     fn live_reconciliation_uses_initial_load_only_until_the_room_has_loaded() {
         let mut model = super::super::tests::model();

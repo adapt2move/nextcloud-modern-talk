@@ -28,13 +28,13 @@ The composer opens the native emoji picker only where supported. macOS uses the 
 
 ## Members and bots
 
-Use one centered dialog with **Personen** and **Bots** tabs. Search current members and the permitted NextCloud directory, clearly separating directory candidates from existing members. Identity, account/source and role distinguish same-named people. Search results do not send invitations.
+Use one centered dialog with **Personen** and **Bots** tabs. The member page has an "Add members" action and a quieter CSV import beside it, followed by compact name/avatar/role rows. Keep search and directory previews in a separate invitation step. Identity, account/source and role distinguish same-named people. Search results do not send invitations.
 
-Members have authorized role and remove actions. Removal, banning and owner transfer are distinct operations; last-owner/moderator restrictions remain visible. Member-list denial has an explanation rather than an empty list. A direct conversation cannot acquire third parties through this dialog.
+Members have authorized role and remove actions in a three-dot menu. Removal, banning and owner transfer are distinct operations; last-owner/moderator restrictions remain visible. Member-list denial has an explanation rather than an empty list. A direct conversation cannot acquire third parties through this dialog.
 
-CSV import belongs here: bounded local selection and parsing, recipient/source validation, duplicate and invalid-row feedback, a preview, then explicit invitation submission. Show partial failures without blindly resending successful or uncertain invitations. CSV import is client workflow over supported invitation APIs, not an assumed CSV server endpoint.
+CSV import belongs here: a native file picker or pasted text, bounded local reading and parsing, recipient/source validation, duplicate and invalid-row feedback, a preview, then explicit invitation submission. A file completion must still match the room, page session and unchanged editor revision; cancellation or a stale completion preserves the current draft. Show partial failures without blindly resending successful or uncertain invitations. Accept UTF-8 regular files up to 64 KiB, including BOM and CRLF, or pasted text. Supported CSV has one record per line, comma/semicolon/tab separators, an optional email header, and quoted fields. Multiline quoted records are unsupported and invalid rows are reported. CSV import is client workflow over supported invitation APIs, not an assumed CSV server endpoint.
 
-The Bots tab enables or removes already available bots for this room, subject to server authority. Bot registration and credentials remain administrative concerns. Classified restrictions prohibit bot enablement; never expose token entry or an unrestricted fallback.
+The Bots tab automatically loads once connectivity and confirmed authority allow it. Show skeletons during the admitted first load, reuse a known list across tab changes, and retain it during refresh. Failed or uncertain requests have an explicit retry instead of automatic repeats. Loading and changing bots are unavailable offline. Bot registration and credentials remain administrative concerns. Classified restrictions prohibit bot enablement; never expose token entry or an unrestricted fallback.
 
 ## Conversation settings
 
@@ -42,11 +42,13 @@ Match the normal application settings: a centered dialog, stable left tab naviga
 
 | Tab | Contents and scope |
 | --- | --- |
-| **Allgemein** | Name, image and description; read-only lock; personal archive; leave membership; delete the conversation for everyone. Direct-conversation identity comes from the other person's profile. Archive, leave, delete and leave-current-call must not share a destructive action. |
+| **Allgemein** | Separate conversation identity, message behavior, personal organization, and leave/delete sections. Show the current avatar with its editor, followed by name and description. Read-only has its own message section; archive and local grouping use compact direct actions with icons, without duplicate field labels or a separator after each action. Place leave and delete as explicit buttons below one shared separator, with a brief explanation of their distinct consequences. Direct-conversation identity comes from the other person's profile. Poll creation belongs in the chat composer's plus menu, not in settings. |
 | **Benachrichtigungen** | Personal important flag; all messages / mentions / no messages, subject to returned capability; call notifications separately. Global banner/sound policy remains in application settings. NextCloud's important flag can override its own DND status; the operating system's Focus/DND remains respected. No critical- or time-sensitive-delivery entitlement is inferred. |
 | **Datenschutz** | Sensitive/no-preview treatment, enforced across navigation/search/notifications; server message-expiry policy; clear chat history with its actual audience and consequence. Classified sensitive treatment is forced. Expiry and clear-history authority are independent of the personal sensitive preference. Preserve room-retention and preserved-room restrictions. |
 | **Berechtigungen** | Effective meeting join/start and media-publishing defaults; explicit participant overrides where supported; banned people and authorized unban. Explain before a default-permission change resets overrides. Do not confuse these server rights with OS camera/microphone/screen permission. |
 | **Meeting** | Moderation roles and policy, lobby, guest link/password, and breakout-room configuration/assignment. Links require confirmed guest policy and never contain passwords. Breakout rooms are meeting subdivisions, not NextCloud directory groups. Direct chats and actual Channel rooms do not expose unavailable meeting configuration. |
+
+Direct and note-to-self conversations show only General, Notifications and Privacy. They have no member-management entry point or group-administration tabs.
 
 Guest-link policy is edited in Meeting, not duplicated as a second writable control in General. Likewise, Meeting links to membership roles rather than maintaining another role editor. Read-only content can remain visible with a reason; an unknown capability never becomes an enabled control.
 
@@ -56,6 +58,7 @@ Guest-link policy is edited in Meeting, not duplicated as a second writable cont
 - A confirmation names the room and whether it affects only this user, future membership, all messages, or the whole room for everyone. No destructive network action is sent on opening the confirmation.
 - Preserve the last confirmed server state during loading, failure and uncertain mutation. Do not optimistically claim removal, invitation, saved access or a usable guest link. Reconcile uncertain effects before retry.
 - Membership, authority, retention and classification may change while the dialog is open. Revalidate at submission; a denial does not leak a cached hidden member list or re-enable a restricted action.
+- Member, message and composer context menus share surface geometry with a four-point gap between entries. Keep focus and hit geometry aligned with the spaced rows.
 - Keyboard navigation, focus return, long labels and enlarged text are required. The HTML's local interactions do not qualify native keyboard or semantic accessibility behavior.
 
 ## Server references

@@ -45,11 +45,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Responder a un mensaje",
     ),
     ("Antwort im Thread", "Reply in thread", "Respuesta en hilo"),
-    (
-        "Archivieren betrifft nur deine Gesprächsliste.",
-        "Archiving only affects your conversation list.",
-        "Archivar solo afecta a tu lista de conversaciones.",
-    ),
     ("Audio veröffentlichen", "Publish audio", "Publicar audio"),
     (
         "Auf dem Server speichern",
@@ -102,9 +97,28 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Screen sharing permission required",
         "Se requiere permiso para compartir pantalla",
     ),
+    (
+        "Bitte wähle eine reguläre CSV-Datei aus.",
+        "Please select a regular CSV file.",
+        "Selecciona un archivo CSV normal.",
+    ),
     ("Bot aktivieren", "Enable bot", "Activar bot"),
     ("Bots", "Bots", "Bots"),
-    ("Bots laden", "Load bots", "Cargar bots"),
+    (
+        "Bots sind offline nicht verfügbar.",
+        "Bots are unavailable offline.",
+        "Los bots no están disponibles sin conexión.",
+    ),
+    (
+        "CSV-Datei auswählen",
+        "Choose CSV file",
+        "Seleccionar archivo CSV",
+    ),
+    (
+        "CSV-Datei auswählen oder Adressen einfügen. Maximal 100 Adressen und 64 KiB.",
+        "Choose a CSV file or paste addresses. Up to 100 addresses and 64 KiB.",
+        "Selecciona un archivo CSV o pega direcciones. Hasta 100 direcciones y 64 KiB.",
+    ),
     ("CSV-Import", "CSV import", "Importación CSV"),
     (
         "Chatverlauf für alle leeren",
@@ -149,6 +163,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo abrir el navegador.",
     ),
     (
+        "Der CSV-Import ist für dieses Gespräch nicht verfügbar.",
+        "CSV import is unavailable for this conversation.",
+        "La importación CSV no está disponible para esta conversación.",
+    ),
+    (
         "Der Name stammt aus dem Profil der Person.",
         "The name comes from the person's profile.",
         "El nombre procede del perfil de la persona.",
@@ -164,9 +183,29 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La solicitud falló. Se conserva el último estado confirmado.",
     ),
     (
-        "Die Berechtigung zum Erstellen wird geprüft.",
-        "Checking permission to create conversations.",
-        "Comprobando el permiso para crear conversaciones.",
+        "Die CSV-Datei ist zu groß. Maximal 64 KiB sind erlaubt.",
+        "The CSV file is too large. The limit is 64 KiB.",
+        "El archivo CSV es demasiado grande. El límite es 64 KiB.",
+    ),
+    (
+        "Die CSV-Datei konnte nicht gelesen werden. Prüfe den Dateizugriff und versuche es erneut.",
+        "The CSV file could not be read. Check file access and try again.",
+        "No se pudo leer el archivo CSV. Comprueba el acceso al archivo y vuelve a intentarlo.",
+    ),
+    (
+        "Die CSV-Datei konnte nicht rechtzeitig gelesen werden. Bitte erneut versuchen.",
+        "Reading the CSV file timed out. Please try again.",
+        "Se agotó el tiempo para leer el archivo CSV. Vuelve a intentarlo.",
+    ),
+    (
+        "Die CSV-Datei muss als UTF-8 gespeichert sein.",
+        "The CSV file must be saved as UTF-8.",
+        "El archivo CSV debe estar guardado en UTF-8.",
+    ),
+    (
+        "Die Dateiauswahl konnte nicht geöffnet werden. Bitte erneut versuchen.",
+        "The file picker could not be opened. Please try again.",
+        "No se pudo abrir el selector de archivos. Vuelve a intentarlo.",
     ),
     (
         "Die Standardrechte des Servers sind nicht bekannt. Neu laden, bevor du Rechte änderst.",
@@ -219,6 +258,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede eliminar este mensaje.",
     ),
     (
+        "Diese Person ist nicht mehr verfügbar.",
+        "This person is no longer available.",
+        "Esta persona ya no está disponible.",
+    ),
+    (
         "Diese Person wird entfernt. Sie wird dadurch nicht gesperrt.",
         "This person will be removed. They will not be banned.",
         "Esta persona será eliminada. No quedará bloqueada.",
@@ -253,11 +297,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ein Passwort ist eingerichtet.",
         "A password is set.",
         "Hay una contraseña configurada.",
-    ),
-    (
-        "Eine Prüfung läuft bereits.",
-        "A check is already running.",
-        "Ya hay una comprobación en curso.",
     ),
     (
         "Eine neue Version ist verfügbar.",
@@ -308,6 +347,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Crea una conversación de grupo y después invita a personas.",
     ),
     ("Folgt", "Following", "Siguiendo"),
+    ("Für dich", "For you", "Para ti"),
     (
         "Für klassifizierte Gespräche ist diese Einstellung verpflichtend.",
         "This setting is required for classified conversations.",
@@ -324,6 +364,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Scheduled messages",
         "Mensajes programados",
     ),
+    ("Gespeicherter Stand", "Saved state", "Estado guardado"),
     ("Gesperrte Personen", "Banned people", "Personas bloqueadas"),
     (
         "Gespräch erstellen",
@@ -341,26 +382,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Leave conversation",
         "Salir de la conversación",
     ),
-    (
-        "Gespräch wird erstellt …",
-        "Creating conversation …",
-        "Creando conversación …",
-    ),
     ("Gespräch öffnen", "Open conversation", "Abrir conversación"),
-    (
-        "Gesprächsdaten werden geladen …",
-        "Loading conversation details…",
-        "Cargando los datos de la conversación…",
-    ),
     (
         "Gesprächseinstellungen",
         "Conversation settings",
         "Ajustes de la conversación",
-    ),
-    (
-        "Gib einen Namen ein und warte auf die bestätigte Berechtigung.",
-        "Enter a name and wait for confirmed permission.",
-        "Escribe un nombre y espera la confirmación del permiso.",
     ),
     (
         "Gilt als Standard für Teilnehmende.",
@@ -373,6 +399,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Breakout rooms divide the meeting. They are separate from directory groups.",
         "Las salas de grupos dividen la reunión. Son independientes de los grupos del directorio.",
     ),
+    ("Gruppierung", "Grouping", "Agrupación"),
     (
         "Gäste warten auf die Freigabe durch die Moderation.",
         "Guests wait for a moderator to admit them.",
@@ -470,16 +497,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mensaje largo mostrado de forma abreviada. No se puede editar aquí.",
     ),
     ("Leise senden", "Send silently", "Enviar sin notificación"),
+    ("Lesestatus", "Read status", "Estado de lectura"),
     ("Löschen", "Delete", "Eliminar"),
     (
         "Löschen bestätigen",
         "Confirm deletion",
         "Confirmar eliminación",
-    ),
-    (
-        "Maximal 100 Adressen und 64 KiB. Einfügen erstellt nur eine Vorschau.",
-        "Maximum 100 addresses and 64 KiB. Pasting creates a preview only.",
-        "Máximo 100 direcciones y 64 KiB. Pegar solo crea una vista previa.",
     ),
     (
         "Maximale Dateigröße:",
@@ -492,12 +515,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Meeting vorbereiten", "Prepare meeting", "Preparar reunión"),
     ("Mitglied", "Member", "Miembro"),
     ("Mitglieder", "Members", "Miembros"),
+    ("Mitglieder hinzufügen", "Add members", "Añadir miembros"),
     ("Mitglieder laden", "Load members", "Cargar miembros"),
     (
         "Mitglieder und Rollen",
         "Members and roles",
         "Miembros y roles",
     ),
+    ("Mitgliedsaktionen", "Member actions", "Acciones de miembro"),
     ("Moderation", "Moderator", "Moderador"),
     ("Nach 30 Tagen", "After 30 days", "Después de 30 días"),
     ("Nach einem Tag", "After one day", "Después de un día"),
@@ -612,11 +637,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Las actualizaciones no están disponibles.",
     ),
     (
-        "Updates werden geprüft …",
-        "Checking for updates…",
-        "Buscando actualizaciones…",
-    ),
-    (
         "Updates werden nur auf deine Anfrage bei GitHub geprüft. Downloads öffnen sich im Browser.",
         "GitHub is checked for updates only on request. Downloads open in your browser.",
         "GitHub se consulta solo cuando solicitas actualizaciones. Las descargas se abren en el navegador.",
@@ -636,12 +656,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Available bots for this conversation. Administrators manage registration and credentials.",
         "Bots disponibles para esta conversación. La administración gestiona el registro y las credenciales.",
     ),
-    (
-        "Verfügbarkeit wird geprüft …",
-        "Checking availability…",
-        "Comprobando disponibilidad…",
-    ),
     ("Verlassen", "Leave", "Salir"),
+    (
+        "Verlassen beendet nur deine Mitgliedschaft. Löschen entfernt das Gespräch für alle.",
+        "Leaving ends only your membership. Deleting removes the conversation for everyone.",
+        "Salir solo termina tu participación. Eliminar borra la conversación para todos.",
+    ),
     (
         "Vertrauliche Vorschau",
         "Sensitive content",
@@ -694,6 +714,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Nombrar moderador",
     ),
     (
+        "Zurück zu Mitgliedern",
+        "Back to members",
+        "Volver a los miembros",
+    ),
+    (
         "Zwei Gruppenräume vorbereiten",
         "Prepare two breakout rooms",
         "Preparar dos salas de grupos",
@@ -713,11 +738,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Änderung vom Server bestätigt.",
         "Change confirmed by the server.",
         "Cambio confirmado por el servidor.",
-    ),
-    (
-        "Änderung wird geprüft …",
-        "Checking the change…",
-        "Comprobando el cambio…",
     ),
     (
         "Änderungen an Standardrechten setzen individuelle Ausnahmen zurück.",

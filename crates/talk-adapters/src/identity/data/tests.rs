@@ -2,6 +2,8 @@ use super::*;
 use crate::identity::{ledger, private_fs::PrivateDir};
 use talk_core::{identity::StorageBackend, ids::LoginAttemptId};
 
+#[path = "metadata_tests.rs"]
+mod metadata_tests;
 #[path = "thumbnail_tests.rs"]
 mod thumbnail_tests;
 
@@ -86,6 +88,7 @@ fn room(key: &NavigationRoomKey, saved_at: u64) -> CacheRoom {
         participant_count_at: Some(saved_at),
         last_activity: Some(saved_at),
         saved_at,
+        observation: None,
     }
 }
 fn page<T, const N: usize>(values: impl IntoIterator<Item = T>) -> Page<T, N> {
@@ -107,6 +110,8 @@ fn message(id: u64) -> CachedMessage {
         edited: true,
         deleted: false,
         system: false,
+        system_event: None,
+        pin_notice: false,
         truncated: false,
         replyable: true,
         parent: None,
@@ -118,6 +123,51 @@ fn message(id: u64) -> CachedMessage {
         }]),
         attachments: Page::empty(),
     }
+}
+
+#[test]
+fn system_event_metadata_roundtrips_and_legacy_history_has_no_classification() {
+    let mut row = message(7);
+    row.system = true;
+    for code in [
+        "other",
+        "call_incoming",
+        "call_outgoing",
+        "call_joined",
+        "call_left",
+        "call_ended",
+        "call_missed",
+        "call_unanswered",
+        "future_domain_code",
+    ] {
+        row.system_event = Some(text(code));
+        let encoded = serde_json::to_vec(&row).unwrap();
+        let decoded: CachedMessage = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, row);
+    }
+    let mut encoded = serde_json::to_value(&row).unwrap();
+    encoded.as_object_mut().unwrap().remove("system_event");
+    let legacy: CachedMessage = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(legacy.system_event, None);
+    assert!(legacy.system);
+    assert_eq!(legacy.text, row.text);
+    encoded["system_event"] = serde_json::Value::String("x".repeat(33));
+    assert!(serde_json::from_value::<CachedMessage>(encoded).is_err());
+}
+
+#[test]
+fn pin_notice_metadata_roundtrips_and_legacy_history_defaults_to_visible() {
+    let mut row = message(7);
+    row.system = true;
+    row.pin_notice = true;
+    let mut encoded = serde_json::to_value(&row).unwrap();
+    let decoded: CachedMessage = serde_json::from_value(encoded.clone()).unwrap();
+    assert!(decoded.pin_notice);
+    encoded.as_object_mut().unwrap().remove("pin_notice");
+    let legacy: CachedMessage = serde_json::from_value(encoded).unwrap();
+    assert!(!legacy.pin_notice);
+    assert!(legacy.system);
+    assert_eq!(legacy.text, row.text);
 }
 fn history(key: &NavigationRoomKey, saved_at: u64) -> CacheHistory {
     CacheHistory {

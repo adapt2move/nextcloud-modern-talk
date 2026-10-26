@@ -125,9 +125,9 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
         click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
-        expect('unknown privacy policy blocks cut without losing draft',['DRAFTSAFE','Zwischenablage'])
+        expect('unknown privacy policy blocks cut without losing draft',['DRAFTSAFE','Ausschneiden ist für diesen Entwurf nicht freigegeben.'])
         key('ctrl+c');key('ctrl+v')
-        expect('unknown privacy policy blocks copy and paste',['DRAFTSAFE'])
+        expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
         expect('denied draft copy did not replace platform clipboard',['CLIPMARK'])
     elif scenario in ('chat', 'busy'):

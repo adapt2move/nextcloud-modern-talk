@@ -34,6 +34,19 @@ fn next(drafts: &[FailedDraft], current: u128, forward: bool) -> Option<u128> {
     drafts.get(index).map(|draft| draft.operation)
 }
 
+fn restoration_target_available(
+    drafts: &crate::presentation::state::Drafts,
+    context: ConversationRef,
+    target: &ComposeTarget,
+    composer_loaded: bool,
+) -> bool {
+    // An empty field is not evidence of an empty stored draft after a rejected
+    // context load. Neither matching targets nor a small recovery copy grant
+    // permission to replace that unavailable retained content.
+    composer_loaded
+        && (drafts.target(context) == *target || !drafts.has_text_for_target(context, target))
+}
+
 impl Desktop {
     fn current_failed_drafts(&self, context: ConversationRef) -> Option<&[FailedDraft]> {
         if self.snapshot.selected != Some(context)
@@ -61,8 +74,12 @@ impl Desktop {
             && self.message_ui.pending_edit.is_none()
             && self.message_ui.time_target.is_none()
             && !self.drafts.pending(context)
-            && (self.drafts.target(context) == draft.target
-                || !self.drafts.has_text_for_target(context, &draft.target))
+            && restoration_target_available(
+                &self.drafts,
+                context,
+                &draft.target,
+                self.message_ui.composer_load_failed != Some(context),
+            )
     }
 
     fn can_retry_failed_draft(&self, draft: &FailedDraft) -> bool {
@@ -130,47 +147,33 @@ impl Desktop {
                 let draft = draft.clone();
                 let generation = if matches!(draft.kind, FailedDraftKind::Edit(_)) {
                     let Some(generation) = self.message_ui.edit_generation.checked_add(1) else {
-                        self.feedback = Some(
-                            crate::presentation::feedback::Feedback::from_draft_error(
-                                talk_core::ui::SubmitError::Busy,
-                            )
-                            .in_conversation(context),
-                        );
+                        self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
                         return;
                     };
                     Some(generation)
                 } else {
                     None
                 };
-                let previous = self.drafts.target(context);
-                if !self.drafts.set_target(context, draft.target.clone()) {
-                    self.feedback = Some(
-                        crate::presentation::feedback::Feedback::from_draft_error(
-                            talk_core::ui::SubmitError::Busy,
-                        )
-                        .in_conversation(context),
-                    );
+                let mut restored_drafts = self.drafts.clone();
+                if !restored_drafts.set_target(context, draft.target.clone()) {
+                    self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
                     return;
                 }
                 if !matches!(draft.kind, FailedDraftKind::Edit(_))
-                    && let Err(error) = self.drafts.save(context, draft.body.as_str())
+                    && let Err(error) = restored_drafts.save(context, draft.body.as_str())
                 {
-                    self.drafts.set_target(context, previous);
-                    self.feedback = Some(
-                        crate::presentation::feedback::Feedback::from_draft_error(error)
-                            .in_conversation(context),
-                    );
+                    self.report_draft_error(error, context);
                     return;
                 }
+                if !self.load_composer_value(draft.body.as_str(), cx) {
+                    return;
+                }
+                self.drafts = restored_drafts;
                 if let FailedDraftKind::Edit(message) = draft.kind {
                     self.message_ui.edit_generation =
                         generation.unwrap_or(self.message_ui.edit_generation);
                     self.message_ui.editing = Some(message);
                 }
-                self.composer.update(cx, |input, cx| {
-                    input.set_context_value(draft.body.as_str());
-                    cx.notify();
-                });
                 if let FailedDraftKind::Schedule(timestamp) = draft.kind {
                     self.open_message_deadline(None, window, cx);
                     if let Some(local) = self.settings_port.local_datetime(timestamp) {
@@ -230,6 +233,51 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_preserves_an_unloaded_draft_until_the_user_can_deliberately_clear_it() {
+        use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};
+        let account = AccountId::from_local(1);
+        let context = ConversationRef {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let mut drafts = crate::presentation::state::Drafts::default();
+        let retained = "K".repeat(600);
+        drafts.save(context, &retained).unwrap();
+        let target = ComposeTarget::default();
+        // A lower 512-byte server ceiling rejected the contextual load, so the
+        // empty field must not authorize the failed record's small replacement.
+        assert!(!restoration_target_available(
+            &drafts, context, &target, false
+        ));
+        assert!(!restoration_target_available(
+            &drafts,
+            context,
+            &ComposeTarget {
+                reply_to: Some(42),
+                ..Default::default()
+            },
+            false
+        ));
+        assert_eq!(drafts.text(context), retained);
+        // After a successful load and deliberate clearing, recovery is allowed.
+        drafts.save(context, "").unwrap();
+        assert!(restoration_target_available(
+            &drafts, context, &target, true
+        ));
+        let mut restored = drafts.clone();
+        restored.save(context, "x").unwrap();
+        drafts = restored;
+        assert_eq!(drafts.text(context), "x");
+    }
+
     fn draft(operation: u128) -> FailedDraft {
         FailedDraft {
             operation,

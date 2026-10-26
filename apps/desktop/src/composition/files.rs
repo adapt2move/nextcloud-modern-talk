@@ -27,10 +27,10 @@ impl Dialogs {
         let Some(picker) = accounts.borrow_mut().take_picker() else {
             return;
         };
-        let accounts = accounts.clone();
+        let accounts = Rc::downgrade(accounts);
         let finished = self.finished.clone();
         self.task = Some(match &picker.kind {
-            Kind::Upload => {
+            Kind::Upload | Kind::Csv { .. } => {
                 let response = cx.prompt_for_paths(gpui::PathPromptOptions {
                     files: true,
                     directories: false,
@@ -42,8 +42,10 @@ impl Dialogs {
                         .await
                         .map_err(|_| ())
                         .and_then(|r| r.map_err(|_| ()))
-                        .map(|p| p.and_then(|p| p.into_iter().next()));
-                    accounts.borrow_mut().finish_picker(picker, path);
+                        .and_then(one_file);
+                    if let Some(accounts) = accounts.upgrade() {
+                        accounts.borrow_mut().finish_picker(picker, path);
+                    }
                     finished.set(true);
                 })
             }
@@ -54,10 +56,36 @@ impl Dialogs {
                         .await
                         .map_err(|_| ())
                         .and_then(|r| r.map_err(|_| ()));
-                    accounts.borrow_mut().finish_picker(picker, path);
+                    if let Some(accounts) = accounts.upgrade() {
+                        accounts.borrow_mut().finish_picker(picker, path);
+                    }
                     finished.set(true);
                 })
             }
         });
+    }
+}
+fn one_file(paths: Option<Vec<std::path::PathBuf>>) -> Result<Option<std::path::PathBuf>, ()> {
+    match paths {
+        None => Ok(None),
+        Some(paths) if paths.len() <= 1 => Ok(paths.into_iter().next()),
+        Some(_) => Err(()),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_selection_never_silently_takes_first_of_multiple_files() {
+        assert_eq!(one_file(None), Ok(None));
+        assert_eq!(one_file(Some(Vec::new())), Ok(None));
+        assert_eq!(
+            one_file(Some(vec!["one.csv".into()])),
+            Ok(Some("one.csv".into()))
+        );
+        assert_eq!(
+            one_file(Some(vec!["one.csv".into(), "two.csv".into()])),
+            Err(())
+        );
     }
 }

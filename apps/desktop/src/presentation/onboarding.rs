@@ -128,22 +128,20 @@ impl Desktop {
                                         div().flex().flex_1().min_w_0().child(self.server.clone()),
                                     ),
                             )
-                            .child(self.hint(self.l(if login.phase == LoginPhase::Validating {
-                                "Die Serveradresse wird geprüft. Bitte warte."
-                            } else {
-                                "Zum Beispiel die Adresse, unter der du eure Dateien öffnest."
-                            }))),
+                            .child(self.hint(self.l(
+                                "Zum Beispiel die Adresse, unter der du eure Dateien öffnest.",
+                            ))),
                     )
                     .child(
                         self.button_with_icon(
                             "login",
                             ("Weiter", "arrow-right"),
                             ButtonStyle::Primary,
-                            Availability::when(
-                                login.phase == LoginPhase::EnterServer,
-                                "Die Serveradresse wird geprüft. Bitte warte.",
-                            )
-                            .explained_elsewhere(),
+                            if login.phase == LoginPhase::Validating {
+                                Availability::pending()
+                            } else {
+                                Availability::available()
+                            },
                             LocalAction::BeginLogin,
                             cx,
                         )
@@ -193,15 +191,6 @@ impl Desktop {
                             cx,
                         ));
                 }
-                card = card.child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .justify_center()
-                        .items_center()
-                        .child(self.scaled_icon("clock", 16., t.muted))
-                        .child(self.hint(self.l("Warte auf deine Anmeldung …"))),
-                );
             }
             LoginPhase::ChooseStorage => {
                 let pending = matches!(
@@ -213,15 +202,23 @@ impl Desktop {
                 card = card
                     .child(self.onboarding_symbol("lock", false))
                     .child(self.title(self.l(if pending {
-                        "Deine Anmeldung wird gespeichert …"
+                        "Anmeldung speichern"
                     } else {
                         "Sicheres Speichern nicht möglich."
                     })))
                     .child(self.server_chip(login.server_label.as_str()));
-                if pending {
+                if login.storage == StorageStatus::Saving {
+                    card = card.child(self.button(
+                        "save-storage",
+                        "Anmeldung speichern",
+                        ButtonStyle::Primary,
+                        Availability::pending(),
+                        LocalAction::Storage(StorageChoice::NativeStore),
+                        cx,
+                    ));
+                } else if pending {
                     card = card.child(self.hint(self.l(match login.storage {
-                        StorageStatus::Saving => "Deine Anmeldung wird dauerhaft auf diesem Gerät gespeichert.",
-                        StorageStatus::CleanupPending => "Eine frühere Speicherung wird noch bereinigt. Bitte warte.",
+                        StorageStatus::CleanupPending => "Eine frühere Speicherung ist noch nicht vollständig bereinigt.",
                         _ => "Der Speicherzustand muss geklärt werden. Wähle bis dahin keine neue Ablage.",
                     })));
                 } else {
@@ -274,14 +271,19 @@ impl Desktop {
                             "onboarding-done",
                             "Zu deinen Gesprächen",
                             ButtonStyle::Primary,
-                            Availability::when(
-                                connected
-                                    && !matches!(
-                                        self.preferences.save,
-                                        talk_core::preferences::SaveState::Pending { .. }
-                                    ),
-                                "Einrichtungsfortschritt wird gespeichert …",
-                            ),
+                            if connected
+                                && matches!(
+                                    self.preferences.save,
+                                    talk_core::preferences::SaveState::Pending { .. }
+                                )
+                            {
+                                Availability::pending()
+                            } else {
+                                Availability::when(
+                                    connected,
+                                    "Deine Gespräche sind noch nicht bereit.",
+                                )
+                            },
                             LocalAction::FinishOnboarding,
                             cx,
                         )
@@ -335,11 +337,13 @@ impl Desktop {
                             self.preferences.save,
                             talk_core::preferences::SaveState::Failed { .. }
                         );
-                    card = card.child(self.hint(self.l(if failed {
-                        "Der Einrichtungsfortschritt konnte nicht gespeichert werden. Bitte erneut versuchen."
-                    } else { "Einrichtungsfortschritt wird gespeichert …" })))
-                        .when(failed, |d| d.child(self.button("onboarding-retry-handoff", "Erneut versuchen", ButtonStyle::Secondary,
-                            true, LocalAction::RetryOnboardingHandoff, cx)));
+                    if failed {
+                        card = card.child(self.hint(self.l(
+                            "Der Einrichtungsfortschritt konnte nicht gespeichert werden. Bitte erneut versuchen."
+                        )))
+                            .child(self.button("onboarding-retry-handoff", "Erneut versuchen", ButtonStyle::Secondary,
+                                true, LocalAction::RetryOnboardingHandoff, cx));
+                    }
                 }
             }
             LoginPhase::Failed(reason) => {
@@ -753,7 +757,7 @@ fn storage_failure_key(
             "Die Abmeldung konnte noch nicht dauerhaft bestätigt werden. Der lokale Speicherstatus muss zuerst geklärt werden."
         }
         Some(StorageSaveFailure::Uncertain) => {
-            "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Bitte warte kurz und versuche es erneut."
+            "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Prüfe den Speicherstatus vor einem erneuten Versuch."
         }
         Some(StorageSaveFailure::Failed) => {
             "Die Anmeldung konnte nicht sicher gespeichert werden. Bitte erneut versuchen oder die private Datei wählen."

@@ -1,11 +1,15 @@
 use super::collection::CollectionState;
 use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
+use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
 
 impl Desktop {
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
+        if self.overlay == Some(Overlay::Forward) {
+            return self.forward_dialog(window, cx);
+        }
         if self.overlay == Some(Overlay::ContentPreview) {
             return self.media_view(window, cx);
         }
@@ -39,6 +43,7 @@ impl Desktop {
             Overlay::Organize => ("Eigene Gruppen", 520.),
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
+            Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
         let body = match overlay {
@@ -62,6 +67,7 @@ impl Desktop {
             Overlay::Organize => self.organization_body(cx),
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
+            Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
         };
         let content = if overlay == Overlay::CallChat {
@@ -83,77 +89,80 @@ impl Desktop {
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(
-                div()
-                    .w_full()
-                    .max_w(px(width))
-                    .max_h_full()
-                    .min_h_0()
-                    .when(side, |d| d.h_full())
-                    .when(overlay == Overlay::Create, |d| {
-                        d.h(px((f32::from(window.viewport_size().height)
-                            - super::window_chrome::HEIGHT
-                            - 66.)
-                            .min(632.)))
-                    })
-                    .when(!side, |d| {
-                        d.max_h(px((f32::from(window.viewport_size().height)
-                            - super::window_chrome::HEIGHT
-                            - 66.)
-                            .min(632.)))
-                    })
-                    .flex()
-                    .flex_col()
-                    .bg(t.surface)
-                    .rounded(px(13.))
-                    .border_1()
-                    .border_color(t.border)
-                    .shadow_lg()
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .occlude()
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .px_6()
-                            .py_4()
-                            .border_b_1()
-                            .border_color(t.border)
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .text_size(self.sp(if side { 18. } else { 24. }))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(self.l(title)),
-                            )
-                            .child(self.icon_button(
-                                "close-overlay",
-                                ("x", "Schließen"),
-                                ButtonStyle::Quiet,
-                                Availability::available(),
-                                LocalAction::Close,
-                                cx,
-                            )),
-                    )
-                    .child(content)
-                    .when(overlay == Overlay::Create, |d| {
-                        d.child(self.creation_footer(cx))
-                    })
-                    .when(
-                        self.feedback_visible() && overlay != Overlay::CallChat,
-                        |d| {
-                            d.child(
-                                div()
-                                    .flex_none()
-                                    .px_4()
-                                    .pb_3()
-                                    .child(self.feedback_view(cx)),
-                            )
-                        },
-                    ),
+                self.dialog_panel(
+                    DialogSurface::Overlay(overlay),
+                    div()
+                        .w_full()
+                        .max_w(px(width))
+                        .max_h_full()
+                        .min_h_0()
+                        .when(side, |d| d.h_full())
+                        .when(overlay == Overlay::Create, |d| {
+                            d.h(px((f32::from(window.viewport_size().height)
+                                - super::window_chrome::HEIGHT
+                                - 66.)
+                                .min(632.)))
+                        })
+                        .when(!side, |d| {
+                            d.max_h(px((f32::from(window.viewport_size().height)
+                                - super::window_chrome::HEIGHT
+                                - 66.)
+                                .min(632.)))
+                        })
+                        .flex()
+                        .flex_col()
+                        .bg(t.surface)
+                        .rounded(px(13.))
+                        .border_1()
+                        .border_color(t.border)
+                        .shadow_lg()
+                        .track_focus(&self.modal_focus)
+                        .tab_group()
+                        .occlude()
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_3()
+                                .px_6()
+                                .py_4()
+                                .border_b_1()
+                                .border_color(t.border)
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .text_size(self.sp(if side { 18. } else { 24. }))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(self.l(title)),
+                                )
+                                .child(self.icon_button(
+                                    "close-overlay",
+                                    ("x", "Schließen"),
+                                    ButtonStyle::Quiet,
+                                    Availability::available(),
+                                    LocalAction::Close,
+                                    cx,
+                                )),
+                        )
+                        .child(content)
+                        .when(overlay == Overlay::Create, |d| {
+                            d.child(self.creation_footer(cx))
+                        })
+                        .when(
+                            self.feedback_visible() && overlay != Overlay::CallChat,
+                            |d| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .px_4()
+                                        .pb_3()
+                                        .child(self.feedback_view(cx)),
+                                )
+                            },
+                        ),
+                ),
             )
     }
     fn participant_row(&self, p: &ParticipantView) -> Div {

@@ -78,7 +78,7 @@ impl Desktop {
         .bg(if open {
             self.theme.selected
         } else {
-            self.theme.surface
+            gpui::transparent_black()
         })
         .child(
             self.scaled_icon("plus", 9., self.theme.muted)
@@ -126,9 +126,9 @@ impl Desktop {
         .bg(if own {
             self.theme.selected
         } else {
-            self.theme.surface
+            gpui::transparent_black()
         })
-        .text_size(self.sp(17.))
+        .text_size(self.sp(14.))
     }
 
     pub(super) fn reaction_available(&self, message: u128) -> Availability {

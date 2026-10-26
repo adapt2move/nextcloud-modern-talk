@@ -6,11 +6,46 @@ use std::ops::Range;
 use gpui::SharedString;
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Native mutation identity is independent of undo history and composition's
+/// committed baseline. Exhaustion rejects before applying a candidate, so an
+/// old receipt can never regain authority through wrapping or saturation.
+#[derive(Default)]
+pub(super) struct EditGeneration(u64);
+impl EditGeneration {
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+    pub fn available(&self) -> bool {
+        self.0.checked_add(1).is_some()
+    }
+    pub fn admit<T>(&mut self, candidate: Option<T>) -> Option<T> {
+        let candidate = candidate?;
+        let generation = self.0.checked_add(1)?;
+        self.0 = generation;
+        Some(candidate)
+    }
+}
+
+/// Persisted drafts may exceed a newly observed server limit; persistence keeps
+/// them intact while every submission checks the current canonical wire size.
+pub(super) fn submitted_text(value: &str, composing: bool, limit: usize) -> Option<&str> {
+    (!composing && value.len() <= limit).then_some(value)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct EditSnapshot {
     pub text: SharedString,
     pub selection: Range<usize>,
     pub reversed: bool,
+    pub rich: Option<super::rich::Document>,
+}
+
+impl EditSnapshot {
+    pub fn value(&self) -> &str {
+        self.rich
+            .as_ref()
+            .map_or(self.text.as_ref(), |doc| doc.wire.as_ref())
+    }
 }
 
 /// At most 16 snapshots in each direction and one bounded preedit baseline.
@@ -41,7 +76,7 @@ impl EditHistory {
 
     pub fn finish_composition(&mut self, text: &str) {
         if let Some(before) = self.composition.take()
-            && before.text.as_ref() != text
+            && before.value() != text
         {
             self.record(before);
         }
@@ -50,7 +85,7 @@ impl EditHistory {
     pub fn committed_value<'a>(&'a self, current: &'a str) -> &'a str {
         self.composition
             .as_ref()
-            .map_or(current, |s| s.text.as_ref())
+            .map_or(current, EditSnapshot::value)
     }
 
     pub fn travel(&mut self, current: EditSnapshot, redo: bool) -> Option<EditSnapshot> {
@@ -67,6 +102,9 @@ impl EditHistory {
 
 pub(super) enum Insertion<'a> {
     Commit(&'a str),
+    Paste(&'a str),
+    Literal(&'a str),
+    Newline,
     Mark {
         text: &'a str,
         selection_utf16: Option<Range<usize>>,
@@ -92,8 +130,14 @@ pub(super) fn replacement(
         .map(|r| range_from_utf16(&current.text, r))
         .or_else(|| marked.cloned())
         .unwrap_or_else(|| current.selection.clone());
+    let paste = matches!(insertion, Insertion::Paste(_));
+    let literal = matches!(insertion, Insertion::Literal(_));
+    let newline = matches!(insertion, Insertion::Newline);
     let (text, selection, mark) = match insertion {
-        Insertion::Commit(text) => (text, None, false),
+        Insertion::Commit(text) | Insertion::Paste(text) | Insertion::Literal(text) => {
+            (text, None, false)
+        }
+        Insertion::Newline => ("\n", None, false),
         Insertion::Mark {
             text,
             selection_utf16,
@@ -103,17 +147,38 @@ pub(super) fn replacement(
         return None;
     }
     let selected = selection.map_or(text.len()..text.len(), |r| range_from_utf16(text, r));
-    let content = format!(
-        "{}{}{}",
-        &current.text[..range.start],
-        text,
-        &current.text[range.end..]
-    );
+    let (content, rich, committed_selection) = if let Some(document) = &current.rich {
+        let (document, selected) = if paste {
+            document.paste(range.clone(), text, limit)?
+        } else if newline {
+            document.newline(range.clone(), limit)?
+        } else {
+            document.replace(range.clone(), text, !mark && !literal, limit)?
+        };
+        (document.text.clone(), Some(document), selected)
+    } else {
+        let content = format!(
+            "{}{}{}",
+            &current.text[..range.start],
+            text,
+            &current.text[range.end..]
+        );
+        (
+            content.into(),
+            None,
+            range.start + text.len()..range.start + text.len(),
+        )
+    };
     Some(Replacement {
         state: EditSnapshot {
-            text: content.into(),
-            selection: range.start + selected.start..range.start + selected.end,
+            text: content,
+            selection: if mark {
+                range.start + selected.start..range.start + selected.end
+            } else {
+                committed_selection
+            },
             reversed: false,
+            rich,
         },
         marked: (mark && !text.is_empty()).then_some(range.start..range.start + text.len()),
     })
@@ -229,7 +294,118 @@ mod tests {
             text: text.to_owned().into(),
             selection,
             reversed: true,
+            rich: None,
         }
+    }
+
+    #[test]
+    fn generation_distinguishes_preedit_from_the_unchanged_committed_draft_and_undo() {
+        let before = snapshot("draft", 5..5);
+        let mut history = EditHistory::default();
+        let mut generation = EditGeneration::default();
+        let receipt_generation = generation.value();
+        let mut current = before.clone();
+        let mut marked = None;
+        for text in ["n", "ni", "ni"] {
+            let previous_generation = generation.value();
+            let next = generation
+                .admit(replacement(
+                    &current,
+                    marked.as_ref(),
+                    None,
+                    Insertion::Mark {
+                        text,
+                        selection_utf16: None,
+                    },
+                    32,
+                    true,
+                ))
+                .unwrap();
+            history.begin_composition(current);
+            current = next.state;
+            marked = next.marked;
+            assert!(generation.value() > previous_generation);
+            assert_ne!(generation.value(), receipt_generation);
+            assert_eq!(history.committed_value(&current.text), before.text.as_ref());
+        }
+        let previous_generation = generation.value();
+        assert!(
+            generation
+                .admit(replacement(
+                    &current,
+                    marked.as_ref(),
+                    None,
+                    Insertion::Commit(&"x".repeat(33)),
+                    32,
+                    true
+                ))
+                .is_none()
+        );
+        assert_eq!(generation.value(), previous_generation);
+        let committed = generation
+            .admit(replacement(
+                &current,
+                marked.as_ref(),
+                None,
+                Insertion::Commit("你"),
+                32,
+                true,
+            ))
+            .unwrap()
+            .state;
+        history.finish_composition(committed.value());
+        let previous_generation = generation.value();
+        let restored = generation.admit(history.travel(committed, false)).unwrap();
+        assert_eq!(restored, before);
+        assert!(generation.value() > previous_generation);
+    }
+
+    #[test]
+    fn exhausted_generation_rejects_edits_loads_and_resets_without_reusing_receipt_authority() {
+        let mut generation = EditGeneration(u64::MAX - 1);
+        let before = snapshot("draft", 5..5);
+        let mut current = generation.admit(Some(before.clone())).unwrap();
+        let receipt_generation = generation.value();
+        assert_eq!(receipt_generation, u64::MAX);
+        assert!(!generation.available());
+        if let Some(next) = generation.admit(replacement(
+            &current,
+            None,
+            None,
+            Insertion::Commit("!"),
+            32,
+            true,
+        )) {
+            current = next.state;
+        }
+        assert_eq!(current, before);
+        assert!(
+            generation
+                .admit(Some(snapshot("other context", 13..13)))
+                .is_none()
+        );
+        assert!(generation.admit(Some(snapshot("", 0..0))).is_none());
+        assert_eq!(generation.value(), receipt_generation);
+        assert_eq!(current, before);
+    }
+
+    #[test]
+    fn submissions_check_canonical_bytes_under_the_current_ceiling_without_discarding_drafts() {
+        let doc = crate::presentation::input::rich::Document::import("**Ä🧭**", 4096).unwrap();
+        assert!(doc.wire.len() > doc.text.len());
+        let original = doc.clone();
+        assert_eq!(
+            submitted_text(&doc.wire, false, doc.wire.len()),
+            Some(doc.wire.as_ref())
+        );
+        assert!(submitted_text(&doc.wire, false, doc.text.len()).is_none());
+        assert!(submitted_text(&doc.wire, true, 4096).is_none());
+        assert!(submitted_text(&doc.wire, false, 0).is_none());
+        assert_eq!(doc, original);
+        assert_eq!(
+            submitted_text(&doc.wire, false, 4096),
+            Some(doc.wire.as_ref())
+        );
     }
 
     #[test]

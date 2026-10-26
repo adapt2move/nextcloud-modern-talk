@@ -2,6 +2,7 @@
 mod arrival;
 pub(super) mod composer_menu;
 mod deadline;
+pub(super) mod forward;
 mod history;
 mod menu;
 mod pins;
@@ -38,6 +39,7 @@ pub(crate) enum Action {
     React(u128, Text<64>),
     Recovery(recovery::RecoveryAction),
     MenuChoice(menu::Target, menu::Choice),
+    Forward(forward::Action),
     RetryHistory,
     RetryContext { request: RequestId, target: u128 },
     Reply(u128),
@@ -66,10 +68,12 @@ pub(super) struct MessageUi {
     arrival: Rc<RefCell<arrival::Arrival>>,
     geometry: Rc<RefCell<MessageGeometry>>,
     pub editing: Option<u128>,
+    pub(super) composer_load_failed: Option<ConversationRef>,
     edit_generation: u64,
     pub(super) pending_edit: Option<super::state::PendingEdit>,
     request: u64,
     menu: menu::Menu,
+    pub(super) forward: forward::Forward,
     pins: pins::Pins,
     reaction_request: Option<RequestId>,
     pending_action: Option<(RequestId, Option<&'static str>)>,
@@ -104,7 +108,7 @@ fn context_status(load: &ContextLoad) -> Option<ContextStatus> {
     use talk_core::ui::{UnavailableReason, conversation::RemoteState};
     let (label, retry) = match load.state {
         RemoteState::Idle => return None,
-        RemoteState::Loading(_) | RemoteState::Saving(_) => ("Nachricht wird geöffnet …", None),
+        RemoteState::Loading(_) | RemoteState::Saving(_) => return None,
         RemoteState::Failed(_, UnavailableReason::Unsupported) => {
             ("Der Server unterstützt diese Funktion nicht.", None)
         }
@@ -211,8 +215,11 @@ impl MessageUi {
         );
         let arrival = Rc::new(RefCell::new(arrival::Arrival::default()));
         let scroll_arrival = arrival.clone();
+        let pins = pins::Pins::default();
+        let cancel_pins = pins.cancellation();
         let list = ListState::new(0, ListAlignment::Bottom, px(300.));
         list.set_scroll_handler(move |event, _, _| {
+            cancel_pins();
             if event.is_scrolled {
                 scroll_arrival.borrow_mut().manual_scroll();
             }
@@ -226,11 +233,13 @@ impl MessageUi {
             observed: Vec::new(),
             observed_pins: Vec::new(),
             editing: None,
+            composer_load_failed: None,
             edit_generation: 0,
             pending_edit: None,
             request: 0,
             menu: menu::Menu::new(cx),
-            pins: pins::Pins::default(),
+            forward: forward::Forward::new(theme, cx),
+            pins,
             reaction_request: None,
             pending_action: None,
             failed_selection: None,
@@ -354,6 +363,10 @@ impl Desktop {
             } else {
                 self.destination != super::SidebarDestination::Inbox
             };
+        self.settle_pin_scroll_for_reduced_motion();
+        self.message_ui
+            .pins
+            .visibility(visible, self.reduced_motion);
         self.message_ui
             .arrival
             .borrow_mut()
@@ -524,20 +537,12 @@ impl Desktop {
             .filter(|p| Some(p.context) == self.snapshot.selected)
             .and_then(|p| p.located)
             && self.message_ui.last_located != Some(request)
-            && let Some(index) = rows.iter().position(|m| m.local_id == id)
+            && rows.iter().any(|m| m.local_id == id)
         {
-            let index = self.media_span(id).map_or(index, |span| span.start);
-            self.message_ui.arrival.borrow_mut().manual_scroll();
-            self.message_ui.list.scroll_to(ListOffset {
-                item_ix: index,
-                offset_in_item: if index == 0 {
-                    px(0.)
-                } else {
-                    -self.message_ui.geometry.borrow().header_inset
-                },
-            });
+            if let Some(context) = self.snapshot.selected {
+                self.locate_message_smooth(context, id);
+            }
             self.message_ui.last_located = Some(request);
-            self.highlighted_message = self.snapshot.selected.map(|context| (context, id));
         }
         if let Some((request, completion)) = self
             .snapshot
@@ -556,9 +561,9 @@ impl Desktop {
                 let notice = match completion {
                     Completion::Queued => None,
                     Completion::ServerAccepted => success.map(super::feedback::Feedback::notice),
-                    Completion::Failed(reason) => Some(super::feedback::Feedback::from_error(
+                    Completion::Failed(reason) => super::feedback::Feedback::from_error(
                         talk_core::ui::SubmitError::Unavailable(reason),
-                    )),
+                    ),
                     Completion::Uncertain => Some(super::feedback::Feedback::warning(
                         "Ergebnis unklar. Vor erneutem Ändern neu laden.",
                     )),
@@ -582,16 +587,19 @@ impl Desktop {
                 self.message_ui
                     .editing
                     .map(|id| (id, self.message_ui.edit_generation)),
-                self.composer.read(cx).content.as_str(),
+                self.composer.read(cx).committed_value(),
+                (!self.composer.read(cx).composing())
+                    .then(|| self.composer.read(cx).edit_generation()),
             ) {
                 if restore {
-                    self.message_ui.editing = None;
                     let body = self
                         .snapshot
                         .selected
                         .map_or("", |c| self.drafts.text(c))
                         .to_owned();
-                    self.composer.update(cx, |i, _| i.set_context_value(&body));
+                    if self.load_composer_value(&body, cx) {
+                        self.message_ui.editing = None;
+                    }
                 } else if !matches!(completion, Completion::Queued | Completion::ServerAccepted)
                     && let Some(context) = self.snapshot.selected
                 {
@@ -657,12 +665,19 @@ impl Desktop {
                         .iter()
                         .any(|row| row.local_id == *id)
             })
-            .map(|(_, id)| id);
-        if let Some(id) = id
-            && self.message_ui.last_read != Some((context, id))
+            .and_then(|(_, id)| {
+                self.snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|message| message.local_id == id)
+                    .map(|message| (id, message.metadata.read_through.unwrap_or(id)))
+            });
+        if let Some((id, effective)) = id
+            && self.message_ui.last_read != Some((context, effective))
             && self.submit_message(MessageAction::MarkRead(id)).is_some()
         {
-            self.message_ui.last_read = Some((context, id));
+            self.message_ui.last_read = Some((context, effective));
         }
     }
     pub(super) fn message_available(&self, feature: MessageFeature) -> Availability {
@@ -827,6 +842,11 @@ impl Desktop {
     }
     pub(super) fn submit_message(&mut self, action: MessageAction) -> Option<RequestId> {
         let context = self.snapshot.selected?;
+        let pin_intent = match &action {
+            MessageAction::Pin(id) => Some((*id, true)),
+            MessageAction::Unpin(id) => Some((*id, false)),
+            _ => None,
+        };
         let notice = action_notice(&action);
         let request = RequestId(self.message_ui.request.checked_add(1)?);
         self.message_ui.request = request.0;
@@ -835,6 +855,9 @@ impl Desktop {
             context,
             action,
         }) {
+            if let Some((source, pin)) = pin_intent {
+                self.admit_pin_intent(context, request, source, pin);
+            }
             if let Some(notice) = notice {
                 self.message_ui.pending_action = Some((request, notice));
             }
@@ -866,6 +889,11 @@ impl Desktop {
         let anchor = self.message_ui.list.logical_scroll_top();
         let prior_compose = self.compose_motion_id(context);
         match action {
+            Action::Forward(action) => {
+                self.forward_action(action, window, cx);
+                cx.notify();
+                return;
+            }
             Action::Recovery(action) => self.recover_failed_draft(context, action, window, cx),
             Action::Silent => {
                 self.content_ui.menu = false;
@@ -891,11 +919,12 @@ impl Desktop {
                 }
             }
             Action::ShareUpload => {
-                if let Ok(caption) = Text::new(self.composer.read(cx).content.as_str()) {
+                if let Some(caption) = self.composer_submission(cx) {
                     self.submit_message(MessageAction::ShareUpload { caption });
                 }
             }
             Action::ThreadReply(root) => {
+                let previous = self.drafts.target(context);
                 if self.save_draft(cx)
                     && self.drafts.set_target(
                         context,
@@ -906,9 +935,12 @@ impl Desktop {
                         },
                     )
                 {
-                    self.handle(LocalAction::Close, window, cx);
                     let value = self.drafts.text(context).to_owned();
-                    self.composer.update(cx, |i, _| i.set_context_value(&value));
+                    if !self.load_composer_value(&value, cx) {
+                        self.drafts.set_target(context, previous);
+                        return;
+                    }
+                    self.handle(LocalAction::Close, window, cx);
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
@@ -938,6 +970,7 @@ impl Desktop {
                 }
             }
             Action::Reply(id) => {
+                let previous = self.drafts.target(context);
                 if self.save_draft(cx)
                     && self
                         .snapshot
@@ -954,17 +987,14 @@ impl Desktop {
                             silent: false,
                         },
                     ) {
-                        self.feedback = Some(
-                            super::feedback::Feedback::from_draft_error(
-                                talk_core::ui::SubmitError::Busy,
-                            )
-                            .in_conversation(context)
-                            .on_surface(self.overlay),
-                        );
+                        self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
                         return;
                     }
                     let value = self.drafts.text(context).to_owned();
-                    self.composer.update(cx, |i, _| i.set_context_value(&value));
+                    if !self.load_composer_value(&value, cx) {
+                        self.drafts.set_target(context, previous);
+                        return;
+                    }
                     self.message_ui.menu.clear();
                     self.composer.focus_handle(cx).focus(window);
                 }
@@ -985,20 +1015,31 @@ impl Desktop {
                     let Some(generation) = self.message_ui.edit_generation.checked_add(1) else {
                         return;
                     };
+                    if !self.load_composer_value(&value, cx) {
+                        return;
+                    }
                     self.message_ui.edit_generation = generation;
                     self.message_ui.editing = Some(id);
                     self.message_ui.menu.clear();
-                    self.composer.update(cx, |i, _| i.set_context_value(&value));
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
             Action::CancelCompose => {
-                if self.message_ui.editing.take().is_none() {
-                    self.save_draft(cx);
-                    self.drafts.set_target(context, ComposeTarget::default());
+                let previous = self.drafts.target(context);
+                if self.message_ui.editing.is_none() {
+                    if !self.save_draft(cx) {
+                        return;
+                    }
+                    if !self.drafts.set_target(context, ComposeTarget::default()) {
+                        return;
+                    }
                 }
                 let value = self.drafts.text(context).to_owned();
-                self.composer.update(cx, |i, _| i.set_context_value(&value));
+                if !self.load_composer_value(&value, cx) {
+                    self.drafts.set_target(context, previous);
+                    return;
+                }
+                self.message_ui.editing = None;
                 self.message_ui.time_target = None;
             }
             Action::Command(command) => {
@@ -1021,24 +1062,7 @@ impl Desktop {
             Action::CloseSearch => self.close_conversation_search(window, cx),
             Action::CyclePin { current, forward } => self.cycle_pin(context, current, forward),
             Action::Locate(id) => {
-                if let Some(index) = self
-                    .snapshot
-                    .messages
-                    .as_slice()
-                    .iter()
-                    .position(|m| m.local_id == id)
-                {
-                    let index = self.media_span(id).map_or(index, |span| span.start);
-                    self.message_ui.arrival.borrow_mut().manual_scroll();
-                    self.message_ui.list.scroll_to(ListOffset {
-                        item_ix: index,
-                        offset_in_item: if index == 0 {
-                            px(0.)
-                        } else {
-                            -self.message_ui.geometry.borrow().header_inset
-                        },
-                    });
-                    self.highlighted_message = Some((context, id));
+                if self.locate_message_smooth(context, id) {
                     if self.overlay == Some(Overlay::Files) {
                         self.handle(LocalAction::Close, window, cx);
                     }
@@ -1098,7 +1122,7 @@ impl Desktop {
         if self.message_ui.pending_edit.is_some() {
             return true;
         }
-        if let Ok(body) = Text::new(self.composer.read(cx).content.as_str())
+        if let Some(body) = self.composer_submission(cx)
             && let Some(request) = self.submit_message(MessageAction::Edit {
                 message,
                 body: body.clone(),
@@ -1108,6 +1132,7 @@ impl Desktop {
                 request,
                 message,
                 generation: self.message_ui.edit_generation,
+                editor_generation: self.composer.read(cx).edit_generation(),
                 body,
             });
         }
@@ -1277,6 +1302,19 @@ impl Desktop {
             self.snapshot.content,
             !self.snapshot.messages.as_slice().is_empty(),
         );
+        let context_pending = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| Some(panel.context) == self.snapshot.selected)
+            .and_then(|panel| panel.context_load.as_ref())
+            .is_some_and(|load| {
+                matches!(
+                    load.state,
+                    talk_core::ui::conversation::RemoteState::Loading(_)
+                        | talk_core::ui::conversation::RemoteState::Saving(_)
+                )
+            });
         if state.shows_content() {
             // Keep the same virtualized list and scroll anchor during refresh
             // and temporary failures; retained rows confer no mutation rights.
@@ -1293,13 +1331,27 @@ impl Desktop {
             } else {
                 self.message_history(px(0.), cx).into_any_element()
             });
-        } else if state.confirmed_empty() {
-            body = body.child(div().flex_1().child(self.state_note(
-                "chat",
-                "Noch keine Nachrichten.",
-                "Hier erscheinen die Nachrichten dieses Gesprächs.",
-            )));
-        } else if state.initial_loading() {
+        } else if state.confirmed_empty() && !context_pending {
+            let has_older = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                Some(panel.context) == self.snapshot.selected && panel.older.is_some()
+            });
+            body = if has_older {
+                body.child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self.history_boundary(cx)),
+                )
+            } else {
+                body.child(div().flex_1().child(self.state_note(
+                    "chat",
+                    "Noch keine Nachrichten.",
+                    "Hier erscheinen die Nachrichten dieses Gesprächs.",
+                )))
+            };
+        } else if state.initial_loading() || context_pending {
             body = body.child(self.collection_skeleton(Skeleton::Messages));
         } else {
             body = body.child(div().flex_1());
@@ -1422,7 +1474,10 @@ impl Desktop {
             })
             .collect();
         let layout_arrival = self.message_ui.arrival.clone();
+        let layout_pins = self.pin_locate_layout();
         let wheel_arrival = self.message_ui.arrival.clone();
+        let wheel_pins = self.message_ui.pins.cancellation();
+        let keyboard_pins = self.message_ui.pins.cancellation();
         let wheel_history = self.message_ui.history.clone();
         let keyboard_history = self.message_ui.history.clone();
         let layout_history = self.message_ui.history.clone();
@@ -1442,6 +1497,7 @@ impl Desktop {
             .min_h_0()
             .track_focus(&keyboard_focus.clone().tab_stop(!self.background_inert))
             .on_scroll_wheel(move |event, _, _| {
+                wheel_pins();
                 if event.delta.pixel_delta(px(20.)).y > px(0.) {
                     wheel_arrival.borrow_mut().manual_scroll();
                     wheel_history.borrow_mut().upward();
@@ -1469,6 +1525,7 @@ impl Desktop {
                 if matches!(event.keystroke.key.as_str(), "pageup" | "home") {
                     keyboard_history.borrow_mut().upward();
                 }
+                keyboard_pins();
                 keyboard_arrival.borrow_mut().manual_scroll();
                 cx.stop_propagation();
                 window.refresh();
@@ -1528,6 +1585,7 @@ impl Desktop {
                         offset_in_item: px(0.),
                     });
                 }
+                layout_pins(painted_anchor, window);
                 if followed || arrival.following() || arrival.animate_next_frame(now) {
                     window.request_animation_frame();
                 }
@@ -1726,7 +1784,14 @@ impl Desktop {
         }
         match if pins { panel.pins_state } else { panel.state } {
             talk_core::ui::conversation::RemoteState::Loading(_) => {
-                body = body.child(self.hint(self.l("Geteilte Inhalte werden geladen …")));
+                let has_content = if pins {
+                    !panel.pinned_messages.as_slice().is_empty()
+                } else {
+                    !panel.shared_files.as_slice().is_empty()
+                };
+                if !has_content {
+                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                }
             }
             talk_core::ui::conversation::RemoteState::Failed(_, _) => {
                 body =
@@ -2381,8 +2446,10 @@ mod tests {
             target: 42,
             state: RemoteState::Loading(RequestId(7)),
         };
-        assert!(context_status(&load).is_some());
-        assert!(context_status(&load).unwrap().retry.is_none());
+        assert!(
+            context_status(&load).is_none(),
+            "accepted loading is not a warning"
+        );
         assert!(!current_context_retry(&load, RequestId(7), 42));
         load.state = RemoteState::Failed(RequestId(7), UnavailableReason::PolicyStale);
         assert_eq!(context_status(&load).unwrap().retry, Some(RequestId(7)));
@@ -2551,6 +2618,7 @@ mod tests {
         assert!(!allowed(&message));
         message.metadata.system = false;
         for delivery in [
+            talk_core::ui::presentation::DeliveryState::Queued,
             talk_core::ui::presentation::DeliveryState::Pending,
             talk_core::ui::presentation::DeliveryState::Failed,
             talk_core::ui::presentation::DeliveryState::Uncertain,

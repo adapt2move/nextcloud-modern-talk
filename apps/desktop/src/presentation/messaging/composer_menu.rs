@@ -325,7 +325,8 @@ impl Desktop {
             .sp(260.)
             .min((window.viewport_size().width - px(24.)).max(px(1.)));
         let silent = self.drafts.target(target.context).silent;
-        let body = div()
+        let body = self
+            .context_menu_surface()
             .id(scoped_id(
                 "composer-popup",
                 target.context,
@@ -339,14 +340,6 @@ impl Desktop {
             .max_h((window.viewport_size().height - px(24.)).max(px(1.)))
             .overflow_y_scroll()
             .track_scroll(&self.content_ui.composer_menu.scroll)
-            .rounded(px(10.))
-            .border_1()
-            .border_color(self.theme.border)
-            .shadow_lg()
-            .bg(self.theme.surface)
-            .p_1()
-            .flex()
-            .flex_col()
             .on_mouse_down_out(cx.listener(
                 move |this, event: &gpui::MouseDownEvent, window, cx| {
                     if this.content_ui.composer_menu.session.target == Some(target)

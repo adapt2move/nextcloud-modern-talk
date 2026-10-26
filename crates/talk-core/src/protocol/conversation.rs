@@ -32,6 +32,7 @@ pub enum Setting {
     Keep,
     Members,
     Invite,
+    CsvImport,
     Roles,
     Bots,
     Bans,
@@ -77,6 +78,9 @@ pub struct IntegrationId {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Member {
     pub id: MemberId,
+    /// Opaque account-local user identity from this fresh member observation.
+    /// It grants no access and is never projected into serialized UI state.
+    pub avatar_identity: Option<[u8; 32]>,
     pub name: Text<256>,
     pub role: Role,
     pub source: RecipientSource,

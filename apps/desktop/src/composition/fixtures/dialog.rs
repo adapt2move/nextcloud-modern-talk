@@ -51,6 +51,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
                 RoomSetting::Keep,
                 RoomSetting::Members,
                 RoomSetting::Invite,
+                RoomSetting::CsvImport,
                 RoomSetting::Roles,
                 RoomSetting::Bots,
                 RoomSetting::Bans,

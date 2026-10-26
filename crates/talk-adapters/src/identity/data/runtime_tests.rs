@@ -48,6 +48,7 @@ async fn cache_reads_and_durable_admission_bypass_a_blocked_credential_restore_a
                 participant_count_at: Some(now),
                 last_activity: Some(now),
                 saved_at: now,
+                observation: None,
             })
             .unwrap();
         store.put_rooms(&rooms, now).unwrap();

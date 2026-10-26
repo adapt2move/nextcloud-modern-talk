@@ -53,6 +53,7 @@ pub enum Overlay {
     Files,
     Accounts,
     Thread,
+    Forward,
     CallParticipants,
     CallChat,
     Search,
@@ -220,6 +221,7 @@ pub struct Desktop {
     hovered_control: Option<gpui::ElementId>,
     reduced_motion: bool,
     motion_trigger: Option<motion::MotionTrigger>,
+    dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
     emoji_picker_generation: u64,
@@ -241,7 +243,10 @@ pub struct Desktop {
     settings_request: u64,
     preference_error: Option<talk_core::preferences::PreferenceError>,
     notification_state: talk_core::preferences::notifications::NotificationState,
-    notification_error: Option<talk_core::preferences::notifications::NotificationError>,
+    notification_error: Option<(
+        talk_core::preferences::notifications::NotificationCategory,
+        talk_core::preferences::notifications::NotificationError,
+    )>,
     notification_test: Option<(
         talk_core::preferences::RequestId,
         talk_core::preferences::notifications::NotificationCategory,
@@ -449,6 +454,7 @@ impl Desktop {
             hovered_control: None,
             reduced_motion: settings_port.reduced_motion(),
             motion_trigger: None,
+            dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
             emoji_picker_generation: 0,
@@ -625,8 +631,16 @@ impl Desktop {
         let selected_rebind = previous
             .and_then(|context| state::cached_draft_context(&self.snapshot, &next, context))
             .is_some_and(|context| Some(context) == next.selected);
+        let composer_unchanged = previous.is_none_or(|context| {
+            self.drafts.observe_editor(
+                context,
+                self.composer.read(cx).edit_generation(),
+                self.composer.read(cx).composing(),
+            )
+        });
         if let Some(c) = previous
             && self.message_ui.editing.is_none()
+            && self.message_ui.composer_load_failed != Some(c)
         {
             let body = self.composer.read(cx).committed_value();
             let _ = self.drafts.save(c, body);
@@ -652,7 +666,7 @@ impl Desktop {
                 )),
             }
             .map(|feedback| feedback.in_conversation(completed_context.unwrap_or(result.context)));
-            reset_draft = completed_context == next.selected;
+            reset_draft = completed_context == next.selected && composer_unchanged;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
             self.pending_ack = Some(result);
         }
@@ -703,6 +717,10 @@ impl Desktop {
         }
         self.refresh_account_removal(&next);
         self.snapshot = next;
+        let limit = self.composer_message_limit();
+        self.composer
+            .update(cx, |input, _| input.configure_message_limit(limit));
+        self.revalidate_forward_session();
         self.refresh_offline_notice(cx);
         self.refresh_action_toast(cx);
         self.refresh_content_ui(cx);
@@ -748,14 +766,27 @@ impl Desktop {
                 .map_or("", |c| self.drafts.text(c))
                 .to_owned();
             let changed_context = previous != self.snapshot.selected;
-            self.composer.update(cx, |i, cx| {
-                if changed_context {
-                    i.set_context_value(&body);
+            let admitted = self.composer.update(cx, |i, cx| {
+                let admitted = if changed_context {
+                    i.set_context_value(&body)
                 } else {
-                    i.set_value(&body);
+                    i.set_value(&body)
+                };
+                // Completing a reply can restore a different retained draft
+                // within the same room. A rejected load must not leave the
+                // submitted reply in an editor now targeting that draft.
+                if !admitted {
+                    i.reset();
                 }
                 cx.notify();
+                admitted
             });
+            if admitted {
+                self.message_ui.composer_load_failed = None;
+            } else {
+                self.message_ui.composer_load_failed = self.snapshot.selected;
+                self.composer_load_error();
+            }
         }
         if let Some(prejoin) = self.prejoin
             && self.selected_call() != Some(CallEntry::Conference(prejoin))
@@ -770,6 +801,58 @@ impl Desktop {
     fn submit(&mut self, intent: UiIntent) -> bool {
         feedback::submit(self.port.as_mut(), &mut self.feedback, intent, self.overlay)
     }
+    fn composer_message_limit(&self) -> usize {
+        self.snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| Some(panel.context) == self.snapshot.selected)
+            .map_or(4096, |panel| panel.message_limit.min(4096) as usize)
+    }
+    fn composer_load_error(&mut self) {
+        let mut notice = Feedback::error(input::RICH_REJECTION).on_surface(self.overlay);
+        if let Some(context) = self.snapshot.selected {
+            notice = notice.in_conversation(context);
+        }
+        self.feedback = Some(notice);
+    }
+    /// Commit the contextual target only after its document was admitted.
+    fn load_composer_value(&mut self, body: &str, cx: &mut Context<Self>) -> bool {
+        let limit = self.composer_message_limit();
+        let admitted = self.composer.update(cx, |input, cx| {
+            input.configure_message_limit(limit);
+            let admitted = input.set_context_value(body);
+            cx.notify();
+            admitted
+        });
+        if admitted {
+            self.message_ui.composer_load_failed = None;
+        } else {
+            self.composer_load_error();
+        }
+        admitted
+    }
+    fn composer_submission(&mut self, cx: &Context<Self>) -> Option<talk_core::ui::Text<4096>> {
+        if self
+            .message_ui
+            .composer_load_failed
+            .is_some_and(|context| Some(context) == self.snapshot.selected)
+        {
+            self.composer_load_error();
+            return None;
+        }
+        let input = self.composer.read(cx);
+        if input.composing() {
+            return None;
+        }
+        let body = input
+            .submitted_value()
+            .filter(|body| body.len() <= self.composer_message_limit())
+            .and_then(|body| talk_core::ui::Text::new(body).ok());
+        if body.is_none() {
+            self.composer_load_error();
+        }
+        body
+    }
     fn save_draft(&mut self, cx: &App) -> bool {
         if self.message_ui.editing.is_some() {
             return true;
@@ -777,17 +860,16 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return true;
         };
+        if self.message_ui.composer_load_failed == Some(context) {
+            return true;
+        }
         match self
             .drafts
             .save(context, self.composer.read(cx).committed_value())
         {
             Ok(()) => true,
             Err(e) => {
-                self.feedback = Some(
-                    Feedback::from_draft_error(e)
-                        .in_conversation(context)
-                        .on_surface(self.overlay),
-                );
+                self.report_draft_error(e, context);
                 false
             }
         }
@@ -814,6 +896,10 @@ impl Desktop {
     }
     fn composer_available(&self) -> bool {
         !self.update_restart_pending
+            && self
+                .message_ui
+                .composer_load_failed
+                .is_none_or(|context| Some(context) != self.snapshot.selected)
             && composer_allowed(
                 self.overlay,
                 self.prejoin.is_some(),
@@ -925,7 +1011,9 @@ impl Desktop {
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
             LocalAction::CheckUpdates => {
-                if let Err(error) = self.settings_port.check_updates() {
+                if let Err(error) = self.settings_port.check_updates()
+                    && error != talk_core::preferences::updates::UpdateError::Busy
+                {
                     self.updates.state =
                         talk_core::preferences::updates::UpdateState::Failed(error);
                 }
@@ -947,14 +1035,17 @@ impl Desktop {
                         match self.settings_port.install_update(generation) {
                             Ok(()) => self.freeze_for_update(window, cx),
                             Err(error) => {
-                                self.feedback =
-                                    Some(Feedback::error(preferences::update_error_label(error)));
+                                if error != talk_core::preferences::updates::UpdateError::Busy
+                                    && let Some(label) = preferences::update_error_label(error)
+                                {
+                                    self.feedback = Some(Feedback::error(label));
+                                }
                             }
                         }
                     }
                 }
             }
-            LocalAction::Room(action) => self.room_action(action, cx),
+            LocalAction::Room(action) => self.room_action(action, window, cx),
             LocalAction::Message(action) => self.message_action(action, window, cx),
             LocalAction::MessageIn(context, action) => {
                 if Some(context) == self.snapshot.selected {
@@ -967,6 +1058,9 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                if overlay == Overlay::Participants && !self.room_members_applicable() {
+                    return;
+                }
                 if !self.save_draft(cx) {
                     cx.notify();
                     return;
@@ -1117,6 +1211,10 @@ impl Desktop {
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
                 self.startup_account_dialog = false;
+                if self.close_forward_dialog(window, cx) {
+                    cx.notify();
+                    return;
+                }
                 if self.close_content_overlay() {
                     if self.overlay.is_none() {
                         if let Some(focus) = self
@@ -1133,6 +1231,7 @@ impl Desktop {
                     return;
                 }
                 self.retire_emoji_picker();
+                self.close_room_dialog_state();
                 self.room_ui.password.update(cx, |i, _| i.reset());
                 if self.navigation_open {
                     self.pending_navigation_focus = Some(false);
@@ -1210,20 +1309,11 @@ impl Desktop {
                 }
             }
             LocalAction::Send => {
-                if self.composer.read(cx).composing() {
+                if self.composer_submission(cx).is_none() {
                     return;
                 }
-                if let Some(context) = self.snapshot.selected
-                    && let Some(failure) = self.account_connection_failure(context.account)
-                {
-                    self.save_draft(cx);
-                    self.feedback = Some(
-                        Feedback::warning(state::connection_failure_copy(failure).1)
-                            .in_conversation(context),
-                    );
-                    cx.notify();
-                    return;
-                }
+                // The scoped queue decision admits offline work. A connection
+                // failure must not veto local staging before that decision.
                 if self.send_edit(cx) {
                     cx.notify();
                     return;
@@ -1248,14 +1338,18 @@ impl Desktop {
                     let context = row.context;
                     let gate = state::composer_send_decision(&self.snapshot, row);
                     let result = self.drafts.send(context, gate, self.port.as_mut());
-                    if result.is_ok() {
+                    if let Ok(request) = &result {
+                        self.drafts.capture_editor(
+                            context,
+                            *request,
+                            self.composer.read(cx).edit_generation(),
+                        );
                         sent_in = Some(context);
                     }
-                    self.feedback = result.err().map(|error| {
-                        Feedback::from_draft_error(error)
-                            .in_conversation(context)
-                            .on_surface(self.overlay)
-                    });
+                    match result {
+                        Ok(_) => self.feedback = None,
+                        Err(error) => self.report_draft_error(error, context),
+                    }
                 }
             }
             LocalAction::FinishOnboarding => {
@@ -1397,6 +1491,9 @@ impl Desktop {
                 self.settings_navigation_open = !self.settings_navigation_open
             }
             LocalAction::SettingsTab(tab) => {
+                if self.settings_tab != tab {
+                    self.begin_surface_reveal(("settings-page", tab as usize).into());
+                }
                 self.device_picker = None;
                 self.pending_device_focus = None;
                 self.settings_tab = tab;
@@ -1479,17 +1576,18 @@ impl Desktop {
             LocalAction::TestNotification(category) => {
                 if let Some(request) = self.settings_request.checked_add(1) {
                     self.settings_request = request;
-                    self.notification_test =
-                        Some((talk_core::preferences::RequestId(request), category));
-                    self.notification_error = self
-                        .settings_port
-                        .test_notification(
-                            talk_core::preferences::RequestId(request),
-                            category,
-                            self.l("Testbenachrichtigung"),
-                            self.l("Benachrichtigungen für euren Arbeitsplatz."),
-                        )
-                        .err();
+                    let result = self.settings_port.test_notification(
+                        talk_core::preferences::RequestId(request),
+                        category,
+                        self.l("Testbenachrichtigung"),
+                        self.l("Benachrichtigungen für euren Arbeitsplatz."),
+                    );
+                    settings_pages::record_notification_test(
+                        &mut self.notification_test,
+                        &mut self.notification_error,
+                        (talk_core::preferences::RequestId(request), category),
+                        result,
+                    );
                 }
             }
             LocalAction::Search => {
@@ -1836,8 +1934,10 @@ impl Render for Desktop {
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
+        self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
+        self.prepare_member_dialog(window, cx);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -1846,6 +1946,21 @@ impl Render for Desktop {
             window.request_animation_frame();
         }
         let incoming = !self.update_restart_pending && self.incoming_visible();
+        let dialog_surface = if self.account_removal.confirming() {
+            Some(motion::DialogSurface::AccountRemoval)
+        } else if let Some(overlay) = self.overlay {
+            Some(motion::DialogSurface::Overlay(overlay))
+        } else {
+            self.prejoin.map(|_| motion::DialogSurface::Prejoin)
+        };
+        self.dialog_motion.prepare(
+            dialog_surface,
+            self.reduced_motion
+                || incoming
+                || self.projection_blocked
+                || self.update_restart_pending,
+            Instant::now(),
+        );
         if incoming && self.snapshot.call.as_ref().map(|c| c.scope) != self.last_incoming_scope {
             self.incoming_return_focus = window.focused(cx);
             self.last_incoming_scope = self.snapshot.call.as_ref().map(|c| c.scope);
@@ -1860,7 +1975,7 @@ impl Render for Desktop {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
-                i.clipboard_allowed = true;
+                i.clipboard_export_allowed = true;
                 i.interactive = self.overlay == Some(Overlay::CreatePoll)
                     && !self.snapshot.content_panel.poll_state.pending()
                     && !incoming;
@@ -1891,7 +2006,7 @@ impl Render for Desktop {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
-                i.clipboard_allowed = true;
+                i.clipboard_export_allowed = true;
                 i.interactive = !incoming
                     && matches!(
                         self.overlay,
@@ -1899,6 +2014,7 @@ impl Render for Desktop {
                     );
             });
         }
+        self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
             self.room_ui.search.update(cx, |i, _| {
                 i.interactive = !incoming && self.room_ui.create_direct
@@ -1909,12 +2025,12 @@ impl Render for Desktop {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
                 i.interactive = self.composer_available();
-                i.clipboard_allowed = true;
+                i.clipboard_export_allowed = true;
             });
         }
         self.room_ui.password.update(cx, |i, _| {
             i.concealed = true;
-            i.clipboard_allowed = false;
+            i.clipboard_export_allowed = false;
         });
         for (input, key) in [
             (&self.room_ui.name, "Name des Gesprächs"),
@@ -1938,7 +2054,7 @@ impl Render for Desktop {
             input.update(cx, |i, _| i.set_placeholder(label));
         }
         for input in [&self.server, &self.search, &self.sidebar_filter] {
-            input.update(cx, |i, _| i.clipboard_allowed = true);
+            input.update(cx, |i, _| i.clipboard_export_allowed = true);
         }
         self.server.update(cx, |i, _| {
             i.interactive = self.overlay.is_none()
@@ -1962,14 +2078,14 @@ impl Render for Desktop {
                 && self.account_preferences.as_ref().is_some_and(|p| {
                     p.state == talk_core::preferences::account::AccountPreferenceState::Ready
                 });
-            i.clipboard_allowed = true;
+            i.clipboard_export_allowed = true;
         });
         self.group_name.update(cx, |i, _| {
             i.interactive = !incoming && self.overlay == Some(Overlay::Organize);
         });
         self.conversation_name.update(cx, |i, _| {
             i.interactive = !incoming && self.overlay == Some(Overlay::Create);
-            i.clipboard_allowed = true;
+            i.clipboard_export_allowed = true;
             i.borderless = true;
         });
         if let Some(row) = self.selected() {
@@ -1977,7 +2093,7 @@ impl Render for Desktop {
             self.composer
                 .update(cx, |i, _| i.set_placeholder(&placeholder));
         }
-        let clipboard = self.snapshot.content == ContentState::Ready
+        let clipboard_export = self.snapshot.content == ContentState::Ready
             && self
                 .selected()
                 .is_some_and(|r| r.draft_clipboard == Decision::Allowed);
@@ -1996,7 +2112,8 @@ impl Render for Desktop {
         .floor() as usize;
         self.composer.update(cx, |i, _| {
             i.interactive = self.composer_available();
-            i.clipboard_allowed = clipboard;
+            i.configure_message_limit(self.composer_message_limit());
+            i.clipboard_export_allowed = clipboard_export;
             i.max_visible_rows = max_rows.clamp(1, 5);
         });
         if self.update_restart_pending {
@@ -2026,28 +2143,27 @@ impl Render for Desktop {
         let body = if self.update_restart_pending {
             use talk_core::preferences::updates::UpdateState;
             let status = match self.updates.state {
-                UpdateState::Applying(_) => "Das Update wird installiert …",
-                UpdateState::Installed(_) => {
-                    "Das Update ist installiert. Der Neustart wird vorbereitet …"
-                }
+                UpdateState::Installed(_) => Some("Das Update ist installiert."),
                 UpdateState::Failed(_) | UpdateState::Stopped => {
-                    "Das Update konnte nicht abgeschlossen werden."
+                    Some("Das Update konnte nicht abgeschlossen werden.")
                 }
-                _ => "Die App bereitet die Installation vor …",
+                _ => None,
             };
             self.reveal(
                 "update-restart",
                 div()
                     .size_full()
                     .flex()
+                    .flex_col()
+                    .gap_4()
                     .items_center()
                     .justify_center()
                     .p_6()
-                    .child(self.state_note(
-                        "download",
-                        "Update installieren und neu starten",
-                        status,
-                    )),
+                    .child(self.title(self.l("Update installieren und neu starten")))
+                    .when_some(status, |d, status| d.child(self.hint(self.l(status))))
+                    .when(status.is_none(), |d| {
+                        d.child(self.pending_dots(self.theme.muted))
+                    }),
             )
         } else if self.development && self.probe == Probe::Controls {
             self.control_probe(cx).into_any_element()
@@ -2080,19 +2196,21 @@ impl Render for Desktop {
             .overlay
             .filter(|_| !self.update_restart_pending)
             .map(|overlay| {
-                self.reveal(
-                    ("dialog-reveal", overlay as usize),
+                self.dialog_backdrop(
+                    motion::DialogSurface::Overlay(overlay),
                     self.overlay_view(window, cx),
                 )
             });
         self.background_inert = false;
         let account_removal_dialog = (!incoming && !self.update_restart_pending)
             .then(|| self.account_removal_dialog(window, cx))
-            .flatten();
+            .flatten()
+            .map(|dialog| self.dialog_backdrop(motion::DialogSurface::AccountRemoval, dialog));
         let incoming_card = incoming.then(|| self.incoming(cx));
         let action_toast = self.action_toast_view(window, cx);
         let message_menu = self.message_menu_popup(window, cx);
         let composer_menu = self.composer_menu_popup(window, cx);
+        let pin_motion_overlay = self.pin_motion_overlay(cx);
         let reveal = self.navigation.reveal.clone();
         let view = div()
             .relative()
@@ -2113,6 +2231,7 @@ impl Render for Desktop {
                 this.control_focus.finish_frame(window, fallback);
                 this.finish_message_menu_frame(window, cx);
                 this.finish_composer_menu_frame(window, cx);
+                this.finish_member_dialog_frame(window, cx);
                 if this.hover_hints.retire(|id| this.control_focus.live(id)) {
                     cx.notify();
                 }
@@ -2145,7 +2264,8 @@ impl Render for Desktop {
                     }
                 }
                 if !composing
-                    && (this.composer_menu_key(event, window, cx)
+                    && (this.member_dialog_key(event, window, cx)
+                        || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)
                         || this.action_toast_key(event, window, cx))
@@ -2170,7 +2290,8 @@ impl Render for Desktop {
                     .when_some(incoming_card, |d, card| d.child(card))
                     .when_some(action_toast, |d, toast| d.child(toast))
                     .when_some(message_menu, |d, menu| d.child(menu))
-                    .when_some(composer_menu, |d, menu| d.child(menu)),
+                    .when_some(composer_menu, |d, menu| d.child(menu))
+                    .when_some(pin_motion_overlay, |d, motion| d.child(motion)),
             )
             .children(self.window_resize_edges(window));
         if let Some(scope) = self.pending_prejoin_return.take()

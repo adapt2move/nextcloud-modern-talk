@@ -103,7 +103,9 @@ def exercise(scenario,env,xid,folder,label,large=False):
    try:
     time.sleep(.2);key('ctrl+a');key('ctrl+c');copy=image('copy-refused','Kopieren ist für diesen Entwurf nicht freigegeben.');v=run(['xclip','-selection','clipboard','-o'],env).stdout
     check('copy-policy-preserves-existing-clipboard',v=='PRIVATE-SENTINEL',v);key('End');text('Z');typed=image('typed-Z-after-refusal');check('visible-draft-survives-refusal','editor_chars=6' in typed['diagnostics']['state'],typed['diagnostics'])
-    key('ctrl+v');paste=image('paste-refused','Einfügen ist für diesen Entwurf nicht freigegeben.');check('paste-policy-preserves-draft','editor_chars=6' in paste['diagnostics']['state'],paste['diagnostics'])
+    key('ctrl+v');paste=image('paste-without-export-authority','ALPHAZPRIVATE-SENTINEL');check('paste-imports-without-export-authority',f"editor_chars={len('ALPHAZPRIVATE-SENTINEL')}" in paste['diagnostics']['state'],paste['diagnostics'])
+    check('paste-keeps-existing-clipboard',run(['xclip','-selection','clipboard','-o'],env).stdout=='PRIVATE-SENTINEL','synthetic clipboard owner')
+    key('ctrl+z');undone=image('paste-undo-restores-draft');check('paste-is-one-undoable-edit','editor_chars=6' in undone['diagnostics']['state'],undone['diagnostics'])
    finally:owner.terminate();owner.wait(timeout=2)
   elif a.batch=='lifecycle':
    if scenario=='server':key('Tab',2);key('Return');image('login-admitted-projection-no-global-progress')

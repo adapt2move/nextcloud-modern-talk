@@ -1,13 +1,15 @@
 //! Message-row geometry, sender grouping and truthful delivery presentation.
-use super::{Action, compact_system_message, menu, message_actions_allowed};
+use super::{
+    Action, compact_system_message, decision_allows_intent, menu, message_actions_allowed,
+};
 use crate::presentation::{
     ButtonStyle, Desktop, LocalAction,
     controls::{Availability, ControlGeometry, scoped_id},
 };
 use gpui::{Context, Div, ElementId, FontWeight, Stateful, div, prelude::*, px};
 use talk_core::ui::{
-    messaging::MessageFeature,
-    presentation::{DeliveryState, MessageView},
+    messaging::{MessageFeature, SystemEvent},
+    presentation::{ContentState, DeliveryState, MessageView},
 };
 
 impl Desktop {
@@ -44,16 +46,26 @@ impl Desktop {
             .to_string()
             .into();
         if compact_system_message(m) {
+            let status = call_status(m);
+            let color = if status.is_some_and(|(_, failed)| failed) {
+                t.danger
+            } else {
+                t.muted
+            };
             return div().child(
                 div()
                     .id(scoped_id("message", context, m.local_id, 0))
                     .px_6()
                     .py_2()
                     .flex()
+                    .items_center()
                     .justify_center()
                     .gap_2()
-                    .text_color(t.muted)
+                    .text_color(color)
                     .text_size(self.sp(12.))
+                    .when_some(status, |row, (symbol, _)| {
+                        row.child(self.scaled_icon(symbol, 14., color))
+                    })
                     .child(self.message_text(m, cx))
                     .child(self.hint(m.time_label.as_str())),
             );
@@ -79,18 +91,6 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap(px(4.))
-            .when(pinned && !m.metadata.deleted, |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .text_color(t.muted)
-                        .child(self.scaled_icon("pin", 12., t.muted))
-                        .child(self.hint(self.l("Angeheftet")))
-                        .text_size(self.sp(11.)),
-                )
-            })
             .when(!continuation, |d| {
                 d.child(
                     div()
@@ -221,7 +221,11 @@ impl Desktop {
                                 0.,
                                 7.,
                                 4.,
-                                if r.own { t.selected } else { t.subtle },
+                                if r.own {
+                                    t.selected
+                                } else {
+                                    gpui::transparent_black()
+                                },
                             ),
                             cx,
                         )
@@ -294,12 +298,29 @@ impl Desktop {
                     .into_any_element()
                 })
                 .child(content)
-                .when_some(delivery, |d, indicator| {
-                    let mut status = self.delivery_indicator(
-                        indicator,
-                        scoped_id("message-delivery", context, m.local_id, 0),
-                        cx,
-                    );
+                .child(self.pin_source_anchor(context, m.local_id))
+                .when(!m.metadata.deleted && (pinned || delivery.is_some()), |d| {
+                    let status = div().flex_none().flex().items_center().gap(px(4.))
+                        .when(pinned, |d| {
+                            let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                                panel.context == context
+                                    && self.message_feature_enabled(MessageFeature::Pins)
+                                    && decision_allows_intent(panel.pin_change, self.local_message_intents())
+                                    && (!panel.state.pending() || self.local_message_intents())
+                            });
+                            d.child(self.icon_button(
+                                scoped_id("row-unpin-message", context, m.local_id, 0),
+                                ("pin", "Angeheftete Nachricht lösen"),
+                                ButtonStyle::Quiet,
+                                Availability::when(allowed, "Anheften ist derzeit nicht verfügbar."),
+                                LocalAction::MessageIn(context, Action::Command(talk_core::ui::messaging::MessageAction::Unpin(m.local_id))),
+                                cx,
+                            ).min_w(px(24.)).min_h(self.sp(20.)).h(self.sp(20.)).p_0())
+                        })
+                        .when_some(delivery, |d, indicator| {
+                            d.child(self.delivery_indicator(indicator, scoped_id("message-delivery", context, m.local_id, 0), cx))
+                        });
+                    let mut status = status;
                     status.style().align_self = Some(gpui::AlignSelf::FlexEnd);
                     d.child(status)
                 })
@@ -322,7 +343,7 @@ impl Desktop {
                             // Own-message status keeps the far-right column even
                             // on compact continuations; actions sit to its left.
                             .right(if m.own {
-                                px(24.) + self.delivery_width() + self.sp(8.)
+                                px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
                             } else {
                                 px(8.)
                             })
@@ -404,11 +425,17 @@ impl Desktop {
             .message_panel
             .as_ref()
             .filter(|panel| Some(panel.context) == self.snapshot.selected);
+        let offline = self.snapshot.content == ContentState::Offline
+            || self
+                .snapshot
+                .selected
+                .is_some_and(|context| self.account_connection_failure(context.account).is_some());
         delivery_indicator(
             message,
             panel.is_some_and(|panel| panel.availability(MessageFeature::ReadReceipts).enabled()),
             panel.and_then(|panel| panel.common_read),
         )
+        .map(|indicator| indicator.with_connection(offline))
     }
 
     fn delivery_width(&self) -> gpui::Pixels {
@@ -426,11 +453,16 @@ impl Desktop {
             DeliveryIndicator::Read => t.accent,
             DeliveryIndicator::Failed => t.danger,
             DeliveryIndicator::Uncertain => t.warning,
-            DeliveryIndicator::Pending | DeliveryIndicator::Accepted => t.muted,
+            DeliveryIndicator::Queued
+            | DeliveryIndicator::Offline
+            | DeliveryIndicator::Pending
+            | DeliveryIndicator::Accepted => t.muted,
         };
         let name = match indicator {
             DeliveryIndicator::Read | DeliveryIndicator::Accepted => "check",
-            DeliveryIndicator::Pending => "clock",
+            DeliveryIndicator::Queued | DeliveryIndicator::Offline | DeliveryIndicator::Pending => {
+                "clock"
+            }
             DeliveryIndicator::Failed | DeliveryIndicator::Uncertain => "info",
         };
         let glyph = px(14. * (f32::from(self.scale) / 100.).sqrt());
@@ -446,6 +478,20 @@ impl Desktop {
                         .left(self.sp(5.)),
                 )
             })
+    }
+}
+
+fn call_status(message: &MessageView) -> Option<(&'static str, bool)> {
+    if !message.metadata.system || message.metadata.deleted {
+        return None;
+    }
+    match message.metadata.system_event {
+        SystemEvent::CallIncoming => Some(("phone-incoming", false)),
+        SystemEvent::CallOutgoing => Some(("phone-outgoing", false)),
+        SystemEvent::CallJoined => Some(("phone", false)),
+        SystemEvent::CallLeft | SystemEvent::CallEnded => Some(("phone-down", false)),
+        SystemEvent::CallMissed | SystemEvent::CallUnanswered => Some(("phone-missed", true)),
+        SystemEvent::Unknown | SystemEvent::Other => None,
     }
 }
 
@@ -483,6 +529,8 @@ pub(super) fn grouped_message(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeliveryIndicator {
+    Queued,
+    Offline,
     Pending,
     Accepted,
     Read,
@@ -490,8 +538,18 @@ enum DeliveryIndicator {
     Uncertain,
 }
 impl DeliveryIndicator {
+    fn with_connection(self, offline: bool) -> Self {
+        if self == Self::Queued && offline {
+            Self::Offline
+        } else {
+            self
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
+            Self::Queued => "Wartet auf Versand",
+            Self::Offline => "Wartet auf Verbindung",
             Self::Pending => "Wird gesendet …",
             Self::Accepted => "Vom Server angenommen",
             Self::Read => "Gelesen (öffentliche Lesebestätigungen)",
@@ -512,6 +570,7 @@ fn delivery_indicator(
         return None;
     }
     Some(match message.delivery {
+        DeliveryState::Queued => DeliveryIndicator::Queued,
         DeliveryState::Pending => DeliveryIndicator::Pending,
         DeliveryState::Received | DeliveryState::ServerAccepted => {
             if receipts_allowed && common_read.is_some_and(|id| message.local_id <= id) {
@@ -546,6 +605,35 @@ mod tests {
                 timestamp,
                 ..Default::default()
             },
+        }
+    }
+
+    #[test]
+    fn call_history_icons_distinguish_direction_and_only_unsuccessful_calls_are_red() {
+        let mut message = authored_message(1, None, 1);
+        message.metadata.system = true;
+        for (event, icon, red) in [
+            (SystemEvent::CallIncoming, "phone-incoming", false),
+            (SystemEvent::CallOutgoing, "phone-outgoing", false),
+            (SystemEvent::CallJoined, "phone", false),
+            (SystemEvent::CallLeft, "phone-down", false),
+            (SystemEvent::CallEnded, "phone-down", false),
+            (SystemEvent::CallMissed, "phone-missed", true),
+            (SystemEvent::CallUnanswered, "phone-missed", true),
+        ] {
+            message.metadata.system_event = event;
+            assert_eq!(call_status(&message), Some((icon, red)));
+        }
+        message.metadata.system = false;
+        assert_eq!(call_status(&message), None);
+        message.metadata.system = true;
+        message.metadata.deleted = true;
+        assert_eq!(call_status(&message), None);
+        message.metadata.deleted = false;
+        for event in [SystemEvent::Unknown, SystemEvent::Other] {
+            message.metadata.system_event = event;
+            message.body = Text::new("Unbeantworteter Anruf").unwrap();
+            assert_eq!(call_status(&message), None);
         }
     }
 
@@ -639,6 +727,7 @@ mod tests {
             );
         }
         for (delivery, indicator) in [
+            (DeliveryState::Queued, DeliveryIndicator::Queued),
             (DeliveryState::Pending, DeliveryIndicator::Pending),
             (DeliveryState::Failed, DeliveryIndicator::Failed),
             (DeliveryState::Uncertain, DeliveryIndicator::Uncertain),
@@ -654,5 +743,26 @@ mod tests {
         message.metadata.deleted = false;
         message.metadata.system = true;
         assert_eq!(delivery_indicator(&message, true, Some(11)), None);
+    }
+
+    #[test]
+    fn offline_queue_indicator_never_claims_a_receipt_or_hides_uncertainty() {
+        let mut message = authored_message(10, Some("users:one"), 32_400);
+        message.own = true;
+        message.delivery = DeliveryState::Queued;
+        let queued = delivery_indicator(&message, true, Some(u128::MAX)).unwrap();
+        assert_eq!(queued.with_connection(false), DeliveryIndicator::Queued);
+        let offline = queued.with_connection(true);
+        assert_eq!(offline, DeliveryIndicator::Offline);
+        assert_eq!(offline.label(), "Wartet auf Verbindung");
+        for indicator in [
+            DeliveryIndicator::Pending,
+            DeliveryIndicator::Accepted,
+            DeliveryIndicator::Read,
+            DeliveryIndicator::Failed,
+            DeliveryIndicator::Uncertain,
+        ] {
+            assert_eq!(indicator.with_connection(true), indicator);
+        }
     }
 }

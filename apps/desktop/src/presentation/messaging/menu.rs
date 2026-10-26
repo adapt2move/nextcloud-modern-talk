@@ -2,11 +2,6 @@
 use super::*;
 use gpui::{AnyElement, Bounds, Element, ElementId, KeyDownEvent, Pixels, Point, Size};
 
-// The adapter forwards text comments only; the preview must include the whole body.
-fn forwardable_body(metadata: &talk_core::ui::messaging::MessageMetadata) -> bool {
-    !metadata.system && !metadata.truncated && metadata.rich.as_slice().is_empty()
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Target {
     context: ConversationRef,
@@ -22,10 +17,9 @@ pub(crate) enum Choice {
     Delete,
     ConfirmDelete,
     Pin,
+    Unpin,
     Remind,
     Forward,
-    Destination(ConversationRef),
-    ConfirmForward,
     Thread,
     Back,
 }
@@ -36,7 +30,6 @@ enum Mode {
     Actions,
     Reactions,
     Delete,
-    Forward(Option<ConversationRef>),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -149,23 +142,28 @@ impl Item {
         }
     }
     fn id(&self, target: Target) -> ElementId {
-        match self.choice {
-            Choice::Destination(context) => scoped_id(
-                "menu-forward-to",
-                context,
-                target.message,
-                u128::from(target.generation),
-            ),
-            _ => scoped_id(
-                "message-popup-item",
-                target.context,
-                target.message,
-                u128::from(target.generation) * 128 + self.choice.ordinal(),
-            ),
-        }
+        scoped_id(
+            "message-popup-item",
+            target.context,
+            target.message,
+            u128::from(target.generation) * 128 + self.choice.ordinal(),
+        )
     }
 }
 impl Choice {
+    fn icon(self) -> &'static str {
+        match self {
+            Self::React => "smile",
+            Self::Reaction(_) => "smile", // The emoji grid does not render this icon.
+            Self::Edit => "file",
+            Self::Delete | Self::ConfirmDelete => "trash-2",
+            Self::Pin | Self::Unpin => "pin",
+            Self::Remind => "clock",
+            Self::Forward => "arrow-right",
+            Self::Thread => "chat",
+            Self::Back => "arrow-left",
+        }
+    }
     fn ordinal(self) -> u128 {
         match self {
             Self::React => 0,
@@ -174,12 +172,11 @@ impl Choice {
             Self::Delete => 2,
             Self::ConfirmDelete => 3,
             Self::Pin => 4,
+            Self::Unpin => 10,
             Self::Remind => 5,
             Self::Forward => 6,
-            Self::ConfirmForward => 7,
             Self::Thread => 8,
             Self::Back => 9,
-            Self::Destination(_) => 10,
         }
     }
 }
@@ -225,7 +222,7 @@ impl Desktop {
             feature(MessageFeature::Delete),
             self.local_message_intents(),
         );
-        let forward = feature(MessageFeature::Forward) && forwardable_body(&message.metadata);
+        let forward = self.forward_source_available(target.context, target.message);
         let pinned = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
             panel.context == target.context
                 && panel
@@ -261,7 +258,7 @@ impl Desktop {
                         "Diese Nachricht kann nicht gelöscht werden.",
                     ),
                     Item::new(
-                        Choice::Pin,
+                        if pinned { Choice::Unpin } else { Choice::Pin },
                         if pinned {
                             "Angeheftete Nachricht lösen"
                         } else {
@@ -314,50 +311,6 @@ impl Desktop {
                 ),
                 back(),
             ],
-            Mode::Forward(destination) => {
-                let mut items = vec![back()];
-                items.extend(
-                    self.snapshot
-                        .conversations
-                        .as_slice()
-                        .iter()
-                        .filter(|room| {
-                            forward_destination_allowed(
-                                target.context,
-                                room.context,
-                                room.send,
-                                self.local_message_intents(),
-                            )
-                        })
-                        .take(20)
-                        .map(|room| {
-                            Item::new(
-                                Choice::Destination(room.context),
-                                room.title.as_str(),
-                                forward,
-                                "Weiterleiten ist derzeit nicht verfügbar.",
-                            )
-                        }),
-                );
-                if let Some(destination) = destination {
-                    let current = self.snapshot.conversations.as_slice().iter().any(|room| {
-                        room.context == destination
-                            && forward_destination_allowed(
-                                target.context,
-                                room.context,
-                                room.send,
-                                self.local_message_intents(),
-                            )
-                    });
-                    items.push(Item::new(
-                        Choice::ConfirmForward,
-                        "An dieses Gespräch senden",
-                        forward && current,
-                        "Das Zielgespräch ist nicht mehr verfügbar.",
-                    ));
-                }
-                items
-            }
         }
     }
 
@@ -495,16 +448,25 @@ impl Desktop {
                 return;
             }
             Choice::Delete => self.message_ui.menu.session.mode = Mode::Delete,
-            Choice::Forward => self.message_ui.menu.session.mode = Mode::Forward(None),
-            Choice::Destination(destination) => {
-                self.message_ui.menu.session.mode = Mode::Forward(Some(destination))
+            Choice::Forward => {
+                let return_control = scoped_id(
+                    self.message_ui.menu.source.key(),
+                    target.context,
+                    target.message,
+                    0,
+                );
+                self.dismiss_message_menu(false, window, cx);
+                self.open_forward_dialog(
+                    target.context,
+                    target.message,
+                    return_control,
+                    window,
+                    cx,
+                );
+                return;
             }
             Choice::Back => self.message_ui.menu.session.mode = Mode::Actions,
             _ => {
-                let destination = match self.message_ui.menu.session.mode {
-                    Mode::Forward(destination) => destination,
-                    _ => None,
-                };
                 let thread = self
                     .current_menu_message(target)
                     .and_then(|row| row.metadata.thread)
@@ -519,15 +481,8 @@ impl Desktop {
                     Choice::ConfirmDelete => {
                         self.submit_message(MessageAction::Delete(target.message));
                     }
-                    Choice::Pin => {
-                        let pinned = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                            panel
-                                .pinned_messages
-                                .as_slice()
-                                .iter()
-                                .any(|m| m.local_id == target.message)
-                        });
-                        self.submit_message(if pinned {
+                    Choice::Pin | Choice::Unpin => {
+                        self.submit_message(if choice == Choice::Unpin {
                             MessageAction::Unpin(target.message)
                         } else {
                             MessageAction::Pin(target.message)
@@ -536,14 +491,6 @@ impl Desktop {
                     Choice::Remind => {
                         self.message_action(Action::Remind(target.message), window, cx);
                         self.message_ui.time_input.focus_handle(cx).focus(window);
-                    }
-                    Choice::ConfirmForward => {
-                        if let Some(destination) = destination {
-                            self.submit_message(MessageAction::Forward {
-                                message: target.message,
-                                destination,
-                            });
-                        }
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
@@ -592,6 +539,8 @@ impl Desktop {
     }
 
     pub(crate) fn prepare_message_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.revalidate_forward_session();
+        self.prepare_forward_dialog(window, cx);
         if let Some(target) = self.message_ui.menu.target() {
             let moved_focus = !self.message_ui.menu.pending_focus
                 && !self.message_ui.menu.focus.contains_focused(window, cx);
@@ -604,7 +553,10 @@ impl Desktop {
                 || self.onboarding_open
                 || self.account_removal.confirming()
                 || self.navigation_open
-                || !matches!(self.overlay, None | Some(Overlay::CallChat))
+                || !matches!(
+                    self.overlay,
+                    None | Some(Overlay::CallChat | Overlay::Thread)
+                )
                 || moved_focus
             {
                 self.dismiss_message_menu(!moved_focus && window.is_window_active(), window, cx);
@@ -625,7 +577,8 @@ impl Desktop {
         let geometry = self.message_ui.menu.geometry.clone();
         let outside_geometry = geometry.clone();
         let width = self.message_popup_width(window);
-        let mut body = div()
+        let mut body = self
+            .context_menu_surface()
             .id(scoped_id(
                 "message-popup",
                 target.context,
@@ -639,14 +592,6 @@ impl Desktop {
             .max_h((window.viewport_size().height - px(24.)).max(px(1.)))
             .overflow_y_scroll()
             .track_scroll(&self.message_ui.menu.scroll)
-            .rounded(px(10.))
-            .border_1()
-            .border_color(self.theme.border)
-            .shadow_lg()
-            .bg(self.theme.surface)
-            .p_1()
-            .flex()
-            .flex_col()
             .on_mouse_down_out(cx.listener(
                 move |this, event: &gpui::MouseDownEvent, window, cx| {
                     if this.message_ui.menu.target() == Some(target)
@@ -664,31 +609,6 @@ impl Desktop {
                 body = body.child(div().p_3().child(self.hint(
                     self.l("Diese Nachricht für alle löschen? Geteilte Dateien bleiben erhalten."),
                 )));
-            }
-            Mode::Forward(destination) => {
-                body = body.child(
-                    div()
-                        .p_3()
-                        .child(
-                            self.hint(self.l("Weiterleiten als neue Nachricht. Ziel auswählen:")),
-                        )
-                        .child(self.hint(message.body.as_str())),
-                );
-                if let Some(room) = destination.and_then(|destination| {
-                    self.snapshot
-                        .conversations
-                        .as_slice()
-                        .iter()
-                        .find(|room| room.context == destination)
-                }) {
-                    body = body.child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .bg(self.theme.selected)
-                            .child(room.title.as_str().to_owned()),
-                    );
-                }
             }
             Mode::Actions => {}
             Mode::Reactions => {
@@ -725,11 +645,11 @@ impl Desktop {
                         .size(self.sp(36.).max(px(34.)))
                         .min_h(self.sp(36.).max(px(34.)))
                         .p_0()
-                        .text_size(self.sp(20.))
+                        .text_size(self.sp(16.))
                         .bg(if own {
                             self.theme.selected
                         } else {
-                            self.theme.surface
+                            gpui::transparent_black()
                         })
                         .child(item.label.clone())
                         .child(self.reason_tip(
@@ -747,12 +667,14 @@ impl Desktop {
             }
         } else {
             for item in items {
-                let label = if matches!(item.choice, Choice::Destination(_)) {
-                    item.label.clone()
+                let label = self.l(&item.label).to_owned();
+                let color = if !item.enabled {
+                    self.theme.muted
+                } else if matches!(item.choice, Choice::Delete | Choice::ConfirmDelete) {
+                    self.theme.danger
                 } else {
-                    self.l(&item.label).to_owned()
+                    self.theme.muted
                 };
-                // Room titles are user content; do not pass them through button's UI catalog.
                 body = body.child(
                     self.control(
                         item.id(target),
@@ -770,6 +692,24 @@ impl Desktop {
                     )
                     .w_full()
                     .justify_start()
+                    .child(
+                        div()
+                            .relative()
+                            .size(px(18.))
+                            .flex_none()
+                            .child(self.scaled_icon(item.choice.icon(), 18., color))
+                            .when(item.choice == Choice::Unpin, |icon| {
+                                icon.child(
+                                    div()
+                                        .absolute()
+                                        .right(px(-3.))
+                                        .top(px(-3.))
+                                        .rounded_full()
+                                        .bg(self.theme.surface)
+                                        .child(self.scaled_icon("x", 10., color)),
+                                )
+                            }),
+                    )
                     .child(label)
                     .when(!item.enabled, |control| {
                         control.child(self.reason_tip(
@@ -799,16 +739,7 @@ impl Desktop {
         match self.message_ui.menu.session.mode {
             Mode::Actions => 0,
             Mode::Reactions => 1,
-            Mode::Delete | Mode::Forward(None) => 1,
-            Mode::Forward(Some(destination)) => {
-                1 + usize::from(
-                    self.snapshot
-                        .conversations
-                        .as_slice()
-                        .iter()
-                        .any(|room| room.context == destination),
-                )
-            }
+            Mode::Delete => 1,
         }
     }
 
@@ -836,6 +767,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.finish_forward_dialog_frame(window, cx);
         let Some(target) = self.message_ui.menu.target() else {
             return;
         };
@@ -874,6 +806,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.forward_dialog_key(event, window, cx) {
+            return true;
+        }
         let Some(target) = self.message_ui.menu.target() else {
             return false;
         };
@@ -927,17 +862,6 @@ impl Desktop {
         }
         true
     }
-}
-
-fn forward_destination_allowed(
-    source: ConversationRef,
-    destination: ConversationRef,
-    send: Decision,
-    queue_available: bool,
-) -> bool {
-    destination != source
-        && destination.account == source.account
-        && decision_allows_intent(send, queue_available)
 }
 
 fn next_reaction_index(
@@ -1159,83 +1083,5 @@ mod tests {
             item(first, Choice::Reaction(35)),
             item(next, Choice::Reaction(19))
         );
-    }
-    #[test]
-    fn forwarding_requires_a_complete_plain_text_preview() {
-        let mut metadata = talk_core::ui::messaging::MessageMetadata::default();
-        assert!(forwardable_body(&metadata));
-        metadata.truncated = true;
-        assert!(!forwardable_body(&metadata));
-        metadata.truncated = false;
-        metadata.system = true;
-        assert!(!forwardable_body(&metadata));
-        metadata.system = false;
-        metadata
-            .rich
-            .try_push(talk_core::ui::messaging::RichObject {
-                id: None,
-                mime_type: None,
-                size: None,
-                placeholder: Text::new("file").unwrap(),
-                kind: Text::new("file").unwrap(),
-                name: Text::new("fixture.txt").unwrap(),
-                link: None,
-            })
-            .unwrap();
-        assert!(!forwardable_body(&metadata));
-    }
-
-    #[test]
-    fn offline_forward_destinations_keep_account_runtime_and_known_send_denials() {
-        let source = room(1);
-        let destination = room(2);
-        assert!(forward_destination_allowed(
-            source,
-            destination,
-            Decision::Allowed,
-            false
-        ));
-        for permission in [Decision::Unknown, Decision::Stale] {
-            assert!(forward_destination_allowed(
-                source,
-                destination,
-                permission,
-                true
-            ));
-            assert!(!forward_destination_allowed(
-                source,
-                destination,
-                permission,
-                false
-            ));
-        }
-        assert!(!forward_destination_allowed(
-            source,
-            destination,
-            Decision::Denied,
-            true
-        ));
-        assert!(!forward_destination_allowed(
-            source,
-            source,
-            Decision::Unknown,
-            true
-        ));
-        let mut replaced = destination;
-        replaced.account.runtime = talk_core::ui::RuntimeGeneration::from_local(9);
-        assert!(!forward_destination_allowed(
-            source,
-            replaced,
-            Decision::Unknown,
-            true
-        ));
-        let mut other = destination;
-        other.account.account = talk_core::ui::AccountId::from_local(9);
-        assert!(!forward_destination_allowed(
-            source,
-            other,
-            Decision::Allowed,
-            true
-        ));
     }
 }

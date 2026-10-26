@@ -4,12 +4,37 @@
 use super::*;
 use talk_adapters::identity::{
     CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory,
-    CacheRoom, CacheThumbnail, CachedRoomKind, DataCommand, DataResult, DataSnapshot,
+    CacheRoom, CacheRoomObservation, CacheThumbnail, CachedNotificationLevel, CachedRoomKind,
+    DataCommand, DataResult, DataSnapshot,
 };
 use talk_core::{
     ids::{ConversationId, HostId, RuntimeGeneration},
     preferences::navigation::NavigationRoomKey,
 };
+
+pub(super) fn fresh_metadata(observed_at: u64, now: u64) -> bool {
+    observed_at <= now && now - observed_at < talk_adapters::identity::CACHE_LIFETIME
+}
+fn cached_observation(details: &talk_core::ui::conversation::RoomDetails) -> CacheRoomObservation {
+    use talk_core::ui::conversation::NotificationLevel as V;
+    CacheRoomObservation {
+        description: details.description.clone(),
+        read_only: details.read_only,
+        notifications: details.notifications.map(|n| match n {
+            V::Default => CachedNotificationLevel::Default,
+            V::Always => CachedNotificationLevel::Always,
+            V::Mention => CachedNotificationLevel::Mention,
+            V::Never => CachedNotificationLevel::Never,
+        }),
+        call_notifications: details.call_notifications,
+        important: details.important,
+        preserved: details.preserved,
+        message_expiration: details.message_expiration,
+        lobby: details.lobby,
+        guest_access: details.guest_access,
+        observed_at: history::now_unix(),
+    }
+}
 
 const WRITES: usize = 24;
 const CLEANUP_RETRY: Duration = Duration::from_secs(5);
@@ -27,6 +52,9 @@ struct Binding {
     context: ConversationRef,
     key: NavigationRoomKey,
     ordinary: bool,
+    // A late disk load may fill a missing observation, never replace a detail
+    // already observed or retired in this runtime, including an oversized one.
+    metadata_observed: bool,
 }
 struct Account {
     id: AccountId,
@@ -567,13 +595,14 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
 }
 impl Accounts {
     pub(super) fn project_cache(&mut self, context: ConversationRef) {
+        let queue_available = self.outbox_available(context);
         if let Some(panel) = self
             .snapshot
             .message_panel
             .as_mut()
             .filter(|p| p.context == context)
         {
-            panel.queue_available = self.cache.persistable(context);
+            panel.queue_available = queue_available;
         }
     }
     pub(super) fn sync_cache_accounts(&mut self, state: &ConnectionSnapshot) {
@@ -820,6 +849,23 @@ impl Accounts {
                 // overwrite newer confirmed content from this runtime.
                 if let Some(current) = a.snapshot.as_mut() {
                     let now = history::now_unix();
+                    current.rooms =
+                        page(current.rooms.as_slice().iter().cloned().map(|mut room| {
+                            if room.observation.is_none()
+                                && a.bindings.iter().any(|b| {
+                                    b.ordinary && !b.metadata_observed && b.key == room.key
+                                })
+                                && let Some(old) =
+                                    snapshot.rooms.as_slice().iter().find(|r| r.key == room.key)
+                                && let Some(observation) = old
+                                    .observation
+                                    .as_ref()
+                                    .filter(|o| fresh_metadata(o.observed_at, now))
+                            {
+                                room.retain_observation(observation.clone());
+                            }
+                            room
+                        }));
                     let newer = current.thumbnails.clone();
                     current.thumbnails = Page::empty();
                     for thumbnail in snapshot
@@ -854,6 +900,9 @@ impl Accounts {
             a.loaded = true;
             a.hydrated = None;
             self.touch();
+        }
+        if let Some(context) = self.snapshot.selected {
+            self.hydrate_room_metadata(context);
         }
         // Required preview cleanup retains its account-owned retry above.
         // Other cache failures retain observations without failing a server
@@ -899,6 +948,7 @@ impl Accounts {
                         context: local_context(scope, &r.key)?,
                         key: r.key.clone(),
                         ordinary: true,
+                        metadata_observed: false,
                     })
                 })
                 .collect();
@@ -989,6 +1039,129 @@ impl Accounts {
             let _ = self.select_conversation(context);
         }
     }
+    /// Disk observations are presentation only, even after their stable room
+    /// key has rebound to the current host/runtime. No cached grant is copied.
+    pub(super) fn cached_room_details(
+        &self,
+        context: ConversationRef,
+    ) -> Option<talk_core::ui::conversation::RoomDetails> {
+        use talk_core::ui::conversation::{NotificationLevel as V, RoomDetails};
+        let key = self.cache.stable_room(context)?;
+        let room = self
+            .cache
+            .accounts
+            .iter()
+            .find(|a| a.id == context.account.account)?
+            .snapshot
+            .as_ref()?
+            .rooms
+            .as_slice()
+            .iter()
+            .find(|r| r.key == key)?;
+        let o = room
+            .observation
+            .as_ref()
+            .filter(|o| fresh_metadata(o.observed_at, history::now_unix()))?;
+        Some(RoomDetails {
+            name: room.title.clone(),
+            description: o.description.clone(),
+            read_only: o.read_only,
+            notifications: o.notifications.map(|n| match n {
+                CachedNotificationLevel::Default => V::Default,
+                CachedNotificationLevel::Always => V::Always,
+                CachedNotificationLevel::Mention => V::Mention,
+                CachedNotificationLevel::Never => V::Never,
+            }),
+            call_notifications: o.call_notifications,
+            important: o.important,
+            sensitive: false,
+            classified: false,
+            preserved: o.preserved,
+            message_expiration: o.message_expiration,
+            default_permissions: None,
+            server_default_permissions: None,
+            effective_permissions: None,
+            lobby: o.lobby,
+            has_password: None,
+            participant_count: room.participant_count,
+            guest_access: o.guest_access,
+            leave: Decision::Unknown,
+            controls: Page::empty(),
+        })
+    }
+    pub(super) fn remember_cached_room_details(
+        &mut self,
+        context: ConversationRef,
+        details: &talk_core::ui::conversation::RoomDetails,
+    ) {
+        if !self.cache.persistable(context) || details.sensitive || details.classified {
+            return;
+        }
+        let Some(key) = self.cache.stable_room(context) else {
+            return;
+        };
+        let Some(account) = self
+            .cache
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == context.account.account && a.scope == Some(context.account))
+        else {
+            return;
+        };
+        if let Some(binding) = account.bindings.iter_mut().find(|b| b.context == context) {
+            binding.metadata_observed = true;
+        }
+        let Some(snapshot) = account.snapshot.as_mut() else {
+            return;
+        };
+        let mut changed = false;
+        snapshot.rooms = page(snapshot.rooms.as_slice().iter().cloned().map(|mut room| {
+            if room.key == key {
+                let observation = cached_observation(details);
+                // Metadata is disposable. If escaped text exceeds 8 KiB, omit
+                // that observation while retaining the complete room policy.
+                room.retain_observation(observation);
+                changed = true;
+            }
+            room
+        }));
+        if changed {
+            let rooms = snapshot.rooms.clone();
+            self.cache
+                .enqueue(context.account.account, DataCommand::PutRooms(rooms));
+        }
+    }
+    pub(super) fn forget_cached_room_details(&mut self, context: ConversationRef) {
+        let Some(key) = self.cache.stable_room(context) else {
+            return;
+        };
+        let Some(account) = self
+            .cache
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == context.account.account && a.scope == Some(context.account))
+        else {
+            return;
+        };
+        if let Some(binding) = account.bindings.iter_mut().find(|b| b.context == context) {
+            binding.metadata_observed = true;
+        }
+        let Some(snapshot) = account.snapshot.as_mut() else {
+            return;
+        };
+        let mut changed = false;
+        snapshot.rooms = page(snapshot.rooms.as_slice().iter().cloned().map(|mut room| {
+            if room.key == key {
+                changed |= room.observation.take().is_some();
+            }
+            room
+        }));
+        if changed {
+            let rooms = snapshot.rooms.clone();
+            self.cache
+                .enqueue(context.account.account, DataCommand::PutRooms(rooms));
+        }
+    }
     pub(super) fn observe_cache_rooms(
         &mut self,
         scope: AccountScope,
@@ -1011,6 +1184,12 @@ impl Accounts {
             .as_ref()
             .map(|s| s.rooms.clone())
             .unwrap_or_else(Page::empty);
+        let metadata_observed: Vec<_> = account
+            .bindings
+            .iter()
+            .filter(|b| b.metadata_observed)
+            .map(|b| b.context)
+            .collect();
         account.bindings.clear();
         let mut rooms = Page::empty();
         for room in list.rooms.as_slice() {
@@ -1038,6 +1217,7 @@ impl Accounts {
                 context,
                 key: key.clone(),
                 ordinary,
+                metadata_observed: metadata_observed.contains(&context),
             });
             if !ordinary {
                 continue;
@@ -1067,7 +1247,7 @@ impl Accounts {
             {
                 self.history.restore(context, history);
             }
-            let _ = rooms.try_push(CacheRoom {
+            let mut cached = CacheRoom {
                 key,
                 title: room.name.clone(),
                 kind: match room.kind {
@@ -1084,7 +1264,15 @@ impl Accounts {
                 participant_count_at: old.and_then(|r| r.participant_count_at),
                 last_activity: room.last_activity,
                 saved_at: now,
-            });
+                observation: None,
+            };
+            if let Some(observation) = old
+                .and_then(|r| r.observation.clone())
+                .filter(|o| fresh_metadata(o.observed_at, now))
+            {
+                cached.retain_observation(observation);
+            }
+            let _ = rooms.try_push(cached);
         }
         account.observed = true;
         let snapshot = account.snapshot.get_or_insert_with(|| DataSnapshot {
@@ -1275,6 +1463,8 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[path = "metadata_tests.rs"]
+    mod metadata_tests;
     #[path = "thumbnail_tests.rs"]
     mod thumbnail_tests;
     fn stable() -> NavigationRoomKey {
@@ -1292,6 +1482,7 @@ mod tests {
             participant_count_at: Some(history::now_unix()),
             last_activity: Some(1),
             saved_at: history::now_unix(),
+            observation: None,
         }
     }
     fn install(model: &mut Accounts, scope: AccountScope) {
@@ -1404,6 +1595,8 @@ mod tests {
                 edited: false,
                 deleted: false,
                 system: false,
+                system_event: None,
+                pin_notice: false,
                 truncated: false,
                 replyable: true,
                 parent: None,

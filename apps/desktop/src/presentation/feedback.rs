@@ -98,20 +98,13 @@ impl Feedback {
     pub fn expired(self, now: Instant) -> bool {
         self.expires_at.is_some_and(|deadline| now >= deadline)
     }
-    pub fn from_draft_error(error: SubmitError) -> Self {
-        let mut feedback = Self::from_error(error);
-        if error == SubmitError::Busy {
-            feedback.text =
-                "Gerade ausgelastet. Dein Entwurf bleibt erhalten; bitte erneut versuchen.";
-        }
-        feedback
+    pub fn from_draft_error(error: SubmitError) -> Option<Self> {
+        Self::from_error(error)
     }
-    pub fn from_error(error: SubmitError) -> Self {
-        let text = error_label(error);
-        let mut feedback = match error {
-            SubmitError::Busy
-            | SubmitError::Unavailable(UnavailableReason::Busy)
-            | SubmitError::Unavailable(
+    pub fn from_error(error: SubmitError) -> Option<Self> {
+        let text = error_label(error)?;
+        Some(match error {
+            SubmitError::Unavailable(
                 UnavailableReason::Unsupported | UnavailableReason::Unconfigured,
             ) => Self::info(text),
             SubmitError::StaleScope
@@ -119,13 +112,7 @@ impl Feedback {
                 UnavailableReason::PolicyUnknown | UnavailableReason::PolicyStale,
             ) => Self::warning(text),
             _ => Self::error(text),
-        };
-        // A rejected admission has no asynchronous completion to clear it.
-        // Only this transient case expires; failed/uncertain effects stay visible.
-        if error == SubmitError::Busy {
-            feedback.expires_at = Some(Instant::now() + Duration::from_secs(8));
-        }
-        feedback
+        })
     }
 }
 
@@ -202,24 +189,31 @@ pub(super) fn submit(
         }
         Err(error) => {
             if !automatic {
-                let mut result = match (unsupported, error) {
+                let result = match (unsupported, error) {
                     (
                         Some(label),
                         SubmitError::Unavailable(
                             UnavailableReason::Unsupported | UnavailableReason::Unconfigured,
                         ),
-                    ) => Feedback::info(label),
+                    ) => Some(Feedback::info(label)),
                     _ => Feedback::from_error(error),
+                };
+                if let Some(mut result) = result {
+                    result = result.on_surface(overlay);
+                    result.context = context;
+                    *feedback = Some(result);
                 }
-                .on_surface(overlay);
-                result.context = context;
-                *feedback = Some(result);
             }
             false
         }
     }
 }
 impl Desktop {
+    pub(super) fn report_draft_error(&mut self, error: SubmitError, context: ConversationRef) {
+        if let Some(feedback) = Feedback::from_draft_error(error) {
+            self.feedback = Some(feedback.in_conversation(context).on_surface(self.overlay));
+        }
+    }
     pub(super) fn feedback_visible(&self) -> bool {
         self.feedback
             .is_some_and(|f| f.visible_in(self.snapshot.selected, self.overlay))
@@ -380,7 +374,9 @@ mod tests {
     #[test]
     fn rejected_user_action_is_visible_only_in_its_conversation_and_surface() {
         let mut port = Port {
-            error: Some(SubmitError::Busy),
+            error: Some(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            )),
             attempts: 0,
         };
         let mut feedback = None;
@@ -409,7 +405,9 @@ mod tests {
             (MessageAction::Files, Overlay::Files),
         ] {
             let mut port = Port {
-                error: Some(SubmitError::Busy),
+                error: Some(SubmitError::Unavailable(
+                    UnavailableReason::PermissionDenied,
+                )),
                 attempts: 0,
             };
             let mut feedback = None;
@@ -424,49 +422,31 @@ mod tests {
     }
 
     #[test]
-    fn only_busy_expires_or_clears_after_user_admission() {
-        let mut port = Port {
-            error: Some(SubmitError::Busy),
-            attempts: 0,
-        };
-        let mut feedback = None;
+    fn quiet_busy_preserves_genuine_feedback_and_does_not_claim_admission() {
         let action = message(MessageAction::React {
             message: 42,
             emoji: Text::new("👍").unwrap(),
             add: true,
         });
-        assert!(!submit(&mut port, &mut feedback, action.clone(), None));
-        let deadline = feedback.unwrap().expires_at.unwrap();
-        assert!(
-            !feedback
-                .unwrap()
-                .expired(deadline - Duration::from_millis(1))
-        );
-        assert!(feedback.unwrap().expired(deadline));
-        port.error = None;
-        assert!(submit(
-            &mut port,
-            &mut feedback,
-            message(MessageAction::MarkRead(42)),
-            None
-        ));
-        assert!(
-            feedback.is_some(),
-            "An unrelated receipt cannot confirm the user action"
-        );
-        assert!(submit(&mut port, &mut feedback, action.clone(), None));
-        assert!(feedback.is_none());
-
         for original in [
-            Feedback::warning("Sendestatus unklar"),
+            None,
+            Some(Feedback::warning("Sendestatus unklar")),
             Feedback::from_error(SubmitError::Unavailable(
                 UnavailableReason::PermissionDenied,
             )),
         ] {
-            assert!(!original.expired(deadline + Duration::from_secs(3600)));
-            feedback = Some(original);
+            let mut feedback = original;
+            let mut port = Port {
+                error: Some(SubmitError::Busy),
+                attempts: 0,
+            };
+            assert!(!submit(&mut port, &mut feedback, action.clone(), None));
+            assert!(feedback == original);
+            assert_eq!(port.attempts, 1);
+            port.error = None;
             assert!(submit(&mut port, &mut feedback, action.clone(), None));
-            assert!(feedback == Some(original));
+            assert!(feedback == original);
+            assert_eq!(port.attempts, 2);
         }
     }
 
@@ -485,22 +465,28 @@ mod tests {
         assert_eq!(error, SubmitError::Busy);
         assert_eq!(drafts.text(context), "Keep this draft");
         assert!(!drafts.pending(context));
-        let result = Feedback::from_draft_error(error)
-            .in_conversation(context)
-            .on_surface(None);
-        assert!(result.text.contains("Entwurf bleibt erhalten"));
-        assert!(result.visible_in(Some(context), None));
-        assert!(!result.visible_in(Some(context), Some(Overlay::Accounts)));
+        assert!(Feedback::from_draft_error(error).is_none());
+        port.error = None;
+        assert!(
+            drafts
+                .send(context, talk_core::ui::Decision::Allowed, &mut port)
+                .is_ok()
+        );
+        assert!(drafts.pending(context));
+        assert_eq!(drafts.text(context), "Keep this draft");
     }
 
     #[test]
     fn admission_and_unsupported_are_not_errors_and_uncertain_is_a_warning() {
+        assert!(Feedback::from_error(SubmitError::Busy).is_none());
+        let expired_work =
+            Feedback::from_error(SubmitError::Unavailable(UnavailableReason::Busy)).unwrap();
+        assert!(matches!(expired_work.tone, Tone::Error));
+        assert!(expired_work.expires_at.is_none());
         assert!(matches!(
-            Feedback::from_error(SubmitError::Busy).tone,
-            Tone::Info
-        ));
-        assert!(matches!(
-            Feedback::from_error(SubmitError::Unavailable(UnavailableReason::Unsupported)).tone,
+            Feedback::from_error(SubmitError::Unavailable(UnavailableReason::Unsupported))
+                .unwrap()
+                .tone,
             Tone::Info
         ));
         assert!(matches!(
@@ -511,6 +497,7 @@ mod tests {
             Feedback::from_error(SubmitError::Unavailable(
                 UnavailableReason::PermissionDenied
             ))
+            .unwrap()
             .tone,
             Tone::Error
         ));

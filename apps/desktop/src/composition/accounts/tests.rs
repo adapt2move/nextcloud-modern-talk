@@ -754,6 +754,7 @@ pub(super) fn model() -> Accounts {
         cache: cache::Cache::default(),
         picker: None,
         picker_open: false,
+        csv_file_owner: files::CsvOwner::default(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
     }

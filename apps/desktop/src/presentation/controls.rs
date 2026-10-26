@@ -121,6 +121,7 @@ pub(super) use super::focus::{FocusStates, scoped_id};
 #[derive(Clone, Copy)]
 pub(super) struct Availability {
     enabled: bool,
+    pending: bool,
     reason: Option<&'static str>,
     help: Option<&'static str>,
     above_composer: bool,
@@ -138,6 +139,7 @@ impl Availability {
     pub fn when(enabled: bool, reason: &'static str) -> Self {
         Self {
             enabled,
+            pending: false,
             reason: (!enabled).then_some(reason),
             help: None,
             above_composer: false,
@@ -147,6 +149,25 @@ impl Availability {
             visible_label: false,
             hover_hint: false,
             switch_value: None,
+        }
+    }
+    /// Only an admitted operation owns this state. Keep the action's geometry
+    /// and identity while replacing waiting copy with a passive progress mark.
+    pub fn pending() -> Self {
+        Self {
+            enabled: false,
+            pending: true,
+            reason: None,
+            explained_elsewhere: true,
+            ..Self::available()
+        }
+    }
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            reason: None,
+            explained_elsewhere: true,
+            ..Self::available()
         }
     }
     /// Composite controls keep a selected marker without restyling unavailable text.
@@ -976,13 +997,42 @@ impl Desktop {
         self.control(id.clone(), style, availability, action, cx)
             // An empty label is not a flex item. Custom icon/row contents
             // otherwise gain a phantom gap and lose their shared alignment.
-            .when(!label.is_empty(), |d| d.child(label))
+            .when(!label.is_empty(), |d| {
+                d.child(
+                    div()
+                        .opacity(if availability.pending { 0. } else { 1. })
+                        .child(label),
+                )
+            })
+            .when(availability.pending, |d| {
+                d.child(self.pending_overlay(control_colors(self.theme, style, false).1))
+            })
             .when(
                 !availability.enabled
                     && !availability.explained_elsewhere
                     && !self.background_inert,
                 |d| d.child(self.reason_tip(id, availability, None, cx)),
             )
+    }
+    /// Static and passive: no timer, frame loop, hitbox or new focus target.
+    pub(in crate::presentation) fn pending_dots(&self, color: Hsla) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(2.))
+            .w(self.sp(18.))
+            .h(self.sp(6.))
+            .children((0..3).map(|_| div().size(self.sp(3.)).rounded_full().bg(color)))
+    }
+    fn pending_overlay(&self, color: Hsla) -> Div {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(self.pending_dots(color))
     }
     /// A boolean switch uses the same single native click/focus path as buttons.
     /// Unknown remote values keep the thumb centred and cannot masquerade as Off.
@@ -1048,12 +1098,13 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .when(value == Some(true), |d| {
+                    .when(value == Some(true) && !availability.pending, |d| {
                         d.child(icon("check", f32::from(thumb_size) - 4., track))
                     })
-                    .when(value.is_none(), |d| {
+                    .when(value.is_none() && !availability.pending, |d| {
                         d.child(div().w(px(8.)).h(px(2.)).bg(t.subtle))
-                    }),
+                    })
+                    .when(availability.pending, |d| d.child(self.pending_dots(track))),
                 px(3.),
                 width - thumb_size - px(5.),
             ),
@@ -1073,6 +1124,7 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
+        let availability = availability.into();
         self.control(id, ButtonStyle::Secondary, availability, action, cx)
             .min_w_0()
             .justify_between()
@@ -1082,15 +1134,29 @@ impl Desktop {
                 self.theme.subtle
             })
             .child(div().flex_1().min_w_0().text_ellipsis().child(label))
-            .child(self.scaled_icon(
-                if expanded {
-                    "chevron-up"
-                } else {
-                    "chevron-down"
-                },
-                16.,
-                self.theme.muted,
-            ))
+            .child(
+                div()
+                    .flex_none()
+                    .w(self.sp(18.))
+                    .h(self.sp(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(availability.pending, |d| {
+                        d.child(self.pending_dots(self.theme.muted))
+                    })
+                    .when(!availability.pending, |d| {
+                        d.child(self.scaled_icon(
+                            if expanded {
+                                "chevron-up"
+                            } else {
+                                "chevron-down"
+                            },
+                            16.,
+                            self.theme.muted,
+                        ))
+                    }),
+            )
     }
     pub(super) fn option_row(
         &self,
@@ -1164,7 +1230,12 @@ impl Desktop {
         let (_, foreground) = control_colors(self.theme, style, availability.enabled);
         self.button(id, content.0, style, availability, action, cx)
             .justify_between()
-            .child(self.scaled_icon(content.1, 18., foreground))
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(if availability.pending { 0. } else { 1. })
+                    .child(self.scaled_icon(content.1, 18., foreground)),
+            )
     }
     pub(super) fn button_with_leading_icon(
         &self,
@@ -1179,8 +1250,17 @@ impl Desktop {
         let (_, foreground) = control_colors(self.theme, style, availability.enabled);
         self.button(id, "", style, availability, action, cx)
             .justify_start()
-            .child(self.scaled_icon(content.1, 18., foreground))
-            .child(self.l(content.0))
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(if availability.pending { 0. } else { 1. })
+                    .child(self.scaled_icon(content.1, 18., foreground)),
+            )
+            .child(
+                div()
+                    .opacity(if availability.pending { 0. } else { 1. })
+                    .child(self.l(content.0)),
+            )
     }
     pub(super) fn icon_button(
         &self,
@@ -1224,7 +1304,15 @@ impl Desktop {
             .size(px(extent))
             .min_h(px(extent))
             .p_0()
-            .child(self.scaled_icon(name, 18., color))
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(if availability.pending { 0. } else { 1. })
+                    .child(self.scaled_icon(name, 18., color)),
+            )
+            .when(availability.pending, |d| {
+                d.child(self.pending_overlay(color))
+            })
             .when(
                 !self.background_inert
                     && !availability.above_composer

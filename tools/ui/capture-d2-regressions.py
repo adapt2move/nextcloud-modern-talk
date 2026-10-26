@@ -60,9 +60,9 @@ def exercise(scenario,env,xid,folder,label,large=False):
             clipboard=folder/f'{label}-synthetic.txt';clipboard.write_text('BEFORE')
             owner=subprocess.Popen(['xclip','-selection','clipboard','-i',str(clipboard),'-loops','0'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             try:
-                click(480,588);text('ALPHA');key('ctrl+a');key('ctrl+c');key('ctrl+x');key('ctrl+v');image('privacy-blocks-copy-cut-paste')
+                click(480,588);text('ALPHA');key('ctrl+a');key('ctrl+c');key('ctrl+x');key('ctrl+v');image('privacy-blocks-export-allows-paste')
                 check('unknown-privacy-preserves-clipboard',run(['xclip','-selection','clipboard','-o'],env).stdout=='BEFORE','synthetic clipboard owner')
-                key('End');text('Z');image('draft-retained-after-denied-cut-paste')
+                key('End');text('Z');image('imported-draft-editable-after-denied-cut')
                 check('privacy-no-port-dispatch',not log('UI_DISPATCH'),log('UI_DISPATCH'))
             finally:owner.terminate();owner.wait(timeout=3)
         else:

@@ -12,11 +12,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Finaliza la llamada antes de instalar la actualización.",
     ),
     (
-        "Das Update ist installiert. Der Neustart wird vorbereitet …",
-        "The update is installed. Preparing to restart…",
-        "La actualización está instalada. Preparando el reinicio…",
-    ),
-    (
         "Das Update ist zur Installation bereit.",
         "The update is ready to install.",
         "La actualización está lista para instalar.",
@@ -42,21 +37,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo verificar la actualización.",
     ),
     (
-        "Das Update wird geprüft …",
-        "Verifying the update…",
-        "Verificando la actualización…",
-    ),
-    (
-        "Das Update wird heruntergeladen …",
-        "Downloading the update…",
-        "Descargando la actualización…",
-    ),
-    (
-        "Das Update wird installiert …",
-        "Installing the update…",
-        "Instalando la actualización…",
-    ),
-    (
         "Das Update überschreitet die unterstützte Größe.",
         "The update exceeds the supported size.",
         "La actualización supera el tamaño admitido.",
@@ -80,11 +60,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Updatedienst wurde beendet.",
         "The update service has stopped.",
         "El servicio de actualizaciones se ha detenido.",
-    ),
-    (
-        "Die App bereitet die Installation vor …",
-        "The app is preparing the installation…",
-        "La aplicación está preparando la instalación…",
     ),
     (
         "Die Paketverwaltung ist nicht verfügbar.",
@@ -115,11 +90,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Diese Installation unterstützt keine automatischen Updates.",
         "This installation does not support automatic updates.",
         "Esta instalación no admite actualizaciones automáticas.",
-    ),
-    (
-        "Eine Updateaktion läuft bereits.",
-        "An update action is already running.",
-        "Ya hay una acción de actualización en curso.",
     ),
     (
         "Schließe ungesendete Nachrichten vor dem Neustart ab oder leere sie.",

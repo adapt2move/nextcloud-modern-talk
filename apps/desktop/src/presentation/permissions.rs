@@ -7,7 +7,7 @@ use talk_core::preferences::permissions::{
     PermissionAction, PermissionError, PermissionGuidance, PermissionIntent, PermissionKind,
     PermissionObservation, PermissionOperation, PermissionSnapshot, PermissionStatus,
 };
-use talk_core::preferences::{RequestId, RuntimeState};
+use talk_core::preferences::{RequestId, RuntimeState, SaveState};
 
 #[derive(Clone, Copy)]
 struct Pending {
@@ -39,29 +39,83 @@ impl PermissionUi {
         }
     }
 
-    fn feedback(&self, kind: PermissionKind) -> Option<&'static str> {
+    fn feedback(&self, _kind: PermissionKind) -> Option<&'static str> {
         // A failed snapshot must stay visible even when no correlated completion
         // arrived. Do not infer a grant or consume an uncorrelated operation here.
-        if let Some(error) = self.snapshot.as_ref().err().copied().or(self.error) {
-            return Some(permission_error_key(error));
+        if let Some(message) = self
+            .snapshot
+            .as_ref()
+            .err()
+            .copied()
+            .and_then(permission_error_key)
+            .or_else(|| self.error.and_then(permission_error_key))
+        {
+            return Some(message);
         }
         if self
             .snapshot
             .as_ref()
             .is_ok_and(|s| s.runtime != RuntimeState::Running)
         {
-            return Some("Die Zugriffsprüfung ist noch nicht bereit.");
+            return Some("Die Zugriffsprüfung ist nicht verfügbar.");
         }
-        self.pending.map(|pending| {
-            if pending.kind != kind {
-                return "Eine andere Zugriffsanfrage läuft …";
+        None
+    }
+
+    fn record_submission(&mut self, pending: Pending, result: Result<(), PermissionError>) {
+        match result {
+            Ok(()) => {
+                self.pending = Some(pending);
+                self.error = None;
+                if pending.kind == PermissionKind::Microphone {
+                    self.microphone_ready = false;
+                }
             }
-            match pending.action {
-                PermissionAction::Check => "Zugriff wird geprüft …",
-                PermissionAction::Request => "Zugriffsanfrage läuft …",
-                PermissionAction::OpenSystemSettings => "Systemeinstellungen werden geöffnet …",
-            }
-        })
+            Err(PermissionError::Busy) => {}
+            Err(error) => self.error = Some(error),
+        }
+    }
+
+    fn apply_snapshot(
+        &mut self,
+        snapshot: Result<PermissionSnapshot, PermissionError>,
+    ) -> Option<(Pending, Option<PermissionError>)> {
+        self.snapshot = snapshot;
+        let pending = self.pending?;
+        let snapshot = self.snapshot.as_ref().ok()?;
+        let (request, kind, action, error) = match snapshot.operation {
+            PermissionOperation::Finished {
+                request,
+                kind,
+                action,
+            } => (request, kind, action, None),
+            PermissionOperation::Failed {
+                request,
+                kind,
+                action,
+                error,
+            } => (request, kind, action, Some(error)),
+            _ => return None,
+        };
+        if request != pending.request || kind != pending.kind || action != pending.action {
+            return None;
+        }
+        self.pending = None;
+        self.error = error;
+        Some((pending, error))
+    }
+
+    fn availability(&self) -> Availability {
+        if self.pending.is_some() {
+            Availability::pending()
+        } else {
+            Availability::when(
+                self.snapshot
+                    .as_ref()
+                    .is_ok_and(|s| s.runtime == RuntimeState::Running),
+                "Die Zugriffsprüfung ist nicht verfügbar.",
+            )
+        }
     }
 }
 const KINDS: [PermissionKind; 3] = [
@@ -302,12 +356,12 @@ fn permission_help(
     }
 }
 
-fn permission_error_key(error: PermissionError) -> &'static str {
-    match error {
+fn permission_error_key(error: PermissionError) -> Option<&'static str> {
+    Some(match error {
         PermissionError::Stale => {
             "Die Zugriffsanfrage ist nicht mehr aktuell. Bitte erneut prüfen."
         }
-        PermissionError::Busy => "Eine Zugriffsanfrage läuft bereits. Bitte warte kurz.",
+        PermissionError::Busy => return None,
         PermissionError::Closed => "Die Zugriffsprüfung wurde beendet.",
         PermissionError::Unsupported => "Diese Zugriffsaktion wird hier nicht unterstützt.",
         PermissionError::Unavailable => "Die Zugriffsprüfung ist nicht verfügbar.",
@@ -316,13 +370,17 @@ fn permission_error_key(error: PermissionError) -> &'static str {
             "Die Zugriffsanfrage hat zu lange gedauert. Bitte erneut prüfen."
         }
         PermissionError::Cancelled => "Die Zugriffsanfrage wurde abgebrochen.",
-    }
+    })
 }
 
 impl Desktop {
     pub(super) fn permission_operation_idle(&self) -> bool {
         self.permission_ui.pending.is_none()
-            && self.permission_ui.error.is_none()
+            && self
+                .permission_ui
+                .error
+                .and_then(permission_error_key)
+                .is_none()
             && self
                 .permission_ui
                 .snapshot
@@ -392,68 +450,38 @@ impl Desktop {
         };
         self.permission_ui.request = next;
         let request = RequestId(next);
-        match self.settings_port.submit_permission(PermissionIntent {
+        let result = self.settings_port.submit_permission(PermissionIntent {
             generation: snapshot.generation,
             request,
             kind,
             action,
-        }) {
-            Ok(()) => {
-                self.permission_ui.pending = Some(Pending {
-                    request,
-                    kind,
-                    action,
-                    entry: self.permission_ui.entry,
-                    setup: self.onboarding_permission_owner(kind),
-                });
-                self.permission_ui.error = None;
-                if kind == PermissionKind::Microphone {
-                    self.permission_ui.microphone_ready = false;
-                }
-            }
-            Err(error) => self.permission_ui.error = Some(error),
-        }
+        });
+        let pending = Pending {
+            request,
+            kind,
+            action,
+            entry: self.permission_ui.entry,
+            setup: self.onboarding_permission_owner(kind),
+        };
+        self.permission_ui.record_submission(pending, result);
     }
     pub(super) fn refresh_permissions(&mut self, cx: &mut Context<Self>) {
         if let Some(snapshot) = self.settings_port.take_permission_snapshot() {
-            self.permission_ui.snapshot = snapshot;
-            if let (Some(pending), Ok(snapshot)) =
-                (self.permission_ui.pending, &self.permission_ui.snapshot)
-            {
-                let completed = match snapshot.operation {
-                    PermissionOperation::Finished {
-                        request,
-                        kind,
-                        action,
-                    } => Some((request, kind, action, None)),
-                    PermissionOperation::Failed {
-                        request,
-                        kind,
-                        action,
-                        error,
-                    } => Some((request, kind, action, Some(error))),
-                    _ => None,
-                };
-                if let Some((request, kind, action, error)) = completed
-                    && request == pending.request
-                    && kind == pending.kind
-                    && action == pending.action
+            if let Some((pending, error)) = self.permission_ui.apply_snapshot(snapshot) {
+                let kind = pending.kind;
+                let action = pending.action;
+                if let Some(owner) = pending.setup {
+                    self.onboarding_permission_completed(owner, kind, action, error.is_none());
+                }
+                if error.is_none()
+                    && kind == PermissionKind::Microphone
+                    && pending.entry == self.permission_ui.entry
+                    && action != PermissionAction::OpenSystemSettings
+                    && self.devices_open()
                 {
-                    self.permission_ui.pending = None;
-                    self.permission_ui.error = error;
-                    if let Some(owner) = pending.setup {
-                        self.onboarding_permission_completed(owner, kind, action, error.is_none());
-                    }
-                    if error.is_none()
-                        && kind == PermissionKind::Microphone
-                        && pending.entry == self.permission_ui.entry
-                        && action != PermissionAction::OpenSystemSettings
-                        && self.devices_open()
-                    {
-                        self.permission_ui.microphone_ready =
-                            self.observation(kind).allows_device_preview();
-                        self.microphone_auto_attempted = false;
-                    }
+                    self.permission_ui.microphone_ready =
+                        self.observation(kind).allows_device_preview();
+                    self.microphone_auto_attempted = false;
                 }
             }
             cx.notify();
@@ -470,7 +498,8 @@ impl Desktop {
     ) -> Option<Div> {
         let observation = self.observation(kind);
         let help = permission_help(observation, PermissionPlatform::current());
-        let failed = self.permission_ui.snapshot.is_err() || self.permission_ui.error.is_some();
+        let feedback = self.permission_ui.feedback(kind);
+        let failed = feedback.is_some();
         let attention = capture_denied
             || failed
             || matches!(
@@ -483,17 +512,7 @@ impl Desktop {
         if observation.allows_device_preview() && !attention {
             return None;
         }
-        let feedback = self.permission_ui.feedback(kind);
-        let idle = self.permission_ui.pending.is_none()
-            && self
-                .permission_ui
-                .snapshot
-                .as_ref()
-                .is_ok_and(|s| s.runtime == RuntimeState::Running);
-        let availability = Availability::when(
-            idle,
-            feedback.unwrap_or("Die Zugriffsprüfung ist noch nicht bereit."),
-        );
+        let availability = self.permission_ui.availability();
         let status = if capture_denied {
             "Zugriff verweigert."
         } else if failed {
@@ -551,16 +570,7 @@ impl Desktop {
         let help = permission_help(observation, PermissionPlatform::current());
         let (_, purpose) = permission_identity(kind);
         let feedback = self.permission_ui.feedback(kind);
-        let idle = self.permission_ui.pending.is_none()
-            && self
-                .permission_ui
-                .snapshot
-                .as_ref()
-                .is_ok_and(|s| s.runtime == RuntimeState::Running);
-        let availability = Availability::when(
-            idle,
-            feedback.unwrap_or("Die Zugriffsprüfung ist noch nicht bereit."),
-        );
+        let availability = self.permission_ui.availability();
         // One borderless text column keeps purpose, status, instructions and
         // actions aligned; paragraphs determine their height at large text sizes.
         let mut panel = div()
@@ -728,14 +738,19 @@ impl Desktop {
                 "Prüfe die Zugriffsrechte in den Systemeinstellungen und wähle danach „Erneut prüfen“."
             }
         };
-        let idle = self.permission_ui.pending.is_none()
-            && self
-                .permission_ui
-                .snapshot
-                .as_ref()
-                .is_ok_and(|snapshot| snapshot.runtime == RuntimeState::Running);
+        let availability = self.permission_ui.availability();
         let settings_ready =
             kind != PermissionKind::ScreenSharing || self.onboarding_checkpoint_ready();
+        let settings_availability = if settings_ready {
+            availability
+        } else if matches!(self.preferences.save, SaveState::Pending { .. }) {
+            Availability::pending()
+        } else {
+            Availability::when(
+                false,
+                "Der Einrichtungsfortschritt konnte nicht gespeichert werden. Bitte erneut versuchen.",
+            )
+        };
         let mut panel = div()
             .w_full()
             .min_w_0()
@@ -773,10 +788,7 @@ impl Desktop {
                             ("onboarding-permission-settings", index(kind)),
                             "Systemeinstellungen öffnen",
                             ButtonStyle::Secondary,
-                            Availability::when(
-                                idle && settings_ready,
-                                "Einrichtungsfortschritt wird gespeichert …",
-                            ),
+                            settings_availability,
                             LocalAction::Permission(kind, PermissionAction::OpenSystemSettings),
                             cx,
                         )
@@ -797,7 +809,7 @@ impl Desktop {
                             ("onboarding-permission-check", index(kind)),
                             "Erneut prüfen",
                             ButtonStyle::Quiet,
-                            Availability::when(idle, "Zugriff wird geprüft …"),
+                            availability,
                             LocalAction::Permission(kind, PermissionAction::Check),
                             cx,
                         )
@@ -1000,7 +1012,7 @@ mod tests {
         });
         assert_eq!(
             ui.feedback(PermissionKind::Camera),
-            Some(permission_error_key(PermissionError::Unavailable)),
+            permission_error_key(PermissionError::Unavailable),
         );
         ui.snapshot = Ok(PermissionSnapshot {
             generation: 1,
@@ -1010,16 +1022,89 @@ mod tests {
             screen_sharing: PermissionObservation::unknown(PermissionKind::ScreenSharing),
             operation: PermissionOperation::Idle,
         });
-        assert_eq!(
-            ui.feedback(PermissionKind::Camera),
-            Some("Systemeinstellungen werden geöffnet …"),
-        );
+        assert_eq!(ui.feedback(PermissionKind::Camera), None,);
         ui.pending = None;
         ui.error = Some(PermissionError::TimedOut);
         assert_eq!(
             ui.feedback(PermissionKind::Camera),
-            Some(permission_error_key(PermissionError::TimedOut)),
+            permission_error_key(PermissionError::TimedOut),
         );
+    }
+
+    #[test]
+    fn busy_admission_does_not_start_an_operation_or_replace_a_failure() {
+        assert_eq!(permission_error_key(PermissionError::Busy), None);
+        let mut ui = PermissionUi::new(Ok(PermissionSnapshot {
+            generation: 1,
+            runtime: RuntimeState::Running,
+            microphone: PermissionObservation::unknown(PermissionKind::Microphone),
+            camera: observation(PermissionKind::Camera, PermissionStatus::Denied),
+            screen_sharing: PermissionObservation::unknown(PermissionKind::ScreenSharing),
+            operation: PermissionOperation::Idle,
+        }));
+        let pending = Pending {
+            request: RequestId(4),
+            kind: PermissionKind::Camera,
+            action: PermissionAction::Request,
+            entry: 2,
+            setup: None,
+        };
+        ui.record_submission(pending, Err(PermissionError::Busy));
+        assert!(ui.pending.is_none());
+        assert_eq!(ui.feedback(PermissionKind::Camera), None);
+        ui.error = Some(PermissionError::TimedOut);
+        ui.record_submission(pending, Err(PermissionError::Busy));
+        assert_eq!(ui.error, Some(PermissionError::TimedOut));
+        assert_eq!(
+            ui.feedback(PermissionKind::Camera),
+            permission_error_key(PermissionError::TimedOut),
+        );
+        ui.record_submission(pending, Ok(()));
+        assert!(ui.error.is_none());
+        assert_eq!(ui.pending.unwrap().request, RequestId(4));
+        assert_eq!(ui.feedback(PermissionKind::Camera), None);
+        let mut snapshot = ui.snapshot.clone().unwrap();
+        for (request, kind, action) in [
+            (
+                RequestId(3),
+                PermissionKind::Camera,
+                PermissionAction::Request,
+            ),
+            (
+                RequestId(4),
+                PermissionKind::Microphone,
+                PermissionAction::Request,
+            ),
+            (
+                RequestId(4),
+                PermissionKind::Camera,
+                PermissionAction::Check,
+            ),
+        ] {
+            snapshot.operation = PermissionOperation::Failed {
+                request,
+                kind,
+                action,
+                error: PermissionError::Failed,
+            };
+            assert!(ui.apply_snapshot(Ok(snapshot.clone())).is_none());
+            assert_eq!(ui.pending.unwrap().request, RequestId(4));
+            assert!(ui.error.is_none());
+        }
+        assert!(
+            ui.apply_snapshot(Err(PermissionError::Unavailable))
+                .is_none()
+        );
+        assert_eq!(ui.pending.unwrap().request, RequestId(4));
+        snapshot.operation = PermissionOperation::Failed {
+            request: pending.request,
+            kind: pending.kind,
+            action: pending.action,
+            error: PermissionError::TimedOut,
+        };
+        assert!(ui.apply_snapshot(Ok(snapshot)).is_some());
+        assert!(ui.pending.is_none());
+        assert_eq!(ui.error, Some(PermissionError::TimedOut));
     }
 
     #[test]
@@ -1082,7 +1167,9 @@ mod tests {
             PermissionError::TimedOut,
             PermissionError::Cancelled,
         ] {
-            localized(permission_error_key(error));
+            if let Some(key) = permission_error_key(error) {
+                localized(key);
+            }
         }
         for key in [
             "Berechtigungen · {step} von 3",
@@ -1090,10 +1177,6 @@ mod tests {
             "Du kannst ohne diese Freigaben chatten und sie später in den Einstellungen ändern.",
             "Unter Windows wird das Fenster oder der Bildschirm erst beim Start einer Freigabe ausgewählt.",
             "Erneut prüfen",
-            "Eine andere Zugriffsanfrage läuft …",
-            "Zugriff wird geprüft …",
-            "Zugriffsanfrage läuft …",
-            "Systemeinstellungen werden geöffnet …",
         ] {
             localized(key);
         }

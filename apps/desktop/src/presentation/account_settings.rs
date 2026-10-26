@@ -56,13 +56,14 @@ impl Desktop {
             return;
         };
         self.account_preference_request = request;
-        self.account_preference_error = self
-            .settings_port
-            .submit_account(AccountPreferenceCommand::Load {
-                scope,
-                request: RequestId(request),
-            })
-            .err();
+        self.account_preference_error = account_submission_error(
+            self.account_preference_error,
+            self.settings_port
+                .submit_account(AccountPreferenceCommand::Load {
+                    scope,
+                    request: RequestId(request),
+                }),
+        );
         self.refresh_account_preferences(cx);
     }
     pub(super) fn change_account_preference(
@@ -71,8 +72,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let Some(p) = self.account_preferences.as_ref().filter(|p| {
-            Some(p.scope) == self.snapshot.active_account
-                && p.state == AccountPreferenceState::Ready
+            Some(p.scope) == self.snapshot.active_account && account_values_editable(p.state)
         }) else {
             return;
         };
@@ -80,14 +80,15 @@ impl Desktop {
             return;
         };
         self.account_preference_request = request;
-        self.account_preference_error = self
-            .settings_port
-            .submit_account(AccountPreferenceCommand::Set {
-                scope: p.scope,
-                request: RequestId(request),
-                change,
-            })
-            .err();
+        self.account_preference_error = account_submission_error(
+            self.account_preference_error,
+            self.settings_port
+                .submit_account(AccountPreferenceCommand::Set {
+                    scope: p.scope,
+                    request: RequestId(request),
+                    change,
+                }),
+        );
         self.refresh_account_preferences(cx);
     }
     pub(super) fn account_settings_page(&self, tab: SettingsTab, cx: &Context<Self>) -> Div {
@@ -137,15 +138,27 @@ impl Desktop {
             .filter(|p| p.scope == scope);
         let state = snapshot.map_or(AccountPreferenceState::Unavailable, |p| p.state);
         let values = snapshot.and_then(|p| p.values.as_ref());
-        let ready = state == AccountPreferenceState::Ready;
+        let ready = account_values_editable(state);
         let reason = match state {
             AccountPreferenceState::Unavailable => {
-                "Für dieses Konto besteht keine aktive Serververbindung."
+                Some("Für dieses Konto besteht keine aktive Serververbindung.")
             }
-            AccountPreferenceState::Loading { .. } => "Kontoeinstellungen werden geladen …",
-            AccountPreferenceState::Saving { .. } => "Bitte warte auf den laufenden Vorgang.",
+            AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. } => None,
             AccountPreferenceState::Failed { error, .. } => account_error_key(error),
-            AccountPreferenceState::Ready => "Diese Einstellung wird vom Server nicht angeboten.",
+            AccountPreferenceState::Ready => None,
+        };
+        let availability = |supported| {
+            if matches!(
+                state,
+                AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. }
+            ) {
+                Availability::pending()
+            } else {
+                Availability::when(
+                    ready && supported,
+                    reason.unwrap_or("Diese Einstellung wird vom Server nicht angeboten."),
+                )
+            }
         };
         if tab == SettingsTab::Privacy {
             for (id, label, description, value, read) in [
@@ -171,7 +184,7 @@ impl Desktop {
                         id,
                         label,
                         value,
-                        Availability::when(ready && value.is_some(), reason),
+                        availability(value.is_some()),
                         LocalAction::AccountPreference(if read {
                             AccountPreferenceChange::SendReadReceipts(value != Some(true))
                         } else {
@@ -184,7 +197,7 @@ impl Desktop {
         } else {
             section=section.child(self.hint(self.l("Ordner in NextCloud für geteilte Dokumente. Kein Downloadordner auf diesem Computer.")))
                 .child(self.input_surface(&self.upload_folder, cx).child(self.upload_folder.clone()))
-                .child(self.dialog_actions().child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,Availability::when(ready&&values.and_then(|v|v.attachment_folder.as_ref()).is_some(),reason),LocalAction::SaveUploadFolder,cx)));
+                .child(self.dialog_actions().child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),LocalAction::SaveUploadFolder,cx)));
             if values.is_some_and(|v| v.conversation_subfolders == Some(true)) {
                 section = section.child(
                     self.hint(self.l("Der Server legt darunter Unterordner für Gespräche an.")),
@@ -193,11 +206,8 @@ impl Desktop {
         }
         let feedback = self
             .account_preference_error
-            .map(account_error_key)
-            .or_else(|| {
-                (!ready && !matches!(state, AccountPreferenceState::Saving { .. }))
-                    .then_some(reason)
-            });
+            .and_then(account_error_key)
+            .or(reason);
         if let Some(feedback) = feedback {
             section = section.child(self.hint(self.l(feedback)));
         }
@@ -205,29 +215,52 @@ impl Desktop {
             "reload-account-settings",
             self.l("Kontoeinstellungen neu laden"),
             ButtonStyle::Secondary,
-            Availability::when(
-                !matches!(
-                    state,
-                    AccountPreferenceState::Unavailable
-                        | AccountPreferenceState::Loading { .. }
-                        | AccountPreferenceState::Saving { .. }
-                ),
-                reason,
-            ),
+            if matches!(
+                state,
+                AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. }
+            ) {
+                Availability::pending()
+            } else {
+                Availability::when(
+                    state != AccountPreferenceState::Unavailable,
+                    reason.unwrap_or("Für dieses Konto besteht keine aktive Serververbindung."),
+                )
+            },
             LocalAction::ReloadAccountPreferences,
             cx,
         ))))
     }
 }
-fn account_error_key(error: AccountPreferenceError) -> &'static str {
-    match error {
+fn account_values_editable(state: AccountPreferenceState) -> bool {
+    matches!(
+        state,
+        AccountPreferenceState::Ready
+            | AccountPreferenceState::Failed {
+                error: AccountPreferenceError::Busy,
+                ..
+            }
+    )
+}
+
+fn account_submission_error(
+    current: Option<AccountPreferenceError>,
+    result: Result<(), AccountPreferenceError>,
+) -> Option<AccountPreferenceError> {
+    match result {
+        Err(AccountPreferenceError::Busy) => current,
+        result => result.err(),
+    }
+}
+
+fn account_error_key(error: AccountPreferenceError) -> Option<&'static str> {
+    Some(match error {
         AccountPreferenceError::Unavailable => {
             "Für dieses Konto besteht keine aktive Serververbindung."
         }
         AccountPreferenceError::Stale => {
             "Das ausgewählte Konto hat sich geändert. Bitte erneut laden."
         }
-        AccountPreferenceError::Busy => "Bitte warte auf den laufenden Vorgang.",
+        AccountPreferenceError::Busy => return None,
         AccountPreferenceError::PermissionDenied => "Der Server erlaubt diese Änderung nicht.",
         AccountPreferenceError::AuthenticationRequired => {
             "Bitte melde dich bei diesem Konto erneut an."
@@ -239,5 +272,34 @@ fn account_error_key(error: AccountPreferenceError) -> &'static str {
         AccountPreferenceError::InvalidFolder => {
             "Bitte gib einen gültigen Ordner innerhalb eurer NextCloud an."
         }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn busy_admission_preserves_failure_and_does_not_disable_confirmed_values() {
+        assert_eq!(account_error_key(AccountPreferenceError::Busy), None);
+        assert_eq!(
+            account_submission_error(
+                Some(AccountPreferenceError::Uncertain),
+                Err(AccountPreferenceError::Busy),
+            ),
+            Some(AccountPreferenceError::Uncertain),
+        );
+        assert!(account_error_key(AccountPreferenceError::Uncertain).is_some());
+        assert!(account_values_editable(AccountPreferenceState::Failed {
+            request: RequestId(4),
+            error: AccountPreferenceError::Busy,
+        }));
+        assert!(!account_values_editable(AccountPreferenceState::Failed {
+            request: RequestId(4),
+            error: AccountPreferenceError::Uncertain,
+        }));
+        assert!(!account_values_editable(AccountPreferenceState::Saving {
+            request: RequestId(5),
+        }));
     }
 }

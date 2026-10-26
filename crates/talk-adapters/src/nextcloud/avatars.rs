@@ -22,16 +22,18 @@ pub(super) struct Avatars {
     pub(super) store: Option<Box<dyn AvatarStore>>,
 }
 pub(super) fn key(kind: &str, identity: &str) -> String {
-    let mut hash = Sha256::new();
-    hash.update(kind.as_bytes());
-    hash.update([0]);
-    hash.update(identity.as_bytes());
-    let digest: String = hash
-        .finalize()
+    let digest: String = canonical_identity(kind, identity)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!("{}-{digest}", if kind == "room" { "r" } else { "u" })
+}
+pub(super) fn canonical_identity(kind: &str, identity: &str) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update(kind.as_bytes());
+    hash.update([0]);
+    hash.update(identity.as_bytes());
+    hash.finalize().into()
 }
 impl Avatars {
     /// A complete fresh room list is the only source with removal authority.
@@ -46,7 +48,7 @@ impl Avatars {
             self.disable_disk();
         }
     }
-    pub(super) fn get(&mut self, key: &str, now: u64, durable: bool) -> Option<Vec<u8>> {
+    pub(super) fn get(&mut self, key: &str, now: u64, durable: bool) -> Option<(Vec<u8>, u64)> {
         // A newly observed restriction also retires an older unrestricted disk
         // entry. It must not survive merely because this lookup uses memory.
         if !durable
@@ -58,15 +60,15 @@ impl Avatars {
         self.entries.retain(|(_, _, at)| fresh(*at, now));
         if let Some(index) = self.entries.iter().position(|(k, _, _)| k == key) {
             let entry = self.entries.remove(index);
-            let bytes = entry.1.clone();
+            let result = (entry.1.clone(), entry.2);
             self.entries.push(entry);
-            return Some(bytes);
+            return Some(result);
         }
         if durable && let Some(store) = self.store.as_mut() {
             match store.get(key, now) {
                 Ok(Some((bytes, at))) if bytes.len() <= BYTES && fresh(at, now) => {
                     self.retain(key, &bytes, at);
-                    return Some(bytes);
+                    return Some((bytes, at));
                 }
                 Ok(_) => (),
                 Err(()) => self.disable_disk(),
@@ -117,7 +119,10 @@ mod tests {
         let person = key("user", "synthetic-user");
         assert_ne!(person, key("room", "synthetic-user"));
         cache.put(&person, b"avatar", 10, false);
-        assert_eq!(cache.get(&person, 11, false).unwrap(), b"avatar");
+        assert_eq!(
+            cache.get(&person, 11, false).unwrap(),
+            (b"avatar".to_vec(), 10)
+        );
         for n in 0..ENTRIES {
             cache.put(&key("user", &n.to_string()), b"x", 11, false);
         }
@@ -126,6 +131,33 @@ mod tests {
         assert!(cache.get(&key("user", "127"), 11 + TTL, false).is_none());
         cache.put(&person, b"avatar", 100, false);
         assert!(cache.get(&person, 99, false).is_none());
+    }
+    #[test]
+    fn disk_and_memory_hits_preserve_original_source_freshness() {
+        struct Disk;
+        impl AvatarStore for Disk {
+            fn get(&mut self, _: &str, _: u64) -> Result<Option<(Vec<u8>, u64)>, ()> {
+                Ok(Some((b"saved-avatar".to_vec(), 100)))
+            }
+            fn put(&mut self, _: &str, _: &[u8], _: u64) -> Result<(), ()> {
+                Ok(())
+            }
+            fn remove(&mut self, _: &str) -> Result<(), ()> {
+                Ok(())
+            }
+            fn retain_rooms(&mut self, _: &[String]) -> Result<(), ()> {
+                Ok(())
+            }
+        }
+        let mut cache = Avatars {
+            store: Some(Box::new(Disk)),
+            ..Default::default()
+        };
+        let key = key("user", "saved-user");
+        assert_eq!(cache.get(&key, 200, true).unwrap().1, 100);
+        assert_eq!(cache.get(&key, 100 + TTL - 1, true).unwrap().1, 100);
+        assert!(cache.get(&key, 100 + TTL, true).is_none());
+        assert!(cache.get(&key, 99, true).is_none());
     }
     #[test]
     fn restricted_images_never_write_disk_and_store_failure_is_not_retried_forever() {
@@ -157,7 +189,10 @@ mod tests {
         let key = key("room", "restricted-room");
         assert!(cache.get(&key, 100, false).is_none());
         cache.put(&key, b"memory-only", 100, false);
-        assert_eq!(cache.get(&key, 101, false).unwrap(), b"memory-only");
+        assert_eq!(
+            cache.get(&key, 101, false).unwrap(),
+            (b"memory-only".to_vec(), 100)
+        );
         assert_eq!(reads.load(Ordering::Relaxed), 0);
         assert!(cache.get("missing", 101, true).is_none());
         assert!(cache.get("missing", 102, true).is_none());

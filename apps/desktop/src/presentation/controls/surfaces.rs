@@ -1,10 +1,22 @@
-//! Shared elevation and geometry for the application's main content surface.
+//! Shared elevation and geometry for content surfaces and context menus.
 use crate::presentation::Desktop;
 use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 12.;
 
 impl Desktop {
+    pub(in crate::presentation) fn context_menu_surface(&self) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .p_1()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(self.theme.border)
+            .bg(self.theme.surface)
+            .shadow_lg()
+    }
     /// Keep the shadow outside the rectangular overflow mask. GPUI 0.2.2 does
     /// not round that mask: full-bleed children must also round their exposed
     /// corners, rather than relying on `overflow_hidden` to clip their fill.

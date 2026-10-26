@@ -103,7 +103,7 @@ on a matching native host with the pinned SDK:
 
 ```sh
 task package -- --target aarch64-apple-darwin \
-  --version 0.0.7 --output /absolute/new/package-directory
+  --version 0.0.8 --output /absolute/new/package-directory
 ```
 
 This delegates to the existing

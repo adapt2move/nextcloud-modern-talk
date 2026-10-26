@@ -12,12 +12,16 @@ pub enum ActionId {
     PreviousControl,
     Undo,
     Redo,
+    FormatBold,
+    FormatItalic,
+    FormatCode,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeyContext {
     Application,
     Composer,
     TextInput,
+    RichComposer,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Modifiers {
@@ -33,7 +37,7 @@ pub struct Shortcut {
     pub modifiers: Modifiers,
     pub context: KeyContext,
 }
-pub const SHORTCUTS: [Shortcut; 10] = [
+pub const SHORTCUTS: [Shortcut; 13] = [
     Shortcut {
         action: ActionId::OpenSettings,
         key: ",",
@@ -93,6 +97,24 @@ pub const SHORTCUTS: [Shortcut; 10] = [
         key: "z",
         modifiers: Modifiers::PrimaryShift,
         context: KeyContext::TextInput,
+    },
+    Shortcut {
+        action: ActionId::FormatBold,
+        key: "b",
+        modifiers: Modifiers::Primary,
+        context: KeyContext::RichComposer,
+    },
+    Shortcut {
+        action: ActionId::FormatItalic,
+        key: "i",
+        modifiers: Modifiers::Primary,
+        context: KeyContext::RichComposer,
+    },
+    Shortcut {
+        action: ActionId::FormatCode,
+        key: "e",
+        modifiers: Modifiers::Primary,
+        context: KeyContext::RichComposer,
     },
 ];
 pub fn matching(key: &str, modifiers: Modifiers, context: KeyContext) -> Option<ActionId> {

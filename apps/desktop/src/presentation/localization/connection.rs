@@ -6,9 +6,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Se conserva tu borrador. Los mensajes no se enviarán automáticamente.",
     ),
     (
-        "Der Server begrenzt die Anfragen. Bitte warte und versuche es später erneut.",
-        "The server is limiting requests. Wait and try again later.",
-        "El servidor está limitando las solicitudes. Espera y vuelve a intentarlo más tarde.",
+        "Der Server begrenzt die Anfragen. Bitte später erneut versuchen.",
+        "The server is limiting requests. Please try again later.",
+        "El servidor está limitando las solicitudes. Vuelve a intentarlo más tarde.",
     ),
     (
         "Der Server hat die Anfrage mit HTTP 403 abgelehnt. Prüfe den Serverzugriff.",

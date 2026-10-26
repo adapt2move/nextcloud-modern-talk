@@ -44,6 +44,21 @@ pub struct Reply {
     pub text: Text<4096>,
     pub unavailable: bool,
 }
+/// Domain classification from an observed system tag, never from display text.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SystemEvent {
+    /// No classification was observed, including older durable cache entries.
+    #[default]
+    Unknown,
+    Other,
+    CallIncoming,
+    CallOutgoing,
+    CallJoined,
+    CallLeft,
+    CallEnded,
+    CallMissed,
+    CallUnanswered,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageMetadata {
     /// Opaque correlation for the local outbox and a validated own-message
@@ -58,6 +73,14 @@ pub struct MessageMetadata {
     pub edited: bool,
     pub deleted: bool,
     pub system: bool,
+    pub system_event: SystemEvent,
+    /// Redundant pin/unpin activity, classified from the untranslated system
+    /// tag. Canonical history retains it; the visible timeline omits it.
+    pub pin_notice: bool,
+    /// Effective receipt target for this painted row, extending only through
+    /// adjacent hidden pin activity with observed server-page continuity.
+    /// Derived by composition; durable content never restores this evidence.
+    pub read_through: Option<u128>,
     pub replyable: bool,
     pub parent: Option<Reply>,
     pub thread: Option<u128>,
@@ -77,6 +100,9 @@ impl Default for MessageMetadata {
             edited: false,
             deleted: false,
             system: false,
+            system_event: SystemEvent::Unknown,
+            pin_notice: false,
+            read_through: None,
             replyable: false,
             parent: None,
             thread: None,
@@ -146,7 +172,7 @@ pub struct FailedDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessagePanel {
     pub failed_drafts: Page<FailedDraft, 64>,
-    /// Local durable intent admission only, never a server permission grant.
+    /// Local durable or session-memory admission, never a server permission grant.
     pub queue_available: bool,
     pub queued_actions: u32,
     /// Latest scoped outbox failure, identified independently from user request

@@ -56,7 +56,7 @@ enum Purpose {
     Data(cache::Work),
     Content(OperationId),
     Create(RequestId, AccountScope, creation::Work),
-    Room(RequestId, ConversationRef, OperationId, bool),
+    Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
@@ -147,6 +147,7 @@ pub struct Accounts {
     cache: cache::Cache,
     picker: Option<files::Picker>,
     picker_open: bool,
+    csv_file_owner: files::CsvOwner,
     message_poll_at: Instant,
     message_poll_request: u64,
 }
@@ -191,11 +192,13 @@ impl Accounts {
             cache: cache::Cache::default(),
             picker: None,
             picker_open: false,
+            csv_file_owner: files::CsvOwner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
         }))
     }
     pub fn shutdown(&mut self) {
+        self.cancel_csv_file();
         self.stop_video();
         self.queued_send = None;
         self.queued_read.clear();
@@ -206,6 +209,9 @@ impl Accounts {
         }
     }
     pub fn stopped(&self) -> bool {
+        if !self.csv_file_stopped() {
+            return false;
+        }
         if !self.content_owner.video.stopped() {
             return false;
         }
@@ -288,6 +294,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.cancel_csv_file();
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -468,6 +475,7 @@ impl Accounts {
         }
     }
     fn tick(&mut self) {
+        self.poll_csv_file();
         let update = match &mut self.connection {
             Ok(c) => c.poll(self.cursor),
             Err(error) => Err(*error),
@@ -628,7 +636,7 @@ impl Accounts {
             Purpose::Data(work) => self.complete_data(work,result),
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
-            Purpose::Room(request, context, operation, read) => self.complete_room(request, context, operation, read, result),
+            Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
                 self.cache_history(context);
@@ -933,6 +941,7 @@ impl Accounts {
         }
         self.clear_content();
         self.snapshot.selected = Some(context);
+        self.restore_room_metadata(context);
         self.restore_messages(context);
         self.touch();
         Ok(true)

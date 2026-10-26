@@ -145,8 +145,9 @@ UI_MODULE_TYPES = {
     "conversation": {
         "Availability", "RemoteState", "ConversationPanel", "ConversationAction",
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",
+        "CsvFileError", "CsvFileOutcome", "CsvFileResult",
     },
-    "messaging": {"MessageMetadata", "MessagePanel", "MessageAction"},
+    "messaging": {"MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
     "content": {"ContentPanel", "ContentAction"},
 }
 UNBOUNDED = (

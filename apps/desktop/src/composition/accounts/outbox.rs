@@ -52,6 +52,22 @@ struct Entry {
     retry: Instant,
     ordinal: u64,
 }
+impl Entry {
+    fn delivery(&self) -> DeliveryState {
+        if self.record.phase == OutboxPhase::Uncertain
+            || matches!(
+                self.state,
+                State::Uncertain | State::ParkedUncertain | State::Confirming
+            )
+        {
+            DeliveryState::Uncertain
+        } else if matches!(self.state, State::Queued | State::Marking | State::Ready) {
+            DeliveryState::Queued
+        } else {
+            DeliveryState::Pending
+        }
+    }
+}
 #[derive(Default)]
 pub(super) struct Outbox {
     entries: Vec<Entry>,
@@ -227,6 +243,17 @@ impl Outbox {
     }
 }
 impl Accounts {
+    pub(super) fn outbox_available(&self, context: ConversationRef) -> bool {
+        self.cache.persistable(context)
+            || self.current(context.account).is_ok()
+                && self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.context == context && row.navigation_key.is_some())
+    }
+
     fn recovery_index(
         &self,
         context: ConversationRef,
@@ -899,6 +926,7 @@ impl Accounts {
                     } else {
                         OutboxPhase::Dispatched
                     };
+                    self.project_history(context);
                 }
                 Err(SubmitError::Busy) => {
                     self.outbox.entries[index].retry = now + Duration::from_millis(100);
@@ -1154,11 +1182,7 @@ fn append_pending(
         time_label: text(&messaging::time_label(entry.created)),
         body,
         own: true,
-        delivery: if entry.state == State::Uncertain {
-            DeliveryState::Uncertain
-        } else {
-            DeliveryState::Pending
-        },
+        delivery: entry.delivery(),
         attachments: Page::empty(),
         reply_count: 0,
         metadata: Default::default(),
@@ -1495,11 +1519,7 @@ fn overlay(
                 time_label: text(&messaging::time_label(entry.created)),
                 body: body.clone(),
                 own: true,
-                delivery: if entry.state == State::Uncertain {
-                    DeliveryState::Uncertain
-                } else {
-                    DeliveryState::Pending
-                },
+                delivery: entry.delivery(),
                 attachments: Page::empty(),
                 reply_count: 0,
                 metadata: Default::default(),

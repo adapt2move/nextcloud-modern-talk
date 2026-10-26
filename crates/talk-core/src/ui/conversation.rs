@@ -59,6 +59,7 @@ pub enum RoomSetting {
     Keep,
     Members,
     Invite,
+    CsvImport,
     Roles,
     Bots,
     Bans,
@@ -207,11 +208,46 @@ pub struct RoomResult {
     pub request: RequestId,
     pub completion: Completion,
 }
+/// A local file operation is separate from CSV preview and invitation submission.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CsvFileError {
+    TooLarge,
+    InvalidUtf8,
+    NotRegularFile,
+    ReadFailed,
+    PickerUnavailable,
+    TimedOut,
+    Unavailable(UnavailableReason),
+}
+#[derive(Clone, Eq, PartialEq)]
+pub enum CsvFileOutcome {
+    Loaded(Text<65536>),
+    Cancelled,
+    Failed(CsvFileError),
+}
+impl std::fmt::Debug for CsvFileOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Loaded(_) => f.write_str("Loaded(<redacted>)"),
+            Self::Cancelled => f.write_str("Cancelled"),
+            Self::Failed(error) => f.debug_tuple("Failed").field(error).finish(),
+        }
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CsvFileResult {
+    pub request: RequestId,
+    /// Presentation must also match its current page session and edit generation.
+    pub edit_generation: u64,
+    pub outcome: CsvFileOutcome,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationPanel {
     pub guest_link: Option<Text<2048>>,
     pub context: ConversationRef,
     pub details: Option<RoomDetails>,
+    /// Restored observations are display-only until a fresh detail response.
+    pub details_stale: bool,
     pub state: RemoteState,
     pub members: Page<Member, 100>,
     pub members_loaded: bool,
@@ -219,10 +255,12 @@ pub struct ConversationPanel {
     pub directory_loaded: bool,
     pub bots: Page<Bot, 100>,
     pub bots_loaded: bool,
+    pub bots_state: RemoteState,
     pub bans: Page<Ban, 100>,
     pub bans_loaded: bool,
     pub csv_duplicates: u16,
     pub csv_invalid: u16,
+    pub csv_file: Option<CsvFileResult>,
     pub result: Option<RoomResult>,
 }
 impl ConversationPanel {
@@ -231,6 +269,7 @@ impl ConversationPanel {
             context,
             guest_link: None,
             details: None,
+            details_stale: false,
             state: RemoteState::Idle,
             members: Page::empty(),
             members_loaded: false,
@@ -238,10 +277,12 @@ impl ConversationPanel {
             directory_loaded: false,
             bots: Page::empty(),
             bots_loaded: false,
+            bots_state: RemoteState::Idle,
             bans: Page::empty(),
             bans_loaded: false,
             csv_duplicates: 0,
             csv_invalid: 0,
+            csv_file: None,
             result: None,
         }
     }
@@ -286,6 +327,12 @@ pub enum ConversationAction {
     Bans,
     Unban(PersonRef),
     PreviewCsv(Text<65536>),
+    PickCsv {
+        edit_generation: u64,
+    },
+    CancelCsvPick {
+        pick_request: RequestId,
+    },
     ConfigureBreakouts {
         amount: u8,
         automatic: bool,
@@ -302,6 +349,8 @@ impl ConversationAction {
                 | Self::Bots
                 | Self::Bans
                 | Self::PreviewCsv(_)
+                | Self::PickCsv { .. }
+                | Self::CancelCsvPick { .. }
         )
     }
 }

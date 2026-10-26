@@ -1,5 +1,6 @@
 use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
+use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
 use talk_core::ui::UserIntent;
 use talk_core::ui::presentation::{CallStage, MediaState, RequiredGate, UiIntent};
@@ -158,58 +159,61 @@ impl Desktop {
                 d.child(self.feedback_view(cx))
             });
         div().size_full().p_3().bg(t.chrome()).child(
-            self.content_card(
-                div()
-                    .flex()
-                    .flex_col()
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .child(
-                        div()
-                            .relative()
-                            .flex_none()
-                            .min_h(px(74.))
-                            .px_6()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(t.border)
-                            .flex()
-                            .items_center()
-                            .gap_4()
-                            .child(self.button_with_leading_icon(
-                                "prejoin-back",
-                                ("Zurück zum Gespräch", "arrow-left"),
-                                ButtonStyle::Secondary,
-                                Availability::available(),
-                                LocalAction::Close,
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_ellipsis()
-                                            .child(title.to_owned()),
-                                    )
-                                    .child(self.hint(self.l("Beitritt vorbereiten"))),
-                            ),
-                    )
-                    .child(
-                        self.scroll_area(super::navigation::Region::Prejoin)
-                            .flex_1()
-                            .min_h_0()
-                            .p_6()
-                            .child(
-                                div()
-                                    .flex()
-                                    .when(!wide, |d| d.flex_col())
-                                    .gap_8()
-                                    .child(preview)
-                                    .child(devices),
-                            ),
-                    ),
+            self.dialog_panel(
+                DialogSurface::Prejoin,
+                self.content_card(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .track_focus(&self.modal_focus)
+                        .tab_group()
+                        .child(
+                            div()
+                                .relative()
+                                .flex_none()
+                                .min_h(px(74.))
+                                .px_6()
+                                .py_3()
+                                .border_b_1()
+                                .border_color(t.border)
+                                .flex()
+                                .items_center()
+                                .gap_4()
+                                .child(self.button_with_leading_icon(
+                                    "prejoin-back",
+                                    ("Zurück zum Gespräch", "arrow-left"),
+                                    ButtonStyle::Secondary,
+                                    Availability::available(),
+                                    LocalAction::Close,
+                                    cx,
+                                ))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_ellipsis()
+                                                .child(title.to_owned()),
+                                        )
+                                        .child(self.hint(self.l("Beitritt vorbereiten"))),
+                                ),
+                        )
+                        .child(
+                            self.scroll_area(super::navigation::Region::Prejoin)
+                                .flex_1()
+                                .min_h_0()
+                                .p_6()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .when(!wide, |d| d.flex_col())
+                                        .gap_8()
+                                        .child(preview)
+                                        .child(devices),
+                                ),
+                        ),
+                ),
             ),
         )
     }
@@ -665,7 +669,7 @@ impl Desktop {
                 .items_center()
                 .gap_3()
                 .text_center()
-                .child(self.scaled_icon("info", 26., t.danger))
+                .child(self.scaled_icon("phone-down", 26., t.danger))
                 .child(
                     div()
                         .text_size(self.sp(18.))
@@ -755,7 +759,7 @@ impl Desktop {
 fn media_reason(state: MediaState) -> &'static str {
     match state {
         MediaState::Denied => "Die Gerätefreigabe wurde nicht erteilt.",
-        MediaState::Requested => "Bitte warte auf die ausstehende Freigabe.",
+        MediaState::Requested => "Freigabe ausstehend",
         _ => "Diese Medienfunktion ist derzeit nicht verfügbar.",
     }
 }

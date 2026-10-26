@@ -41,11 +41,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El almacén seguro informa de datos dañados. Repáralo o elige el archivo privado.",
     ),
     (
-        "Der Speichervorgang ist noch nicht bestätigt und kann noch abgeschlossen werden. Bitte warte kurz und versuche es erneut.",
-        "Saving has not been confirmed and may still finish. Wait a moment and try again.",
-        "El guardado no se ha confirmado y aún puede completarse. Espera un momento y vuelve a intentarlo.",
-    ),
-    (
         "Der Speicherzustand hat sich geändert. Bitte erneut versuchen.",
         "The storage state changed. Please try again.",
         "El estado del almacenamiento ha cambiado. Vuelve a intentarlo.",
@@ -84,11 +79,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Dieses Konto ist bereits auf diesem Gerät eingetragen. Öffne die Konten und verbinde es dort erneut.",
         "This account is already registered on this device. Open accounts and reconnect it there.",
         "Esta cuenta ya está registrada en este dispositivo. Abre las cuentas y vuelve a conectarla allí.",
-    ),
-    (
-        "Einrichtungsfortschritt wird gespeichert …",
-        "Saving setup progress…",
-        "Guardando el progreso de la configuración…",
     ),
     ("Konten öffnen", "Open accounts", "Abrir cuentas"),
     (

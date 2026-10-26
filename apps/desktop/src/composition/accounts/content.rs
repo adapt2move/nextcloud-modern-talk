@@ -1,6 +1,7 @@
 //! One admitted account lane for assets/polls; no detached HTTP client. Profile
 //! avatars have a separate account-owned disk cache; attachments remain transient.
 //! Every completion is checked against current account and room.
+mod avatars;
 mod links;
 mod thumbnails;
 use super::*;
@@ -20,6 +21,7 @@ struct Job {
     cloud: bool,
     attachment: Option<talk_adapters::identity::CachedAttachment>,
     preview_generation: Option<u64>,
+    avatar_actor: Option<Text<256>>,
 }
 struct AssetRetry {
     request: RequestId,
@@ -36,10 +38,7 @@ pub(super) struct ContentOwner {
     images: Vec<ImageJob>,
     pub(super) next_key: u64,
     pub(super) retained: Vec<(u64, usize)>,
-    // Equal, freshly authorized avatar bytes share one GPU image. Entries exist
-    // only while a live asset references that image: 128 entries / 8 MiB, never
-    // attachment bytes or an independent permission/lifetime source.
-    avatars: Vec<(wire::ImageBytes, u64)>,
+    avatars: avatars::Avatars,
     // UI queue admission is not HTTP admission. Busy automatic asset loads wait
     // here, at most 128 targets for 60 seconds, with one retry per owner tick.
     // Navigation/account teardown cancels these before they can start effects.
@@ -101,7 +100,19 @@ impl Accounts {
         }
         self.content_owner.preview_request = None;
         self.content_owner.pending_assets.clear();
+        self.content_owner.avatars.clear_member_observations();
         self.content_owner.jobs.clear();
+        let cancelled: Vec<_> = self
+            .content_owner
+            .images
+            .iter()
+            .filter(|j| is_avatar(&j.target))
+            .map(|j| j.key)
+            .collect();
+        for key in cancelled {
+            let retired = self.content_owner.avatars.remove(key);
+            self.retire_avatar_bindings(retired);
+        }
         self.content_owner.images.clear();
         self.content_owner.link = None;
         self.content_owner.message_link = None;
@@ -109,6 +120,7 @@ impl Accounts {
         self.content_owner.capabilities_at = None;
         let account = self.snapshot.active_account;
         let old = &self.snapshot.content_panel;
+        let old_account_changed = old.account != account;
         let assets = if old.account == account {
             page(
                 old.assets
@@ -140,6 +152,9 @@ impl Accounts {
             organization,
             ..Default::default()
         };
+        if old_account_changed {
+            self.content_owner.avatars = avatars::Avatars::default();
+        }
         self.retire_content_keys();
     }
     pub(super) fn content_action(
@@ -256,6 +271,7 @@ impl Accounts {
                         cloud: true,
                         attachment: None,
                         preview_generation: None,
+                        avatar_actor: None,
                     },
                     wire::ContentCommand::OpenCloud {
                         message,
@@ -319,6 +335,9 @@ impl Accounts {
         }) || local_context(&target).is_some_and(|c| Some(c) != self.snapshot.selected)
         {
             return Err(SubmitError::StaleScope);
+        }
+        if self.reuse_avatar_target(&target) {
+            return Ok(());
         }
         if self.content_owner.jobs.iter().any(|j| {
             j.target.as_ref() == Some(&target)
@@ -394,6 +413,7 @@ impl Accounts {
                 attachment,
                 preview_generation: matches!(target, view::AssetTarget::Image(_))
                     .then_some(self.content_owner.preview_generation),
+                avatar_actor: self.avatar_actor(&target),
             },
             command,
         )?;
@@ -545,6 +565,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                avatar_actor: None,
             },
             wire::ContentCommand::Poll {
                 conversation: context.conversation,
@@ -597,6 +618,26 @@ impl Accounts {
             return;
         };
         let job = self.content_owner.jobs.remove(index);
+        if job
+            .target
+            .as_ref()
+            .is_some_and(|t| self.avatar_actor(t) != job.avatar_actor)
+        {
+            if let Some(target) = &job.target {
+                self.snapshot.content_panel.assets = page(
+                    self.snapshot
+                        .content_panel
+                        .assets
+                        .as_slice()
+                        .iter()
+                        .filter(|a| &a.target != target || a.state != view::AssetState::Loading)
+                        .cloned(),
+                );
+                self.retire_content_keys();
+                self.touch();
+            }
+            return;
+        }
         if self.snapshot.active_account != Some(job.account)
             || job
                 .context
@@ -661,15 +702,13 @@ impl Accounts {
                     );
                 }
             }
-            Ok(wire::ContentResult::Emoji { text, color }) => {
+            Ok(wire::ContentResult::Emoji {
+                text,
+                color,
+                source,
+            }) => {
                 if let Some(target) = job.target {
-                    self.set_asset(view::AssetView {
-                        target,
-                        state: view::AssetState::Ready { key: 0 },
-                        emoji: Some(text),
-                        color,
-                        document_pages: None,
-                    });
+                    self.receive_emoji(target, text, color, source);
                 }
             }
             Ok(wire::ContentResult::CloudLink(link)) if job.cloud => {
@@ -712,16 +751,36 @@ impl Accounts {
         attachment: Option<talk_adapters::identity::CachedAttachment>,
         preview_generation: Option<u64>,
     ) {
+        self.prune_avatars();
         if is_avatar(&target)
-            && let Some(key) = self
+            && bytes
+                .avatar_source()
+                .is_some_and(|s| !avatars::fresh(s, history::now_unix()))
+        {
+            self.asset_retry_failed(target);
+            return;
+        }
+        if is_avatar(&target)
+            && bytes.avatar_source().is_some()
+            && let Some((key, ready)) = self
                 .content_owner
                 .avatars
-                .iter()
-                .find_map(|(old, key)| (old == &bytes).then_some(*key))
+                .pixels(&bytes)
+                .map(|p| (p.key, p.ready))
         {
+            let actor = self.avatar_actor(&target);
+            let retired = self
+                .content_owner
+                .avatars
+                .bind(target.clone(), &bytes, key, actor);
+            self.retire_avatar_bindings(retired);
             self.set_asset(view::AssetView {
                 target,
-                state: view::AssetState::Ready { key },
+                state: if ready {
+                    view::AssetState::Ready { key }
+                } else {
+                    view::AssetState::Loading
+                },
                 emoji: None,
                 color: None,
                 document_pages: None,
@@ -739,6 +798,16 @@ impl Accounts {
                 return;
             };
             self.content_owner.next_key = key;
+            if is_avatar(&target) && bytes.avatar_source().is_some() {
+                let retired = self.content_owner.avatars.stage(bytes.clone(), key);
+                self.retire_avatar_bindings(retired);
+                let actor = self.avatar_actor(&target);
+                let retired = self
+                    .content_owner
+                    .avatars
+                    .bind(target.clone(), &bytes, key, actor);
+                self.retire_avatar_bindings(retired);
+            }
             self.content_owner.images.push(ImageJob {
                 cached: false,
                 attachment,
@@ -748,6 +817,7 @@ impl Accounts {
                 key: self.content_owner.next_key,
                 bytes,
             });
+            self.retire_content_keys();
         }
     }
     fn content_failure(&mut self, job: &Job, error: IdentityError) {
@@ -757,6 +827,15 @@ impl Accounts {
             return;
         }
         if let Some(target) = job.target.clone() {
+            if is_avatar(&target) {
+                self.content_owner
+                    .avatars
+                    .forget_member_observation(&target);
+                let mut avatars = std::mem::take(&mut self.content_owner.avatars);
+                let retired = avatars.prune(history::now_unix(), |b| b.target != target);
+                self.content_owner.avatars = avatars;
+                self.retire_avatar_bindings(retired);
+            }
             if matches!(
                 error,
                 IdentityError::Request(
@@ -839,9 +918,16 @@ impl Accounts {
             .leases
             .retain(|(target, _)| target != &asset.target);
         if asset.state != view::AssetState::Loading {
-            self.content_owner
-                .leases
-                .push((asset.target.clone(), Instant::now()));
+            let now = history::now_unix();
+            let at = self
+                .content_owner
+                .avatars
+                .binding(&asset.target, now)
+                .and_then(|b| {
+                    Instant::now().checked_sub(Duration::from_secs(now - b.source.saved_at))
+                })
+                .unwrap_or_else(Instant::now);
+            self.content_owner.leases.push((asset.target.clone(), at));
         }
         assets.push(asset);
         self.snapshot.content_panel.assets = page(assets);
@@ -864,6 +950,12 @@ impl Accounts {
         }
     }
     fn retire_content_keys(&mut self) {
+        self.prune_avatars();
+        let keys = page(self.content_owner.avatars.keys());
+        if self.snapshot.content_panel.retained_avatar_keys != keys {
+            self.snapshot.content_panel.retained_avatar_keys = keys;
+            self.touch();
+        }
         self.content_owner.descriptors.retain(|(target, _)| {
             self.snapshot
                 .content_panel
@@ -874,17 +966,15 @@ impl Accounts {
         });
         let assets = &self.snapshot.content_panel.assets;
         self.content_owner.retained.retain(|(key, _)| {
-            assets
-                .as_slice()
-                .iter()
-                .any(|a| a.state == (view::AssetState::Ready { key: *key }))
+            self.content_owner.avatars.keys().any(|k| k == *key)
+                || assets
+                    .as_slice()
+                    .iter()
+                    .any(|a| a.state == (view::AssetState::Ready { key: *key }))
         });
         self.content_owner
             .leases
             .retain(|(target, _)| assets.as_slice().iter().any(|a| &a.target == target));
-        self.content_owner
-            .avatars
-            .retain(|(_, key)| self.content_owner.retained.iter().any(|(k, _)| k == key));
     }
     pub(crate) fn take_content_image(&mut self) -> Option<ImageJob> {
         if self.content_owner.images.is_empty() {
@@ -894,8 +984,12 @@ impl Accounts {
         }
     }
     pub(crate) fn finish_content_image(&mut self, job: &ImageJob, bytes: Option<usize>) -> bool {
+        self.prune_avatars();
+        let avatar = is_avatar(&job.target) && job.bytes.avatar_source().is_some();
+        let retained_avatar = avatar && self.content_owner.avatars.contains(job.key);
         if self.snapshot.active_account != Some(job.account)
-            || local_context(&job.target).is_some_and(|c| Some(c) != self.snapshot.selected)
+            || (!retained_avatar
+                && local_context(&job.target).is_some_and(|c| Some(c) != self.snapshot.selected))
             || (!job.cached && self.current(job.account).is_err())
             || (job.cached && !self.cached_thumbnail_job_current(job))
         {
@@ -918,33 +1012,40 @@ impl Accounts {
         {
             return false;
         }
-        if !self.asset_is_current(&job.target)
-            || !self
-                .snapshot
-                .content_panel
-                .assets
-                .as_slice()
-                .iter()
-                .any(|a| a.target == job.target && a.state == view::AssetState::Loading)
+        if !retained_avatar
+            && (!self.asset_is_current(&job.target)
+                || !self
+                    .snapshot
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .any(|a| a.target == job.target && a.state == view::AssetState::Loading))
         {
+            return false;
+        }
+        if avatar && !retained_avatar {
             return false;
         }
         let mut admitted = false;
         if let Some(bytes) = bytes.filter(|n| {
-            *n <= if matches!(job.target, view::AssetTarget::Image(_)) {
+            *n <= if avatar {
+                128 * 128 * 4
+            } else if matches!(job.target, view::AssetTarget::Image(_)) {
                 64 * 1024 * 1024
             } else {
                 8 * 1024 * 1024
             }
         }) {
-            while self
-                .content_owner
-                .retained
-                .iter()
-                .map(|(_, n)| *n)
-                .sum::<usize>()
-                + bytes
-                > 96 * 1024 * 1024
+            while self.content_owner.retained.len() >= 128
+                || self
+                    .content_owner
+                    .retained
+                    .iter()
+                    .map(|(_, n)| *n)
+                    .sum::<usize>()
+                    + bytes
+                    > 96 * 1024 * 1024
             {
                 if self.content_owner.retained.is_empty() {
                     break;
@@ -966,6 +1067,8 @@ impl Accounts {
                     })
                     .unwrap_or(0);
                 let (key, _) = self.content_owner.retained.remove(index);
+                let retired = self.content_owner.avatars.remove(key);
+                self.retire_avatar_bindings(retired);
                 self.snapshot.content_panel.assets = page(
                     self.snapshot
                         .content_panel
@@ -976,6 +1079,9 @@ impl Accounts {
                         .cloned(),
                 );
             }
+            self.content_owner
+                .retained
+                .retain(|(key, _)| *key != job.key);
             self.content_owner.retained.push((job.key, bytes));
             if let Some(attachment) = &job.attachment {
                 self.content_owner
@@ -985,26 +1091,40 @@ impl Accounts {
                     .descriptors
                     .push((job.target.clone(), attachment.clone()));
             }
-            if is_avatar(&job.target) {
-                let size = job.bytes.as_slice().len();
-                while !self.content_owner.avatars.is_empty()
-                    && (self.content_owner.avatars.len() >= 128
-                        || self
-                            .content_owner
-                            .avatars
-                            .iter()
-                            .map(|(b, _)| b.as_slice().len())
-                            .sum::<usize>()
-                            + size
-                            > 8 * 1024 * 1024)
-                {
-                    self.content_owner.avatars.remove(0);
-                }
-                self.content_owner
-                    .avatars
-                    .push((job.bytes.clone(), job.key));
+            if avatar {
+                self.content_owner.avatars.finish(job.key);
             }
             admitted = true;
+        }
+        if avatar {
+            let targets = if admitted {
+                self.content_owner.avatars.targets(job.key)
+            } else {
+                let retired = self.content_owner.avatars.remove(job.key);
+                let targets = retired.iter().map(|b| b.target.clone()).collect();
+                self.retire_avatar_bindings(retired);
+                targets
+            };
+            for target in targets
+                .into_iter()
+                .filter(|t| self.asset_is_current(t))
+                .collect::<Vec<_>>()
+            {
+                self.set_asset(view::AssetView {
+                    target,
+                    state: if admitted {
+                        view::AssetState::Ready { key: job.key }
+                    } else {
+                        view::AssetState::Unsupported
+                    },
+                    emoji: None,
+                    color: None,
+                    document_pages: None,
+                });
+            }
+            self.retire_content_keys();
+            self.touch();
+            return admitted;
         }
         self.set_asset(view::AssetView {
             target: job.target.clone(),
@@ -1059,6 +1179,31 @@ impl Accounts {
                     .any(|r| r.context == context)
         }) {
             return false;
+        }
+        if let view::AssetTarget::PersonAvatar(person) = target {
+            return Some(person.account) == self.snapshot.active_account
+                && self
+                    .snapshot
+                    .create_panel
+                    .as_ref()
+                    .is_some_and(|p| p.people.as_slice().iter().any(|p| p.id == *person));
+        }
+        if let view::AssetTarget::ParticipantAvatar {
+            context,
+            participant,
+        } = target
+        {
+            return self.snapshot.selected == Some(*context)
+                && self.snapshot.content != ContentState::Denied
+                && self.participant_avatar_allowed(*context)
+                && self.snapshot.conversation_panel.as_ref().is_some_and(|p| {
+                    p.context == *context
+                        && p.members_loaded
+                        && p.members
+                            .as_slice()
+                            .iter()
+                            .any(|m| m.id.local == *participant)
+                });
         }
         if self.snapshot.content == ContentState::Denied
             && target
@@ -1219,6 +1364,7 @@ impl Accounts {
                 .cloned(),
         );
         self.retire_content_keys();
+        self.restore_member_avatars();
         if previous != self.snapshot.content_panel.assets.as_slice().len() {
             self.touch();
         }
@@ -1274,6 +1420,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                avatar_actor: None,
             };
             if self
                 .start_content(job, wire::ContentCommand::SelfProfile)
@@ -1517,6 +1664,7 @@ mod tests {
                     cloud: false,
                     attachment: None,
                     preview_generation: None,
+                    avatar_actor: None,
                 };
                 model.snapshot.content_panel.result = None;
                 model.content_failure(&job, IdentityError::Request(kind));
@@ -1568,6 +1716,7 @@ mod tests {
                     cloud,
                     attachment: None,
                     preview_generation: None,
+                    avatar_actor: None,
                 };
                 model.content_failure(&job, IdentityError::Request(kind));
                 assert_eq!(
@@ -1871,10 +2020,31 @@ mod tests {
         let mut model = super::super::tests::model();
         model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
         let context = model.snapshot.selected.unwrap();
-        let bytes = wire::ImageBytes::new(b"synthetic decoded avatar source".to_vec()).unwrap();
+        // This seed represents a completed image in the active account panel,
+        // including the key allocation that normal image admission performs.
+        model.snapshot.content_panel.account = Some(context.account);
+        model.content_owner.next_key = 1;
+        let bytes = wire::ImageBytes::avatar(
+            b"synthetic decoded avatar source".to_vec(),
+            wire::AvatarSource {
+                identity: [1; 32],
+                saved_at: history::now_unix(),
+                restricted: false,
+            },
+        )
+        .unwrap();
         model.set_asset(asset(view::AssetTarget::SelfAvatar, 1));
         model.content_owner.retained = vec![(1, 16)];
-        model.content_owner.avatars.push((bytes.clone(), 1));
+        model.content_owner.avatars.scope = model.snapshot.active_account;
+        model.content_owner.avatars.stage(bytes.clone(), 1);
+        model
+            .content_owner
+            .avatars
+            .bind(view::AssetTarget::SelfAvatar, &bytes, 1, None);
+        model.content_owner.avatars.finish(1);
+        let mut row = model.snapshot.messages.as_slice()[0].clone();
+        row.local_id = 7;
+        model.snapshot.messages = page([row]);
         let target = view::AssetTarget::MessageAvatar {
             context,
             message: 7,
@@ -1895,17 +2065,29 @@ mod tests {
             placeholder: text("file"),
         });
         model.receive_image(context.account, attachment.clone(), bytes, None, None);
-        assert_eq!(model.take_content_image().unwrap().target, attachment);
+        let attachment_job = model.take_content_image().unwrap();
+        assert_eq!(attachment_job.target, attachment);
+        assert_ne!(
+            attachment_job.key, 1,
+            "attachments never reuse avatar pixels"
+        );
         model.snapshot.content_panel.assets = page([asset(target, 1)]);
         model.retire_content_keys();
         assert_eq!(
-            model.content_owner.avatars.len(),
+            model.content_owner.avatars.keys().count(),
             1,
             "a remaining authorized alias retains the pixels"
         );
         model.snapshot.content_panel.assets = Page::empty();
         model.retire_content_keys();
-        assert!(model.content_owner.avatars.is_empty());
+        assert_eq!(
+            model.snapshot.content_panel.retained_avatar_keys.as_slice(),
+            &[1],
+            "unmounting targets does not discard account-owned pixels"
+        );
+        model.snapshot.active_account = None;
+        model.retire_content_keys();
+        assert_eq!(model.content_owner.avatars.keys().count(), 0);
         assert!(model.content_owner.retained.is_empty());
     }
 
@@ -1922,6 +2104,7 @@ mod tests {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                avatar_actor: None,
             });
         }
     }
