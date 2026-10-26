@@ -45,7 +45,7 @@ zip = { version = "=9.0.4", default-features = false, features = ["deflate"] }
 # GPUI's pinned xattr/tar chain still uses libc::ENOATTR. Keep the lock
 # resolution at libc 0.2.186 until that upstream chain is updated and compiled.
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
-unicode-segmentation = "=1.12.0"
+unicode-segmentation = "=1.13.3"
 # Pure bounded message formatting; no HTML renderer or external resource loading.
 pulldown-cmark = { version = "=0.13.5", default-features = false }
 # Application-owned physical devices; native APIs remain in safe dependency bindings.
