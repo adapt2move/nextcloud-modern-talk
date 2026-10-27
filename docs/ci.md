@@ -4,9 +4,11 @@ The [CI workflow](../.github/workflows/ci.yml) has three jobs. Pull requests, pu
 
 | Job | Runner | Work |
 | --- | --- | --- |
-| Linux | `blacksmith-4vcpu-ubuntu-2404` | Docs/policy checks, package fixtures, architecture and formatting, Clippy, Rust tests, desktop build and three native fixture captures |
-| Windows | `blacksmith-4vcpu-windows-2025` | Compile the workspace and test targets for MSVC; do not execute them |
-| macOS | `blacksmith-6vcpu-macos-latest` | Compile the workspace, test targets and native Swift helper for Apple Silicon; assemble and inspect the self-contained app/DMG without executing the app |
+| Linux | `ubuntu-24.04` | Docs/policy checks, package fixtures, architecture and formatting, Clippy, Rust tests, desktop build and three native fixture captures |
+| Windows | `windows-2025` | Compile the workspace and test targets for MSVC; do not execute them |
+| macOS | `macos-26` | Compile the workspace, test targets and native Swift helper for Apple Silicon; assemble and inspect the self-contained app/DMG without executing the app |
+
+These standard GitHub-hosted runners are free for this public repository. macOS uses the Apple Silicon runner.
 
 Tests run only on Linux. Windows/macOS compilation does not establish native device, credential-store, permission or UI behavior. Linux synthetic captures are smoke checks, not a substitute for real server/device scenarios. New pull-request pushes cancel obsolete runs; a running main-branch run is allowed to finish.
 
@@ -29,7 +31,7 @@ scope explicitly. Packaging retains the separate pinned-runtime builder.
 
 The manual [release workflow](../.github/workflows/release.yml) accepts an exact commit on `main`, an existing version tag and an optional publish flag. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The ordinary macOS CI job also assembles these packages so packaging failures can be fixed before a release tag is created.
 
-The separate publisher uses `blacksmith-2vcpu-ubuntu-2404` and is the only job with `contents: write`. It checks package receipts and the existing tag, creates a draft using GitHub CLI, uploads files, downloads and compares their bytes, rechecks the tag, then marks the release as a prerelease. An error leaves the draft for inspection. It never replaces existing release assets or creates/moves a tag. Maintainers must serialize publication of a version; tag checks do not prevent an administrator from changing GitHub state concurrently.
+The separate publisher uses `ubuntu-24.04` and is the only job with `contents: write`. It checks package receipts and the existing tag, creates a draft using GitHub CLI, uploads files, downloads and compares their bytes, rechecks the tag, then marks the release as a prerelease. An error leaves the draft for inspection. It never replaces existing release assets or creates/moves a tag. Maintainers must serialize publication of a version; tag checks do not prevent an administrator from changing GitHub state concurrently.
 
 macOS packages include the required GStreamer runtime, plugins, notices and source information. Their ad-hoc signatures are not Developer ID signatures or notarization. Structural package checks do not establish native installation, device or permission behavior. Windows binaries are compile-checked but are not packaged by this alpha workflow.
 

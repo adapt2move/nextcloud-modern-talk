@@ -37,7 +37,7 @@ env:
 jobs:
   package-linux:
     name: Linux package and install smoke
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
       LANG: C.UTF-8
@@ -78,7 +78,7 @@ jobs:
 
   package-macos:
     name: macOS Apple Silicon package (compile only)
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-26
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,7 +103,7 @@ jobs:
     name: Publish verified prerelease
     needs: [package-linux, package-macos]
     if: inputs.publish && github.repository == 'adapt2move/nextcloud-modern-talk' && github.ref == 'refs/heads/main'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write

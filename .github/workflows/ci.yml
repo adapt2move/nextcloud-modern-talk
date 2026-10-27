@@ -25,7 +25,7 @@ env:
 jobs:
   linux:
     name: Linux tests and native smoke
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       LANG: C.UTF-8
@@ -71,7 +71,7 @@ jobs:
 
   windows:
     name: Compile only (Windows x86_64 MSVC)
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-2025
     timeout-minutes: 60
     env:
       AWS_LC_SYS_PREBUILT_NASM: "1"
@@ -92,7 +92,7 @@ jobs:
 
   macos:
     name: Compile only (macOS Apple Silicon)
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       RUSTFLAGS: "-D warnings"
