@@ -41,7 +41,7 @@ sha2 = { version = "=0.11.1", default-features = false }
 tempfile = { version = "=3.27.0", default-features = false, features = ["getrandom"] }
 flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 tar = { version = "=0.4.46", default-features = false }
-zip = { version = "=9.0.4", default-features = false, features = ["deflate"] }
+zip = { version = "=9.1.2", default-features = false, features = ["deflate"] }
 # GPUI's pinned xattr/tar chain still uses libc::ENOATTR. Keep the lock
 # resolution at libc 0.2.186 until that upstream chain is updated and compiled.
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
