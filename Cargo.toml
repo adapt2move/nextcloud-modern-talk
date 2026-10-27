@@ -78,7 +78,7 @@ default-features = false
 features = ["bundled", "limits"]
 
 [workspace.dependencies.dirs]
-version = "=5.0.1"
+version = "=7.0.0"
 default-features = false
 
 # Snapshot the system timezone off the UI thread; formatting uses the cached zone.
