@@ -1,6 +1,8 @@
 # Build, test and release
 
-The [CI workflow](../.github/workflows/ci.yml) has three jobs. Pull requests, pushes to `main` and manual runs use the same checks.
+The [CI workflow](../.github/workflows/ci.yml) runs only the Linux job on pull requests.
+Pushes to `main` and manual runs on `main` also run Windows and macOS. Manual runs
+on other branches run Linux only.
 
 | Job | Runner | Work |
 | --- | --- | --- |

@@ -158,7 +158,7 @@ cargo test --locked -p talk-adapters --features backend-test --lib
 
 Select the smallest relevant package scope for a change. Negative boundary fixtures must fail for their intended diagnostic; see [contract fixtures](../tests/contracts/README.md). A compile or synthetic fixture result does not qualify authentication, native media, accessibility or performance.
 
-[CI](ci.md) runs tests on Linux and compilation only on Windows/macOS. The [release tooling guide](../tools/release/README.md) describes standalone workflow/package checks and their limits.
+[CI](ci.md) runs only Linux checks on PRs. On `main`, it also compiles on Windows/macOS. The [release tooling guide](../tools/release/README.md) describes standalone workflow/package checks and their limits.
 
 ## Documentation check
 

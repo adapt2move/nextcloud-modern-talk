@@ -73,6 +73,7 @@ jobs:
 
   windows:
     name: Compile only (Windows x86_64 MSVC)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 60
     env:
@@ -94,6 +95,7 @@ jobs:
 
   macos:
     name: Compile only (macOS Apple Silicon)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 60
     env:

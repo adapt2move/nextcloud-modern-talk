@@ -22,6 +22,7 @@ ACTIONLINT_SHA256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b34
 ACTIONLINT_URL = "https://github.com/rhysd/actionlint/releases/download/v" + ACTIONLINT_VERSION + "/actionlint_" + ACTIONLINT_VERSION + "_linux_amd64.tar.gz"
 LINUX = {"ubuntu-24.04"}
 COMPILE = {"windows-2025", "macos-26"}
+MAIN_ONLY = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
 TEST = re.compile(r"cargo(?:\.py)?\s+(?:test|bench|run|nextest)\b|tests?\.py\b|capture\.py|--ui-scenario|--licenses|xvfb-run|pytest")
 
 
@@ -53,6 +54,11 @@ def check(root, actionlint=False, placement=True):
                 raise ValueError("Missing timeout in " + name)
             if "contents: write" in job and (file.name, name) != ("release.yml", "publish"):
                 raise ValueError("Only release publication may write contents")
+            conditions = re.findall(r"(?m)^    if: (.*)$", job)
+            if file.name == "ci.yml":
+                expected = [MAIN_ONLY] if runner[1] in COMPILE else []
+                if conditions != expected:
+                    raise ValueError("CI must run Linux on PRs and all platforms only on main: " + name)
             if runner[1] in COMPILE:
                 if TEST.search(job):
                     raise ValueError("Tests/application execution must run on Linux: " + name)
@@ -60,7 +66,7 @@ def check(root, actionlint=False, placement=True):
                     "cargo build --locked", "tools/cargo.py build --locked", "tools/release/build.py",
                 )):
                     raise ValueError("Compile-only job lacks its build: " + name)
-                if re.search(r"(?m)^    if:|^        if:", job):
+                if (file.name != "ci.yml" and conditions) or re.search(r"(?m)^        if:", job):
                     raise ValueError("Compile-only builds must not be conditionally skipped: " + name)
     for folder in ("tools/release", "tools/ci"):
         for source in (root / folder).glob("*.py"):

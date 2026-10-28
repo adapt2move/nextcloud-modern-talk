@@ -58,6 +58,21 @@ class PolicyTests(unittest.TestCase):
     def test_macos_compile_not_skipped(self):
         self.check("    name: Compile only (macOS Apple Silicon)", "    if: false\n    name: Compile only (macOS Apple Silicon)")
 
+    def test_platform_builds_cannot_run_in_pull_requests(self):
+        self.check("    if: " + policy.MAIN_ONLY + "\n", "")
+        self.check(policy.MAIN_ONLY, policy.MAIN_ONLY.replace("!=", "=="))
+
+    def test_manual_feature_branches_cannot_run_full_ci(self):
+        self.check(policy.MAIN_ONLY, "github.event_name != 'pull_request'")
+
+    def test_linux_must_run_in_pull_requests(self):
+        self.check("    name: Linux tests and native smoke",
+                   "    if: " + policy.MAIN_ONLY + "\n    name: Linux tests and native smoke")
+
+    def test_release_builds_remain_unconditional(self):
+        self.check("    runs-on: macos-26", "    if: " + policy.MAIN_ONLY + "\n    runs-on: macos-26",
+                   file="release.yml")
+
 
 if __name__ == "__main__":
     unittest.main()

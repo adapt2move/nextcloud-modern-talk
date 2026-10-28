@@ -25,8 +25,8 @@ lists scoped commands. Typical commands are `task fmt:check`, `task lint`, `task
 selection, source provenance and third-party notices.
 
 Describe what changed, checks run and any untested platforms or remaining limitations
-in the PR. Runtime, mock and compile-only results are different evidence. CI runs Linux
-tests and native smoke checks, plus Windows/macOS builds; see [CI policy](docs/ci.md).
+in the PR. Runtime, mock and compile-only results are different evidence. PRs run Linux
+tests and native smoke checks; `main` adds Windows/macOS builds. See [CI policy](docs/ci.md).
 
 ## Documentation and licensing
 
