@@ -98,14 +98,7 @@ def capture(args, before_runtime_cleanup=None):
                             "measurement_limit": "single Linux diagnostic sample; excludes GPU/Xvfb/other processes; not Q.PERF acceptance",
                             "window_size": [args.width, args.height], "command": ["talk-desktop"] + command[1:]})
                         if args.interactions:
-                            if getattr(args, "interaction_suite", "i1") == "d1-2":
-                                from interactions_d1_2 import exercise
-                            elif getattr(args, "interaction_suite", "i1") == "d1-1":
-                                from interactions_d1_1 import exercise
-                            elif getattr(args, "interaction_suite", "i1") == "d1":
-                                from interactions_d1 import exercise
-                            else:
-                                from interactions import exercise
+                            from interactions import exercise
                             manifest["captures"][-1]["interactions"] = exercise(scenario, env, xid, out, label, args.scale>=150)
                         print(label, flush=True)
                     finally:

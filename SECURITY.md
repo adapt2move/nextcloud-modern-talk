@@ -2,7 +2,7 @@
 
 This repository contains an unfinished native implementation and its specifications.
 No supported product release or completed security audit is established here. Consult
-[current state](docs/status.md) for implemented behavior and limitations;
+[known limitations](docs/limitations.md) for implemented behavior and limitations;
 [the security requirements](docs/quality/security.md) describe target contracts,
 not delivered guarantees. A coarse security review is not a penetration test or
 certification.

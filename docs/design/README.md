@@ -1,39 +1,43 @@
-# Design reference
+# Interface design
 
-These references describe the visual and interaction targets for the native Rust/GPUI application, with macOS as the primary platform and no embedded WebView. Browser-rendered mockups do not demonstrate native rendering, server integration, accessibility conformance, or performance.
+The native Rust/GPUI interface is the design reference. The [README screenshot](../../README.md)
+shows the application; [known limitations](../limitations.md) distinguishes implemented
+behavior from platform qualification. Historical HTML galleries and milestone captures
+are available in Git history, not maintained alongside the current interface.
 
-Blue is the preferred direction. Sage is retained for comparison. Both use Manrope, shared geometry, fictional people and messages, and CSS-drawn media placeholders. UI examples are German; public documentation is English.
+## Visual rules
 
-| Read | Purpose |
-| --- | --- |
-| [Principles](principles.md) | Stable design rules, conversation semantics, native behavior |
-| [Tokens](tokens.md) | Palette, typography, alignment and accessibility targets |
-| [Flows and screen map](flows.md) | Stable screen/flow IDs, acceptance criteria, screenshot links |
-| [Conversation dialogs](conversation-dialogs.md) | Header actions, members/bots and five-tab room settings; [interactive design](prototypes/conversation-dialogs.html) |
-| [Artifact provenance and checks](artifacts.md) | What was copied or revised, reproducible review, limits |
-| [Project notices](../../NOTICE.md) | EUPL scope and the separate Manrope font license |
+- Use bundled Google Sans, Lucide icons, blue or sage accents, and system/light/dark appearance.
+- Keep conversation navigation, messages, shared content and calls in one workspace.
+- Reuse native controls and retained input entities. Composite fields have one background
+  and border; focus must be visible without shifting geometry.
+- Keep confirmed content visible during refresh. Use bounded static skeletons only for
+  initial loads; expose offline, denied, unsupported and uncertain outcomes honestly.
+- Respect Reduce Motion and maintain keyboard access, visible focus, readable contrast
+  and text scaling. Styling alone does not establish semantic accessibility.
+- UI strings are localized; user-authored messages are not. Product behavior must not
+  depend on translated string matching.
 
-Product feature specifications govern scope and supported behavior. These Markdown documents govern the design interpretation of the supporting assets. HTML, screenshots, synthetic capability profiles and historical comparison notes are evidence of design intent only. Resolve conflicts in that order; a screenshot must never expand a feature or permission claim.
+[Tokens](tokens.md) records accessibility targets and palette roles.
+[Conversation dialogs](conversation-dialogs.md) describes members, bots and room settings.
+[Dependency provenance](native-ui/dependencies.md) and [project notices](../../NOTICE.md)
+cover the native toolkit and assets.
 
-## Current direction
+## Interaction rules
 
-![Blue conversation workspace, schematic design with fictional messages](assets/blue/05-chat.png)
+Selecting a conversation joins nothing and activates no capture. An explicit audio
+join in a group or huddle goes directly into audio; voluntary conference/webinar joins
+use device prejoin. Accepting an incoming direct call skips conference prejoin.
+Mandatory OS permission, security and consent gates still apply. Cancellation returns
+to the conversation without leaving devices active. See [call requirements](../product/calls.md).
 
-[Compare the sage workspace](assets/sage/05-chat.png). The native implementation must apply the readability targets in [tokens.md](tokens.md), including improvements over small or low-contrast labels in retained sketches.
+Views consume bounded snapshots and typed intents. They retain no credentials, perform
+no I/O and cannot infer permissions from a screenshot or server version. Dialogs preserve
+scope, drafts and focus; stale callbacks cannot change a replacement account or room.
 
-## Call entry decision
+## Screenshots
 
-- Incoming **direct** colleague call: `D-S13` → **Annehmen** → `D-S19`, a call with Mara and Alex. No conference device-prejoin interstitial.
-- Conference/webinar/presentation: conversation → `D-S09`, **Bereit, wenn du es bist.** → **Jetzt teilnehmen** → required gates → `D-S10`.
-- Huddle/ordinary group: deliberate headphone action → required gates → connecting/joined call, without a generic device-prejoin page. Teamküche selection still opens only `D-S20`; the explicit join leads to `D-S18`. Actual Channel presets forbid calls. Older Teamküche-prejoin sketches are historical, not the current target.
-- OS permissions, required recording consent and security policy remain gates in either flow. Ringing alone never activates microphone or camera.
-
-See [D-F03](flows.md#d-f03-accept-a-direct-call) and [D-F04](flows.md#d-f04-voluntarily-join-a-conference) for acceptance criteria. Incoming calls do not require a device-preview step.
-
-## Supporting assets
-
-The [gallery](prototypes/index.html) contains **20 views per palette**: four account, nine conversation and seven call views. Counts in both galleries come from their screen data. Download the repository and open it locally; GitHub's source viewer does not execute HTML. The editable [blue mockup](prototypes/blue/ui-sketch.html) and [sage mockup](prototypes/sage/ui-sketch.html) are self-contained. Add `?review` to expose the screen selector, or `?screen=incoming`, `?screen=direct-call`, or `?screen=prejoin` to select a view. `?screen=voice-room` opens the new conversation; `?screen=prejoin&conversation=voice` or `&conversation=design` selects a contextual device check. Back returns to that conversation. Voice/direct sharing controls remain illustrative; only the four-person conference has a sharing sequence.
-
-The mockups perform local screen navigation only. Device selectors, messaging, authentication, consent, capture and media controls are illustrations. They make no Nextcloud calls. Their use of HTML is an authoring aid, not an application architecture choice.
-
-The support targets are Nextcloud 34.x / Talk 24.x and Nextcloud 35.x / Talk 25.x. Controls depend on capabilities, configuration, conversation state and effective permissions; the version labels in the creation examples are synthetic fixtures, not feature switches.
+Capture the compiled app with `tools/ui/capture.py`; use fictional development scenarios
+or a disposable synthetic backend. Record the platform and whether a backend is connected.
+Do not include real accounts, messages, credentials or private server addresses. Screenshot
+changes must come from the native app, not an edited mockup.

@@ -1,6 +1,6 @@
 # Disposable backend fixtures
 
-This bootstrap harness installs two **released** Nextcloud/Talk pairs and exercises a small API smoke suite. It implements no native product feature. All 140 product inventory entries remain Planned. The accepted [lab contract](../../docs/quality/test-servers.md) and [compatibility matrix](../../docs/compatibility/test-matrix.md) remain the broader acceptance requirements.
+This harness installs two pinned Nextcloud/Talk pairs and exercises API smoke scenarios. These backend checks are separate from native application tests. The accepted [lab contract](../../docs/quality/test-servers.md) and [compatibility matrix](../../docs/compatibility/test-matrix.md) remain the broader acceptance requirements.
 
 | Profile | Server | Talk package | Runtime |
 | --- | --- | --- | --- |

@@ -1,6 +1,6 @@
 # Development
 
-Read [current state](status.md) and [Contributing](../CONTRIBUTING.md). Use a coherent checkout with its pinned dependencies; private historical snapshots are not contributor build inputs.
+Read [known limitations](limitations.md) and [Contributing](../CONTRIBUTING.md). Use a coherent checkout with its pinned dependencies; private historical snapshots are not contributor build inputs.
 
 ## Environment and toolchain
 
@@ -116,7 +116,7 @@ For a fictional-data preview:
 task dev -- --ui-scenario chat --ui-preserve-preferences
 ```
 
-This opens a native GPUI window without server login or capture. Launch without `--ui-scenario` for ordinary browser login and restored accounts. Previews, focus/keyboard checks and appearance fixtures do not establish integrated behavior. See [native UI boundaries](design/native-ui/README.md). Keep `--licenses` output and installed notices with packages.
+This opens a native GPUI window without server login or capture. Launch without `--ui-scenario` for ordinary browser login and restored accounts. Previews, focus/keyboard checks and appearance fixtures do not establish integrated behavior. See [native UI boundaries](design/README.md). Keep `--licenses` output and installed notices with packages.
 
 Use `login-server-denied`, `chat-server-denied`, `chat-server-unavailable` and `accounts-server-denied` to inspect connection-error copy with fictional data.
 
@@ -168,7 +168,7 @@ This bounded checker is not a complete CommonMark renderer or browser. It does n
 
 The [Docker backend lab](backend-lab.md) provides pinned disposable server families and synthetic accounts. Keep real credentials out of ordinary PR jobs; use separate assigned tests for browser grants, native storage, media, devices and performance.
 
-In this agent workspace, application builds/tests/services use the author's assigned agent-dev-box session and frozen inputs. Respect the four-VM project limit, preserve other sessions and active inputs, sanitize evidence, remove disposable secret-bearing state and hibernate after use. A static documentation task needs no VM. This agent-specific workflow is not a prerequisite for ordinary OSS contributors.
+Build and test locally, in an isolated container or in CI. Preserve other contributors' work and remove disposable services and secret-bearing fixtures after use.
 
 User macOS testing is final-only after the assigned agent-side work and a prepared installable candidate. A compile/package result cannot establish Keychain, devices, permissions or VoiceOver behavior.
 

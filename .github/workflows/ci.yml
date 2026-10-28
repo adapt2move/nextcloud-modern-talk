@@ -37,10 +37,12 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tools/check_docs.py
+      - run: python3 tools/check_architecture_tests.py
       - run: python3 tools/release/check_workflows.py --actionlint
       - run: python3 tools/ci/workflow_policy_tests.py
       - run: python3 tools/ci/test_prepare_gstreamer.py
       - run: python3 tools/test_cargo.py
+      - run: python3 tools/test_dev.py
       - run: python3 tools/release/tests.py
       - run: python3 tools/release/publication_tests.py
       - name: Native prerequisites

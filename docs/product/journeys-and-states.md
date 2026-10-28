@@ -1,6 +1,6 @@
 # User journeys and shared states
 
-This document defines end-to-end acceptance journeys and shared states. Each journey uses the detailed specifications; its presence here establishes no test result. The [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) record implemented scope and limitations. Account, room, participant, and call state remain distinct.
+This document defines end-to-end acceptance journeys and shared states. Each journey uses the detailed specifications; its presence here establishes no test result. The [feature inventory](../compatibility/feature-inventory.md) and [known limitations](../limitations.md) record implemented scope and limitations. Account, room, participant, and call state remain distinct.
 
 ## Journeys
 

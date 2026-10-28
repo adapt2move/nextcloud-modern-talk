@@ -1,21 +1,13 @@
 ## Change
 
-Describe the concrete problem and actual before/after behavior. For a contract or
-bootstrap change, say what it specifies or scaffolds and what remains unimplemented.
+Describe the problem and resulting behavior. Link the related issue or requirements.
 
-## Requirements and boundaries
+## Validation
 
-Link affected requirement IDs, feature/scenario IDs and owning modules. Explain
-any changed interface, permission/capability gate, resource bound or scope decision.
-Link the updated IST/current-state documentation and any affected specification.
+List relevant checks and results, untested platforms and remaining limitations.
+Keep synthetic, real-server and native-platform evidence distinct.
 
-## Evidence and limitations
+## Documentation
 
-Record commands, results and evidence for this candidate; name checks not run and
-why. For real integration/native results, name exact server patches, capabilities,
-OS and fixture/profile. Keep mocks and targets labelled. Include no credentials or
-private data.
-
-Link applicable independent reviews and unresolved findings. The PM records scoped
-acceptance under [the quality gates](../docs/quality/verification.md); author checks
-and CI are supporting evidence.
+Update user/developer documentation if behavior or setup changed. Preserve third-party
+notices; include no credentials, private server details or real message contents.

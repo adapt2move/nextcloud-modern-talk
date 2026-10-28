@@ -32,7 +32,7 @@ These roles are shared across palettes. Gray indicates unavailable/unknown state
 
 ## Typography and alignment
 
-`D-T01`: Manrope is the design typeface. The bundled variable font supports weights 200–800; use 400 for body, 600–650 for controls, and 700 for headings. Use the platform font for system-owned UI and as a fallback. Validate fallback glyphs, emoji and international scripts without clipping. See the [font notice](../../NOTICE.md#manrope).
+`D-T01`: Google Sans is the runtime typeface; Manrope belongs to historical sketches. Use the bundled Regular, Medium and Bold weights for body, controls and headings. Use the platform font for system-owned UI and as a fallback. Validate fallback glyphs, emoji and international scripts without clipping. See the [font notice](../../NOTICE.md#google-sans-and-gpui).
 
 | Role / metric | Native target or reference |
 | --- | --- |

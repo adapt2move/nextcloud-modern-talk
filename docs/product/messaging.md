@@ -1,6 +1,6 @@
 # Messages, threads, and retrieval
 
-These requirements define messaging behavior. Implemented paths and remaining parity work are described in [current state](../status.md) and the [feature inventory](../compatibility/feature-inventory.md). Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
+These requirements define messaging behavior. Implemented paths and remaining parity work are described in [known limitations](../limitations.md) and the [feature inventory](../compatibility/feature-inventory.md). Sources: [chat, reaction, thread, scheduling, and capability contracts](../compatibility/baselines-and-sources.md#protocol-sources). All writes require current membership, relevant permissions, and supported room/host behavior.
 
 ## MSG-001
 
