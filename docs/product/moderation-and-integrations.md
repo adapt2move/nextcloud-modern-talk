@@ -1,6 +1,6 @@
 # Moderation and conditional integrations
 
-This document defines moderation and conditional integration behavior. The [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) record implemented scope and limitations. Sources: [participant, webinar, breakout, bot, federation, integration, and external-service contracts](../compatibility/baselines-and-sources.md#protocol-sources). Backend availability, account authority, and host/room policy are separate conditions. Missing implementation is a visible limitation.
+This document defines moderation and conditional integration behavior. The [feature inventory](../compatibility/feature-inventory.md) and [known limitations](../limitations.md) record implemented scope and limitations. Sources: [participant, webinar, breakout, bot, federation, integration, and external-service contracts](../compatibility/baselines-and-sources.md#protocol-sources). Backend availability, account authority, and host/room policy are separate conditions. Missing implementation is a visible limitation.
 
 ## MOD-001
 

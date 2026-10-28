@@ -9,7 +9,7 @@ capabilities or platform tests.
 ## A-SRC-01 — Rust and native UI
 
 The desktop uses the pinned GPUI 0.2.2 crate. Its responsibilities and renderer
-boundary are described in [native UI architecture](decisions/001-native-ui.md).
+boundary are described in [native UI architecture](README.md#native-ui).
 The local [GPUI guidance](../../.agents/skills/gpui-guidelines/SKILL.md) links the
 upstream APIs used for lifetime, rendering, focus and input. Platform compilation
 and native behavior remain separate checks.
@@ -31,7 +31,7 @@ schemas and permission constants:
 
 Capabilities describe supported operations; current room/session responses supply
 permissions and participation. Neither a version number nor cached capabilities
-grant publication authority. See the [policy lifecycle](decisions/004-policy-media-lifecycle.md).
+grant publication authority. See the [policy lifecycle](README.md#policy-and-lifetime).
 
 ## A-SRC-03 — Signaling
 
@@ -56,7 +56,7 @@ The OCS v2 responses are defined in
 [NC34](https://github.com/nextcloud/server/blob/77e3cab12d2215bf94d6de67f23b98ed7bad236e/lib/private/AppFramework/OCS/V2Response.php)
 and [NC35](https://github.com/nextcloud/server/blob/ba900af933e61ffa005315b09d6454bfbbcbcc81/lib/private/AppFramework/OCS/V2Response.php).
 
-The [credential contract](decisions/003-credential-lifecycle.md) defines the narrow
+The [credential contract](README.md#accounts-and-storage) defines the narrow
 HTTP 401 / OCS 997 rejection classifier. A public capabilities response is not
 proof of authenticated account health. Browser Login Flow and app-password
 lifetime references are indexed with the [protocol sources](../compatibility/baselines-and-sources.md#protocol-sources).
@@ -73,7 +73,7 @@ these declarations are not a measured performance result.
 
 The shipping transport is [`webrtc =0.21.1`](https://docs.rs/crate/webrtc/0.21.1/source/), an async runtime over `rtc =0.21.1`. Its registry archive SHA-256 is `b621e736302bef784948cc8d8099fd0a8fdb5757693c80a344ffbe38c49387d2`. The released `play-from-disk-vpx`, `save-to-disk-vpx` and data-channel examples define the API used by the engine; older 0.14 examples do not apply. The [lockfile](../../Cargo.lock) pins the complete resolution, including the safe GStreamer codec bindings.
 
-[Native media architecture](decisions/005-native-media.md) describes ownership, limitations and packaging. Rust dependency and native codec notices accompany packages; a separate libwebrtc SDK is no longer a shipping input.
+[Native media architecture](README.md#native-media) describes ownership, limitations and packaging. Rust dependency and native codec notices accompany packages; a separate libwebrtc SDK is no longer a shipping input.
 
 The older [media source index](evidence/native-media-sources.json) preserves
 attributed upstream references for codecs, transform APIs and Talk framing.

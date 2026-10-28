@@ -1,6 +1,6 @@
 # Desktop behavior, accessibility, and resilience
 
-These requirements define desktop behavior and accessibility. macOS is the primary product target; available packages and platform qualifications are described in [current state](../status.md) and the [known limitations](../limitations.md). Server notification/presence/settings facts are referenced in [sources S03, S05, S08, S15](../compatibility/baselines-and-sources.md#protocol-sources).
+These requirements define desktop behavior and accessibility. macOS is the primary product target; available packages and platform qualifications are described in [known limitations](../limitations.md) and the [known limitations](../limitations.md). Server notification/presence/settings facts are referenced in [sources S03, S05, S08, S15](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## DESK-001
 

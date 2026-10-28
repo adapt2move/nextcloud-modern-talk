@@ -20,7 +20,7 @@ Runtime directories are private (0700, files 0600), outside source/sync. Keep th
 
 ## Reach a remote lab
 
-The server uses an unpublished internal Docker network. From the workstation running the assigned agent-dev-box session, use its verified SSH identity/host key:
+The server uses an unpublished internal Docker network. For a remote Docker host, use its verified SSH identity and host key:
 
 ```sh
 python3 tests/lab/access.py connect --session "$LAB_SESSION" \

@@ -1,6 +1,6 @@
 # Conversations, discovery, and membership
 
-This document defines conversation, discovery and membership behavior. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md); see the [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) for implemented scope and limitations. Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
+This document defines conversation, discovery and membership behavior. Use the [typed domain](terminology.md) and [compatibility gates](../compatibility/README.md); see the [feature inventory](../compatibility/feature-inventory.md) and [known limitations](../limitations.md) for implemented scope and limitations. Sources: [conversation API, constants, preset factory/controller, and participant API](../compatibility/baselines-and-sources.md#protocol-sources).
 
 ## CONV-001
 

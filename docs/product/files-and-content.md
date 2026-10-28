@@ -1,6 +1,6 @@
 # Files, media, and structured content
 
-This document defines file, media and structured-content behavior. The [feature inventory](../compatibility/feature-inventory.md) and [current state](../status.md) record implemented scope and limitations. Protocol evidence: [chat/share, polls, integration, and capability sources](../compatibility/baselines-and-sources.md#protocol-sources). Rendering is native; HTML content never becomes an embedded browser surface.
+This document defines file, media and structured-content behavior. The [feature inventory](../compatibility/feature-inventory.md) and [known limitations](../limitations.md) record implemented scope and limitations. Protocol evidence: [chat/share, polls, integration, and capability sources](../compatibility/baselines-and-sources.md#protocol-sources). Rendering is native; HTML content never becomes an embedded browser surface.
 
 ## CONTENT-001
 

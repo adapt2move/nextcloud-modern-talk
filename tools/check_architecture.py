@@ -233,6 +233,16 @@ def checked_imports(source: str, boundary: bool) -> str:
     return remainder
 
 
+def dependency_policy(name: str, entry: str | dict) -> dict:
+    """Keep version pins in Cargo.toml; independently review sources and features."""
+    config = {"version": entry} if isinstance(entry, str) else dict(entry)
+    if "path" not in config:
+        version = config.pop("version", "")
+        require(isinstance(version, str) and re.fullmatch(r"=\d+\.\d+\.\d+", version) is not None,
+                f"{name}: dependency must use an exact release pin")
+    return config
+
+
 def check() -> None:
     workspace = read_toml(ROOT / "Cargo.toml")["workspace"]
     require(set(workspace["members"]) == {path for path, _ in GRAPH.values()},
@@ -244,61 +254,62 @@ def check() -> None:
         "talk-core": {"path": "crates/talk-core"},
         "nextcloud-talk-api": {"path": "crates/nextcloud-talk-api"},
         "talk-adapters": {"path": "crates/talk-adapters"},
-        "webrtc": {"version": "=0.21.1", "default-features": False, "features": ["runtime-tokio", "crypto-ring"]},
-        "rtc": {"version": "=0.21.1", "default-features": False},
-        "async-trait": "=0.1.89",
-        "futures-util": {"version": "=0.3.34", "default-features": False, "features": ["std"]},
-        "tokio-tungstenite": {"version": "=0.30.0", "default-features": False, "features": ["connect", "rustls-tls-native-roots"]},
-        "rustls": {"version": "=0.23.46", "default-features": False, "features": ["std", "aws_lc_rs", "tls12"]},
-        "rustls-native-certs": {"version": "=0.8.5", "default-features": False},
-        "reqwest": {"version": "=0.13.5", "default-features": False, "features": ["rustls", "form", "stream"]},
-        "tokio": {"version": "=1.53.3", "default-features": False, "features": ["rt", "time", "sync", "macros", "net", "io-util", "fs"]},
-        "serde": {"version": "=1.0.229", "default-features": False, "features": ["std"]},
-        "serde_json": {"version": "=1.0.154", "default-features": False, "features": ["std"]},
-        "url": {"version": "=2.5.8", "default-features": False, "features": ["std"]},
-        "zeroize": {"version": "=1.9.1", "default-features": False, "features": ["alloc"]},
-        "getrandom": {"version": "=0.4.3", "default-features": False, "features": ["std"]},
-        "cookie": {"version": "=0.18.1", "default-features": False},
-        "semver": {"version": "=1.0.28", "default-features": False, "features": ["std"]},
-        'self_update': {'version': '=1.3.1', 'default-features': False, 'features': ['reqwest', 'rustls', 'checksums', 'archive-tar', 'compression-tar-gz', 'archive-zip', 'compression-zip-deflate']},
-        'sha2': {'version': '=0.11.1', 'default-features': False},
-        'tempfile': {'version': '=3.27.0', 'default-features': False, 'features': ['getrandom']},
-        'flate2': {'version': '=1.1.10', 'default-features': False, 'features': ['rust_backend']},
-        'tar': {'version': '=0.4.46', 'default-features': False},
-        'zip': {'version': '=9.0.4', 'default-features': False, 'features': ['deflate']},
-        "gpui": {"version": "=0.2.2", "default-features": False, "features": ["font-kit", "x11"]},
-        "unicode-segmentation": "=1.12.0",
-        "pulldown-cmark": {"version": "=0.13.5", "default-features": False},
-        "cpal": {"version": "=0.18.2", "default-features": False, "features": ["pulseaudio"]},
-        "gstreamer": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
-        "gstreamer-app": {"version": "=0.25.2", "default-features": False, "features": ["v1_24"]},
-        "gstreamer-video": {"version": "=0.25.4", "default-features": False, "features": ["v1_24"]},
-        "image": {"version": "=0.25.10", "default-features": False, "features": ["png", "jpeg", "webp", "gif"]},
-        "enigo": {"version": "=0.6.1", "default-features": False},
-        "windows": {"version": "=0.61.3", "default-features": False, "features": ["UI_ViewManagement"]},
-        "core-graphics": {"version": "=0.24.0", "default-features": False, "features": ["link"]},
-        "objc2-app-kit": {"version": "=0.3.2", "default-features": False, "features": ["std", "NSWorkspace", "NSAccessibility"]},
-        "ashpd": {"version": "=0.12.3", "default-features": False, "features": ["async-std"]},
-        "async-io": {"version": "=2.6.0", "default-features": False},
-        "futures-lite": {"version": "=2.6.1", "default-features": False, "features": ["std"]},
-        "keyring-core": {"version": "=1.0.1", "default-features": False},
-        "rusqlite": {"version": "=0.40.2", "default-features": False, "features": ["bundled", "limits"]},
-        "dirs": {"version": "=5.0.1", "default-features": False},
-        "jiff": {"version": "=0.2.38", "default-features": False, "features": ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"]},
-        "rustix": {"version": "=1.1.5", "default-features": False, "features": ["std", "fs", "process"]},
-        "apple-native-keyring-store": {"version": "=1.0.2", "default-features": False, "features": ["keychain"]},
-        "windows-native-keyring-store": {"version": "=1.1.0", "default-features": False},
-        "zbus-secret-service-keyring-store": {"version": "=1.0.1", "default-features": False, "features": ["crypto-rust"]},
-        "dbus-secret-service": {"version": "=4.1.0", "default-features": False, "features": ["crypto-rust"]},
-        "secret-service": {"version": "=5.2.0", "default-features": False, "features": ["crypto-rust"]},
-        "zbus": {"version": "=5.19.0", "default-features": False, "features": ["blocking-api", "async-io"]},
-        "exacl": {"version": "=0.13.0", "default-features": False},
-        "security-framework": {"version": "=3.7.0", "default-features": False},
-        "windows-permissions": {"version": "=0.2.4", "default-features": False},
-        "winapi-util": {"version": "=0.1.11", "default-features": False},
-        "atomicwrites": {"version": "=0.4.4", "default-features": False},
+        "webrtc": {"default-features": False, "features": ["runtime-tokio", "crypto-ring"]},
+        "rtc": {"default-features": False},
+        "async-trait": {},
+        "futures-util": {"default-features": False, "features": ["std"]},
+        "tokio-tungstenite": {"default-features": False, "features": ["connect", "rustls-tls-native-roots"]},
+        "rustls": {"default-features": False, "features": ["std", "aws_lc_rs", "tls12"]},
+        "rustls-native-certs": {"default-features": False},
+        "reqwest": {"default-features": False, "features": ["rustls", "form", "stream"]},
+        "tokio": {"default-features": False, "features": ["rt", "time", "sync", "macros", "net", "io-util", "fs"]},
+        "serde": {"default-features": False, "features": ["std"]},
+        "serde_json": {"default-features": False, "features": ["std"]},
+        "url": {"default-features": False, "features": ["std"]},
+        "zeroize": {"default-features": False, "features": ["alloc"]},
+        "getrandom": {"default-features": False, "features": ["std"]},
+        "cookie": {"default-features": False},
+        "semver": {"default-features": False, "features": ["std"]},
+        'self_update': {'default-features': False, 'features': ['reqwest', 'rustls', 'checksums', 'archive-tar', 'compression-tar-gz', 'archive-zip', 'compression-zip-deflate']},
+        'sha2': {'default-features': False},
+        'tempfile': {'default-features': False, 'features': ['getrandom']},
+        'flate2': {'default-features': False, 'features': ['rust_backend']},
+        'tar': {'default-features': False},
+        'zip': {'default-features': False, 'features': ['deflate']},
+        "gpui": {"default-features": False, "features": ["font-kit", "x11"]},
+        "unicode-segmentation": {},
+        "pulldown-cmark": {"default-features": False},
+        "cpal": {"default-features": False, "features": ["pulseaudio"]},
+        "gstreamer": {"default-features": False, "features": ["v1_24"]},
+        "gstreamer-app": {"default-features": False, "features": ["v1_24"]},
+        "gstreamer-video": {"default-features": False, "features": ["v1_24"]},
+        "image": {"default-features": False, "features": ["png", "jpeg", "webp", "gif"]},
+        "enigo": {"default-features": False},
+        "windows": {"default-features": False, "features": ["UI_ViewManagement"]},
+        "core-graphics": {"default-features": False, "features": ["link"]},
+        "objc2-app-kit": {"default-features": False, "features": ["std", "NSWorkspace", "NSAccessibility"]},
+        "ashpd": {"default-features": False, "features": ["async-io", "screencast"]},
+        "async-io": {"default-features": False},
+        "futures-lite": {"default-features": False, "features": ["std"]},
+        "keyring-core": {"default-features": False},
+        "rusqlite": {"default-features": False, "features": ["bundled", "limits"]},
+        "dirs": {"default-features": False},
+        "jiff": {"default-features": False, "features": ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"]},
+        "rustix": {"default-features": False, "features": ["std", "fs", "process"]},
+        "apple-native-keyring-store": {"default-features": False, "features": ["keychain"]},
+        "windows-native-keyring-store": {"default-features": False},
+        "zbus-secret-service-keyring-store": {"default-features": False, "features": ["crypto-rust"]},
+        "dbus-secret-service": {"default-features": False, "features": ["crypto-rust"]},
+        "secret-service": {"default-features": False, "features": ["crypto-rust"]},
+        "zbus": {"default-features": False, "features": ["blocking-api", "async-io"]},
+        "exacl": {"default-features": False},
+        "security-framework": {"default-features": False},
+        "windows-permissions": {"default-features": False},
+        "winapi-util": {"default-features": False},
+        "atomicwrites": {"default-features": False},
     }
-    require(shared == reviewed, "shared dependency pins/features differ from reviewed network/native plan")
+    require({name: dependency_policy(name, entry) for name, entry in shared.items()} == reviewed,
+            "shared dependency features/sources differ from reviewed network/native plan")
     require(set(workspace) <= {"members", "exclude", "resolver", "package", "dependencies", "lints"},
             "unreviewed workspace patch/target/configuration")
     require(workspace.get("exclude") == ["vendor/gpui"], "unreviewed workspace exclusions")
@@ -380,7 +391,7 @@ def check() -> None:
                     "third-party lock entries require registry checksums and reviewed provenance")
     require(any(p["name"] == "libc" and p["version"] == "0.2.186" for p in packages),
             "GPUI/xattr compatibility pin missing")
-    for name, entry in reviewed.items():
+    for name, entry in shared.items():
         if name in {"talk-core", "talk-adapters", "nextcloud-talk-api"}:
             continue
         version = (entry if isinstance(entry, str) else entry["version"]).removeprefix("=")

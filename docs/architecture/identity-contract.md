@@ -46,4 +46,4 @@ Only the [authoritative rejection classifier](nextcloud-contract.md#i2-auth-reje
 
 The facade, runtime queues, provider workers and HTTP runtime all have explicit finite capacities; their constants and admission behavior are documented in the owning code. No caller may create another runtime to evade capacity, recreate an account to erase uncertain writes, or treat process exit as proof of provider settlement.
 
-Linux real-server/browser, private-file and isolated Secret Service checks cover their named paths. Native macOS/Windows providers, sleep/wake, all device combinations and complete performance qualification remain separate. See [current limits](../status.md), [account requirements](../product/accounts.md) and the [development guide](../development.md) for supported checks.
+Linux real-server/browser, private-file and isolated Secret Service checks cover their named paths. Native macOS/Windows providers, sleep/wake, all device combinations and complete performance qualification remain separate. See [current limits](../limitations.md), [account requirements](../product/accounts.md) and the [development guide](../development.md) for supported checks.

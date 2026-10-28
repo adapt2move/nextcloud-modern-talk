@@ -1,27 +1,38 @@
 # Contributing
 
-NextCloud Modern Talk is an EUPL-1.2 Rust/GPUI project for teams. Read [current state](docs/status.md), [development](docs/development.md) and [architecture](docs/architecture/README.md) before taking a task. Coordinate owned paths when working concurrently.
+NextCloud Modern Talk is an independent Rust/GPUI client licensed under EUPL-1.2.
+Start with [development](docs/development.md), [architecture](docs/architecture/README.md)
+and [known limitations](docs/limitations.md).
 
-## Scope a contribution
+## Issues and pull requests
 
-Use the [product requirements](docs/product/README.md), [feature inventory](docs/compatibility/feature-inventory.md) and [compatibility scenarios](docs/compatibility/test-matrix.md). Name relevant requirement, feature and scenario IDs. Preserve those IDs and make requirement changes explicit. An interface, stub or successful compile does not verify a feature.
+For a bug, include the app version, OS, relevant NextCloud/Talk versions, reproduction
+steps, expected behavior and actual result. Use synthetic data and remove credentials,
+private server names and message contents. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+For a substantial feature, open an issue first to agree on scope and supported platforms.
 
-Keep transport, credentials, persistence and media behind their owning modules. GPUI views consume bounded snapshots and typed intents. Specifications govern permissions and supported behavior; design images are illustrative. Compatibility claims need evidence for the actual server, configuration and platform.
+Keep changes focused. Preserve account/room/call isolation and keep I/O behind its owning
+module. [Product requirements](docs/product/README.md) and [security requirements](docs/quality/security.md)
+define behavior; link relevant requirements when changing it. Do not treat compilation
+or a mocked response as proof of real-server or native-platform support.
 
-For concurrent work, agree on owned paths and interface changes. Preserve other contributors' edits and active private inputs. Escalate cross-module contract changes to their owner.
+## Checks
 
-## Verify a change
+Run the checks appropriate to the change; the [development guide](docs/development.md#bootstrap-checks)
+lists scoped commands. Typical commands are `task fmt:check`, `task lint`, `task test`,
+`task docs` and `python3 tools/check_architecture.py`. Use the pinned Rust toolchain and
+`--locked`. Dependency updates must update the lockfile and preserve explicit feature
+selection, source provenance and third-party notices.
 
-Choose proportionate checks using the [development guide](docs/development.md#bootstrap-checks) and [quality requirements](docs/quality/index.md). Describe changed behavior, source identity, checks run, outcomes, unrun checks and real limitations. Keep synthetic fixtures, server observations, native results and compilation distinct. Follow [Q.VER-03](docs/quality/verification.md#qver-03--exact-candidate-and-evidence-identity) for consequential verification and [Q.VER-07](docs/quality/verification.md#qver-07--current-state-documentation-and-handoff) for current-state changes.
+Describe what changed, checks run and any untested platforms or remaining limitations
+in the PR. Runtime, mock and compile-only results are different evidence. PRs run Linux
+tests and native smoke checks; `main` adds Windows/macOS builds. See [CI policy](docs/ci.md).
 
-The task owner selects review scope in proportion to the change. Product and release claims still require evidence and acceptance for their actual scope under [Q.VER-02](docs/quality/verification.md#qver-02--independent-reviews-and-decision-authority); passing CI alone establishes neither.
+## Documentation and licensing
 
-Use synthetic accounts and sanitized evidence. Keep credentials, private server names, private paths and raw sensitive traces out of commits, issues and CI logs. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+Write public documentation in English and use NextCloud as the project brand. Keep
+installation, development and limitations current. Put implementation rationale beside
+code; use issues, PRs and Git history for task status and historical reports.
 
-## Documentation and attribution
-
-Write public documentation in English and use NextCloud for the project's brand. Preserve specified localized UI examples. Keep contributor instructions concise, product specifications normative, and high-level architecture focused on responsibilities and boundaries. Put implementation rationale beside code. Keep historical reports and task ledgers outside normal contributor documentation.
-
-Use relative links and stable requirement anchors. Cite official, pinned sources for protocol and dependency claims. Run the [documentation check](docs/development.md#documentation-check) for changed links.
-
-Preserve [EUPL-1.2](LICENSE) and third-party terms and provenance in [NOTICE.md](NOTICE.md). Contribute only material you have the right to distribute; separately licensed assets retain their terms.
+Contribute only material you can distribute under the applicable terms. Preserve
+[EUPL-1.2](LICENSE), [third-party notices](NOTICE.md), asset licenses and source provenance.

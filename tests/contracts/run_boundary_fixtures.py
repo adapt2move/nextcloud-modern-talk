@@ -32,7 +32,8 @@ def copy_source(destination):
     for name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'rustfmt.toml'):
         shutil.copy2(candidate / name, destination / name)
     for name in ('crates', 'apps', 'vendor'):
-        shutil.copytree(candidate / name, destination / name)
+        shutil.copytree(candidate / name, destination / name,
+                        ignore=shutil.ignore_patterns('__pycache__', '.durable-cache-test-*'))
     (destination / 'tools').mkdir()
     shutil.copy2(candidate / 'tools/check_architecture.py', destination / 'tools/check_architecture.py')
     shutil.copy2(candidate / 'tools/vendor.py', destination / 'tools/vendor.py')
@@ -51,7 +52,10 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     env = dict(os.environ, CARGO_TARGET_DIR=str(scratch / 'target'), PYTHONDONTWRITEBYTECODE='1', CARGO_TERM_COLOR='never')
 
     def run(root, argv):
-        result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True, timeout=180)
+        # The positive consumer builds the adapter graph from a cold target directory.
+        # Allow that compilation on ordinary hosted runners; lexical checks stay short.
+        timeout = 600 if argv[0] == "cargo" else 60
+        result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
         return {
             'argv': argv, 'exit_code': result.returncode,
             'stdout': result.stdout.replace(str(scratch), '[fixture-temp]').replace(str(candidate), '[candidate]'),

@@ -3,7 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends build-essential pkg-config clang lld libclang-dev \
+apt-get install -y --no-install-recommends build-essential pkg-config clang lld libclang-dev ca-certificates \
   libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev \
   libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan1 mesa-vulkan-drivers \
   vulkan-tools xvfb xauth xdotool imagemagick fonts-noto-core fonts-noto-color-emoji \

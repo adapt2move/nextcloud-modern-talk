@@ -3,7 +3,7 @@
 The desktop uses **GPUI 0.2.2** with source-bound local backdrop-renderer and
 macOS text-input range output-pointer patches,
 default features disabled, `font-kit` and `x11`, plus
-**unicode-segmentation 1.12.0**. Exact versions and
+**unicode-segmentation 1.13.3**. Exact versions and
 features live in the workspace manifests and `Cargo.lock`; the toolchain is
 pinned in `rust-toolchain.toml`.
 
@@ -13,7 +13,7 @@ pinned in `rust-toolchain.toml`.
 | --- | --- | --- |
 | GPUI | [published 0.2.2](https://docs.rs/crate/gpui/0.2.2), [immutable crate archive](https://static.crates.io/crates/gpui/gpui-0.2.2.crate), SHA-256 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707` | Apache-2.0; full original license bundled |
 | Native input adaptation | `examples/input.rs` in that exact archive; selection/edit/IME/render API inspected against archive source | Apache-2.0, attribution and modifications in desktop NOTICE/source |
-| Unicode segmentation | [official 1.12.0 documentation](https://docs.rs/unicode-segmentation/1.12.0/unicode_segmentation/) and canonical registry checksum | MIT OR Apache-2.0 |
+| Unicode segmentation | [official 1.13.3 documentation](https://docs.rs/unicode-segmentation/1.13.3/unicode_segmentation/) and canonical registry checksum | MIT OR Apache-2.0 |
 | Runtime Google Sans | [v14.000 release](https://github.com/googlefonts/googlesans/releases/tag/v14.000); unchanged static Regular, Medium and Bold; [exact archive/file hashes](../../../apps/desktop/assets/fonts/googlesans-provenance.json) | OFL-1.1, with upstream license and trademark guidance bundled |
 | Manrope in historical design assets | [Google Fonts commit b31870aff700ab7a1d74fa0c6887d95beb9e0037](https://github.com/google/fonts/tree/b31870aff700ab7a1d74fa0c6887d95beb9e0037/ofl/manrope), SHA-256 `3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6` | OFL-1.1; unchanged original notice SHA-256 `58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b` |
 

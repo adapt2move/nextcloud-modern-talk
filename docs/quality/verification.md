@@ -30,9 +30,9 @@ For product acceptance, the owner selects review coverage based on the changed b
 | Performance | Budgets are measurable; UI work, queue/cache limits, cancellation and profiling points are designed | Inspect release-build traces, resource boundaries, raw runs and regressions against [performance](performance.md) |
 | Coarse security | Threats and credential/TLS/media/privacy interfaces have explicit safe behavior | Inspect actual adapters and error paths, redaction artifacts, permissions, dependencies and negative tests against [security](security.md) |
 
-Use the [review template](review-report-template.md). “Coarse security review” is a scoped engineering review, not a penetration test, external audit or certification. Bootstrap performance/security passes apply to the plan/contracts only.
+Use the [review template](verification.md). “Coarse security review” is a scoped engineering review, not a penetration test, external audit or certification. Bootstrap performance/security passes apply to the plan/contracts only.
 
-For a product/release decision, the owner can use the [acceptance template](acceptance-report-template.md) after the assigned verification. Critical/high-impact security findings, unauthorized capture, account leakage, broken core workflows, missing required evidence or unmet advertised budgets block product acceptance. Lower-impact exceptions need an explicit owner, expiry/milestone and narrowed public claim; an exception cannot turn `not run` into `pass`.
+For a product/release decision, the owner can use the [acceptance template](verification.md) after the assigned verification. Critical/high-impact security findings, unauthorized capture, account leakage, broken core workflows, missing required evidence or unmet advertised budgets block product acceptance. Lower-impact exceptions need an explicit owner, expiry/milestone and narrowed public claim; an exception cannot turn `not run` into `pass`.
 
 ## Q.VER-03 — Exact candidate and evidence identity
 
@@ -141,7 +141,7 @@ Applies to [Q.PERF-02/07/08](performance.md#qperf-02--workload-budgets) and [Q.L
 
 Unit/contract tests exercise meaningful invariants, protocol parsing and failure transitions. Integration tests exercise adapters and real servers. Native scenario tests exercise OS devices/vault/UI; performance runs use the declared reference hardware. Do not inflate coverage with tests that merely repeat implementation constants or claim a mock is a real server.
 
-The user has authorized disposable Nextcloud/Talk servers. [The lab plan](test-servers.md) defines isolation, versions, secret handling and cleanup. Run services only within their assigned execution scope. Agent builds/services/tests use the assigned agent-dev-box session; inspect status/cost before use and hibernate after secret-bearing cleanup. Static documentation work needs no VM or service. Linux-server evidence cannot substitute for macOS capture/Keychain/performance evidence.
+The user has authorized disposable Nextcloud/Talk servers. [The lab plan](test-servers.md) defines isolation, versions, secret handling and cleanup. Run services only within their assigned execution scope. Use a local development environment, an isolated container or CI. Clean up disposable services and secret-bearing fixtures after the run. Linux-server evidence cannot substitute for macOS capture/Keychain/performance evidence.
 
 ## Q.VER-07 — Current-state documentation and handoff
 

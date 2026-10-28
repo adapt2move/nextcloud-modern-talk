@@ -37,10 +37,12 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tools/check_docs.py
+      - run: python3 tools/check_architecture_tests.py
       - run: python3 tools/release/check_workflows.py --actionlint
       - run: python3 tools/ci/workflow_policy_tests.py
       - run: python3 tools/ci/test_prepare_gstreamer.py
       - run: python3 tools/test_cargo.py
+      - run: python3 tools/test_dev.py
       - run: python3 tools/release/tests.py
       - run: python3 tools/release/publication_tests.py
       - name: Native prerequisites
@@ -71,6 +73,7 @@ jobs:
 
   windows:
     name: Compile only (Windows x86_64 MSVC)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 60
     env:
@@ -92,6 +95,7 @@ jobs:
 
   macos:
     name: Compile only (macOS Apple Silicon)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 60
     env:

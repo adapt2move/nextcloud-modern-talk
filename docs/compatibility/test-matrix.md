@@ -1,8 +1,8 @@
 # Compatibility and product acceptance matrix
 
-This matrix defines compatibility scenarios and required profiles. Results belong to evidence for an exact client, server and platform; listing a scenario here establishes neither a pass nor an unrun result. See the [feature inventory](feature-inventory.md) and [current state](../status.md) for implemented scope and limitations. Protocol source verification is recorded separately in [baselines and sources](baselines-and-sources.md). Follow the [quality verification process](../quality/verification.md), [security contract](../quality/security.md), and [test-server guidance](../quality/test-servers.md).
+This matrix defines compatibility scenarios and required profiles. Results belong to evidence for an exact client, server and platform; listing a scenario here establishes neither a pass nor an unrun result. See the [feature inventory](feature-inventory.md) and [known limitations](../limitations.md) for implemented scope and limitations. Protocol source verification is recorded separately in [baselines and sources](baselines-and-sources.md). Follow the [quality verification process](../quality/verification.md), [security contract](../quality/security.md), and [test-server guidance](../quality/test-servers.md).
 
-Functional checks use disposable NextCloud/Talk servers with synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. VM builds/services use agent-dev-box; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
+Functional checks use disposable NextCloud/Talk servers with synthetic accounts/content, reproducible artifacts, minimal exposure, and teardown. Builds and services use an isolated development environment; actual macOS Keychain, VoiceOver, capture permissions, and devices require an appropriate macOS environment. A Linux VM or mock adapter cannot qualify those platform behaviors.
 
 ## Required environments
 
@@ -175,6 +175,6 @@ For classified retention, separately vary message expiry, configured room retent
 
 ## Evidence and release decision
 
-For each scenario record profile(s), test class (fixture/native adapter/live integration/manual accessibility), client revision, test implementation reference, result (`not run`, `pass`, `fail`, `blocked`, or justified `not applicable`), redacted artifacts, unresolved findings, and reviewer. Use the quality acceptance report template rather than overwriting this planned matrix with an unqualified checkmark.
+For each scenario record profile(s), test class (fixture/native adapter/live integration/manual accessibility), client revision, test implementation reference, result (`not run`, `pass`, `fail`, `blocked`, or justified `not applicable`), redacted artifacts, unresolved findings, and reviewer. Keep detailed run results in the relevant issue or PR; do not replace this planned matrix with unqualified checkmarks.
 
 P1 requires applicable CT-001–009/025–028 safety paths; P2 additionally requires CT-011–016/018–019 for every call policy the client will encounter, including correct blocking of unsupported combinations. P3/P4 add their feature scenarios and regress the affected earlier cases. A deferred feature's restrictive policy still needs testing when its data can reach an earlier phase. Publication of a reviewed documentation/bootstrap repository does not require pretending these runtime tests ran; shipping or claiming a working feature does require its evidence.

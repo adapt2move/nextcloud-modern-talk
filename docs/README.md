@@ -1,24 +1,17 @@
 # Documentation
 
-Read [current state](status.md) for limitations and [development](development.md) to contribute. Specifications describe intended behavior; they do not establish implemented support.
-
-| Read | Purpose |
+| Start here | Purpose |
 | --- | --- |
-| [Development](development.md) | Prerequisites, pinned toolchain, native UI entrypoint and scoped checks |
-| [Installation](install.md) | Install, approve the first macOS launch and update |
-| [Changelog](changelog.md) | Changes in the current release |
-| [Known limitations](limitations.md) | Platform and feature gaps |
-| [Backend lab](backend-lab.md) | Disposable pinned servers, synthetic accounts and cleanup |
-| [Product](product/README.md) | Intended user outcomes and stable requirement IDs |
-| [Compatibility](compatibility/README.md) | Server families, runtime conditions, inventory and scenarios |
-| [Design](design/README.md) | Design hierarchy, flows, tokens and illustrative assets |
-| [Architecture](architecture/README.md) | Module responsibilities, boundaries and data flow |
-| [Quality](quality/index.md) | Security, performance and verification requirements |
-| [CI](ci.md) | Linux tests, Windows/macOS compile-only jobs |
-| [Release tooling](../tools/release/README.md) | Package inputs, metadata and publication commands |
+| [Install](install.md) | Downloads, first launch and updates |
+| [Known limitations](limitations.md) | Supported profile and remaining gaps |
+| [Changelog](changelog.md) | Release changes |
+| [Development](development.md) | Prerequisites, builds and tests |
+| [Architecture](architecture/README.md) | Modules, ownership and data flow |
+| [Backend lab](backend-lab.md) | Disposable synthetic NextCloud servers |
+| [CI](ci.md) | Automated checks and platform coverage |
+| [Release tooling](../tools/release/README.md) | Packaging and publication |
 
-<a id="active-implementation-and-credential-amendment"></a>
-
-Normal sign-in persists the account, preferring a native credential store and offering an explicit durable unencrypted private-file fallback. The [account contract](product/accounts.md) describes storage failure, restoration and logout. Platform qualification remains separate from the storage interface.
-
-Keep implementation rationale beside code. Historical reports and task ledgers belong outside normal contributor documentation; follow [AGENTS.md](../AGENTS.md).
+Detailed reference: [product requirements](product/README.md),
+[compatibility](compatibility/README.md), [design](design/README.md) and
+[quality](quality/index.md). Requirements describe intended behavior, not verified support.
+[Contributing](../CONTRIBUTING.md) explains how to propose and validate changes.

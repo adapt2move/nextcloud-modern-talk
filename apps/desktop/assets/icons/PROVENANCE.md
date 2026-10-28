@@ -6,6 +6,6 @@ Functional SVG icons come from [Lucide 0.468.0](https://github.com/lucide-icons/
 
 ## Application artwork
 
-`brand.svg`, `brand-front.svg` and `brand-knockout.svg` remain inherited project artwork under EUPL-1.2, separate from Lucide. They transcribe the prototype `.brandmark:before/:after` geometry in [the Blue sketch](../../../../docs/design/prototypes/blue/ui-sketch.html) and its Sage counterpart. The rounded outline and rotated foreground square are separate SVG masks so each uses its native palette role. `brand.svg` subtracts the foreground and its clearance through an alpha mask so its outline works on every background. No Lucide authorship is asserted for these files.
+`brand.svg`, `brand-front.svg` and `brand-knockout.svg` remain inherited project artwork under EUPL-1.2, separate from Lucide. They transcribe the prototype `.brandmark:before/:after` geometry in the original Blue and Sage sketches retained in Git history. The rounded outline and rotated foreground square are separate SVG masks so each uses its native palette role. `brand.svg` subtracts the foreground and its clearance through an alpha mask so its outline works on every background. No Lucide authorship is asserted for these files.
 
 All SVGs are embedded with `include_bytes!`. The fixed in-memory `AssetSource` performs no runtime filesystem or network lookup.

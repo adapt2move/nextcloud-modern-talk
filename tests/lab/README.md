@@ -1,6 +1,6 @@
 # Disposable backend fixtures
 
-This bootstrap harness installs two **released** Nextcloud/Talk pairs and exercises a small API smoke suite. It implements no native product feature. All 140 product inventory entries remain Planned. The accepted [lab contract](../../docs/quality/test-servers.md) and [compatibility matrix](../../docs/compatibility/test-matrix.md) remain the broader acceptance requirements.
+This harness installs two pinned Nextcloud/Talk pairs and exercises API smoke scenarios. These backend checks are separate from native application tests. The accepted [lab contract](../../docs/quality/test-servers.md) and [compatibility matrix](../../docs/compatibility/test-matrix.md) remain the broader acceptance requirements.
 
 | Profile | Server | Talk package | Runtime |
 | --- | --- | --- | --- |
@@ -11,7 +11,7 @@ This bootstrap harness installs two **released** Nextcloud/Talk pairs and exerci
 
 ## Persistent development backend
 
-Use [the development lab guide](../../docs/backend-lab.md) and `python3 tests/lab/dev.py --help` when a browser, an agent or a future native client needs the server to remain available. `up` provisions one pinned family, seeds the proven smoke scenarios and leaves it running; `status`, `check`, `login-start`, `login-poll`, `reset` and `stop` are separate invocations with an explicit private state path. The workstation-only `access.py` opens a verified SSH tunnel bound to IPv4 loopback; Docker retains the unpublished internal network. The guide covers URL/trusted-domain configuration, private credential files and cleanup.
+Use [the development lab guide](../../docs/backend-lab.md) and `python3 tests/lab/dev.py --help` when a browser or native client needs the server to remain available. `up` provisions one pinned family, seeds the proven smoke scenarios and leaves it running; `status`, `check`, `login-start`, `login-poll`, `reset` and `stop` are separate invocations with an explicit private state path. The workstation-only `access.py` opens a verified SSH tunnel bound to IPv4 loopback; Docker retains the unpublished internal network. The guide covers URL/trusted-domain configuration, private credential files and cleanup.
 
 The following one-shot smoke interface retains its auto-cleanup behavior and unpublished internal bridge. Historical runs apply to their recorded harness hashes; the development extension requires new evidence.
 
@@ -19,16 +19,11 @@ The following one-shot smoke interface retains its auto-cleanup behavior and unp
 
 Prerequisites: a disposable Linux amd64 VM with Python 3.11+ and Docker Engine 28+; Internet access for the pinned image/package downloads. Runtime secrets live in restricted `/run` directories, which should be tmpfs. Allow approximately 4 GiB RAM, 10 GiB free disk and a 30-minute execution budget. The two profiles run sequentially; this is a functional fixture, not a production deployment or performance benchmark.
 
-Use the project/session's existing agent-dev-box environment. Set `LAB_SESSION` to that real session ID in your terminal; it is an identifier, not a credential. Do not use a new child session. From the bound workspace containing this repository:
+Run from the repository root on an isolated Linux Docker host:
 
 ```sh
-agent-dev-box up --session "$LAB_SESSION" --size small
-agent-dev-box sync --session "$LAB_SESSION"
-agent-dev-box exec --session "$LAB_SESSION" -- bash -lc \
-  'cd nextcloud-modern-talk && sh tests/lab/reprovision.sh --output /tmp/nmt-lab-evidence'
+sh tests/lab/reprovision.sh --output /tmp/nmt-lab-evidence
 ```
-
-If the session is bound to the repository itself, omit the remote `cd nextcloud-modern-talk`. `up` rejects a different workspace for an already bound session; retain the session's binding. For a previously hibernated session, use `resume`. Source changes must be local and synced; sync excludes `.git`, does not delete stale remote files and does not copy remote evidence back.
 
 The output directory must be empty and outside the repository. Optional flags: `--profile r34`, `--profile r35`, `--budget-seconds 1800`. Each run creates new independent credentials and data. Rerunning is reprovisioning, not an upgrade/downgrade or an attempt to reuse a database. No credential environment variables or production account are required. This suite is manual/opt-in and must not depend on repository secrets in untrusted pull-request CI.
 
@@ -60,25 +55,14 @@ Official release-specific protocol sources: [Talk24 conversation](https://github
 
 ## Evidence and failure recovery
 
-`report.json` records run timestamps, executing source-file SHA-256s, artifact pins and observed identities, operations/statuses, semantic assertions, errors, and cleanup. The VM copy has no Git history, so the manager must bind the hashes to the final source commit before using it as acceptance evidence. Copy only this allowlisted report after review. Never publish a full container inspection, environment/config dump, raw server log, `/run` directory, database, cookie jar or unreviewed snapshot.
+`report.json` records run timestamps, executing source-file SHA-256s, artifact pins and observed identities, operations/statuses, semantic assertions, errors, and cleanup. Record the source commit alongside the report. Copy only this allowlisted report after review. Never publish a full container inspection, environment/config dump, raw server log, `/run` directory, database, cookie jar or unreviewed snapshot.
 
-Normal success, failure, SIGINT and SIGTERM attempt cleanup. The recovery state location is printed at startup; it contains resource identities, no credential values. After a killed runner or interrupted host connection, inspect the existing dev-box job before starting another. Recover with:
+Normal success, failure, SIGINT and SIGTERM attempt cleanup. The recovery state location is printed at startup; it contains resource identities, no credential values. After a killed runner, inspect its recorded resources before starting another. Recover with:
 
 ```sh
-agent-dev-box exec --session "$LAB_SESSION" -- bash -lc \
-  'cd nextcloud-modern-talk && sh tests/lab/cleanup.sh --state /run/nmtlab-RUN/state.json'
+sh tests/lab/cleanup.sh --state /run/nmtlab-RUN/state.json
 ```
 
 Replace the placeholder with that run's printed state location. Cleanup checks exact ownership labels, removes only its recorded containers/networks/volumes, checks for remaining run-labelled resources, then removes its runtime directory. It never invokes global prune. Failed cleanup retains the recovery record and fails the run. Downloaded packages and passwords are removed before hibernation; immutable public image cache layers may remain. No secret-bearing lab snapshot should be retained.
-
-After inspecting cleanup and retrieving sanitized evidence:
-
-```sh
-agent-dev-box stats --session "$LAB_SESSION" --json
-agent-dev-box hibernate --session "$LAB_SESSION"
-agent-dev-box status --session "$LAB_SESSION"
-```
-
-Wait for `phase: hibernated`; record snapshot and estimated cost separately. Hibernation is not a substitute for data cleanup. If other work explicitly owns the same running VM, coordinate that lifecycle with its owner.
 
 Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB/TURN, recording, native performance and full parity remain **not tested here**. HPB/TURN artifacts are not pinned or provisioned by this harness. No native client or full compatibility pass is implied by these harness commands.

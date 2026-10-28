@@ -38,7 +38,7 @@ class DevelopmentSigning(unittest.TestCase):
 
     def test_an_unavailable_configured_certificate_never_creates_a_replacement(self):
         self.configured()
-        with patch.object(dev, "run", return_value="0 valid identities found") as run:
+        with patch.object(dev.platform, "system", return_value="Darwin"), patch.object(dev, "run", return_value="0 valid identities found") as run:
             with self.assertRaisesRegex(ValueError, "unavailable"):
                 dev.setup_signing(self.root)
         self.assertEqual(run.call_count, 1)

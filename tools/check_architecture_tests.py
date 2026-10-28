@@ -39,6 +39,36 @@ def load_checker(path):
     return namespace
 
 
+class DependencyPins(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.guard = load_checker(CHECKER)
+
+    def policy(self, entry):
+        self.guard['failures'].clear()
+        result = self.guard['dependency_policy']('example', entry)
+        return result, list(self.guard['failures'])
+
+    def test_release_update_keeps_feature_policy(self):
+        for version in ('=1.2.3', '=2.0.0'):
+            policy, failures = self.policy({'version': version, 'default-features': False, 'features': ['std']})
+            self.assertEqual(policy, {'default-features': False, 'features': ['std']})
+            self.assertEqual(failures, [])
+
+    def test_unpinned_and_nonrelease_versions_fail(self):
+        for version in ('1.2.3', '^1.2', '*', '=1.2.3-beta.1', ''):
+            with self.subTest(version=version):
+                self.assertTrue(self.policy(version)[1])
+
+    def test_extra_sources_and_features_are_not_erased(self):
+        policy, failures = self.policy({'version': '=1.2.3', 'git': 'https://example.invalid/fork', 'features': ['network']})
+        self.assertEqual(failures, [])
+        self.assertEqual(policy, {'git': 'https://example.invalid/fork', 'features': ['network']})
+
+    def test_local_path_is_preserved(self):
+        self.assertEqual(self.policy({'path': 'crates/talk-core'}), ({'path': 'crates/talk-core'}, []))
+
+
 class ImportStrings(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

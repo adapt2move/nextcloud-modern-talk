@@ -1,34 +1,103 @@
 # Architecture
 
-The independent [NextCloud Talk API](../../crates/nextcloud-talk-api/README.md) owns origin-bound transport and typed protocol values, including the meeting/signaling seam. It has no dependency on application policy or native media. The app has three layers: a bounded core, cohesive adapters for consequential I/O and policy decisions, and native GPUI presentation/composition. Views consume typed snapshots and intents; they do not own networking, credentials, persistence or media. The [known limitations](../limitations.md) distinguishes connected functionality from remaining compatibility and platform work.
+NextCloud Modern Talk is a Rust workspace with native GPUI presentation. The
+workspace manifests, `Cargo.lock` and `rust-toolchain.toml` are the build inputs;
+[development](../development.md) covers prerequisites and checks.
 
-| Contract | Responsibility |
+## Module boundaries
+
+| Owner | Responsibility |
 | --- | --- |
-| [ADR-001](decisions/001-native-ui.md) | Rust/GPUI native direction, toolchain and dependency boundaries |
-| [ADR-002](decisions/002-deep-modules.md) | Cohesive modules, narrow interfaces, dependency direction and resource ownership |
-| [ADR-003](decisions/003-credential-lifecycle.md) | Generations, durable restoration, settlement/recovery and account rejection |
-| [ADR-004](decisions/004-policy-media-lifecycle.md) | Policy mapping, freshness, local enforcement and shutdown |
-| [ADR-005](decisions/005-native-media.md) | Maintained WebRTC engine, device ownership and distribution |
-| [ADR-006](decisions/006-credential-providers.md) | Native/private-file providers and qualification boundaries |
-| [ADR-007](decisions/007-nextcloud-transport.md) | Bounded HTTP/TLS/OCS owner and diagnostic signaling |
-| [Integration contract](nextcloud-contract.md) | Construction, cancellation, lifetime and projection obligations |
-| [Identity contract](identity-contract.md) | Private runtime and storage transaction boundaries; durable owner, cancellation and restoration |
-| [Media allocation](media-allocation.md) | Future allocation targets and unresolved native/GPU accounting |
-| [Measurement](measurement.md) | Workload ownership, process/lifetime/peak evidence and collector qualification |
-| [Source provenance](source-evidence.md) | Official source pins and limits of feasibility research |
-| [Credential sources](credential-provider-sources.json) | Upstream pins and provenance; not runtime qualification |
+| `nextcloud-talk-api` | Origin-bound HTTP/OCS, typed protocol values, signaling and file transport |
+| `talk-core` | Domain policy, account/conversation/call identities, bounded UI snapshots and typed intents |
+| `talk-adapters` | Credential providers, persistence transactions, network integration, updates and media engine |
+| `apps/desktop` | Application composition, native devices, settings, GPUI windows and presentation |
+| `apps/bootstrap` | Headless bootstrap and contract checks |
 
-## Validation
+A consequential resource has one owner with a small interface. Extend that owner
+before adding facade layers, event buses or feature-specific crates. Views do no
+network, database, credential or media I/O. The API crate has no application-policy
+or native-device dependency. Rust application code forbids unsafe code; native FFI
+stays in reviewed dependencies.
 
-Use the scoped commands and prerequisites in [development](../development.md#bootstrap-checks). Keep the pinned toolchain and lock; never regenerate dependencies to make a check pass.
+[Architecture checks](../../tools/check_architecture.py) enforce dependency
+boundaries, feature selection, source provenance and presentation restrictions.
+[Boundary fixtures](../../tests/contracts/README.md) test intended rejection paths.
+These lexical checks supplement compilation and behavioral tests; they are not a sandbox.
 
-[check_architecture.py](../../tools/check_architecture.py) guards dependency/lock boundaries, unsafe policy and renderer/core restrictions. It is a conservative lexical guard, not a Rust parser or general sandbox. [Boundary fixtures](../../tests/contracts/README.md) must distinguish intended diagnostic failures from incidental failures. Static checks, compilation and synthetic tests cannot establish native behavior or product support.
+## Native UI
 
-## Qualification boundaries
+GPUI owns rendering, focus and window lifetimes. Composition injects bounded
+snapshots and typed intents/results into presentation. No embedded WebView is used;
+Login Flow v2 opens the system browser. Collections are paged or virtualized, and
+input entities own cancellable caret tasks. Frames never enter chat serialization.
 
-- Both server families need real integration evidence for each claimed profile. Missing or unbounded policy sources block the affected path; version numbers do not grant permission.
-- The production engine runs in the ordinary account/call owner. The old IPC helper is diagnostic-only; its tests do not qualify production device authority or native allocation bounds.
-- Credential durability, crash recovery, clock/suspend behavior, process/device release, native rendering, HPB/TURN and E2EE require their own evidence. Uncertainty must remain visible.
-- No combined-app startup, memory, energy, capture-release or policy-latency benchmark is established. Required workloads and collectors are specifications, not measured passes.
+The local GPUI patch and bundled assets retain exact provenance in
+[UPSTREAM.json](../../vendor/gpui/UPSTREAM.json) and [NOTICE.md](../../NOTICE.md).
+See [design](../design/README.md) for UI rules. Compilation does not establish
+accessibility, IME, device or permission support on another platform.
 
-Keep implementation rationale and local invariants beside the owning code. Historical execution reports belong outside normal contributor documentation.
+## Accounts and storage
+
+Every operation carries its account/runtime generation and narrower conversation
+or call scope. Retired completions cannot restore authority or update a new scope.
+The account owner coordinates login, restoration, cancellation, logout and cleanup.
+Normal sign-in is durable: prefer the native credential store, with an explicitly
+selected **unencrypted private-file** fallback when native storage is unavailable.
+There is no silent provider migration or master-password setup.
+
+Use macOS Keychain, Windows Credential Manager or Linux Secret Service through the
+platform adapter. Private files require verified per-user ownership and restrictive
+POSIX permissions or Windows DACLs. The committed ledger names the exact eligible
+provider/item; enumeration and a successful write alone cannot authorize restoration.
+Retain the previous committed credential until replacement is confirmed. Late or
+uncertain writes require settlement, and deletion failure remains visible. Logout
+suppresses restoration account-wide, including residual items in another provider.
+
+The detailed [identity contract](identity-contract.md), [account requirements](../product/accounts.md)
+and [security requirements](../quality/security.md) own transaction, crash recovery,
+file-access and cancellation invariants. Implementation rationale belongs beside code.
+
+## Transport
+
+`nextcloud-talk-api` owns bounded HTTP/TLS/OCS requests, canonical origins, response
+limits, timeouts and typed errors. Credentials are confined to the authorized origin;
+redirects, downloads and URLs supplied by servers cannot broaden that authority.
+Errors preserve safe context without credentials or message contents.
+
+Adapters map protocol observations to application policy. Mutations with uncertain
+outcomes use bounded read-only reconciliation instead of blind retries. A room-level
+denial, timeout or rate limit is not account revocation. The [integration contract](nextcloud-contract.md)
+defines admission, completion and shutdown; [protocol sources](source-evidence.md)
+record the upstream references.
+
+## Policy and lifetime
+
+Capabilities, configuration, current permissions, session state and explicit user
+intent determine available actions. A server version or cached snapshot grants no
+permission. Policy observations have finite freshness; unknown, restrictive or expired
+state denies the affected operation. Hash-only responses cannot renew omitted policy.
+
+Account rejection invalidates its generation, stops new authenticated work and closes
+local media without waiting for server leave or credential cleanup. Room restrictions
+act on their narrower scope. Resume revalidates authority and devices before use.
+Every queue/cache/operation has finite capacity, lifetime, cancellation and overload
+behavior. Preserve durable intents and required transitions when rejecting new work.
+
+## Native media
+
+The in-process `webrtc` engine and same-version `rtc` core own SDP, ICE, DTLS/SRTP
+and SCTP. Safe GStreamer bindings provide codec and frame conversion; desktop device
+owners use CPAL for audio and GStreamer for cameras. Account/call generations bind
+signaling, publication grants, devices and frames. Leaving or losing authority closes
+publication irreversibly; remote leave and device disposal are separate outcomes.
+
+Selecting a conversation or ringing never opens devices. Explicit preview is separate
+from call publication. Required E2EE and unsupported profiles fail closed. See
+[known limitations](../limitations.md) for the actual supported profile.
+
+The [legacy native helper](../../native/media/README.md) is diagnostic-only. Its
+process isolation and allocation model do not apply to the shipping engine.
+Application frame/queue bounds do not cap decoder, OS or GPU allocations. Complete
+resource claims require the [measurement contract](measurement.md) and
+[performance requirements](../quality/performance.md).
