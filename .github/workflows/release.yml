@@ -37,7 +37,7 @@ env:
 jobs:
   package-linux:
     name: Linux package and install smoke
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
       LANG: C.UTF-8
@@ -103,7 +103,7 @@ jobs:
     name: Publish verified prerelease
     needs: [package-linux, package-macos]
     if: inputs.publish && github.repository == 'adapt2move/nextcloud-modern-talk' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: write
