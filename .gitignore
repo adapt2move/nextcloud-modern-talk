@@ -8,3 +8,5 @@
 /.agent-dev-box.json
 /.runtime/
 /artifacts/private/
+
+**/.durable-cache-test-*/
