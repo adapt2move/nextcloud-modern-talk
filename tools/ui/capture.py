@@ -87,10 +87,24 @@ def capture(args, before_runtime_cleanup=None):
                             raise RuntimeError(f"No visible native window: {label}")
                         first_window_ms = round((time.monotonic() - started) * 1000, 2)
                         run(["xdotool", "windowfocus", "--sync", xid], env)
+                        run(["xdotool", "windowmove", "--sync", xid, "0", "0"], env)
                         run(["xdotool", "windowsize", "--sync", xid, str(args.width), str(args.height)], env)
-                        time.sleep(2.0)
+                        run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
                         screenshot = out / f"{label}.png"
-                        run(["import", "-window", xid, str(screenshot)], env)
+                        # A visible X11 window can precede its first Vulkan frame,
+                        # especially during cold shader compilation on software GPUs.
+                        # Never report an empty framebuffer as a successful smoke test.
+                        paint_deadline = time.monotonic() + 30
+                        while True:
+                            if app.poll() is not None:
+                                raise RuntimeError(f"Native app exited before painting: {label}")
+                            run(["import", "-window", xid, str(screenshot)], env)
+                            colors = int(run(["identify", "-format", "%k", str(screenshot)], env).stdout)
+                            if colors > 16:
+                                break
+                            if time.monotonic() >= paint_deadline:
+                                raise RuntimeError(f"Native window stayed blank: {label}")
+                            time.sleep(0.5)
                         status = Path(f"/proc/{app.pid}/status").read_text()
                         memory = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith(("VmRSS:", "VmHWM:", "Threads:"))}
                         manifest["captures"].append({"scenario": scenario, "appearance": appearance, "theme": theme, "image": screenshot.name,

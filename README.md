@@ -6,11 +6,11 @@ The target server families are **NextCloud 34 / Talk 24** and **NextCloud 35 / T
 
 The alpha includes browser-based account connection, conversation settings, messaging, previews, polls, background activity, audio/video calls and automatic update downloads. The macOS DMG includes its media runtime; no separate GStreamer installation is needed. The native UI uses Lucide icons, contextual chat actions and subtle transitions that respect Reduce Motion. Download an [alpha release](https://github.com/adapt2move/nextcloud-modern-talk/releases) and follow the [installation guide](docs/install.md), including the macOS first-launch approval. See the [changelog](docs/changelog.md) for recent changes and [known limitations](docs/limitations.md) for remaining gaps.
 
-![Native chat with favorites, image previews and fictional team messages](docs/assets/chat.png)
+![Native chat with grouped navigation, favorites and fictional team messages](docs/assets/chat.png)
 
-The untouched screenshot shows the native Linux app connected to a disposable
-NextCloud Talk server, with an English interface, fictional team members and
-German messages. The image card is an actual shared attachment.
+Native Linux/X11 screenshot of the current app in light appearance, using the
+German interface and fictional team messages (`--ui-scenario chat`). This
+standalone development scenario is not connected to a server.
 
 ## Contribute
 

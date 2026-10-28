@@ -51,7 +51,10 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     env = dict(os.environ, CARGO_TARGET_DIR=str(scratch / 'target'), PYTHONDONTWRITEBYTECODE='1', CARGO_TERM_COLOR='never')
 
     def run(root, argv):
-        result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True, timeout=180)
+        # The positive consumer builds the adapter graph from a cold target directory.
+        # Allow that compilation on ordinary hosted runners; lexical checks stay short.
+        timeout = 600 if argv[0] == "cargo" else 60
+        result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
         return {
             'argv': argv, 'exit_code': result.returncode,
             'stdout': result.stdout.replace(str(scratch), '[fixture-temp]').replace(str(candidate), '[candidate]'),

@@ -19,7 +19,7 @@ pub(super) fn check(
 
 async fn read_version() -> Result<u32, ashpd::Error> {
     let portal = Screencast::new().await?;
-    // ashpd 0.12.3's constructor defaults some failed version reads to 1.
+    // ashpd's constructor defaults some failed version reads to 1.
     // Require a successful typed property read; constructing a proxy proves nothing.
     portal
         .get_property::<u32>("version")
