@@ -20,7 +20,7 @@ import urllib.request
 ACTIONLINT_VERSION = "1.7.12"
 ACTIONLINT_SHA256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 ACTIONLINT_URL = "https://github.com/rhysd/actionlint/releases/download/v" + ACTIONLINT_VERSION + "/actionlint_" + ACTIONLINT_VERSION + "_linux_amd64.tar.gz"
-LINUX = {"ubuntu-24.04"}
+LINUX = {"ubuntu-26.04"}
 COMPILE = {"windows-2025", "macos-26"}
 MAIN_ONLY = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
 TEST = re.compile(r"cargo(?:\.py)?\s+(?:test|bench|run|nextest)\b|tests?\.py\b|capture\.py|--ui-scenario|--licenses|xvfb-run|pytest")

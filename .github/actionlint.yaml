@@ -1,0 +1,7 @@
+self-hosted-runner:
+  # actionlint 1.7.12 (our pinned version, see tools/release/check_workflows.py)
+  # does not yet know the ubuntu-26.04 GitHub-hosted runner label (GA since
+  # 2026-09, see https://github.com/rhysd/actionlint/issues/682). Listing it
+  # here is the documented workaround until a release ships the label.
+  labels:
+    - ubuntu-26.04
