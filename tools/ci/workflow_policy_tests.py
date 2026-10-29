@@ -33,7 +33,7 @@ class PolicyTests(unittest.TestCase):
         self.check()
 
     def test_unselected_runner(self):
-        self.check("ubuntu-24.04", "ubuntu-latest")
+        self.check("ubuntu-26.04", "ubuntu-latest")
 
     def test_mutable_action(self):
         self.check("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@main")
