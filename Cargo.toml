@@ -118,7 +118,7 @@ default-features = false
 features = ["crypto-rust"]
 
 [workspace.dependencies.zbus]
-version = "=5.19.0"
+version = "=6.2.0"
 default-features = false
 features = ["blocking-api", "async-io"]
 
