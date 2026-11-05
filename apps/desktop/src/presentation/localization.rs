@@ -120,4 +120,32 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn account_loading_failures_and_recovery_actions_are_translated() {
+        use talk_core::ui::presentation::AccountLoadFailure;
+        for failure in [
+            AccountLoadFailure::DeviceChanged,
+            AccountLoadFailure::InUse,
+            AccountLoadFailure::AccessDenied,
+            AccountLoadFailure::Unavailable,
+            AccountLoadFailure::UnsafeLocation,
+            AccountLoadFailure::Incomplete,
+            AccountLoadFailure::BindingMismatch,
+            AccountLoadFailure::UnsupportedVersion,
+            AccountLoadFailure::InvalidData,
+            AccountLoadFailure::RecoveryRequired,
+        ] {
+            let (title, detail) = crate::presentation::state::account_load_failure_copy(failure);
+            for key in [
+                title,
+                detail,
+                "Konten erneut laden",
+                "Kontospeicher wieder verwenden",
+            ] {
+                for locale in [Locale::English, Locale::Spanish] {
+                    assert_ne!(text(locale, key), key, "missing translation: {key}");
+                }
+            }
+        }
+    }
 }

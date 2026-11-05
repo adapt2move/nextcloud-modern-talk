@@ -3105,3 +3105,31 @@ fn reaction_old_read_protection_is_bounded_and_reclaims_after_reads_settle() {
     cache.remove_account(key.account.account);
     assert!(!cache.can_react(key, 1));
 }
+
+#[test]
+fn scrolling_older_history_keeps_receipts_when_the_header_is_absent_but_respects_privacy_zero() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let receipt = |value: Option<u64>| {
+        let mut result = messages(key, [message(key, 80, "Own message")], Some(79));
+        if let MessagingResult::Messages { common_read, .. } = &mut result {
+            *common_read = value.map(|sequence| MessageId {
+                conversation: key.conversation,
+                sequence,
+            });
+        }
+        result
+    };
+    complete(&mut cache, key, 1, Work::History, receipt(Some(90)));
+    complete(&mut cache, key, 2, Work::Older, receipt(None));
+    assert_eq!(cache.get(key).unwrap().common_read, Some(90));
+    complete(&mut cache, key, 3, Work::Poll, receipt(Some(0)));
+    assert_eq!(
+        cache.get(key).unwrap().common_read,
+        Some(0),
+        "explicit server privacy must suppress read indicators"
+    );
+    complete(&mut cache, key, 4, Work::Older, receipt(None));
+    assert_eq!(cache.get(key).unwrap().common_read, Some(0));
+}

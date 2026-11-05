@@ -1,7 +1,19 @@
 //! Native content and account-directory interface copy.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Abspielen", "Play", "Reproducir"),
+    ("Anhang entfernen", "Remove attachment", "Quitar adjunto"),
     ("Antwortoption", "Answer option", "Opción de respuesta"),
+    ("Bereit zum Senden", "Ready to send", "Listo para enviar"),
+    (
+        "Datei konnte nicht gesendet werden. Erneut versuchen.",
+        "The file could not be sent. Try again.",
+        "No se pudo enviar el archivo. Inténtalo de nuevo.",
+    ),
+    (
+        "Datei nicht mehr gefunden.",
+        "The file could no longer be found.",
+        "Ya no se encuentra el archivo.",
+    ),
     (
         "Datei wird gespeichert …",
         "Saving file…",
@@ -12,7 +24,17 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Downloading file…",
         "Descargando archivo…",
     ),
+    (
+        "Dateien werden gesendet …",
+        "Sending files…",
+        "Enviando archivos…",
+    ),
     ("Dateivorschau", "File preview", "Vista previa del archivo"),
+    (
+        "Die Datei ist zu groß. Maximal 32 MiB pro Datei.",
+        "The file is too large. Maximum 32 MiB per file.",
+        "El archivo es demasiado grande. Máximo 32 MiB por archivo.",
+    ),
     (
         "Die Inhaltsaktion ist fehlgeschlagen. Erneut versuchen.",
         "The content action failed. Try again.",
@@ -29,6 +51,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo cargar la vista previa.",
     ),
     (
+        "Diese Datei kann nicht gesendet werden.",
+        "This file cannot be sent.",
+        "No se puede enviar este archivo.",
+    ),
+    (
+        "Diese Dateiauswahl wird nicht unterstützt.",
+        "This file selection is not supported.",
+        "No se admite esta selección de archivos.",
+    ),
+    (
         "Download abgebrochen.",
         "Download cancelled.",
         "Descarga cancelada.",
@@ -42,6 +74,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Du hast keinen Zugriff auf diese Vorschau.",
         "You do not have access to this preview.",
         "No tienes acceso a esta vista previa.",
+    ),
+    (
+        "Du kannst höchstens 8 Dateien auf einmal anhängen.",
+        "You can attach up to 8 files at a time.",
+        "Puedes adjuntar hasta 8 archivos a la vez.",
     ),
     (
         "Ergebnis unklar. Prüfe das Gespräch vor erneutem Veröffentlichen.",
@@ -85,11 +122,26 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Abrir en la interfaz web de la nube",
     ),
     (
+        "Keine Berechtigung zum Senden dieser Datei.",
+        "You do not have permission to send this file.",
+        "No tienes permiso para enviar este archivo.",
+    ),
+    (
         "Keine native Vorschau verfügbar. Öffne die Datei in der Cloud-Webansicht.",
         "No native preview is available. Open the file in the Cloud web interface.",
         "No hay vista previa nativa. Abre el archivo en la interfaz web de la nube.",
     ),
     ("Kleine Vorschau", "Small preview", "Vista previa pequeña"),
+    (
+        "Kleine Vorschau · Original nicht verfügbar",
+        "Small preview · Original unavailable",
+        "Vista previa pequeña · Original no disponible",
+    ),
+    (
+        "Kleine Vorschau · Original wird geladen …",
+        "Small preview · Loading original…",
+        "Vista previa pequeña · Cargando original…",
+    ),
     (
         "Letzte Option entfernen",
         "Remove last option",
@@ -135,6 +187,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "People search failed. Try again.",
         "La búsqueda de personas ha fallado. Inténtalo de nuevo.",
     ),
+    (
+        "Sendestatus unklar. Bitte im Gespräch prüfen.",
+        "Send status unknown. Please check the conversation.",
+        "Estado de envío desconocido. Comprueba la conversación.",
+    ),
     ("Umfrage beenden", "Close poll", "Finalizar encuesta"),
     ("Umfrage beendet.", "Poll closed.", "Encuesta finalizada."),
     ("Umfrage erstellen", "Create poll", "Crear encuesta"),
@@ -165,7 +222,18 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Preview unavailable",
         "Vista previa no disponible",
     ),
+    (
+        "Vorschau wird geladen …",
+        "Loading preview…",
+        "Cargando vista previa…",
+    ),
     ("Weitere Optionen", "More options", "Más opciones"),
+    ("Wird hochgeladen …", "Uploading…", "Subiendo…"),
+    (
+        "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen.",
+        "Exit reply or special sending mode before sending files.",
+        "Sal del modo de respuesta o de envío especial antes de enviar archivos.",
+    ),
     (
         "Öffne die Datei erneut aus dem Gespräch.",
         "Open the file again from the conversation.",

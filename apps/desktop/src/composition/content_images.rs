@@ -22,9 +22,17 @@ pub(super) fn decode(job: &ImageJob) -> Option<(Arc<gpui::RenderImage>, usize)> 
     let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
     let mut limits = image::Limits::default();
     let original = matches!(job.target, talk_core::ui::content::AssetTarget::Image(_));
-    limits.max_image_width = Some(if original { 8192 } else { 4096 });
-    limits.max_image_height = Some(if original { 8192 } else { 4096 });
-    limits.max_alloc = Some(if original {
+    // A missing server preview can return an already bounded original. Decode
+    // attachment thumbnails under the same source limits, then shrink before
+    // retention/upload; avatars retain their smaller source budget.
+    let attachment = original
+        || matches!(
+            job.target,
+            talk_core::ui::content::AssetTarget::Thumbnail(_)
+        );
+    limits.max_image_width = Some(if attachment { 8192 } else { 4096 });
+    limits.max_image_height = Some(if attachment { 8192 } else { 4096 });
+    limits.max_alloc = Some(if attachment {
         96 * 1024 * 1024
     } else {
         32 * 1024 * 1024
@@ -35,7 +43,7 @@ pub(super) fn decode(job: &ImageJob) -> Option<(Arc<gpui::RenderImage>, usize)> 
     if width == 0
         || height == 0
         || u64::from(width) * u64::from(height)
-            > if original {
+            > if attachment {
                 16 * 1024 * 1024
             } else {
                 4 * 1024 * 1024
@@ -181,6 +189,22 @@ mod tests {
             .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn thumbnail_fallback_accepts_a_bounded_original_and_shrinks_before_retention() {
+        let mut source = job(png(3072, 1536, &vec![255; 3072 * 1536 * 4]));
+        source.target = AssetTarget::Thumbnail(talk_core::ui::content::AttachmentRef {
+            context: crate::composition::fixtures::context(1),
+            message: 7,
+            placeholder: talk_core::bounded::Text::new("photo").unwrap(),
+        });
+        let (image, bytes) = decode(&source).unwrap();
+        assert_eq!((image.size(0).width.0, image.size(0).height.0), (320, 160));
+        assert_eq!(bytes, 320 * 160 * 4);
+        assert!(thumbnail_bytes(&image).is_some());
+        source.bytes = ImageBytes::new(png(8193, 1, &vec![255; 8193 * 4])).unwrap();
+        assert!(decode(&source).is_none());
     }
 
     #[test]

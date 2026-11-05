@@ -27,7 +27,8 @@ axis remains at its upstream default of 1. Preserve its separate
 [font provenance](apps/desktop/assets/fonts/googlesanscode-provenance.json).
 
 The patched GPUI 0.2.2 dependency remains Apache-2.0. Local changes cover backdrop
-rendering and the nullable macOS text-input range output pointer. Its
+rendering, the nullable macOS text-input range output pointer, and an asynchronous
+copy-only macOS file-promise drag source with bounded ownership. Its
 [upstream license](vendor/gpui/LICENSE-APACHE) and
 [original source and patch inventory](vendor/gpui/UPSTREAM.json) accompany the
 source. Binary notice collection keeps this attribution separate from EUPL

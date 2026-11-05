@@ -1,4 +1,4 @@
-//! Offline preview admission binds persisted stable room/message identities to
+//! Local preview admission binds persisted stable room/message identities to
 //! the currently selected presentation. Decoding remains with composition's
 //! existing bounded worker; cached pixels confer no protocol authority.
 use super::*;
@@ -158,6 +158,12 @@ impl Accounts {
         self.cache.forget_thumbnail(attachment);
     }
     pub(crate) fn hydrate_thumbnails(&mut self) {
+        self.hydrate_thumbnails_for(None);
+    }
+    pub(super) fn hydrate_thumbnail(&mut self, target: &view::AssetTarget) {
+        self.hydrate_thumbnails_for(Some(target));
+    }
+    fn hydrate_thumbnails_for(&mut self, requested: Option<&view::AssetTarget>) {
         let Some(context) = self.snapshot.selected else {
             return;
         };
@@ -201,6 +207,9 @@ impl Accounts {
                 continue;
             }
             let target = view::AssetTarget::Thumbnail(attachment);
+            if requested.is_some_and(|requested| requested != &target) {
+                continue;
+            }
             // Loading/ready and every terminal target observation retain their
             // own authority. Disk pixels never override an explicit refusal.
             if self.snapshot.content_panel.account == Some(context.account)

@@ -25,8 +25,8 @@ use std::{
 };
 use talk_adapters::identity::{
     AccountConnection, AccountSummary, ConnectionCompletion, ConnectionCursor, ConnectionRequestId,
-    ConnectionSnapshot, ConnectionState, IdentityError, RuntimeCommand, RuntimeConfig,
-    RuntimeReply, SavedAccountState, StoredState,
+    ConnectionSnapshot, ConnectionState, IdentityError, ProfileFailure, RuntimeCommand,
+    RuntimeConfig, RuntimeReply, SavedAccountState, StoredState,
 };
 use talk_core::identity::{StorageBackend, StorageFailure};
 use talk_core::ids::{AccountId, AccountScope, LoginAttemptId, OperationId};
@@ -40,13 +40,13 @@ use talk_core::preferences::{
 };
 use talk_core::protocol::{self, RoomKind, SendMessage, SendState};
 use talk_core::ui::presentation::{
-    AccountConnectionState, AccountView, Completion, ConnectionFailure, ContentState,
-    ConversationCategory, ConversationKind, ConversationListState, ConversationMutationResult,
-    ConversationOrganization, ConversationRef, ConversationView, FeatureSupport, LoginFailure,
-    LoginPhase, NativeDesktopPort, NativeStoreState, OrganizationResult, Presence,
-    PresentationSnapshot, RequestId, SavedAccountPhase, SavedAccountView, ServerInput,
-    StorageChoice, StorageSaveFailure, StorageStatus, SubmissionResult, TagEdit, TagKind, TagRef,
-    TagView, UiIntent,
+    AccountConnectionState, AccountLoadFailure, AccountView, Completion, ConnectionFailure,
+    ContentState, ConversationCategory, ConversationKind, ConversationListState,
+    ConversationMutationResult, ConversationOrganization, ConversationRef, ConversationView,
+    FeatureSupport, LoginFailure, LoginPhase, NativeDesktopPort, NativeStoreState,
+    OrganizationResult, Presence, PresentationSnapshot, RequestId, SavedAccountPhase,
+    SavedAccountView, ServerInput, StorageChoice, StorageSaveFailure, StorageStatus,
+    SubmissionResult, TagEdit, TagKind, TagRef, TagView, UiIntent,
 };
 use talk_core::ui::{Decision, Page, SubmitError, Text, UnavailableReason, UserIntent};
 
@@ -55,6 +55,7 @@ enum Purpose {
     Outbox(outbox::Work),
     Data(cache::Work),
     Content(OperationId),
+    Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
@@ -148,6 +149,7 @@ pub struct Accounts {
     picker: Option<files::Picker>,
     picker_open: bool,
     csv_file_owner: files::CsvOwner,
+    attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
 }
@@ -193,11 +195,13 @@ impl Accounts {
             picker: None,
             picker_open: false,
             csv_file_owner: files::CsvOwner::default(),
+            attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
         }))
     }
     pub fn shutdown(&mut self) {
+        self.clear_attachment_work();
         self.cancel_csv_file();
         self.stop_video();
         self.queued_send = None;
@@ -261,6 +265,7 @@ impl Accounts {
                 ),
             };
             diagnostics::record(Diagnostic {
+                profile: None,
                 request,
                 operation,
                 outcome,
@@ -294,6 +299,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.clear_attachment_work();
         self.cancel_csv_file();
         self.queued_read.clear();
         self.clear_content_assets();
@@ -340,6 +346,11 @@ impl Accounts {
             return;
         }
         self.diagnostic_connection = Some(state);
+        let failure = if let ConnectionState::Failed(error) = state {
+            Some(error)
+        } else {
+            None
+        };
         let (outcome, error) = match state {
             ConnectionState::Starting => (DiagnosticOutcome::Loading, None),
             ConnectionState::Ready => (DiagnosticOutcome::Ready, None),
@@ -354,7 +365,8 @@ impl Accounts {
             outcome,
             error,
             count: self.snapshot.accounts.as_slice().len() as u64,
-            storage: None,
+            storage: failure.and_then(diagnostic_storage),
+            profile: failure.and_then(diagnostic_profile),
         });
     }
     fn sync_accounts(&mut self, state: &ConnectionSnapshot) {
@@ -469,9 +481,7 @@ impl Accounts {
         }
         self.restore_cache_selection();
         if let ConnectionState::Failed(error) = state.state {
-            self.snapshot.login.phase = LoginPhase::Failed(login_error(error));
-            self.snapshot.content = ContentState::Failed;
-            self.touch();
+            self.account_load_failed(error);
         }
     }
     fn tick(&mut self) {
@@ -495,11 +505,7 @@ impl Accounts {
             }
             Err(error) => {
                 self.diagnostic_connection(ConnectionState::Failed(error));
-                let phase = LoginPhase::Failed(login_error(error));
-                if self.snapshot.login.phase != phase {
-                    self.snapshot.login.phase = phase;
-                    self.touch();
-                }
+                self.account_load_failed(error);
             }
         }
         if let Some((request, deadline, choice)) = self.login.as_ref().and_then(|login| {
@@ -526,6 +532,7 @@ impl Accounts {
         self.tick_queued_send(Instant::now());
         self.tick_queued_read(Instant::now());
         self.tick_content();
+        self.tick_file_work();
         self.tick_background();
         self.tick_calls();
         self.poll_messages();
@@ -558,6 +565,14 @@ impl Accounts {
             {
                 self.login_failed(error);
             }
+        }
+    }
+    fn account_load_failed(&mut self, error: IdentityError) {
+        let phase = LoginPhase::Failed(LoginFailure::AccountStorage(account_load_failure(error)));
+        if self.snapshot.login.phase != phase || self.snapshot.content != ContentState::Failed {
+            self.snapshot.login.phase = phase;
+            self.snapshot.content = ContentState::Failed;
+            self.touch();
         }
     }
     fn login_failed(&mut self, error: IdentityError) {
@@ -635,6 +650,7 @@ impl Accounts {
             Purpose::Outbox(work) => self.complete_outbox_data(work,result),
             Purpose::Data(work) => self.complete_data(work,result),
             Purpose::Content(operation) => self.complete_content(operation, result),
+            Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
@@ -727,7 +743,7 @@ impl Accounts {
             }
             Purpose::Restore(id) | Purpose::RestoreAutomatic(id) => {
                 let error = result.as_ref().err().copied();
-                diagnostics::record(Diagnostic {
+                diagnostics::record(Diagnostic { profile: None,
                     request: done.request.0,
                     operation: DiagnosticOperation::AccountRestore,
                     outcome: if matches!(&result, Ok(RuntimeReply::Active { .. })) { DiagnosticOutcome::Accepted } else { DiagnosticOutcome::Failed },
@@ -784,7 +800,7 @@ impl Accounts {
                     Err(error) => completion_error(error),
                     _ => Completion::Uncertain,
                 };
-                diagnostics::record(Diagnostic { request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error, storage: None });
+                diagnostics::record(Diagnostic { profile: None, request: done.request.0, operation: DiagnosticOperation::Send, outcome: diagnostic_completion(completion), count: 0, error, storage: None });
                 if completion != Completion::Uncertain { self.unresolved.retain(|u| u.operation != operation); }
                 self.snapshot.submission = Some(SubmissionResult { request, context, result: completion });
             }
@@ -951,6 +967,9 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::FinishFileExport { request, context } => {
+                self.finish_file_export(request, context)
+            }
             UiIntent::OpenMessageLink {
                 context,
                 message,
@@ -1090,6 +1109,41 @@ impl Accounts {
             UiIntent::NewLogin => {
                 self.cancel_login();
                 self.replace = None;
+            }
+            UiIntent::RetryAccountLoad | UiIntent::RepairAccountBinding => {
+                if !matches!(
+                    self.snapshot.login.phase,
+                    LoginPhase::Failed(LoginFailure::AccountStorage(_))
+                ) {
+                    return Err(SubmitError::StaleScope);
+                }
+                let result = match &mut self.connection {
+                    Ok(connection) if matches!(intent, UiIntent::RepairAccountBinding) => {
+                        connection.repair_startup_binding()
+                    }
+                    Ok(connection) => connection.retry_startup(),
+                    Err(_) => {
+                        self.connection = AccountConnection::start(
+                            RuntimeConfig::platform().with_media(self.media.clone()),
+                        );
+                        self.connection.as_ref().map(|_| ()).map_err(|error| *error)
+                    }
+                };
+                match result {
+                    Ok(()) => {
+                        self.cursor = ConnectionCursor::default();
+                        self.next_request = 0;
+                        self.startup = startup::Restoration::default();
+                        self.snapshot.login.phase = LoginPhase::EnterServer;
+                        self.snapshot.content = ContentState::Loading;
+                        self.diagnostic_connection(ConnectionState::Starting);
+                        self.touch();
+                    }
+                    // A startup thread may still be releasing its lock. Keep
+                    // the existing actionable failure; never retry in a loop.
+                    Err(IdentityError::Request(ErrorKind::Busy)) => (),
+                    Err(error) => self.account_load_failed(error),
+                }
             }
             UiIntent::Reauthenticate(account) => {
                 if !self
@@ -1561,6 +1615,35 @@ fn diagnostic_storage(error: IdentityError) -> Option<(StorageBackend, StorageFa
         _ => None,
     }
 }
+fn diagnostic_profile(error: IdentityError) -> Option<ProfileFailure> {
+    match error {
+        IdentityError::Profile(failure) => Some(failure),
+        _ => None,
+    }
+}
+fn account_load_failure(error: IdentityError) -> AccountLoadFailure {
+    use AccountLoadFailure as F;
+    match error {
+        IdentityError::Profile(failure) => match failure {
+            ProfileFailure::UnsafeLocation => F::UnsafeLocation,
+            ProfileFailure::Incomplete => F::Incomplete,
+            ProfileFailure::BindingMismatch => F::BindingMismatch,
+            ProfileFailure::DeviceChanged => F::DeviceChanged,
+            ProfileFailure::UnsupportedSchema => F::UnsupportedVersion,
+            ProfileFailure::InvalidMetadata => F::InvalidData,
+        },
+        IdentityError::Storage { failure, .. } => match failure {
+            StorageFailure::Conflict => F::InUse,
+            StorageFailure::AccessDenied => F::AccessDenied,
+            StorageFailure::Corrupt => F::InvalidData,
+            _ => F::Unavailable,
+        },
+        IdentityError::RecoveryRequired | IdentityError::SuppressionUnconfirmed => {
+            F::RecoveryRequired
+        }
+        _ => F::Unavailable,
+    }
+}
 fn login_completion_event(work: LoginWork, done: &ConnectionCompletion) -> Option<Diagnostic> {
     let operation = work.diagnostic_operation()?;
     let (outcome, error) = match &done.result {
@@ -1591,6 +1674,7 @@ fn login_completion_event(work: LoginWork, done: &ConnectionCompletion) -> Optio
         _ => (DiagnosticOutcome::Failed, Some(ErrorKind::Malformed)),
     };
     Some(Diagnostic {
+        profile: None,
         request: done.request.0,
         operation,
         outcome,
@@ -1608,6 +1692,7 @@ fn diagnostic_error(error: IdentityError) -> ErrorKind {
     match error {
         IdentityError::Request(error) => error,
         IdentityError::Storage { .. }
+        | IdentityError::Profile(_)
         | IdentityError::RecoveryRequired
         | IdentityError::SuppressionUnconfirmed => ErrorKind::StorageUnavailable,
         IdentityError::WorkerUnavailable => ErrorKind::Unconfigured,
@@ -1679,6 +1764,7 @@ fn login_error(e: IdentityError) -> LoginFailure {
     }
     match e {
         IdentityError::Storage { .. }
+        | IdentityError::Profile(_)
         | IdentityError::RecoveryRequired
         | IdentityError::SuppressionUnconfirmed => LoginFailure::Storage,
         IdentityError::Request(

@@ -22,7 +22,7 @@ pub use data::{
     CachedReply, CachedRoomKind, DataCommand, DataError, DataResult, DataSnapshot, OUTBOX_LIMIT,
     OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxRecord,
 };
-pub use error::IdentityError;
+pub use error::{IdentityError, ProfileFailure};
 pub use runtime::{
     AccountPhase, AccountSummary, IdentityRuntime, Observation, RecoverySelection, RuntimeCommand,
     RuntimeConfig, RuntimeReply, StoredItemStatus, StoredState,

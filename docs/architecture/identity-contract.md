@@ -11,6 +11,10 @@ Start once with `AccountConnection::start(RuntimeConfig::platform())`. Startup h
 - `poll(ConnectionCursor)` delivers retained, correlated completions. Acknowledge only a returned cursor. Sixteen retained jobs, including unacknowledged completions, bound the facade; a slow consumer gets Busy rather than silent result loss.
 - `cancel_request`, `cancel_attempt`, `logout` and `shutdown` preserve a priority local closure path. `account_cancellation` and `new_operation_id` require the exact currently admitted scope.
 - `is_stopped()` is nonblocking. `join()` belongs to a background owner, never a GPUI callback.
+- `retry_startup()` replaces only a failed, stopped initial owner with no accounts
+  or retained jobs. It never restarts an owner that reached ready state or retries
+  a credential operation. A profile-load failure has its own UI reason and is not
+  presented as a failed browser login or credential save.
 
 The runtime command/result definitions are the API reference. Composition translates them into [`talk_core::ui`](../../crates/talk-core/src/ui.rs), owns window revisions and rejects stale account/attempt/operation results. A stored-account revision is not a UI snapshot revision.
 
@@ -35,6 +39,21 @@ The ledger separately tracks durable eligibility, restrictive decisions, writer 
 Removal follows `RetireAll` → `Maintain` → `ForgetAccount`, with exact-item cleanup and honest pending states. `Maintain` cannot grant restoration eligibility. Local logout suppression does not claim server-side app-password revocation. Account content and outgoing work have a separate purge acknowledgement; report incomplete local cleanup rather than treating suppression as proof of deletion.
 
 Private metadata uses bounded SQLite storage; credentials remain in the chosen provider. Private-file credentials use owner-only access controls and atomic generation files. The additive metadata migration preserves eligible credentials and stable account/navigation keys. Provider details and nonobvious transaction invariants stay beside the [ledger](../../crates/talk-adapters/src/identity/ledger.rs) and provider code.
+
+On macOS the directory association uses the persistent volume UUID, effective
+user and directory inode. The UUID is read from the validated directory's mount
+through the system `diskutil` utility, with a three-second process lifetime and
+32 KiB output bound. The old `st_dev` value identifies a current mount and is
+not a persistent volume identity. An exactly matching legacy association upgrades
+automatically. If only that legacy device value differs, explicit **Use account
+storage again** recovery may associate the same user, inode and profile marker
+with the current volume. A different user, inode, profile marker or already
+persisted volume UUID is rejected even by that recovery action. The committed
+provider identities, generations, eligibility, suppression and unsettled writes
+are unchanged; ordinary restoration still validates the selected credential.
+
+Connection diagnostics preserve allowlisted storage categories and profile-load
+reasons, without paths, volume UUIDs, directory identifiers or database contents.
 
 The ledger also records `connected_once` as historical metadata, independently of eligibility and runtime authority. The identity owner supplies a private avatar store only to durably eligible clients. Avatar files are separate from restoration metadata and credential files; store operations serialize with suppression and removal. The NextCloud content owner resolves canonical avatar identities and revalidates scope and room policy before serving cached bytes. Encoded memory retention is 128 entries / 8 MiB per client; each account's disk store holds at most 128 images, 1 MiB per image and 8 MiB of payload in a 16 MiB database. Entries expire after 24 hours; failures fall back to memory. Profile-image storage remains separate from ordinary chat data and any content flow that requires a protected key.
 

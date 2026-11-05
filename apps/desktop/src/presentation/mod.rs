@@ -1,5 +1,6 @@
 mod account_removal;
 mod account_settings;
+mod attachments;
 mod call;
 mod collection;
 mod connectivity;
@@ -293,6 +294,7 @@ pub struct Desktop {
     pub composer: Entity<TextInput>,
     composer_focus: FocusHandle,
     composer_active: bool,
+    file_send: Option<attachments::PendingSend>,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
     upload_folder: Entity<TextInput>,
@@ -519,6 +521,7 @@ impl Desktop {
             composer,
             composer_focus,
             composer_active: false,
+            file_send: None,
             conversation_name,
             group_name,
             upload_folder,
@@ -912,6 +915,21 @@ impl Desktop {
     ) -> Option<talk_core::ui::presentation::ConnectionFailure> {
         state::account_connection_failure(&self.snapshot.accounts, scope)
     }
+    pub(crate) fn prepare_window_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.retire_emoji_picker();
+        self.clear_message_visibility();
+        // Device checks and local playback belong to the visible window.
+        // Established calls remain owned by their independent call lifetime.
+        self.stop_device_preview(cx);
+        self.microphone_auto_attempted = true;
+        if self.devices_open() {
+            self.handle(LocalAction::Close, window, cx);
+        }
+        if self.overlay == Some(Overlay::ContentPreview) {
+            self.close_content_overlay();
+            cx.notify();
+        }
+    }
     pub fn handle(&mut self, action: LocalAction, window: &mut Window, cx: &mut Context<Self>) {
         // Window controls stay available while the content is modal or inert,
         // just like the system controls they replace.
@@ -975,6 +993,7 @@ impl Desktop {
             LocalAction::Intent(UiIntent::DownloadFile { .. } | UiIntent::Refresh(_))
                 | LocalAction::BeginLogin
                 | LocalAction::RetryLogin
+                | LocalAction::Intent(UiIntent::RetryAccountLoad | UiIntent::RepairAccountBinding)
         );
         self.hover_hints.cancel();
         let previous_feedback = self.feedback;
@@ -1318,6 +1337,10 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                if self.send_attachments(cx) {
+                    cx.notify();
+                    return;
+                }
                 // Repeated Enter follows the disabled button while this exact
                 // draft is locally queued, in flight or awaiting reconciliation.
                 if self
@@ -1424,6 +1447,12 @@ impl Desktop {
                 }
             }
             LocalAction::Intent(intent) => {
+                if matches!(
+                    intent,
+                    UiIntent::RetryAccountLoad | UiIntent::RepairAccountBinding
+                ) {
+                    self.feedback = None;
+                }
                 let cancelled_login = matches!(intent, UiIntent::CancelLogin(_));
                 if self.submit(intent)
                     && cancelled_login

@@ -593,6 +593,25 @@ impl Accounts {
             other => other,
         };
         match &action {
+            V::StageFiles(paths) => return self.stage_files(context, paths.clone()),
+            V::SendFiles { caption, target } => {
+                return self.send_files(request, context, caption.clone(), target.clone());
+            }
+            V::RemoveFile(id) => return self.remove_file(context, *id),
+            V::RetryFile(id) => return self.retry_file(context, *id),
+            V::ExportFile {
+                attachment,
+                source,
+                destination,
+            } => {
+                return self.export_file(
+                    request,
+                    context,
+                    attachment.clone(),
+                    source.as_slice().first().ok_or(SubmitError::StaleScope)?,
+                    destination.clone(),
+                );
+            }
             V::PickUpload => {
                 return self.queue_picker(request, context, super::files::Kind::Upload);
             }
@@ -614,6 +633,7 @@ impl Accounts {
             V::DismissUpload => {
                 if let Some(panel) = self.snapshot.message_panel.as_mut() {
                     panel.uploaded = None;
+                    panel.file_error = None;
                     self.touch();
                 }
                 return Ok(());
@@ -678,7 +698,14 @@ impl Accounts {
         };
         let command = match action {
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
-            V::PickUpload | V::Download { .. } | V::DismissUpload => {
+            V::PickUpload
+            | V::Download { .. }
+            | V::DismissUpload
+            | V::StageFiles(_)
+            | V::SendFiles { .. }
+            | V::RemoveFile(_)
+            | V::RetryFile(_)
+            | V::ExportFile { .. } => {
                 return Err(SubmitError::StaleScope);
             }
             V::Files => W::SharedFiles { before: None },
@@ -853,6 +880,7 @@ impl Accounts {
                 && (offline && before != Some(true) || !offline && before == Some(true))
             {
                 diagnostics::record(Diagnostic {
+                    profile: None,
                     outcome: if offline {
                         DiagnosticOutcome::Offline
                     } else {

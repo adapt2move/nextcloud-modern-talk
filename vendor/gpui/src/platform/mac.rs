@@ -4,6 +4,7 @@ mod dispatcher;
 mod display;
 mod display_link;
 mod events;
+mod file_drag;
 mod keyboard;
 
 #[cfg(feature = "screen-capture")]

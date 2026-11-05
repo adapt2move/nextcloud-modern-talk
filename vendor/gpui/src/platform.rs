@@ -458,6 +458,18 @@ pub(crate) struct RequestFrameOptions {
 }
 
 pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+    /// Copy-only file promises are a platform capability, independent of local drags.
+    fn supports_file_drag(&self) -> bool {
+        false
+    }
+    fn start_file_drag(
+        &self,
+        _name: SharedString,
+        _writer: Box<dyn FnOnce(PathBuf) -> Task<bool>>,
+        _ended: Box<dyn FnOnce()>,
+    ) -> bool {
+        false
+    }
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn window_bounds(&self) -> WindowBounds;

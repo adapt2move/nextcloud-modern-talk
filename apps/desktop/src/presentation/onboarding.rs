@@ -348,6 +348,9 @@ impl Desktop {
             }
             LoginPhase::Failed(reason) => {
                 let (title, detail) = match reason {
+                    LoginFailure::AccountStorage(failure) => {
+                        super::state::account_load_failure_copy(failure)
+                    }
                     LoginFailure::Connection(failure) => {
                         super::state::connection_failure_copy(failure)
                     }
@@ -368,7 +371,7 @@ impl Desktop {
                         "Prüfe deinen Standardbrowser und versuche es erneut.",
                     ),
                     LoginFailure::Storage => (
-                        "Speicherung nicht bestätigt.",
+                        "Anmeldung konnte nicht gespeichert werden.",
                         storage_failure_key(
                             Some(
                                 login
@@ -402,8 +405,38 @@ impl Desktop {
                     ))
                     .child(self.title(self.l(title)))
                     .child(self.selectable_hint("login-failure-detail", self.l(detail)))
-                    .child(self.server_chip(login.server_label.as_str()));
-                if reason == LoginFailure::AccountExists {
+                    .when(!login.server_label.as_str().is_empty(), |card| {
+                        card.child(self.server_chip(login.server_label.as_str()))
+                    });
+                let account_load_failed = matches!(reason, LoginFailure::AccountStorage(_));
+                if account_load_failed {
+                    let repair = reason
+                        == LoginFailure::AccountStorage(
+                            talk_core::ui::presentation::AccountLoadFailure::DeviceChanged,
+                        );
+                    card = card.child(
+                        self.button_with_icon(
+                            "retry-account-load",
+                            (
+                                if repair {
+                                    "Kontospeicher wieder verwenden"
+                                } else {
+                                    "Konten erneut laden"
+                                },
+                                "refresh",
+                            ),
+                            ButtonStyle::Primary,
+                            true,
+                            LocalAction::Intent(if repair {
+                                UiIntent::RepairAccountBinding
+                            } else {
+                                UiIntent::RetryAccountLoad
+                            }),
+                            cx,
+                        )
+                        .min_h(px(46.)),
+                    );
+                } else if reason == LoginFailure::AccountExists {
                     card = card.child(
                         self.button_with_icon(
                             "login-open-accounts",
@@ -440,20 +473,22 @@ impl Desktop {
                 }
                 // Begin can fail before a runtime attempt exists. Leaving that
                 // failure must still clear the retained retry destination.
-                card = card.child(
-                    self.button(
-                        "change-server",
-                        "Anderen Server verwenden",
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::Intent(
-                            login
-                                .attempt
-                                .map_or(UiIntent::NewLogin, UiIntent::CancelLogin),
+                card = card.when(!account_load_failed, |card| {
+                    card.child(
+                        self.button(
+                            "change-server",
+                            "Anderen Server verwenden",
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Intent(
+                                login
+                                    .attempt
+                                    .map_or(UiIntent::NewLogin, UiIntent::CancelLogin),
+                            ),
+                            cx,
                         ),
-                        cx,
-                    ),
-                );
+                    )
+                });
             }
         }
         card = card.when(self.local_feedback_visible(), |d| {
@@ -751,7 +786,7 @@ fn storage_failure_key(
             "Der Speicherzustand hat sich geändert. Bitte erneut versuchen."
         }
         Some(StorageSaveFailure::RecoveryRequired) => {
-            "Der lokale Kontozustand konnte nicht sicher bestätigt werden. Deine Anmeldung gilt noch nicht als gespeichert."
+            "Ein früherer Speicherversuch ist noch ungeklärt. Öffne „Konten“, um den Speicherstatus zu prüfen, bevor du dich erneut anmeldest."
         }
         Some(StorageSaveFailure::SuppressionUnconfirmed) => {
             "Die Abmeldung konnte noch nicht dauerhaft bestätigt werden. Der lokale Speicherstatus muss zuerst geklärt werden."

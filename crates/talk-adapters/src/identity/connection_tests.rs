@@ -817,3 +817,91 @@ async fn account_removal_dormant_cleanup_is_local_exact_and_retryable() {
         );
     }
 }
+
+async fn failed_and_stopped(connection: &mut AccountConnection) -> IdentityError {
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let update = connection.poll(ConnectionCursor::default()).unwrap();
+        if let ConnectionState::Failed(error) = update.snapshot.state
+            && connection.is_stopped()
+        {
+            return error;
+        }
+        assert!(tokio::time::Instant::now() < until);
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+#[tokio::test]
+async fn explicit_startup_retry_waits_for_lock_release_and_preserves_saved_accounts() {
+    let fixture = Fixture::new();
+    let mut ledger = fixture.ledger();
+    let account = ledger.reserve("http://127.0.0.1:1/".into()).unwrap().id;
+    ledger.bind_user(account, "synthetic-user").unwrap();
+    let op = ledger
+        .stage(
+            account,
+            LoginAttemptId::from_local(random().unwrap()),
+            StorageBackend::PrivateFile,
+            "synthetic-user",
+        )
+        .unwrap();
+    ledger.settle(op, true).unwrap();
+    ledger
+        .activate(op, ledger.account(account).unwrap().revision)
+        .unwrap();
+    let mut connection =
+        AccountConnection::start(RuntimeConfig::isolated_fixture(fixture.0.clone())).unwrap();
+    let locked = IdentityError::Storage {
+        backend: StorageBackend::PrivateFile,
+        failure: StorageFailure::Conflict,
+    };
+    assert_eq!(failed_and_stopped(&mut connection).await, locked);
+    assert_eq!(
+        connection.repair_startup_binding(),
+        Err(ErrorKind::WrongScope.into())
+    );
+    connection.retry_startup().unwrap();
+    // Ordinary repeated retries do not bypass another owner's lock.
+    assert_eq!(failed_and_stopped(&mut connection).await, locked);
+    drop(ledger);
+    connection.retry_startup().unwrap();
+    ready(&mut connection).await;
+    let snapshot = connection.snapshot();
+    assert_eq!(snapshot.accounts.as_slice().len(), 1);
+    let saved = &snapshot.accounts.as_slice()[0];
+    assert_eq!(saved.summary.account, account);
+    assert_eq!(
+        saved.summary.storage,
+        crate::identity::StoredState::Eligible(op.item)
+    );
+    assert_eq!(saved.state, SavedAccountState::Dormant);
+    assert!(
+        saved.summary.scope.is_none(),
+        "reopening storage grants no live session"
+    );
+    assert_eq!(
+        connection.retry_startup(),
+        Err(ErrorKind::WrongScope.into())
+    );
+    assert!(connection.join());
+}
+
+#[tokio::test]
+async fn incomplete_profile_is_reported_without_recreating_its_database() {
+    let fixture = Fixture::new();
+    drop(fixture.ledger());
+    std::fs::remove_file(fixture.0.join("restoration.sqlite")).unwrap();
+    let mut connection =
+        AccountConnection::start(RuntimeConfig::isolated_fixture(fixture.0.clone())).unwrap();
+    assert_eq!(
+        failed_and_stopped(&mut connection).await,
+        IdentityError::Profile(crate::identity::ProfileFailure::Incomplete)
+    );
+    assert!(!fixture.0.join("restoration.sqlite").exists());
+    assert_eq!(
+        connection.repair_startup_binding(),
+        Err(ErrorKind::WrongScope.into())
+    );
+    assert!(connection.join());
+}

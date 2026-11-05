@@ -27,6 +27,9 @@ pub const SCENARIOS: &[&str] = &[
     "login-denied",
     "login-browser-error",
     "login-storage-error",
+    "login-account-store-busy",
+    "login-account-store-device-changed",
+    "login-account-store-error",
     "storage-locked",
     "storage-denied",
     "storage-saving",
@@ -49,6 +52,9 @@ pub const SCENARIOS: &[&str] = &[
     "thread-error",
     "chat-content",
     "chat-content-progress",
+    "chat-content-loading",
+    "chat-content-failed",
+    "chat-attachments",
     "chat-motion",
     "history",
     "history-pagination",
@@ -376,9 +382,48 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         dialog::configure(&mut state);
         return state;
     }
-    if matches!(scenario, Some("chat-content" | "chat-content-progress")) {
+    if matches!(
+        scenario,
+        Some(
+            "chat-content"
+                | "chat-attachments"
+                | "chat-content-progress"
+                | "chat-content-loading"
+                | "chat-content-failed"
+        )
+    ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
+        if scenario == Some("chat-attachments") {
+            content::attachments(&mut state);
+        }
+        if matches!(
+            scenario,
+            Some("chat-content-loading" | "chat-content-failed")
+        ) {
+            state.content_panel.assets = page(
+                state
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut asset| {
+                        if matches!(
+                            asset.target,
+                            talk_core::ui::content::AssetTarget::Thumbnail(_)
+                                | talk_core::ui::content::AssetTarget::Image(_)
+                        ) {
+                            asset.state = if scenario == Some("chat-content-loading") {
+                                talk_core::ui::content::AssetState::Loading
+                            } else {
+                                talk_core::ui::content::AssetState::Failed
+                            };
+                        }
+                        asset
+                    }),
+            );
+        }
         if scenario == Some("chat-content-progress") {
             content::transfer(&mut state);
         }
@@ -419,6 +464,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     let mut s = PresentationSnapshot {
         content_panel: talk_core::ui::content::ContentPanel::default(),
+        file_export: None,
         create_panel: None,
         revision: 1,
         login: LoginView {
@@ -458,7 +504,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     };
     s.login.server_label = text("cloud.example.test");
     s.login.account_label = text("Alex Sommer");
-    s.login.attempt = (scenario != "login-admission").then_some(RequestId(1));
+    s.login.attempt = (scenario != "login-admission"
+        && !scenario.starts_with("login-account-store-"))
+    .then_some(RequestId(1));
     s.login.phase = match scenario {
         "server" => LoginPhase::EnterServer,
         "validating" => LoginPhase::Validating,
@@ -473,6 +521,15 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         "login-denied" => LoginPhase::Failed(LoginFailure::Denied),
         "login-browser-error" => LoginPhase::Failed(LoginFailure::BrowserUnavailable),
         "login-storage-error" => LoginPhase::Failed(LoginFailure::Storage),
+        "login-account-store-busy" => LoginPhase::Failed(LoginFailure::AccountStorage(
+            talk_core::ui::presentation::AccountLoadFailure::InUse,
+        )),
+        "login-account-store-device-changed" => LoginPhase::Failed(LoginFailure::AccountStorage(
+            talk_core::ui::presentation::AccountLoadFailure::DeviceChanged,
+        )),
+        "login-account-store-error" => LoginPhase::Failed(LoginFailure::AccountStorage(
+            talk_core::ui::presentation::AccountLoadFailure::RecoveryRequired,
+        )),
         "expired" => LoginPhase::Failed(LoginFailure::Expired),
         _ => LoginPhase::Ready,
     };
@@ -481,6 +538,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         "storage-denied" => NativeStoreState::Denied,
         _ => NativeStoreState::Missing,
     };
+    if scenario.starts_with("login-account-store-") {
+        s.login.server_label = text("");
+        return s;
+    }
     s.login.storage = match scenario {
         "storage-saving" => StorageStatus::Saving,
         "storage-cleanup" => StorageStatus::CleanupPending,
@@ -1100,7 +1161,16 @@ impl DevelopmentPort {
             ),
             chat_motion: scenario == Some("chat-motion"),
             history_pagination: scenario == Some("history-pagination"),
-            chat_content: matches!(scenario, Some("chat-content" | "chat-content-progress")),
+            chat_content: matches!(
+                scenario,
+                Some(
+                    "chat-content"
+                        | "chat-attachments"
+                        | "chat-content-progress"
+                        | "chat-content-loading"
+                        | "chat-content-failed"
+                )
+            ),
             snapshot: initial,
             dirty: true,
             enabled: scenario.is_some(),
@@ -1542,7 +1612,7 @@ impl NativeDesktopPort for DevelopmentPort {
                 request,
                 context,
                 action,
-            } if self.chat_ux => {
+            } if self.chat_ux || self.chat_content => {
                 use talk_core::ui::messaging::{MessageAction, SearchResult};
                 if Some(context) != self.snapshot.selected {
                     return Err(SubmitError::StaleScope);
@@ -1553,6 +1623,45 @@ impl NativeDesktopPort for DevelopmentPort {
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
+                    MessageAction::StageFiles(paths) => {
+                        use talk_core::ui::messaging::{UploadState, UploadView};
+                        let mut uploads = panel.uploads.as_slice().to_vec();
+                        if uploads.len() + paths.as_slice().len() > 8 {
+                            return Err(SubmitError::Busy);
+                        }
+                        for path in paths.as_slice() {
+                            let name = std::path::Path::new(path.as_str())
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("file");
+                            uploads.push(UploadView {
+                                id: 1000 + uploads.len() as u64,
+                                name: text(name),
+                                bytes: None,
+                                state: UploadState::Selected,
+                            });
+                        }
+                        panel.uploads = page(uploads);
+                    }
+                    MessageAction::RemoveFile(id) => {
+                        panel.uploads = page(
+                            panel
+                                .uploads
+                                .as_slice()
+                                .iter()
+                                .filter(|file| file.id != id)
+                                .cloned(),
+                        )
+                    }
+                    MessageAction::SendFiles { .. } => {
+                        // Presentation-only pending state, never a fabricated upload receipt.
+                        panel.uploads_running = true;
+                        panel.uploads =
+                            page(panel.uploads.as_slice().iter().cloned().map(|mut file| {
+                                file.state = talk_core::ui::messaging::UploadState::Uploading;
+                                file
+                            }));
+                    }
                     MessageAction::Thread(root) if self.thread_fixture.is_some() => {
                         panel.thread_root = Some(root);
                         panel.thread_state = if self.thread_fixture == Some(true) {

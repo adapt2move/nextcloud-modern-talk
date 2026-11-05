@@ -8,6 +8,17 @@ This document defines file, media and structured-content behavior. The [feature 
 
 Acceptance: upload and sharing are distinct states. A completed upload whose chat share failed is shown as “Hochgeladen, noch nicht geteilt”, with a safe retry/share action; it is not uploaded again blindly. Partial batches show per-file outcomes and cancellation. Permission denial, no quota, deleted local source, path collision, disconnection, and server rejection preserve recoverable choices without claiming delivery.
 
+The composer stages up to eight local files from the native multi-file picker or
+an external file drop. Compact removable chips show selection, upload, sharing
+and per-file failure states; selection itself performs no upload. The ordinary
+Send action sends the optional caption once, on the first confirmed share.
+Files upload and share sequentially, with the existing 32 MiB per-file transport
+limit and current server permissions. A definitive failed share retries the
+already uploaded path. An uncertain dispatched write pauses the batch and has
+no automatic or blind retry. Paths remain session-local, expire after thirty
+minutes and retire on a room/account change. Reply/thread/silent modes must be
+closed before sending attachments because this share API does not preserve them.
+
 ## CONTENT-002
 
 **Share existing NextCloud files (P1).** Browse/search only the account's accessible files, show the selected object and sharing audience, then create the supported Talk attachment/share. A rich object is not evidence the user may download its contents. Respect guest/federated restrictions and current file/share permissions.
@@ -20,17 +31,30 @@ Acceptance: selecting a file never changes its sharing permissions until explici
 
 Acceptance: one account's cached thumbnail cannot appear for another. Canceling a download leaves no misleading completed file. Opening a remote resource requires a deliberate action under the security policy. A missing preview falls back to file metadata, not a broken or blank message.
 
-Images and videos use compact thumbnail tiles without filenames. Two tiles fit side by side. Consecutive bare media messages from the same actor within two minutes may form groups of up to eight; captions, replies, reactions, pins and other meaningful metadata keep their own rows. Grouping preserves every message's identity and permitted actions. PDF cards retain their filenames. Keep small server thumbnails at their useful display size instead of stretching them across the message column.
+Images and videos use compact thumbnail tiles without filenames. Size a loaded tile to its aspect ratio within 320×240 points, displaying the entire image without cropping or the former half-resolution display cap. Two landscape tiles can fit side by side in the 648-point grid. Consecutive bare media messages from the same actor within two minutes may form groups of up to eight; captions, replies, reactions, pins and other meaningful metadata keep their own rows. Grouping preserves every message's identity and permitted actions. PDF cards retain their filenames. Ordinary files such as JSON and ZIP use compact filename/type/size cards without thumbnail requests or a media-gallery entry. Missing or unsupported thumbnails fall back to those cards. Each attachment exposes a keyboard-focusable Download icon on hover or focus; clicking an ordinary file also offers Save. Loading and failed previews have visible labels; transient failures allow a bounded automatic retry and a deliberate retry action. When a loaded image changes a row's height, invalidate list measurements while preserving the reader's anchor.
 
-Opening a tile presents a frameless, room-scoped media dialog. Fit the media to the available width and height, with a background-free Close icon at the upper right. Previous/Next arrows, left/right keys and horizontal trackpad gestures navigate the loaded collection. The footer contains the filename, position, Download and authenticated Cloud web handoff. Navigation is bounded to a moving 128-item window over loaded history and shared/thread/pinned items; it does not fetch the account's entire file collection.
+An unchanged, confirmed thumbnail remains ready while its account, room, message and exact attachment descriptor remain current, within the existing pixel/count budgets. It does not expire after one minute merely because it is being displayed. A missing in-memory tile first uses an eligible local thumbnail, including online; a full local decode queue waits rather than redownloading the same image. Disk retention and exclusions remain governed by [AUTH-009](accounts.md#auth-009). Deletion, expiry, access loss and a replaced descriptor still retire the cached pixels.
 
-Online, supported raster images load their authenticated original directly. A failed original must not silently become a thumbnail. Raster inputs are limited to 4 MiB, 8192 pixels per dimension and 16 Mi pixels; supported formats are PNG, JPEG, GIF and WebP, with still-frame rendering. macOS PDF previews load the original, up to 4 MiB, and render the first page through the bounded native helper. Label that page and the observed page count. This is not a complete PDF reader. Other document/platform combinations use supported server previews or an explicit external handoff.
+Opening a tile presents a frameless, room-scoped media dialog on an opaque background, including during loading. Fit the complete media to the available width and height, clip its stage and keep the footer outside it. A Close button stays visible at the upper right. Previous/Next arrows, left/right keys and horizontal trackpad gestures navigate the loaded collection. The footer contains the filename, position, Download and authenticated Cloud web handoff. Navigation is bounded to a moving 128-item window over loaded history and shared/thread/pinned items; it does not fetch the account's entire file collection.
+
+Online, supported raster images load their authenticated original directly. An available thumbnail may remain visible while the original loads, labelled as a small preview. If the original fails, label its unavailability and retain the permitted retry or external handoff; never present the thumbnail as a loaded original. Access denial suppresses that fallback. Raster inputs are limited to 4 MiB, 8192 pixels per dimension and 16 Mi pixels; supported formats are PNG, JPEG, GIF and WebP, with still-frame rendering. macOS PDF previews load the original, up to 4 MiB, and render the first page through the bounded native helper. Label that page and the observed page count. This is not a complete PDF reader. Other PDFs use supported server previews or an explicit external handoff; other document formats use file cards and explicit downloads.
 
 Supported video originals use a separate 32 MiB input limit. The local player starts paused and accepts MP4 with H.264/H.265 and AAC on macOS, or WebM with VP8/VP9 and Opus, subject to the packaged native decoders. Playback is bounded to 1920×1080, 30 frames per second and a 30-minute lifetime. Unsupported containers/codecs offer the Cloud web view and download. The player never receives remote URLs or credentials. Closing, changing files, losing access or retiring the account immediately retires displayed pixels and requests native stop. A replacement waits for confirmed worker exit; an unconfirmed stop remains visible and cannot grant another player lease.
 
 Offline, show only an eligible cached thumbnail, explicitly labelled as a small preview, without fetching an original or starting playback. The private cache in [AUTH-009](accounts.md#auth-009) survives restart under its size, retention and permission rules. Absence of a cached preview is an honest unavailable state.
 
 File-share system messages retain their rich attachment cards. A missing inline preview may fall back to a bounded supported original, but permission or authentication denial must never trigger a fallback fetch. Every permitted item offers Download, with progress derived from transferred bytes and a clear pending/failed/cancelled state. Unknown totals stay indeterminate. A progress animation never implies successful publication of a partial file. Keep download progress and cancellation owned by the admitted transfer when a second download is rejected.
+
+On macOS, dragging a permitted file card or media tile to Finder starts a
+copy-only native file promise. Downloading begins only when the receiver supplies
+its local destination. The application revalidates the exact captured attachment,
+account and room, then uses the existing authenticated, staged, non-overwriting
+download. Finder receives success only after actual local publication. One
+export is admitted at a time, with a 120-second deadline; cancellation, access
+loss and room/account retirement stop pending work. Only the filename is placed
+on the native drag surface, never a remote route or credential. Linux and Windows
+use the explicit Download action; outgoing native drags are not implemented
+there. Native Finder interoperability still requires Mac qualification.
 
 ## CONTENT-004
 

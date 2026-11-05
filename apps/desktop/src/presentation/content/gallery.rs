@@ -73,8 +73,20 @@ impl Swipe {
         Some(if self.distance < 0. { 1 } else { -1 })
     }
 }
+// Contain the complete image, keeping portrait, square and panoramic ratios.
+fn media_size(width: f32, height: f32) -> (f32, f32) {
+    if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
+        return (320., 180.);
+    }
+    let scale = (320. / width).min(240. / height);
+    (
+        (width * scale).clamp(1., 320.),
+        (height * scale).clamp(1., 240.),
+    )
+}
+
 impl Desktop {
-    pub(in crate::presentation) fn bare_media_body(
+    pub(in crate::presentation) fn bare_attachment_body(
         &self,
         m: &talk_core::ui::presentation::MessageView,
     ) -> bool {
@@ -83,7 +95,7 @@ impl Desktop {
             .rich
             .as_slice()
             .iter()
-            .filter(|o| o.kind.as_str() == "file" && matches!(kind(o), Kind::Image | Kind::Video))
+            .filter(|o| o.kind.as_str() == "file")
             .take(32)
             .collect();
         !media.is_empty()
@@ -194,6 +206,38 @@ impl Desktop {
         let media = matches!(kind(object), Kind::Image | Kind::Video);
         let target = AssetTarget::Thumbnail(reference.clone());
         let preview = self.asset_image(&target);
+        let state = self.asset(&target).map(|asset| asset.state);
+        if !crate::presentation::attachments::previewable(object)
+            || preview.is_none()
+                && matches!(state, Some(AssetState::Missing | AssetState::Unsupported))
+        {
+            let native_pdf = kind(object) == Kind::Pdf && cfg!(target_os = "macos");
+            let card = self.file_card(&reference, object, native_pdf, cx);
+            return self.exportable_card(card, reference, object, cx);
+        }
+        let group: gpui::SharedString = format!(
+            "{:?}",
+            scoped_id(
+                "attachment-card",
+                reference.context,
+                reference.message,
+                placeholder_key(reference.placeholder.as_str())
+            )
+        )
+        .into();
+        let (width, height) = match &preview {
+            Some(ImageSource::Render(image)) => {
+                let size = image.size(0);
+                media_size(size.width.0 as f32, size.height.0 as f32)
+            }
+            _ if media => (320., 180.),
+            _ => (280., 160.),
+        };
+        let loading = !self.media_offline()
+            && matches!(
+                state,
+                None | Some(AssetState::Loading | AssetState::Ready { .. })
+            );
         let mut card = self
             .button(
                 scoped_id(
@@ -216,38 +260,55 @@ impl Desktop {
                 div()
                     .relative()
                     .w_full()
-                    .h(px(if media { 136. } else { 160. }))
+                    .h(px(height))
+                    .overflow_hidden()
                     .bg(self.theme.subtle)
                     .rounded(px(8.))
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(if let Some(image) = preview {
-                        let maximum = match &image {
-                            ImageSource::Render(image) => {
-                                let s = image.size(0);
-                                (s.width.0 as f32 / 2., s.height.0 as f32 / 2.)
-                            }
-                            _ => (200., 136.),
-                        };
                         img(image)
                             .size_full()
-                            .max_w(px(maximum.0))
-                            .max_h(px(maximum.1))
                             .object_fit(ObjectFit::Contain)
                             .rounded(px(8.))
                             .into_any_element()
+                    } else if loading {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_2()
+                            .child(self.pending_dots(self.theme.muted))
+                            .child(self.hint(self.l("Vorschau wird geladen …")))
+                            .into_any_element()
                     } else {
-                        self.scaled_icon(
-                            if kind(object) == Kind::Video {
-                                "play"
-                            } else {
-                                "file"
-                            },
-                            28.,
-                            self.theme.muted,
-                        )
-                        .into_any_element()
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .text_center()
+                            .px_3()
+                            .gap_2()
+                            .child(self.scaled_icon(
+                                if kind(object) == Kind::Video {
+                                    "play"
+                                } else {
+                                    "file"
+                                },
+                                28.,
+                                self.theme.muted,
+                            ))
+                            .child(self.hint(self.l(match state {
+                                Some(AssetState::Failed) => {
+                                    "Die Vorschau konnte nicht geladen werden."
+                                }
+                                Some(AssetState::Denied) => {
+                                    "Du hast keinen Zugriff auf diese Vorschau."
+                                }
+                                _ => "Vorschau nicht verfügbar",
+                            })))
+                            .into_any_element()
                     })
                     .when(kind(object) == Kind::Video, |d| {
                         d.child(
@@ -279,11 +340,40 @@ impl Desktop {
                     ),
             );
         }
-        div()
+        let card = div()
+            .group(group.clone())
             .relative()
-            .w(px(if media { 200. } else { 280. }))
+            .w(px(width))
             .max_w_full()
             .child(card)
+            .when(
+                matches!(state, Some(AssetState::Failed | AssetState::Missing)),
+                |d| {
+                    d.child(
+                        self.icon_button(
+                            scoped_id(
+                                "thumbnail-retry",
+                                reference.context,
+                                reference.message,
+                                placeholder_key(reference.placeholder.as_str()),
+                            ),
+                            ("refresh", "Vorschau erneut laden"),
+                            ButtonStyle::Secondary,
+                            Availability::when(
+                                !self.media_offline(),
+                                "Keine Verbindung zum Server.",
+                            ),
+                            LocalAction::Content(Action::Command(ContentAction::Load(
+                                target.clone(),
+                            ))),
+                            cx,
+                        )
+                        .absolute()
+                        .top_2()
+                        .left_2(),
+                    )
+                },
+            )
             .when(media && self.media_span(reference.message).is_some(), |d| {
                 d.child(
                     self.attachment_actions(&reference, cx)
@@ -292,6 +382,14 @@ impl Desktop {
                         .right_1(),
                 )
             })
+            .child(
+                self.attachment_download(&reference, group, cx)
+                    .absolute()
+                    .bottom_2()
+                    .when(kind(object) == Kind::Video, |button| button.left_2())
+                    .when(kind(object) != Kind::Video, |button| button.right_2()),
+            );
+        self.exportable_card(card, reference, object, cx)
     }
     pub(in crate::presentation) fn attachment_grid(
         &self,
@@ -302,7 +400,7 @@ impl Desktop {
             .flex()
             .flex_wrap()
             .gap(px(8.))
-            .max_w(px(408.))
+            .max_w(px(648.))
             .children(
                 entries
                     .iter()
@@ -321,7 +419,7 @@ impl Desktop {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(self.theme.scrim)
+            .bg(self.theme.canvas)
             .p_5()
             .flex()
             .flex_col()
@@ -364,7 +462,11 @@ impl Desktop {
             .relative()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .w_full()
+            .overflow_hidden()
+            .bg(self.theme.subtle)
+            .rounded(px(8.))
             .flex()
             .items_center()
             .justify_center();
@@ -375,9 +477,44 @@ impl Desktop {
             } else {
                 AssetTarget::Image(reference.clone())
             };
-            let image = self.asset_image(&target);
+            let original = self.asset_image(&target);
+            let state = self.asset(&target).map(|asset| asset.state);
+            let fallback = !offline && original.is_none() && state != Some(AssetState::Denied);
+            let image = original.or_else(|| {
+                fallback
+                    .then(|| self.asset_image(&AssetTarget::Thumbnail(reference.clone())))
+                    .flatten()
+            });
             if let Some(image) = image {
-                stage = stage.child(img(image).size_full().object_fit(ObjectFit::Contain));
+                stage = stage.child(
+                    img(image)
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .object_fit(ObjectFit::Contain),
+                );
+                if fallback {
+                    stage = stage.child(
+                        div()
+                            .absolute()
+                            .top_2()
+                            .left_2()
+                            .px_3()
+                            .py_2()
+                            .rounded(px(6.))
+                            .bg(self.theme.canvas)
+                            .child(self.hint(self.l(
+                                if matches!(
+                                    state,
+                                    None | Some(AssetState::Loading | AssetState::Ready { .. })
+                                ) {
+                                    "Kleine Vorschau · Original wird geladen …"
+                                } else {
+                                    "Kleine Vorschau · Original nicht verfügbar"
+                                },
+                            ))),
+                    );
+                }
             } else {
                 let loading = !offline
                     && matches!(
@@ -573,8 +710,10 @@ impl Desktop {
                 self.dialog_panel(
                     DialogSurface::Overlay(Overlay::ContentPreview),
                     div()
-                        .flex_1()
+                        .size_full()
+                        .min_w_0()
                         .min_h_0()
+                        .bg(self.theme.canvas)
                         .flex()
                         .flex_col()
                         .child(stage)
@@ -592,6 +731,7 @@ impl Desktop {
                     cx,
                 )
                 .size(px(32.))
+                .bg(self.theme.surface)
                 .min_h(px(32.))
                 .p_0()
                 .child(self.scaled_icon("x", 20., self.theme.text))
@@ -605,6 +745,22 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_tiles_use_the_full_box_without_cropping_any_aspect_ratio() {
+        for (source, expected) in [
+            ((1200., 400.), (320., 320. / 3.)),
+            ((400., 1200.), (80., 240.)),
+            ((400., 400.), (240., 240.)),
+        ] {
+            let actual = media_size(source.0, source.1);
+            assert!((actual.0 - expected.0).abs() < 0.001);
+            assert!((actual.1 - expected.1).abs() < 0.001);
+            assert!(actual.0 <= 320. && actual.1 <= 240.);
+        }
+        assert_eq!(media_size(0., 400.), (320., 180.));
+        assert_eq!(media_size(f32::NAN, 400.), (320., 180.));
+    }
 
     #[test]
     fn horizontal_swipe_advances_once_per_gesture_and_recovers_after_a_gap() {

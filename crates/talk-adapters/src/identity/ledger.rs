@@ -1,6 +1,6 @@
 //! Single-owner private metadata SQLite ledger (no app credentials). Provider writes never run on this owner.
 use super::{
-    error::{IdentityError, Result},
+    error::{IdentityError, ProfileFailure, Result},
     private_fs::PrivateDir,
 };
 use rusqlite::{Connection, OpenFlags, params};
@@ -42,7 +42,23 @@ fn next_revision(value: u64) -> Result<String> {
         .ok_or(IdentityError::RecoveryRequired)
 }
 fn db<T>(v: rusqlite::Result<T>) -> Result<T> {
-    v.map_err(|_| IdentityError::RecoveryRequired)
+    v.map_err(|error| {
+        use rusqlite::ErrorCode;
+        let failure = match error.sqlite_error_code() {
+            Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => {
+                StorageFailure::TemporarilyUnavailable
+            }
+            Some(ErrorCode::PermissionDenied | ErrorCode::ReadOnly) => StorageFailure::AccessDenied,
+            Some(ErrorCode::SystemIoFailure | ErrorCode::DiskFull | ErrorCode::CannotOpen) => {
+                StorageFailure::Unavailable
+            }
+            _ => return IdentityError::RecoveryRequired,
+        };
+        IdentityError::Storage {
+            backend: StorageBackend::PrivateFile,
+            failure,
+        }
+    })
 }
 fn unsafe_label_character(c: char) -> bool {
     c.is_control()
@@ -114,6 +130,27 @@ pub(super) struct Account {
 mod boundaries {
     use super::*;
     #[test]
+    fn storage_io_failures_are_not_reported_as_damaged_metadata() {
+        for (code, expected) in [
+            (
+                rusqlite::ffi::SQLITE_BUSY,
+                StorageFailure::TemporarilyUnavailable,
+            ),
+            (rusqlite::ffi::SQLITE_READONLY, StorageFailure::AccessDenied),
+            (rusqlite::ffi::SQLITE_FULL, StorageFailure::Unavailable),
+            (rusqlite::ffi::SQLITE_CANTOPEN, StorageFailure::Unavailable),
+        ] {
+            let error = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+            assert_eq!(
+                db::<()>(Err(error)),
+                Err(IdentityError::Storage {
+                    backend: StorageBackend::PrivateFile,
+                    failure: expected
+                })
+            );
+        }
+    }
+    #[test]
     fn sqlite_roundtrips_entire_identifier_and_revision_domains() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE boundaries(id TEXT NOT NULL, revision TEXT NOT NULL)")
@@ -177,9 +214,28 @@ pub(super) struct Ledger {
 }
 impl Ledger {
     pub fn open(dir: Arc<PrivateDir>) -> Result<Self> {
+        Self::open_with_binding_repair(dir, false)
+    }
+    pub fn open_with_binding_repair(dir: Arc<PrivateDir>, repair: bool) -> Result<Self> {
+        Self::open_checked(dir, repair).map_err(|error| match error {
+            IdentityError::RecoveryRequired => {
+                IdentityError::Profile(ProfileFailure::InvalidMetadata)
+            }
+            error => error,
+        })
+    }
+    fn open_checked(dir: Arc<PrivateDir>, repair: bool) -> Result<Self> {
         let lock = dir.lock()?;
-        let marker = dir.read("profile.id", 128);
         let binding = dir.binding()?;
+        Self::open_bound(dir, lock, binding, repair)
+    }
+    fn open_bound(
+        dir: Arc<PrivateDir>,
+        lock: File,
+        binding: super::private_fs::binding::DirectoryBinding,
+        repair: bool,
+    ) -> Result<Self> {
+        let marker = dir.read("profile.id", 128);
         let fresh = matches!(
             marker,
             Err(IdentityError::Storage {
@@ -189,7 +245,7 @@ impl Ledger {
         );
         let profile = if fresh {
             if dir.path().join("restoration.sqlite").exists() {
-                return Err(IdentityError::RecoveryRequired);
+                return Err(IdentityError::Profile(ProfileFailure::Incomplete));
             }
             ProfileId::from_local(random()?)
         } else {
@@ -198,7 +254,7 @@ impl Ledger {
             )?)
         };
         if !fresh && !dir.path().join("restoration.sqlite").exists() {
-            return Err(IdentityError::RecoveryRequired);
+            return Err(IdentityError::Profile(ProfileFailure::Incomplete));
         }
         dir.prepare_database("restoration.sqlite")?;
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -217,7 +273,7 @@ impl Ledger {
         if mode != "delete" || sync != 3 || full != 1 {
             return Err(IdentityError::RecoveryRequired);
         }
-        let store = if fresh {
+        let (store, old_binding) = if fresh {
             let store = random()?;
             db(connection.execute_batch("BEGIN IMMEDIATE;
             CREATE TABLE meta(schema INTEGER NOT NULL,profile TEXT NOT NULL,store TEXT NOT NULL,root TEXT NOT NULL);
@@ -228,27 +284,35 @@ impl Ledger {
             "))?;
             db(connection.execute(
                 "INSERT INTO meta VALUES(5,?1,?2,?3)",
-                params![id(profile.as_local()), id(store), binding],
+                params![id(profile.as_local()), id(store), binding.current],
             ))?;
             db(connection.execute_batch("COMMIT;"))?;
             dir.create("profile.id", id(profile.as_local()).as_bytes())?;
-            store
+            (store, None)
         } else {
+            let count: i64 =
+                db(connection.query_row("SELECT COUNT(*) FROM meta", [], |r| r.get(0)))?;
+            if count != 1 {
+                return Err(IdentityError::RecoveryRequired);
+            }
             let tuple: (i64, String, String, String) = db(connection.query_row(
                 "SELECT schema,profile,store,root FROM meta",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             ))?;
-            if !matches!(tuple.0, 5..=7) || tuple.1 != id(profile.as_local()) || tuple.3 != binding
-            {
-                return Err(IdentityError::RecoveryRequired);
+            if !matches!(tuple.0, 5..=7) {
+                return Err(IdentityError::Profile(ProfileFailure::UnsupportedSchema));
+            }
+            if tuple.1 != id(profile.as_local()) {
+                return Err(IdentityError::Profile(ProfileFailure::BindingMismatch));
             }
             let integrity: String =
                 db(connection.query_row("PRAGMA quick_check", [], |r| r.get(0)))?;
             if integrity != "ok" {
                 return Err(IdentityError::RecoveryRequired);
             }
-            number(tuple.2)?
+            let update = binding.needs_update(&tuple.3, repair)?;
+            (number(tuple.2)?, update.then_some(tuple.3))
         };
         let schema: i64 =
             db(connection.query_row("SELECT schema FROM meta", [], |row| row.get(0)))?;
@@ -279,6 +343,18 @@ impl Ledger {
         };
         if ledger.accounts()?.len() > 8 {
             return Err(IdentityError::RecoveryRequired);
+        }
+        if let Some(previous) = old_binding {
+            // Only the root association changes. Qualified providers, generations,
+            // suppression and unsettled operations remain exactly as committed.
+            ledger.dir.check()?;
+            let changed = db(ledger.db.execute(
+                "UPDATE meta SET root=?1 WHERE root=?2",
+                params![binding.current, previous],
+            ))?;
+            if changed != 1 {
+                return Err(IdentityError::RecoveryRequired);
+            }
         }
         Ok(ledger)
     }
@@ -848,5 +924,165 @@ impl Ledger {
             [id(op.id.as_local())],
         ))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+    use crate::identity::private_fs::binding::DirectoryBinding;
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("nmt-binding-test-{:032x}", random().unwrap()));
+            PrivateDir::open(&path, true).unwrap();
+            Self(path)
+        }
+        fn directory(&self) -> Arc<PrivateDir> {
+            Arc::new(PrivateDir::open(&self.0, true).unwrap())
+        }
+        fn open(&self, current: &str, legacy: &str, repair: bool) -> Result<Ledger> {
+            let dir = self.directory();
+            let lock = dir.lock()?;
+            Ledger::open_bound(
+                dir,
+                lock,
+                DirectoryBinding {
+                    current: current.into(),
+                    legacy: Some(legacy.into()),
+                },
+                repair,
+            )
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    const STABLE: &str = "macos:501:11111111-2222-3333-4444-555555555555:42";
+    const LEGACY: &str = "unix:501:123:42";
+
+    #[test]
+    fn legacy_migration_and_deliberate_mount_recovery_preserve_account_authority() {
+        for stored in [LEGACY, "unix:501:999:42"] {
+            let fixture = Fixture::new();
+            let mut ledger = Ledger::open(fixture.directory()).unwrap();
+            let account = ledger
+                .reserve("https://example.invalid/".into())
+                .unwrap()
+                .id;
+            ledger.bind_user(account, "synthetic-user").unwrap();
+            let previous = ledger
+                .stage(
+                    account,
+                    LoginAttemptId::from_local(random().unwrap()),
+                    StorageBackend::PrivateFile,
+                    "synthetic-user",
+                )
+                .unwrap();
+            ledger.settle(previous, true).unwrap();
+            ledger
+                .activate(previous, ledger.account(account).unwrap().revision)
+                .unwrap();
+            // Pending replacement keeps P retained and N unresolved. Rebinding
+            // cannot activate N, unsuppress the account or choose a new provider.
+            let pending = ledger
+                .stage(
+                    account,
+                    LoginAttemptId::from_local(random().unwrap()),
+                    StorageBackend::MacKeychain,
+                    "synthetic-user",
+                )
+                .unwrap();
+            let state = ledger.account(account).unwrap();
+            ledger
+                .db
+                .execute("UPDATE meta SET root=?1", [stored])
+                .unwrap();
+            drop(ledger);
+            if stored != LEGACY {
+                assert!(matches!(
+                    fixture.open(STABLE, LEGACY, false),
+                    Err(IdentityError::Profile(ProfileFailure::DeviceChanged))
+                ));
+                let db = Connection::open(fixture.0.join("restoration.sqlite")).unwrap();
+                assert_eq!(
+                    db.query_row("SELECT root FROM meta", [], |r| r.get::<_, String>(0))
+                        .unwrap(),
+                    stored
+                );
+            }
+            let ledger = fixture.open(STABLE, LEGACY, stored != LEGACY).unwrap();
+            let after = ledger.account(account).unwrap();
+            assert_eq!(
+                (
+                    after.id,
+                    after.revision,
+                    after.disposition,
+                    after.mode,
+                    after.eligible
+                ),
+                (
+                    state.id,
+                    state.revision,
+                    state.disposition,
+                    state.mode,
+                    state.eligible
+                )
+            );
+            let retained = ledger.operation(account, previous.id).unwrap();
+            assert_eq!(retained.item, previous.item);
+            assert_eq!(retained.settlement, 1);
+            let unresolved = ledger.operation(account, pending.id).unwrap();
+            assert_eq!(unresolved.item, pending.item);
+            assert_eq!(unresolved.retained, Some(previous.id));
+            assert_eq!(unresolved.settlement, 0);
+            assert_eq!(
+                ledger
+                    .db
+                    .query_row("SELECT root FROM meta", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                STABLE
+            );
+            drop(ledger);
+            // Later remount changes only the legacy device number; the new
+            // persistent volume binding needs no further recovery or migration.
+            let reopened = fixture.open(STABLE, "unix:501:456:42", false).unwrap();
+            assert_eq!(
+                reopened.account(account).unwrap().disposition,
+                state.disposition
+            );
+        }
+    }
+
+    #[test]
+    fn even_explicit_recovery_rejects_another_directory_or_profile() {
+        for (stored, wrong_profile) in [("unix:501:123:43", false), (LEGACY, true)] {
+            let fixture = Fixture::new();
+            let ledger = Ledger::open(fixture.directory()).unwrap();
+            ledger
+                .db
+                .execute("UPDATE meta SET root=?1", [stored])
+                .unwrap();
+            if wrong_profile {
+                ledger
+                    .db
+                    .execute("UPDATE meta SET profile=?1", [id(random().unwrap())])
+                    .unwrap();
+            }
+            drop(ledger);
+            assert!(matches!(
+                fixture.open(STABLE, LEGACY, true),
+                Err(IdentityError::Profile(ProfileFailure::BindingMismatch))
+            ));
+            let db = Connection::open(fixture.0.join("restoration.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row("SELECT root FROM meta", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                stored
+            );
+        }
     }
 }

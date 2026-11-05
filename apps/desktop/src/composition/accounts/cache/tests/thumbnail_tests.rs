@@ -86,6 +86,84 @@ fn image_job(context: ConversationRef, cached: bool) -> ImageJob {
 }
 
 #[test]
+fn online_thumbnail_request_uses_the_exact_local_raster_before_the_next_owner_tick() {
+    let (mut model, context) = prepare(false);
+    model.cache.accounts[0]
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .thumbnails = page([thumbnail(7)]);
+    let target = image_job(context, true).target;
+    // There is no network worker in this reducer fixture: a cache miss cannot
+    // return successful admission. The UI request must choose local decoding.
+    assert!(model.current(context.account).is_err());
+    assert_eq!(
+        model.load_asset(RequestId(1), context.account, target.clone()),
+        Ok(())
+    );
+    assert_eq!(
+        model.load_asset(RequestId(2), context.account, target.clone()),
+        Ok(())
+    );
+    let job = model.take_content_image().unwrap();
+    assert!(job.cached);
+    assert_eq!(job.target, target);
+    assert!(
+        model.take_content_image().is_none(),
+        "duplicate requests reuse the same decode"
+    );
+    assert!(model.finish_content_image(&job, Some(4)));
+    assert!(model.pending.is_empty());
+
+    // Returning to the same room after retiring its view still uses the local
+    // descriptor-bound bytes rather than starting another network request.
+    model.clear_content_assets();
+    assert_eq!(
+        model.load_asset(RequestId(3), context.account, target),
+        Ok(())
+    );
+    assert!(model.take_content_image().unwrap().cached);
+    assert!(model.pending.is_empty());
+}
+
+#[test]
+fn full_local_decode_queue_defers_a_cache_hit_instead_of_downloading_again() {
+    let (mut model, context) = prepare(false);
+    let source = model.snapshot.messages.as_slice()[0].clone();
+    model.snapshot.messages = page((7..=9).map(|id| {
+        let mut message = source.clone();
+        message.local_id = id;
+        message
+    }));
+    model.cache.accounts[0]
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .thumbnails = page((7..=9).map(thumbnail));
+    model.hydrate_thumbnails();
+    let target = AssetTarget::Thumbnail(AttachmentRef {
+        context,
+        message: 9,
+        placeholder: text("photo"),
+    });
+    assert_eq!(
+        model.load_asset(RequestId(1), context.account, target.clone()),
+        Err(SubmitError::Busy)
+    );
+    let first = model.take_content_image().unwrap();
+    assert!(model.finish_content_image(&first, Some(4)));
+    assert_eq!(
+        model.load_asset(RequestId(2), context.account, target.clone()),
+        Ok(())
+    );
+    let remaining: Vec<_> = std::iter::from_fn(|| model.take_content_image()).collect();
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.iter().all(|job| job.cached));
+    assert!(remaining.iter().any(|job| job.target == target));
+    assert!(model.pending.is_empty());
+}
+
+#[test]
 fn offline_hydration_is_bounded_and_binds_only_cached_thumbnail_jobs_without_network_authority() {
     let (mut model, context) = prepare(true);
     let first = model.snapshot.messages.as_slice()[0].clone();

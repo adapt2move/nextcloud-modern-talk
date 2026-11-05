@@ -1,5 +1,7 @@
 //! Native selection is scoped before and after the OS dialog. File bytes stay in the adapter.
+mod attachments;
 use super::*;
+pub(super) use attachments::{Owner, Work};
 use std::path::PathBuf;
 use talk_adapters::local_files::{CsvRead, CsvReadError};
 use talk_core::protocol::messaging::MessagingCommand;
@@ -53,6 +55,52 @@ fn csv_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> b
         })
 }
 impl Accounts {
+    pub(crate) fn finish_upload_picker(
+        &mut self,
+        picker: Picker,
+        paths: Result<Option<Vec<PathBuf>>, ()>,
+    ) {
+        self.picker_open = false;
+        if self.snapshot.selected != Some(picker.context)
+            || self.current(picker.context.account).is_err()
+        {
+            return;
+        }
+        let outcome = paths
+            .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unconfigured))
+            .and_then(|paths| match paths {
+                None => Ok(()),
+                Some(paths) => {
+                    if paths.len() > 8 {
+                        if let Some(panel) = self.snapshot.message_panel.as_mut() {
+                            panel.file_error =
+                                Some(talk_core::ui::messaging::UploadFailure::TooMany);
+                        }
+                        self.touch();
+                        return Ok(());
+                    }
+                    let mut selected = Page::empty();
+                    for path in paths {
+                        let path = path
+                            .to_str()
+                            .and_then(|path| Text::new(path).ok())
+                            .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+                        selected.try_push(path).map_err(|_| SubmitError::Busy)?;
+                    }
+                    self.stage_files(picker.context, selected)
+                }
+            });
+        if let Err(error) = outcome {
+            self.snapshot.content_panel.result = Some((
+                picker.request,
+                Completion::Failed(match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    _ => UnavailableReason::Busy,
+                }),
+            ));
+            self.touch();
+        }
+    }
     pub(super) fn queue_csv_picker(
         &mut self,
         request: RequestId,
@@ -279,7 +327,8 @@ impl Accounts {
         self.finish_file_selection(picker, result);
     }
     fn file_work_pending(&self, context: ConversationRef) -> bool {
-        self.content_owner.transfer.is_some()
+        self.file_export_pending()
+            || self.content_owner.transfer.is_some()
             || self.pending.iter().any(|pending| {
                 matches!(pending.purpose,
                     Purpose::Message(_, current, _, messaging::Work::Action) if current == context)

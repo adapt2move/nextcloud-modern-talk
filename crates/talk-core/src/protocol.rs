@@ -233,6 +233,7 @@ pub struct HistoryPage {
     pub conversation: ConversationId,
     pub messages: Page<Message, 50>,
     pub older: Option<MessageId>,
+    /// None leaves the previous observation unchanged; sequence zero retires it.
     pub common_read: Option<MessageId>,
 }
 

@@ -179,16 +179,19 @@ impl PrivateDir {
         }
         Ok(())
     }
-    pub(in crate::identity) fn binding(&self) -> Result<String> {
+    pub(in crate::identity) fn binding(&self) -> Result<super::binding::DirectoryBinding> {
         self.check()?;
         let i = winapi_util::file::information(self.chain.last().ok_or_else(error::denied)?)
             .map_err(error::io)?;
-        Ok(format!(
-            "windows:{}:{}:{}",
-            self.owner,
-            i.volume_serial_number(),
-            i.file_index()
-        ))
+        Ok(super::binding::DirectoryBinding {
+            current: format!(
+                "windows:{}:{}:{}",
+                self.owner,
+                i.volume_serial_number(),
+                i.file_index()
+            ),
+            legacy: None,
+        })
     }
     fn name(name: &str) -> Result<()> {
         let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();

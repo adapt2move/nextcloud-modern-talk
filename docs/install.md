@@ -51,6 +51,35 @@ If macOS asks you to restart after allowing screen access, reopen the app. It
 returns to the ready screen for the same account and checks the actual permission
 states again. You can change permissions later in Settings.
 
+### Closing the window and quitting
+
+On macOS, the red close button or **Command-W** hides the window and keeps Talk
+running for permitted notifications. Click the Dock icon to return to the same
+conversation and draft. Choose **Talk → Quit app** or **Command-Q** to stop the
+application completely. Notifications still depend on macOS permission, Focus
+and the server's notification policy; they cannot arrive after explicit quit.
+Native close/reopen and notification delivery still require qualification on a Mac.
+
+### Legacy profile recovery
+
+Version v0.0.8 associates local accounts with a mount device number that can
+change after a remount. If the user and directory inode still match but that
+device number differs, quit Talk completely and use the
+[legacy repair tool](../tools/identity/repair_macos_profile.py) with Python 3:
+
+```sh
+python3 repair_macos_profile.py --repair
+```
+
+Without `--repair` it only checks the association. Repair takes the application's
+exclusive profile lock, creates a private SQLite backup in the same app data
+folder and rechecks the profile before changing only its root association.
+It preserves account eligibility, pending work and credentials; it refuses a
+different user, directory or profile marker. Reopen Talk after successful repair.
+This is a compatibility repair for the current mount, not the persistent-volume
+upgrade. The tool's guards and transactions are tested with synthetic POSIX
+profiles; native macOS execution remains unqualified.
+
 ## Ubuntu
 
 For **Ubuntu 24.04 x86_64**, install the downloaded `.deb`:

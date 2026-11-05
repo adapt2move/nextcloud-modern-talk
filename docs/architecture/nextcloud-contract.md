@@ -18,15 +18,35 @@ Room IDs, recipient IDs, member IDs and call scopes are application-local handle
 
 Conversation and message writes return correlated results. Composition retains results until acknowledgement, refreshes the affected server projection and prevents a stale completion from repopulating another room. File transfers use bounded streaming, explicit server sharing and staged non-overwriting local downloads.
 
+The attachment composition owner retains one eight-file, thirty-minute selected-room
+batch. It dispatches one upload/share at a time, consumes the caption only after
+its first confirmed share, and preserves uploaded remote paths for definitive
+share retries. Dispatched uncertainty pauses the batch without replay. Room or
+account retirement cancels the work and fences late completions.
+
+The same owner admits one native file-promise export against the exact captured
+rich descriptor and current message policy. The existing transfer owner performs
+staged non-overwriting publication. A bounded app-level scalar observation retains
+only request, former context and publication outcome until the native foreground
+waiter acknowledges it, including after navigation. This observation grants no
+former account authority. Both sides have a 120-second deadline; an unacknowledged
+composition outcome releases its slot after five further seconds. The presentation
+waiter performs no I/O. AppKit owns its task and receives no authenticated route.
+The vendored GPUI patch retains the weak delegate's source and releases the active
+UI drag on native completion. Other platforms retain the default unsupported
+outgoing-drag implementation.
+
 User-authored message links are separate from authenticated Cloud handoffs. Presentation emits the exact source and a bounded link ordinal. Composition resolves that ordinal through the pure text owner only after checking the current account, room, source, retention and exposure policy, then repeats those checks when draining its single two-second handoff slot. Only a canonical public HTTP/HTTPS value reaches the OS opener. Parsing or rendering never starts network or external-resource work.
 
 ## Attachment presentation and playback
 
 The content adapter validates current room, attachment, retention and origin before resolving an original. Original raster/PDF reads and the separate bounded `VideoBytes` result never expose a remote route to presentation. Composition decodes raster images off the UI executor and owns their finite resident pixel budget: 64 MiB for one original and 96 MiB across admitted rasters. Preview generations distinguish closing and reopening the same file, in addition to account/runtime/room and exact descriptor checks.
 
+Visible attachment requests precede additional avatars, with at most two requests per presentation tick and two admitted content jobs. Transient thumbnail failures allow at most three attempts in a 60-second window, with one- and two-second retry delays; at most 128 targets remain tracked. Room/account retirement cancels retries. Permission, authentication, missing-file and unsupported-format failures are not automatically retried. A permitted original used after a missing server thumbnail retains the existing 4 MiB, 8192-pixel and 16 Mi-pixel source limits, then shrinks to at most 320×240 before pixel retention or persistence.
+
 One local video owner consumes finite in-memory bytes through explicit GStreamer demuxers and decoders. A single worker, one latest-frame slot and coalesced play/seek controls bound work; stop has priority. Frames move directly to composition-owned render images and never enter chat/event serialization or the durable content cache. Native teardown retains the single-player lease until the worker exits. Starting/seeking has a ten-second deadline; stop is reported unconfirmed after three seconds. Explicit process quit waits at most five seconds without fabricating resource-stop confirmation. The packaged native plugin/source closure remains owned by the release runtime definition.
 
-The existing private account-data owner stores only reencoded, descriptor-bound thumbnails under [AUTH-009](../product/accounts.md#auth-009). Reads are length/dimension checked before decode and retirement fences late completions. Failed required removals collapse to one retained account clear, retried on the existing owner tick with a five-second cooldown. Disposable previews yield to required history and outgoing work within the database ceiling. Cached presentation never grants network or attachment authority.
+The existing private account-data owner stores only reencoded, descriptor-bound thumbnails under [AUTH-009](../product/accounts.md#auth-009). Reads are length/dimension checked before decode and retirement fences late completions. Both owner hydration and an earlier UI load prefer the exact eligible local raster over a network fetch; the two-slot decode queue uses existing admission backpressure. Confirmed in-memory thumbnails follow their current descriptor/scope and capacity limits instead of a periodic one-minute lease. Failed required removals collapse to one retained account clear, retried on the existing owner tick with a five-second cooldown. Disposable previews yield to required history and outgoing work within the database ceiling. Cached presentation never grants network or attachment authority.
 
 ## Calls
 

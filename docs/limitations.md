@@ -30,9 +30,17 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
-  offer the Cloud web view and download. Office document previews also depend on
-  the server's providers. Online raster previews use originals up to 4 MiB,
+  offer the Cloud web view and download. Other documents use compact file cards
+  with explicit downloads. Online raster previews use originals up to 4 MiB,
   8192 pixels per dimension and 16 Mi pixels. GIF/WebP render a still frame.
+  Thumbnail fallback uses the same source limits and retains only a small raster;
+  larger or unsupported inputs require the Cloud web view or download.
+- Attachment selection supports up to eight files and sequential upload/share,
+  limited to 32 MiB each before any stricter server limit. Unsent paths are
+  session-local and retire on a room/account change or after thirty minutes.
+  Attachment paste and sending in reply/thread/silent modes remain unsupported.
+  Native outgoing file drags use AppKit file promises on macOS and still need
+  Finder qualification; Linux and Windows use the Download action.
 - The media gallery and local video player are implemented but await native GUI,
   real-server and packaged-runtime qualification. The player accepts MP4
   H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders
@@ -42,6 +50,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
+  macOS window closing keeps the application services alive; native close/reopen
+  and notification reception with a hidden window still need Mac qualification.
+  Explicit quit stops background reception.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to eight ordinary-room histories, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
@@ -66,6 +77,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   need platform qualification. Windows is compile-checked only.
 - Native credential storage may be unavailable or report cleanup pending.
   The explicitly selected private-file fallback is persistent but unencrypted.
+- macOS profiles upgraded to the persistent volume association cannot be opened
+  by v0.0.8 and older builds. A legacy profile whose mount device value changed
+  needs the explicit storage reassociation action. Copied or replaced directories
+  are not automatically repaired. Native macOS volume lookup and this recovery
+  flow still need qualification on a Mac.
 - Synthetic media and successful compilation do not qualify physical devices,
   every OS, semantic accessibility or whole-process performance and energy use.
 

@@ -130,11 +130,24 @@ Keep the README caption accurate about the platform and synthetic data.
 
 Use `login-server-denied`, `chat-server-denied`, `chat-server-unavailable` and `accounts-server-denied` to inspect connection-error copy with fictional data.
 
+Use `login-account-store-busy`, `login-account-store-device-changed` and
+`login-account-store-error` for local profile-load failures. They have no login
+destination and expose storage actions instead of a browser-login retry. These
+fixtures never reopen or repair an actual profile.
+
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
 
 Use `chat-busy` to inspect rejected automatic read receipts and explicit sends under fictional local backpressure. Automatic requests remain quiet; a rejected send keeps its draft and shows a scoped notice for at most eight seconds. This fixture performs no server request.
 
 Use `chat-reactions`, `chat-reactions-pending` and `chat-reactions-denied` for direct reactions, palette keyboard handling, confirmed badge toggles and duplicate-admission guards. These scenarios use fictional counts and never qualify a server mutation.
+
+Use `chat-content`, `chat-content-loading` and `chat-content-failed` to inspect proportional thumbnail tiles, labelled loading/failure states and the opaque media dialog. Open a tile, resize the window and check that the complete image stays inside its stage above the footer. These fixtures do not fetch files or establish server latency, actual retry timing or native macOS PDF support.
+
+Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip.
+Remove chips, hover/focus Download and drop multiple local files into the chat.
+The fixture shows a pending send rather than fabricating upload success. It has
+no file or server I/O. Native Finder promises require a real macOS account-connected
+run; an isolated Cocoa binding check or Linux UI run does not qualify them.
 
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 
@@ -154,6 +167,7 @@ cargo check --locked --workspace --all-targets
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
 cargo test --locked -p talk-adapters --features backend-test --lib
+python3 -m unittest discover -s tools/identity -p 'test_*.py'
 ```
 
 Select the smallest relevant package scope for a change. Negative boundary fixtures must fail for their intended diagnostic; see [contract fixtures](../tests/contracts/README.md). A compile or synthetic fixture result does not qualify authentication, native media, accessibility or performance.

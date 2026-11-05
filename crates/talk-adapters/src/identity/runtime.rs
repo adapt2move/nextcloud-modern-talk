@@ -32,11 +32,13 @@ use talk_core::{
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use zeroize::Zeroizing;
 
+#[derive(Clone)]
 pub struct RuntimeConfig {
     media: Option<Arc<crate::media::MediaService>>,
     path: Option<PathBuf>,
     fixture: bool,
     browser_fixture: bool,
+    pub(super) repair_binding: bool,
     #[cfg(test)]
     pub(super) faults: Arc<provider::faults::Faults>,
 }
@@ -47,6 +49,7 @@ impl RuntimeConfig {
             path: None,
             fixture: false,
             browser_fixture: false,
+            repair_binding: false,
             #[cfg(test)]
             faults: Arc::default(),
         }
@@ -63,6 +66,7 @@ impl RuntimeConfig {
             path: Some(path),
             fixture: true,
             browser_fixture: true,
+            repair_binding: false,
             #[cfg(test)]
             faults: Arc::default(),
         }
@@ -739,15 +743,16 @@ fn path(config: &RuntimeConfig) -> Result<PathBuf> {
     if let Some(p) = &config.path {
         return Ok(p.clone());
     }
-    let base = dirs::data_local_dir().ok_or(IdentityError::RecoveryRequired)?;
-    let home = dirs::home_dir().ok_or(IdentityError::RecoveryRequired)?;
+    let unsafe_location = IdentityError::Profile(super::ProfileFailure::UnsafeLocation);
+    let base = dirs::data_local_dir().ok_or(unsafe_location)?;
+    let home = dirs::home_dir().ok_or(unsafe_location)?;
     if !base.is_absolute()
         || !base.starts_with(home)
         || base
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        return Err(IdentityError::RecoveryRequired);
+        return Err(unsafe_location);
     }
     if base.components().any(|c| {
         matches!(
@@ -755,7 +760,7 @@ fn path(config: &RuntimeConfig) -> Result<PathBuf> {
             Some("tmp" | "Temp" | "Dropbox" | "OneDrive" | "CloudStorage" | "Mobile Documents")
         )
     }) {
-        return Err(IdentityError::RecoveryRequired);
+        return Err(unsafe_location);
     }
     Ok(base.join("org.adapt2move.nextcloud-modern-talk"))
 }
@@ -809,7 +814,11 @@ async fn run(
     timezone_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     timezone_refresh.tick().await;
     let directory = Arc::new(PrivateDir::open(&path(&config)?, config.fixture)?);
-    let ledger = Ledger::open(directory.clone())?;
+    let ledger = if config.repair_binding {
+        Ledger::open_with_binding_repair(directory.clone(), true)?
+    } else {
+        Ledger::open(directory.clone())?
+    };
     let providers = Providers::new(directory, ledger.lock.clone());
     #[cfg(test)]
     let providers = Providers {

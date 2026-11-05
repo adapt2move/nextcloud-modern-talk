@@ -50,6 +50,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Inicio de sesión guardado en el almacén seguro.",
     ),
     (
+        "Anmeldung konnte nicht gespeichert werden.",
+        "Could not save sign-in.",
+        "No se pudo guardar el inicio de sesión.",
+    ),
+    (
         "Anmeldung speichern",
         "Save sign-in",
         "Guardar inicio de sesión",
@@ -915,6 +920,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Esta acción aún no está disponible en este cliente.",
     ),
     (
+        "Diese Ansicht ist nicht mehr aktuell. Bitte öffne sie erneut und wiederhole die Aktion.",
+        "This view is no longer current. Open it again and repeat the action.",
+        "Esta vista ya no está actualizada. Ábrela de nuevo y repite la acción.",
+    ),
+    (
         "Diese Einstellung wird vom Server nicht angeboten.",
         "This setting is not offered by the server.",
         "El servidor no ofrece este ajuste.",
@@ -963,11 +973,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Diese Zugriffsaktion wird hier nicht unterstützt.",
         "This access action is not supported here.",
         "Esta acción de acceso no está disponible aquí.",
-    ),
-    (
-        "Dieser Stand ist überholt. Bitte das Gespräch neu öffnen; dein Text bleibt erhalten.",
-        "This view is out of date. Reopen the conversation; your text is preserved.",
-        "Esta vista está desactualizada. Vuelve a abrir la conversación; se conserva el texto.",
     ),
     (
         "Dieser Zugriff kann hier nicht geprüft werden.",
@@ -1949,11 +1954,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Speicher", "Storage", "Almacenamiento"),
     ("Speichern läuft …", "Saving …", "Guardando…"),
-    (
-        "Speicherung nicht bestätigt.",
-        "Save not confirmed.",
-        "Guardado no confirmado.",
-    ),
     (
         "Speicherwahl erforderlich",
         "Choose credential storage",

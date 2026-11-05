@@ -156,6 +156,7 @@ pub enum Reply {
     History {
         messages: Vec<Message>,
         last_given: Option<u64>,
+        /// Missing header is None; explicit unavailability is Some(0).
         common_read: Option<u64>,
     },
     Message(Message),

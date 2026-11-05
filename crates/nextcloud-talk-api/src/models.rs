@@ -108,6 +108,8 @@ pub struct Room {
     pub favorite: Option<bool>,
     pub archived: Option<bool>,
     pub unread: Option<u64>,
+    pub last_read: Option<u64>,
+    pub common_read: Option<u64>,
     pub last_activity: Option<u64>,
     pub has_call: Option<bool>,
     pub sensitive: Option<bool>,
@@ -161,6 +163,8 @@ impl Room {
             favorite: v.get("isFavorite").and_then(Value::as_bool),
             archived: v.get("isArchived").and_then(Value::as_bool),
             unread: integer(v.get("unreadMessages")),
+            last_read: integer(v.get("lastReadMessage")),
+            common_read: integer(v.get("lastCommonReadMessage")),
             last_activity: integer(v.get("lastActivity")),
             has_call: v.get("hasCall").and_then(Value::as_bool),
             sensitive: v.get("isSensitive").and_then(Value::as_bool),
@@ -570,6 +574,24 @@ pub enum Preference {
 mod message_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn room_read_markers_preserve_missing_zero_and_bounded_numeric_values() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        for (value, expected) in [
+            (Value::Null, None),
+            (json!(0), Some(0)),
+            (json!("90"), Some(90)),
+            (json!(-1), None),
+            (json!("invalid"), None),
+        ] {
+            room["lastReadMessage"] = value.clone();
+            room["lastCommonReadMessage"] = value;
+            let decoded = Room::decode(&room).unwrap();
+            assert_eq!(decoded.last_read, expected);
+            assert_eq!(decoded.common_read, expected);
+        }
+    }
 
     #[test]
     fn silent_omission_matches_talk_without_trusting_malformed_values() {

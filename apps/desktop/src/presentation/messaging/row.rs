@@ -130,7 +130,7 @@ impl Desktop {
             );
         if m.metadata.deleted {
             content = content.child(self.hint(self.l("Nachricht gelöscht.")));
-        } else if !self.bare_media_body(m) {
+        } else if !self.bare_attachment_body(m) {
             content = content.child(
                 div().flex().items_start().gap_2().pr(px(76.)).child(
                     div()
