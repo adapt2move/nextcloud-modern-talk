@@ -91,8 +91,13 @@ def main(argv=None):
         cargo = shutil.which("cargo", path=env.get("PATH"))
         if not cargo:
             raise ValueError("Cargo is missing. Install rustup and the repository's pinned toolchain.")
-        # Replacing this process preserves terminal input and Ctrl-C for cargo
-        # run, including the application it starts. No shell reparses arguments.
+        # Windows emulates exec by starting a new process and exiting this one.
+        # CI can then report success and kill the still-running Cargo process.
+        # Retain the launcher until Cargo exits and forward its actual status.
+        if platform.system() == "Windows":
+            return subprocess.call([cargo, *argv], cwd=ROOT, env=env)
+        # POSIX exec preserves terminal input and Ctrl-C for cargo run,
+        # including the application it starts. No shell reparses arguments.
         os.chdir(ROOT)
         os.execvpe(cargo, [cargo, *argv], env)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:

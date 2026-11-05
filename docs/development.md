@@ -68,7 +68,8 @@ The `webrtc` and `rtc` crates supply the WebRTC protocol implementation.
 Cargo resolves their exact versions and checksums from the lockfile; there is
 no separate libwebrtc SDK download. GStreamer remains a native runtime
 dependency for camera capture and media codecs. Windows builds use the explicit
-`--target x86_64-pc-windows-msvc`.
+`--target x86_64-pc-windows-msvc`. The Cargo starter waits for the child process
+on Windows and forwards its exit status; POSIX hosts replace the starter process.
 
 ## Native UI entrypoint
 

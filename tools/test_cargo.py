@@ -119,6 +119,24 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 17, result.stderr)
         self.assertEqual(json.loads(self.record.read_text()), arguments)
 
+    def test_windows_launcher_waits_for_cargo_and_preserves_failure_and_project_directory(self):
+        project = self.root / "project with spaces"
+        project.mkdir()
+        fake = self.root / "cargo"
+        fake.write_text("#!" + sys.executable + "\nimport os,sys,json\nfrom pathlib import Path\n"
+                        "Path(os.environ['CARGO_TEST_RECORD']).write_text(json.dumps({'arguments':sys.argv[1:], 'cwd':os.getcwd()}))\n"
+                        "sys.exit(int(os.environ['CARGO_TEST_EXIT']))\n")
+        arguments = ["build", "--locked", "--target-dir", "space ' quoted $(literal)"]
+        for code in (0, 17):
+            self.record.unlink(missing_ok=True)
+            with patch.object(cargo.platform, "system", return_value="Windows"), \
+                 patch.object(cargo, "ROOT", project), \
+                 patch.dict(os.environ, dict(self.env, CARGO_TEST_EXIT=str(code)), clear=True), \
+                 patch.object(cargo.os, "execvpe", side_effect=AssertionError("Windows must wait for its child")):
+                result = cargo.main(arguments)
+            self.assertEqual(result, code)
+            self.assertEqual(json.loads(self.record.read_text()), {"arguments": arguments, "cwd": str(project)})
+
     @unittest.skipUnless(shutil.which("task"), "Go Task is optional in CI; the Cargo starter has no Task dependency")
     def test_task_dev_and_build_preserve_profiles_and_literal_arguments(self):
         task = shutil.which("task")
