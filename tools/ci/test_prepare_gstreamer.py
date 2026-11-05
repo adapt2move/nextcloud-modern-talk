@@ -88,11 +88,116 @@ class WindowsSdkInstall(unittest.TestCase):
 
     def test_bad_checksum_never_runs_installer(self):
         with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen",
-                               return_value=io.BytesIO(b"corrupt download")):
+                               side_effect=lambda *args, **kwargs: io.BytesIO(b"corrupt download")):
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 prepare_gstreamer.install(self.target)
         self.run.assert_not_called()
         self.assertFalse(self.env_file.exists())
+
+
+class SdkRanges(unittest.TestCase):
+    class Response(io.BytesIO):
+        def __init__(self, data, status=200, headers=None):
+            super().__init__(data)
+            self.status = status
+            self.headers = headers or {}
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.destination = self.root / "sdk.pkg"
+        self.payload = bytes(range(256)) * (8 * 1024 * 1024 // 256) + b"sdk-tail"
+        self.expected = hashlib.sha256(self.payload).hexdigest()
+        self.seen = []
+        self.corrupt = self.incomplete = self.wrong_range = False
+
+    def response(self, request, timeout):
+        self.assertEqual(timeout, 60)
+        if request.get_method() == "HEAD":
+            return self.Response(b"", headers={"Content-Length": str(len(self.payload)), "Accept-Ranges": "bytes"})
+        header = request.get_header("Range")
+        self.assertTrue(header.startswith("bytes="))
+        start, end = map(int, header.removeprefix("bytes=").split("-"))
+        self.seen.append((start, end))
+        body = self.payload[start:end + 1]
+        if self.corrupt and start == 0:
+            body = b"!" + body[1:]
+        if self.incomplete and start == 0:
+            body = body[:-1]
+        actual_range = f"bytes {start}-{end}/{len(self.payload)}"
+        if self.wrong_range and start == 0:
+            actual_range = f"bytes 1-{end}/{len(self.payload)}"
+        return self.Response(body, status=206, headers={"Content-Range": actual_range})
+
+    def download(self):
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=self.response):
+            prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+
+    def test_assemble_disjoint_ranges_and_verify_the_complete_archive(self):
+        self.download()
+        self.assertEqual(self.destination.read_bytes(), self.payload)
+        self.assertEqual(len(self.seen), 4)
+        ordered = sorted(self.seen)
+        self.assertEqual(ordered[0][0], 0)
+        self.assertEqual(ordered[-1][1], len(self.payload) - 1)
+        self.assertTrue(all(left[1] + 1 == right[0] for left, right in zip(ordered, ordered[1:])))
+        self.assertEqual(list(self.root.iterdir()), [self.destination])
+
+    def test_corruption_incomplete_and_wrong_ranges_leave_no_accepted_archive(self):
+        for kind, message in [("corrupt", "checksum mismatch"), ("incomplete", "incomplete byte range"),
+                              ("wrong_range", "unexpected byte range")]:
+            with self.subTest(kind=kind):
+                setattr(self, kind, True)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.download()
+                setattr(self, kind, False)
+                self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_missing_range_support_uses_one_verified_stream(self):
+        def response(request, timeout):
+            if not isinstance(request, str):
+                self.assertEqual(request.get_method(), "HEAD")
+                return self.Response(b"", headers={"Content-Length": str(len(self.payload))})
+            return self.Response(self.payload)
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=response) as opened:
+            prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(opened.call_count, 2)
+        self.assertEqual(self.destination.read_bytes(), self.payload)
+
+    def test_oversized_metadata_stops_before_fetching_a_body(self):
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen",
+                               return_value=self.Response(b"", headers={"Content-Length": str(1024 ** 3 + 1), "Accept-Ranges": "bytes"})) as opened:
+            with self.assertRaisesRegex(ValueError, "SDK archive too large"):
+                prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(opened.call_count, 1)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_expired_transfer_removes_parts_and_never_creates_an_archive(self):
+        now = [0]
+        def response(request, timeout):
+            if request.get_method() != "HEAD":
+                now[0] = 1201
+            return self.response(request, timeout)
+        with mock.patch.object(prepare_gstreamer.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=response):
+            with self.assertRaisesRegex(ValueError, "time limit"):
+                prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_failed_download_cannot_remove_an_existing_destination(self):
+        self.destination.write_bytes(b"existing download")
+        with self.assertRaises(FileExistsError):
+            self.download()
+        self.assertEqual(self.destination.read_bytes(), b"existing download")
+
+    def test_rate_limit_is_propagated_without_starting_body_requests(self):
+        error = prepare_gstreamer.urllib.error.HTTPError("https://sdk.example.test/sdk.pkg", 429, "Busy", {}, None)
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=error) as opened:
+            with self.assertRaises(prepare_gstreamer.urllib.error.HTTPError):
+                prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(opened.call_count, 1)
+        self.assertEqual(list(self.root.iterdir()), [])
 
 
 if __name__ == "__main__":

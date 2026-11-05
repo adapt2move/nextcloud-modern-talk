@@ -5,12 +5,15 @@ Checksums come from the adjacent upstream .sha256sum files. Linux uses the
 Ubuntu packages installed by tools/ui/prepare-linux.sh instead.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
 from pathlib import Path
 import platform
 import subprocess
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 PACKAGES = {
@@ -23,6 +26,81 @@ PACKAGES = {
         [("gstreamer-1.0-msvc-x86_64-1.26.11.msi", "31cbc21fa0950b5c1e79c80959b2799805cb05a7a35953a13a9f790776137605"),
          ("gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi", "af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587")]),
 }
+
+
+def download(url, destination, expected):
+    """Fetch at most four bounded ranges, then verify the complete pinned SDK.
+
+    The upstream server advertises byte ranges; its large single responses can
+    stall long enough to consume a native build's lifetime. Smaller servers and
+    endpoints without range support retain a single streaming download.
+    """
+    limit, deadline = 1024 * 1024 * 1024, time.monotonic() + 1200
+    size, ranges = None, False
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=60) as response:
+            headers = getattr(response, "headers", {})
+            try:
+                size = int(headers.get("Content-Length", ""))
+            except ValueError:
+                pass
+            ranges = headers.get("Accept-Ranges", "").strip().lower() == "bytes"
+    except urllib.error.HTTPError as error:
+        if error.code not in (405, 501):
+            raise
+    if size is not None and size > limit:
+        raise ValueError("SDK archive too large")
+    parallel = ranges and size is not None and size >= 8 * 1024 * 1024
+    print(f"Downloading {destination.name}: {size or 'unknown'} bytes, {4 if parallel else 1} transfer(s)", flush=True)
+
+    def copy(source, output, maximum, digest=None):
+        total = 0
+        while chunk := source.read(64 * 1024):
+            total += len(chunk)
+            if total > maximum or time.monotonic() >= deadline:
+                raise ValueError("SDK download exceeded its size or time limit")
+            output.write(chunk)
+            if digest is not None:
+                digest.update(chunk)
+        return total
+
+    digest, created = hashlib.sha256(), False
+    try:
+        if parallel:
+            with tempfile.TemporaryDirectory(prefix="gstreamer-ranges-", dir=destination.parent) as temporary:
+                parts = [Path(temporary) / str(index) for index in range(4)]
+                width = (size + 3) // 4
+                def fetch(index):
+                    start, end = index * width, min((index + 1) * width, size) - 1
+                    request = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}"})
+                    with urllib.request.urlopen(request, timeout=60) as response:
+                        if response.status != 206 or response.headers.get("Content-Range", "").strip() != f"bytes {start}-{end}/{size}":
+                            raise ValueError("SDK server returned an unexpected byte range")
+                        with parts[index].open("xb") as output:
+                            received = copy(response, output, end - start + 1)
+                        if received != end - start + 1:
+                            raise ValueError("SDK server returned an incomplete byte range")
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    list(pool.map(fetch, range(4)))
+                with destination.open("xb") as output:
+                    created = True
+                    for index, part in enumerate(parts):
+                        with part.open("rb") as source:
+                            copy(source, output, min(width, size - index * width), digest)
+        else:
+            with urllib.request.urlopen(url, timeout=60) as response, destination.open("xb") as output:
+                created = True
+                received = copy(response, output, limit, digest)
+                if size is not None and size > 0 and received != size:
+                    raise ValueError("SDK server returned an incomplete download")
+        actual = digest.hexdigest()
+        if actual != expected:
+            raise ValueError(f"GStreamer SDK checksum mismatch for {destination.name}: expected {expected}, received {actual}")
+    except BaseException:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+    print("Verified SDK archive:", destination.name, flush=True)
 
 
 def install(target):
@@ -43,15 +121,7 @@ def install(target):
     with tempfile.TemporaryDirectory(prefix="gstreamer-sdk-") as temp:
         for name, expected in packages:
             path = Path(temp) / name
-            digest, total = hashlib.sha256(), 0
-            with urllib.request.urlopen(url + name, timeout=60) as response, path.open("xb") as output:
-                while data := response.read(1024 * 1024):
-                    total += len(data)
-                    if total > 1024 * 1024 * 1024:
-                        raise ValueError("SDK archive too large")
-                    digest.update(data); output.write(data)
-            if digest.hexdigest() != expected:
-                raise ValueError("GStreamer SDK checksum mismatch")
+            download(url + name, path, expected)
             if mac:
                 command = ["sudo", "installer", "-pkg", str(path), "-target", "/"]
             else:
