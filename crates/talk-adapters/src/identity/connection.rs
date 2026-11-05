@@ -109,6 +109,7 @@ struct Retained {
 }
 
 pub struct AccountConnection {
+    config: RuntimeConfig,
     runtime: IdentityRuntime,
     startup: Option<Observation>,
     state: ConnectionState,
@@ -123,9 +124,10 @@ impl AccountConnection {
     /// Starts one IdentityRuntime. Production passes RuntimeConfig::platform().
     /// Startup readiness is separate from an initially empty account snapshot.
     pub fn start(config: RuntimeConfig) -> Result<Self> {
-        let runtime = IdentityRuntime::start(config)?;
+        let runtime = IdentityRuntime::start(config.clone())?;
         let startup = runtime.try_submit(RuntimeCommand::Accounts)?;
         Ok(Self {
+            config,
             runtime,
             startup: Some(startup),
             state: ConnectionState::Starting,
@@ -135,6 +137,41 @@ impl AccountConnection {
             acknowledged: ConnectionCursor::default(),
             delivered: ConnectionCursor::default(),
         })
+    }
+
+    /// Explicit retry of a failed initial load only. Never replace a ready owner,
+    /// pending work or an unresolved provider writer. A stopped startup has
+    /// released its profile lock before the replacement is created.
+    pub fn retry_startup(&mut self) -> Result<()> {
+        self.restart_startup(false)
+    }
+
+    /// Explicitly associate a legacy macOS profile whose mount device changed.
+    /// The ledger still requires the same owner, inode and profile marker.
+    pub fn repair_startup_binding(&mut self) -> Result<()> {
+        if self.snapshot().state
+            != ConnectionState::Failed(IdentityError::Profile(super::ProfileFailure::DeviceChanged))
+        {
+            return Err(ErrorKind::WrongScope.into());
+        }
+        self.restart_startup(true)
+    }
+
+    fn restart_startup(&mut self, repair: bool) -> Result<()> {
+        if !matches!(self.state, ConnectionState::Failed(_))
+            || !self.jobs.is_empty()
+            || !self.runtime.snapshot().as_slice().is_empty()
+        {
+            return Err(ErrorKind::WrongScope.into());
+        }
+        if !self.runtime.is_stopped() {
+            return Err(ErrorKind::Busy.into());
+        }
+        let mut config = self.config.clone();
+        config.repair_binding = repair;
+        *self = Self::start(config)?;
+        self.config.repair_binding = false;
+        Ok(())
     }
 
     pub fn try_submit(

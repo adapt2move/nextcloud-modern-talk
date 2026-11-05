@@ -92,7 +92,22 @@ pub enum NativeStoreState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountLoadFailure {
+    DeviceChanged,
+    InUse,
+    AccessDenied,
+    Unavailable,
+    UnsafeLocation,
+    Incomplete,
+    BindingMismatch,
+    UnsupportedVersion,
+    InvalidData,
+    RecoveryRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoginFailure {
+    AccountStorage(AccountLoadFailure),
     Connection(ConnectionFailure),
     Expired,
     BrowserUnavailable,
@@ -495,6 +510,7 @@ pub struct AccountRemovalResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSnapshot {
     pub content_panel: super::content::ContentPanel,
+    pub file_export: Option<super::content::FileExportView>,
     pub create_panel: Option<super::conversation::CreatePanel>,
     pub revision: u64,
     pub login: LoginView,
@@ -532,6 +548,11 @@ pub struct ConversationListState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    /// Acknowledge or cancel only this native promise, including after navigation.
+    FinishFileExport {
+        request: RequestId,
+        context: ConversationRef,
+    },
     /// Deliberate activation of one link in the exact displayed message body.
     /// Composition revalidates the room, source and ordinal before OS handoff.
     OpenMessageLink {
@@ -604,6 +625,10 @@ pub enum UiIntent {
     RetryLogin {
         request: RequestId,
     },
+    /// Retry opening local accounts before any login destination was loaded.
+    RetryAccountLoad,
+    /// Deliberate recovery of the same legacy macOS directory after a mount change.
+    RepairAccountBinding,
     CancelLogin(RequestId),
     ReopenBrowser(RequestId),
     ChooseStorage {

@@ -49,7 +49,7 @@ fn removal_failure(error: IdentityError) -> AccountRemovalFailure {
             StorageFailure::TemporarilyUnavailable => F::Busy,
             _ => F::NativeFailed,
         },
-        IdentityError::RecoveryRequired => F::LocalState,
+        IdentityError::RecoveryRequired | IdentityError::Profile(_) => F::LocalState,
         IdentityError::SuppressionUnconfirmed => F::SuppressionUnconfirmed,
         IdentityError::WorkerUnavailable => F::Unavailable,
         IdentityError::Request(error) => match error {

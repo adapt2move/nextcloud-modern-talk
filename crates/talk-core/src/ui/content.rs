@@ -3,6 +3,15 @@ use super::conversation::{AccountPersonRef, Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{AccountScope, Page, Text, UnavailableReason};
 
+/// One native file promise's bounded observation, retained until acknowledged.
+/// This correlation grants no authority to read the former account or room.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileExportView {
+    pub request: RequestId,
+    pub context: ConversationRef,
+    pub saved: Option<bool>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttachmentRef {
     pub context: ConversationRef,

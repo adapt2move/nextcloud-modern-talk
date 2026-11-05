@@ -961,6 +961,16 @@ impl NextcloudClient {
         }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;
+            let observed = wire::integer(data.get("lastReadMessage"));
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = binding.read_through.max(observed);
+                if binding
+                    .read_through
+                    .is_some_and(|read| message.sequence <= read)
+                {
+                    return Ok(R::Changed);
+                }
+            }
             let token = api::models::RoomToken::parse(self.check_room(id)?)
                 .map_err(|k| self.error(transport::kind(k)))?;
             self.transport
@@ -972,6 +982,9 @@ impl NextcloudClient {
                     },
                 )
                 .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(message.sequence);
+            }
             return Ok(R::Changed);
         }
         if matches!(command, C::Pin { .. } | C::Unpin(_))
@@ -1325,9 +1338,12 @@ impl NextcloudClient {
                     capabilities: Some(self.message_capabilities(&room, &data, caps)?),
                     messages: out,
                     cursor,
-                    common_read: common_read
-                        .filter(|n| *n > 0 && caps.read_receipts == Some(true))
-                        .map(mid),
+                    common_read: (if caps.read_receipts == Some(true) {
+                        common_read.or_else(|| wire::integer(data.get("lastCommonReadMessage")))
+                    } else {
+                        Some(0)
+                    })
+                    .map(mid),
                 })
             }
             api::Reply::Message(message) => Ok(R::Message(Box::new(
@@ -1447,6 +1463,12 @@ impl NextcloudClient {
         }
         if mutation {
             self.settle_action(operation, result.as_ref().err())
+        }
+        if result.is_ok()
+            && command == C::MarkUnread
+            && let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id)
+        {
+            binding.read_through = None;
         }
         result
     }

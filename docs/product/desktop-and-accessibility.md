@@ -88,6 +88,8 @@ Acceptance: one offline account does not block another. Duplicate events reconci
 
 **Sleep, app lifecycle, and conflicts (P1/P2).** Closing a window, quitting, logging out, system sleep, and crashing have distinct effects. Explain active calls/transfers/drafts before explicit quit where interruption matters. Do not claim that a closed window disconnected a background account. A crash restart restores only permitted persisted state and never resumes capture automatically.
 
+On macOS, the red close control and Command-W hide the retained main window without shutting down account or notification services. Dock activation restores that window, preserving the selected conversation, draft and bounds. Hidden content cannot advance read markers. Close visible device checks and local attachment playback when hiding; an established call keeps its separate lifetime. The localized application menu and Command-Q explicitly quit after the existing bounded service drain. Linux and Windows retain their last-window shutdown behavior. OS permission, Focus and server notification policy still govern delivery; explicit quit and system sleep do not promise notification reception.
+
 Acceptance: wake revalidates server session and OS devices; stale notifications and call attempts cannot reconnect blindly. One session becoming obsolete does not delete another device's account. Quit ends local capture and transient session credentials; server-scheduled messages/reminders remain server-owned.
 
 ## DESK-009

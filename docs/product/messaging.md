@@ -124,6 +124,8 @@ Acceptance: forbidden `@all` cannot be sent through a decorative mention control
 
 Advance the read marker only to a message whose end has been painted inside the current conversation viewport, with the hidden pin-activity extension in MSG-012. This also applies to a short history that fits without scrolling. Replaced rows, hidden histories and a different account/runtime cannot reuse an earlier visibility observation. Busy local admission leaves the marker eligible for retry and does not display a send warning. Clear a room's unread count only when the acknowledged target covers its canonical event cursor, including omitted activity.
 
+Automatic read markers only advance: scrolling back, repainting older rows and reopening a room cannot rewind progress already observed from the server or acknowledged in the current runtime. A successful explicit Mark unread releases that automatic floor. Missing common-read information on a history page preserves the last confirmed receipt; an explicit unavailable/zero marker suppresses it. Message age and position alone never prove that other participants have read an own message.
+
 Acceptance: a hidden/minimized conversation does not become read from a background fetch. Turning read receipts off suppresses receipt display/transmission as required by the server contract. A common-read marker is never labeled as an exact individual reader list. Reconnect reconciles markers without resetting the user to a guessed latest message.
 
 ## MSG-011

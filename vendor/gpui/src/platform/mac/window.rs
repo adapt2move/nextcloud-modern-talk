@@ -410,6 +410,7 @@ struct MacWindowState {
     keystroke_for_do_command: Option<Keystroke>,
     do_command_handled: Option<bool>,
     external_files_dragged: bool,
+    file_drag: Option<super::file_drag::Session>,
     // Whether the next left-mouse click is also the focusing click.
     first_mouse: bool,
     fullscreen_restore_bounds: Bounds<Pixels>,
@@ -717,6 +718,7 @@ impl MacWindow {
                 keystroke_for_do_command: None,
                 do_command_handled: None,
                 external_files_dragged: false,
+                file_drag: None,
                 first_mouse: false,
                 fullscreen_restore_bounds: Bounds::default(),
                 move_tab_to_new_window_callback: None,
@@ -951,6 +953,33 @@ impl Drop for MacWindow {
 }
 
 impl PlatformWindow for MacWindow {
+    fn supports_file_drag(&self) -> bool {
+        true
+    }
+    fn start_file_drag(
+        &self,
+        name: SharedString,
+        writer: Box<dyn FnOnce(PathBuf) -> crate::Task<bool>>,
+        ended: Box<dyn FnOnce()>,
+    ) -> bool {
+        let (view, executor) = {
+            let state = self.0.lock();
+            if state
+                .file_drag
+                .as_ref()
+                .is_some_and(|session| !session.replaceable())
+            {
+                return false;
+            }
+            (state.native_view.as_ptr(), state.executor.clone())
+        };
+        let Some(session) = super::file_drag::Session::start(view, executor, name, writer, ended)
+        else {
+            return false;
+        };
+        self.0.lock().file_drag = Some(session);
+        true
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.0.as_ref().lock().bounds()
     }

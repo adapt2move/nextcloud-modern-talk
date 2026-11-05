@@ -426,6 +426,25 @@
       ]
     },
     {
+      "name": "lyon_algorithms",
+      "version": "1.0.22",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "f3a6b9d4e8b48acd531fbf1241ad9b270df6e60b6b92bdea1469f4f40899d805",
+      "source_commit": "db98d26a1a90076a7a894262dcb51117eef643c8",
+      "files": [
+        {
+          "path": "lyon_algorithms-1.0.22/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_algorithms-1.0.22/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
       "name": "lyon_geom",
       "version": "1.0.19",
       "license": "MIT OR Apache-2.0",
@@ -440,6 +459,25 @@
         {
           "path": "lyon_geom-1.0.19/LICENSE-APACHE",
           "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_geom",
+      "version": "1.0.20",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "d82dd26aa4dc0b5b70b9115de59824842bcb43cf4a28e1b1e6d0ad148c93f93e",
+      "source_commit": "db98d26a1a90076a7a894262dcb51117eef643c8",
+      "files": [
+        {
+          "path": "lyon_geom-1.0.20/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_geom-1.0.20/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
           "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
         }
       ]
@@ -478,6 +516,25 @@
         {
           "path": "lyon_tessellation-1.0.22/LICENSE-APACHE",
           "source": "https://raw.githubusercontent.com/nical/lyon/b456b143215a1942a617c4672776b68b9a30feee/LICENSE-APACHE",
+          "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+        }
+      ]
+    },
+    {
+      "name": "lyon_tessellation",
+      "version": "1.0.23",
+      "license": "MIT OR Apache-2.0",
+      "crate_sha256": "fd4872650e70dc907dd4f7ebc449d7d657a0d2658e423b2e724970870bbbf75b",
+      "source_commit": "db98d26a1a90076a7a894262dcb51117eef643c8",
+      "files": [
+        {
+          "path": "lyon_tessellation-1.0.23/LICENSE-MIT",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+          "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+        },
+        {
+          "path": "lyon_tessellation-1.0.23/LICENSE-APACHE",
+          "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
           "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
         }
       ]

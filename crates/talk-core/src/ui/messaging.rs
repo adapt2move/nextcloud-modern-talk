@@ -141,6 +141,30 @@ pub struct UploadedFile {
     pub name: Text<255>,
     pub bytes: u64,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UploadFailure {
+    TooMany,
+    Missing,
+    TooLarge,
+    Denied,
+    Connection,
+    Unsupported,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UploadState {
+    Selected,
+    Uploading,
+    Sharing,
+    Failed(UploadFailure),
+    Uncertain,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UploadView {
+    pub id: u64,
+    pub name: Text<255>,
+    pub bytes: Option<u64>,
+    pub state: UploadState,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextLoad {
     pub target: u128,
@@ -185,6 +209,10 @@ pub struct MessagePanel {
     pub shared_files: Page<super::presentation::MessageView, 50>,
     pub file_limit: u64,
     pub uploaded: Option<UploadedFile>,
+    pub uploads: Page<UploadView, 8>,
+    pub uploads_running: bool,
+    pub files_sent: Option<RequestId>,
+    pub file_error: Option<UploadFailure>,
     pub upload_name: Option<Text<255>>,
     pub file_saved: Option<u64>,
     pub thread_root: Option<u128>,
@@ -226,6 +254,10 @@ impl MessagePanel {
             shared_files: Page::empty(),
             file_limit: 0,
             uploaded: None,
+            uploads: Page::empty(),
+            uploads_running: false,
+            files_sent: None,
+            file_error: None,
             upload_name: None,
             file_saved: None,
             thread_root: None,
@@ -270,6 +302,18 @@ pub enum MessageAction {
     RetryQueued(u128),
     DiscardQueued(u128),
     PickUpload,
+    StageFiles(Page<Text<16384>, 8>),
+    SendFiles {
+        caption: Text<4096>,
+        target: ComposeTarget,
+    },
+    RemoveFile(u64),
+    RetryFile(u64),
+    ExportFile {
+        attachment: super::content::AttachmentRef,
+        source: Page<RichObject, 1>,
+        destination: Text<16384>,
+    },
     Download {
         message: u128,
         placeholder: Text<128>,

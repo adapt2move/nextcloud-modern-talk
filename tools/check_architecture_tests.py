@@ -106,6 +106,19 @@ class ImportStrings(unittest.TestCase):
                 failures = [f for f in self.guard['failures'] if 'API contains' in f]
                 self.assertEqual(bool(failures), forbidden)
 
+    def test_native_export_waiter_exemption_is_scoped_to_one_named_foreground_task(self):
+        waiter = 'fn wait_for_native_export(cx: &mut gpui::AsyncApp) -> gpui::Task<bool> { cx.spawn(async move |cx| { false }) }'
+        self.assertEqual(self.native(waiter, filename='attachments.rs'), [])
+        for source, filename in [
+            (waiter, 'other.rs'),
+            (waiter.replace('wait_for_native_export', 'other'), 'attachments.rs'),
+            (waiter + ' fn other() { cx.spawn(task); }', 'attachments.rs'),
+            (waiter.replace('false', 'cx.background_executor().spawn(work); false'), 'attachments.rs'),
+            (waiter.replace('false', 'std::fs::read(path); false'), 'attachments.rs'),
+        ]:
+            with self.subTest(source=source, filename=filename):
+                self.assertTrue(self.native(source, filename=filename))
+
     def test_reported_settings_sentence(self):
         source = 'use gpui::div;\nconst COPY: &str = "Both will use GitHub Releases in the future.";'
         self.assertEqual(self.native(source), [])

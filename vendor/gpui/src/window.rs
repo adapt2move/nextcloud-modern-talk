@@ -853,6 +853,7 @@ pub struct Window {
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
+    native_file_drag: bool,
     mouse_hit_test: HitTest,
     modifiers: Modifiers,
     capslock: Capslock,
@@ -1236,6 +1237,7 @@ impl Window {
             focus_lost_listeners: SubscriberSet::new(),
             default_prevented: true,
             mouse_position,
+            native_file_drag: false,
             mouse_hit_test: HitTest::default(),
             modifiers,
             capslock,
@@ -1716,6 +1718,37 @@ impl Window {
     /// Returns the size of the drawable area within the window.
     pub fn viewport_size(&self) -> Size<Pixels> {
         self.viewport_size
+    }
+
+    /// Whether this window supports exporting a native promised file.
+    pub fn supports_file_drag(&self) -> bool {
+        self.platform_window.supports_file_drag()
+    }
+
+    /// Begin a copy-only native file drag. The asynchronous writer receives the
+    /// OS destination only after a drop and reports confirmed file publication.
+    pub fn start_file_drag(
+        &mut self,
+        name: SharedString,
+        cx: &App,
+        writer: impl FnOnce(std::path::PathBuf, &mut crate::AsyncApp) -> Task<bool> + 'static,
+    ) -> bool {
+        let mut end = self.to_async(cx);
+        let mut writer_cx = cx.to_async();
+        self.native_file_drag = true;
+        let started = self.platform_window.start_file_drag(
+            name,
+            Box::new(move |path| writer(path, &mut writer_cx)),
+            Box::new(move || {
+                let _ = end.update(|window, cx| {
+                    cx.stop_active_drag(window);
+                });
+            }),
+        );
+        if !started {
+            self.native_file_drag = false;
+        }
+        started
     }
 
     /// Returns whether this window is focused by the operating system (receiving key events).
@@ -3661,11 +3694,20 @@ impl Window {
                 PlatformInput::MouseMove(mouse_move)
             }
             PlatformInput::MouseDown(mouse_down) => {
+                self.native_file_drag = false;
                 self.mouse_position = mouse_down.position;
                 self.modifiers = mouse_down.modifiers;
                 PlatformInput::MouseDown(mouse_down)
             }
             PlatformInput::MouseUp(mouse_up) => {
+                if self.native_file_drag {
+                    self.native_file_drag = false;
+                    cx.stop_active_drag(self);
+                    return DispatchEventResult {
+                        propagate: false,
+                        default_prevented: true,
+                    };
+                }
                 self.mouse_position = mouse_up.position;
                 self.modifiers = mouse_up.modifiers;
                 PlatformInput::MouseUp(mouse_up)
@@ -3688,6 +3730,7 @@ impl Window {
             // to internal drag and drop events.
             PlatformInput::FileDrop(file_drop) => match file_drop {
                 FileDropEvent::Entered { position, paths } => {
+                    self.native_file_drag = false;
                     self.mouse_position = position;
                     if cx.active_drag.is_none() {
                         cx.active_drag = Some(AnyDrag {

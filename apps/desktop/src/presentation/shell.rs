@@ -459,6 +459,9 @@ impl Desktop {
             .flex_col()
             .child(timeline.tab_group().tab_index(0))
             .child(composer.tab_group().tab_index(1));
+        let drop_context = row.context;
+        let drop_enabled =
+            self.overlay.is_none() && self.message_feature_enabled(MessageFeature::Files);
         self.content_card(
             div().child(
                 self.scroll_area(super::navigation::Region::Conversation)
@@ -470,6 +473,15 @@ impl Desktop {
                     }),
             ),
         )
+        .when(drop_enabled, |card| {
+            card.can_drop(|value, _, _| value.is::<gpui::ExternalPaths>())
+                .drag_over::<gpui::ExternalPaths>(move |style, _, _, _| style.bg(t.selected))
+                .on_drop(
+                    cx.listener(move |this, paths: &gpui::ExternalPaths, window, cx| {
+                        this.stage_dropped_files(drop_context, paths, window, cx);
+                    }),
+                )
+        })
     }
     pub(super) fn composer_view(
         &self,
@@ -481,25 +493,42 @@ impl Desktop {
         let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
+        let attached = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| !panel.uploads.as_slice().is_empty());
+        let files_pending = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.uploads_running);
         let unloaded = self.message_ui.composer_load_failed == Some(row.context);
         let emoji_availability = self.emoji_availability(cx).above_composer();
         let options_availability = Availability::available().above_composer();
-        let send_availability = if pending && !self.drafts.uncertain(row.context) {
-            Availability::pending()
-        } else {
-            Availability::when(
-                ready
-                    && !pending
-                    && !unloaded
-                    && self.composer.read(cx).submitted_value().is_some(),
-                if self.drafts.uncertain(row.context) {
-                    "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
-                } else {
-                    "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
-                },
-            )
-        }
-        .above_composer();
+        let send_availability =
+            if files_pending || pending && !self.drafts.uncertain(row.context) {
+                Availability::pending()
+            } else {
+                Availability::when(
+                    ready
+                        && !pending
+                        && !unloaded
+                        && (!attached || self.can_send_attachments())
+                        && self.composer.read(cx).submitted_value().is_some(),
+                    if attached
+                        && self.drafts.target(row.context)
+                            != talk_core::ui::messaging::ComposeTarget::default()
+                    {
+                        "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen."
+                    } else if self.drafts.uncertain(row.context) {
+                        "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
+                    } else {
+                        "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
+                    },
+                )
+            }
+            .above_composer();
         div()
             .track_focus(&self.composer_focus)
             .flex_none()

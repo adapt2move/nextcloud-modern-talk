@@ -8,6 +8,11 @@
       "sha256": "aa0745f2433cc883028b0501b8caac709dd23dd9a065547d69dc478250555803"
     },
     {
+      "original_sha256": "7106499142d5416edaf44168da5c7dcd778c527398cb86e487131ba6689b94ff",
+      "path": "src/platform.rs",
+      "sha256": "34af27e8a72e738cd54338d1a9e919ff4666563e531e2e0696e516f14fc6bd16"
+    },
+    {
       "original_sha256": "d6407a0e8685e03621e671fbbf52402217e6aacd1b1b5a285ec6693a980d7b2b",
       "path": "src/platform/blade/blade_renderer.rs",
       "sha256": "3f3a865c916239f17e68f586966641d0be7f22d915ea5b35c41a8a8502bb89e7"
@@ -16,6 +21,16 @@
       "original_sha256": "507b6fc7e69ce1fa2703b510f65f5aa2740c061f85e523220b742a65f18d8498",
       "path": "src/platform/blade/shaders.wgsl",
       "sha256": "7cbf7d4b277b39c76365327ddb9b61e0a39160df600f4c587527b5e686dff0dc"
+    },
+    {
+      "original_sha256": "cec6bf0c2fb32124f605a73d57bf11d5aa884c4c09904ee94d34b9ebfab9208b",
+      "path": "src/platform/mac.rs",
+      "sha256": "1d3ec1ef0aab5bd20716167205c94f62403b7e9628e6037dfa6476cf730777d6"
+    },
+    {
+      "original_sha256": null,
+      "path": "src/platform/mac/file_drag.rs",
+      "sha256": "1504e210a80f2bfae2c7cfe3e394444bb97141fac5a9aa3b3d78904596f026f6"
     },
     {
       "original_sha256": "3caecf82301a0514064afd29d8c1b964313d2c23d16655dc703d16918b01c18f",
@@ -30,7 +45,7 @@
     {
       "original_sha256": "c21da3de36159b51e62f02666b335359d5fff8c20ddf79c4fc9e3195047c3f35",
       "path": "src/platform/mac/window.rs",
-      "sha256": "c3131654c07a5090b503beb364594096d5ef06a8b14d14902a229b6dbb36e236"
+      "sha256": "ca8e4247b41dd67ea2a68280cbe1081fd57c74d7a730026e1684a0c8c947ac7a"
     },
     {
       "original_sha256": "b4b10b48cd3c31c1fa1390ca7eeb70c2c184db59ce1aeb387ca06563b342b010",
@@ -50,7 +65,7 @@
     {
       "original_sha256": "40d58470971ccd658ead4d4f788219658fb68b9486aff73e143835c09237ab18",
       "path": "src/window.rs",
-      "sha256": "e4a2171beb9db342c55351ec16f8a1fa193aedbf46e0408508d15b2d7280b367"
+      "sha256": "db60a647e52397747b2c02a1c269b58e88e1ee28ba3cb80622405011e6a72991"
     }
   ],
   "license": "Apache-2.0",

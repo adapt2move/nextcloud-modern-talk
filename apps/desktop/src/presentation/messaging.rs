@@ -32,7 +32,6 @@ pub(crate) enum Action {
     Files,
     Silent,
     Pins,
-    ShareUpload,
     ThreadReply(u128),
     Menu(u128),
     ReactionPalette(u128, menu::Source),
@@ -170,6 +169,15 @@ struct MessageGeometry {
     anchor: Option<(u128, gpui::Pixels)>,
     header_inset: gpui::Pixels,
     boundary_inset: gpui::Pixels,
+}
+
+/// Painting an older row is navigation, never an instruction to rewind reading.
+fn read_advances(
+    previous: Option<(ConversationRef, u128)>,
+    context: ConversationRef,
+    id: u128,
+) -> bool {
+    previous.is_none_or(|(room, read)| room != context || id > read)
 }
 
 fn visible_read(
@@ -618,6 +626,11 @@ impl Desktop {
             }
         }
     }
+    pub(super) fn clear_message_visibility(&mut self) {
+        let mut geometry = self.message_ui.geometry.borrow_mut();
+        geometry.visible_read = None;
+        geometry.painted.clear();
+    }
     pub(crate) fn observe_message_visibility(&mut self, window: &mut Window) {
         if window.is_window_active() && self.request_older_history(false) {
             window.refresh();
@@ -674,7 +687,7 @@ impl Desktop {
                     .map(|message| (id, message.metadata.read_through.unwrap_or(id)))
             });
         if let Some((id, effective)) = id
-            && self.message_ui.last_read != Some((context, effective))
+            && read_advances(self.message_ui.last_read, context, effective)
             && self.submit_message(MessageAction::MarkRead(id)).is_some()
         {
             self.message_ui.last_read = Some((context, effective));
@@ -708,7 +721,7 @@ impl Desktop {
             },
         )
     }
-    fn message_feature_enabled(&self, feature: MessageFeature) -> bool {
+    pub(super) fn message_feature_enabled(&self, feature: MessageFeature) -> bool {
         self.message_available(feature).is_enabled()
     }
     pub(super) fn local_message_intents(&self) -> bool {
@@ -916,11 +929,6 @@ impl Desktop {
                 }
                 if self.overlay != Some(Overlay::Files) {
                     self.handle(LocalAction::Open(Overlay::Files), window, cx);
-                }
-            }
-            Action::ShareUpload => {
-                if let Some(caption) = self.composer_submission(cx) {
-                    self.submit_message(MessageAction::ShareUpload { caption });
                 }
             }
             Action::ThreadReply(root) => {
@@ -2020,29 +2028,23 @@ impl Desktop {
             );
         }
         if let Some(panel) = &self.snapshot.message_panel {
-            if let Some(file) = &panel.uploaded {
+            if !panel.uploads.as_slice().is_empty() {
+                rows.push(self.upload_strip(cx).into_any_element());
+            }
+            if panel.file_error == Some(talk_core::ui::messaging::UploadFailure::TooMany) {
                 rows.push(
                     div()
-                        .p_3()
-                        .rounded_lg()
-                        .bg(self.theme.subtle)
-                        .child(file.name.as_str().to_owned())
-                        .child(self.hint(self.l(
-                            "Hochgeladen. Erst beim Teilen wird die Datei im Gespräch sichtbar.",
-                        )))
-                        .child(self.button(
-                            "share-upload",
-                            "Datei mit diesem Gespräch teilen",
-                            ButtonStyle::Primary,
-                            self.message_available(MessageFeature::Files),
-                            LocalAction::Message(Action::ShareUpload),
-                            cx,
-                        ))
-                        .child(self.button(
-                            "dismiss-upload",
-                            "Vorschau schließen",
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            self.hint(self.l("Du kannst höchstens 8 Dateien auf einmal anhängen.")),
+                        )
+                        .child(self.icon_button(
+                            "dismiss-file-error",
+                            ("x", "Schließen"),
                             ButtonStyle::Quiet,
-                            true,
+                            Availability::available(),
                             LocalAction::Message(Action::Command(MessageAction::DismissUpload)),
                             cx,
                         ))
@@ -2413,6 +2415,35 @@ fn message_mutation_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_read_marker_never_rewinds_when_scrolling_back_or_repainting() {
+        use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration};
+        let room = ConversationRef {
+            account: AccountScope {
+                account: AccountId::from_local(1),
+                runtime: RuntimeGeneration::from_local(1),
+            },
+            conversation: ConversationId {
+                account: AccountId::from_local(1),
+                host: HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let other = ConversationRef {
+            conversation: ConversationId {
+                local: 2,
+                ..room.conversation
+            },
+            ..room
+        };
+        assert!(read_advances(None, room, 100));
+        for visible in [100, 99, 80, 2] {
+            assert!(!read_advances(Some((room, 100)), room, visible));
+        }
+        assert!(read_advances(Some((room, 100)), room, 101));
+        assert!(read_advances(Some((room, 100)), other, 2));
+    }
 
     #[test]
     fn read_candidate_requires_painted_message_end_inside_the_history_viewport() {

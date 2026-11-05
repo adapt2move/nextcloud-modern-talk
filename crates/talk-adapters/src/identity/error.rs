@@ -2,6 +2,17 @@
 use talk_core::identity::{StorageBackend, StorageFailure};
 use talk_core::ports::ErrorKind;
 
+/// Safe startup diagnostics, without paths, database contents or provider text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileFailure {
+    UnsafeLocation,
+    Incomplete,
+    BindingMismatch,
+    DeviceChanged,
+    UnsupportedSchema,
+    InvalidMetadata,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IdentityError {
     Request(ErrorKind),
@@ -9,6 +20,7 @@ pub enum IdentityError {
         backend: StorageBackend,
         failure: StorageFailure,
     },
+    Profile(ProfileFailure),
     RecoveryRequired,
     SuppressionUnconfirmed,
     WorkerUnavailable,

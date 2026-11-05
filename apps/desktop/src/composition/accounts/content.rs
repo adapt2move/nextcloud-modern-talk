@@ -1,5 +1,5 @@
 //! One admitted account lane for assets/polls; no detached HTTP client. Profile
-//! avatars have a separate account-owned disk cache; attachments remain transient.
+//! avatars and eligible attachment thumbnails have account-owned disk caches.
 //! Every completion is checked against current account and room.
 mod avatars;
 mod links;
@@ -29,6 +29,19 @@ struct AssetRetry {
     target: view::AssetTarget,
     deadline: Instant,
 }
+struct ThumbnailRetry {
+    target: view::AssetTarget,
+    failures: u8,
+    next: Option<Instant>,
+    expires: Instant,
+}
+impl ThumbnailRetry {
+    fn failed(&mut self, now: Instant) {
+        self.failures = self.failures.saturating_add(1);
+        self.next = (self.failures < 3 && now < self.expires)
+            .then(|| now + Duration::from_secs(u64::from(self.failures)));
+    }
+}
 #[derive(Default)]
 pub(super) struct ContentOwner {
     pub(super) video: super::preview::Video,
@@ -43,6 +56,7 @@ pub(super) struct ContentOwner {
     // here, at most 128 targets for 60 seconds, with one retry per owner tick.
     // Navigation/account teardown cancels these before they can start effects.
     pending_assets: Vec<AssetRetry>,
+    thumbnail_retries: Vec<ThumbnailRetry>,
     leases: Vec<(view::AssetTarget, Instant)>,
     pub(super) transfer: Option<wire::TransferProgress>,
     link: Option<(AccountScope, Text<2048>)>,
@@ -100,6 +114,7 @@ impl Accounts {
         }
         self.content_owner.preview_request = None;
         self.content_owner.pending_assets.clear();
+        self.content_owner.thumbnail_retries.clear();
         self.content_owner.avatars.clear_member_observations();
         self.content_owner.jobs.clear();
         let cancelled: Vec<_> = self
@@ -175,23 +190,7 @@ impl Accounts {
                 Ok(())
             }
             A::ClosePreview => {
-                self.content_owner.preview_generation =
-                    self.content_owner.preview_generation.saturating_add(1);
-                self.stop_video();
-                self.snapshot.content_panel.assets = page(
-                    self.snapshot
-                        .content_panel
-                        .assets
-                        .as_slice()
-                        .iter()
-                        .filter(|a| !matches!(a.target, view::AssetTarget::Image(_)))
-                        .cloned(),
-                );
-                self.retire_content_keys();
-                self.snapshot.content_panel.playback = None;
-                self.content_owner.preview_request = None;
-                self.snapshot.content_panel.preview = None;
-                self.touch();
+                self.close_content_preview();
                 Ok(())
             }
             A::CancelDownload => {
@@ -255,7 +254,14 @@ impl Accounts {
             A::PlayPreview { .. } | A::PausePreview { .. } | A::SeekPreview { .. } => {
                 self.video_control(action)
             }
-            A::Load(target) => self.request_asset(request, account, target),
+            A::Load(target) => {
+                // A deliberate retry starts a fresh bounded window. Automatic
+                // retry never comes through this UI intent.
+                self.content_owner
+                    .thumbnail_retries
+                    .retain(|retry| retry.target != target);
+                self.request_asset(request, account, target)
+            }
             A::OpenCloud(attachment) => {
                 self.require_attachment(&attachment)?;
                 let message = mid(&attachment)?;
@@ -295,7 +301,29 @@ impl Accounts {
             A::ClosePoll(poll) => self.start_poll(request, wire::PollCommand::Close(poll)),
         }
     }
+    pub(crate) fn close_content_preview(&mut self) {
+        self.content_owner.preview_generation =
+            self.content_owner.preview_generation.saturating_add(1);
+        self.stop_video();
+        self.snapshot.content_panel.assets = page(
+            self.snapshot
+                .content_panel
+                .assets
+                .as_slice()
+                .iter()
+                .filter(|asset| !matches!(asset.target, view::AssetTarget::Image(_)))
+                .cloned(),
+        );
+        self.retire_content_keys();
+        self.snapshot.content_panel.playback = None;
+        self.content_owner.preview_request = None;
+        self.snapshot.content_panel.preview = None;
+        self.touch();
+    }
     pub(super) fn cancel_download(&mut self) {
+        if self.cancel_file_export() {
+            return;
+        }
         if let Some(progress) = &self.content_owner.transfer {
             progress.cancel();
         }
@@ -322,7 +350,7 @@ impl Accounts {
         }
         self.current(attachment.context.account)
     }
-    fn load_asset(
+    pub(super) fn load_asset(
         &mut self,
         request: RequestId,
         account: AccountScope,
@@ -356,6 +384,31 @@ impl Accounts {
             .any(|a| a.target == target && matches!(a.state, view::AssetState::Ready { .. }))
         {
             return Ok(());
+        }
+        // A UI request can arrive before the next hydration tick. Prefer the
+        // exact local raster instead of racing it with an authenticated fetch.
+        if !self
+            .snapshot
+            .content_panel
+            .assets
+            .as_slice()
+            .iter()
+            .any(|asset| asset.target == target)
+            && self.cached_thumbnail_current(&target)
+        {
+            self.hydrate_thumbnail(&target);
+            return if self
+                .content_owner
+                .images
+                .iter()
+                .any(|job| job.target == target)
+            {
+                Ok(())
+            } else {
+                // The bounded decoder queue is full; keep this in the existing
+                // admission queue instead of downloading a cached image again.
+                Err(SubmitError::Busy)
+            };
         }
         let attachment = match &target {
             view::AssetTarget::Image(reference) | view::AssetTarget::Thumbnail(reference) => {
@@ -522,6 +575,49 @@ impl Accounts {
             }
         }
     }
+    fn retry_thumbnail_assets(&mut self, now: Instant) {
+        let retries = std::mem::take(&mut self.content_owner.thumbnail_retries);
+        for retry in retries {
+            if now < retry.expires
+                && self.asset_is_current(&retry.target)
+                && self
+                    .snapshot
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .any(|asset| {
+                        asset.target == retry.target
+                            && !matches!(
+                                asset.state,
+                                view::AssetState::Ready { .. }
+                                    | view::AssetState::Denied
+                                    | view::AssetState::Unsupported
+                                    | view::AssetState::Missing
+                            )
+                    })
+            {
+                self.content_owner.thumbnail_retries.push(retry);
+            }
+        }
+        let Some(index) = self
+            .content_owner
+            .thumbnail_retries
+            .iter()
+            .position(|retry| retry.next.is_some_and(|at| at <= now))
+        else {
+            return;
+        };
+        let target = self.content_owner.thumbnail_retries[index].target.clone();
+        let Some(account) = self.snapshot.active_account else {
+            return;
+        };
+        match self.load_asset(RequestId(0), account, target) {
+            Err(SubmitError::Busy) => (),
+            _ => self.content_owner.thumbnail_retries[index].next = None,
+        }
+    }
+
     pub(super) fn start_poll(
         &mut self,
         request: RequestId,
@@ -827,6 +923,42 @@ impl Accounts {
             return;
         }
         if let Some(target) = job.target.clone() {
+            if matches!(target, view::AssetTarget::Thumbnail(_))
+                && matches!(
+                    error,
+                    IdentityError::Request(
+                        ErrorKind::Transport
+                            | ErrorKind::Deadline
+                            | ErrorKind::ServerUnavailable
+                            | ErrorKind::RateLimited
+                            | ErrorKind::Busy
+                    )
+                )
+            {
+                let now = Instant::now();
+                if !self
+                    .content_owner
+                    .thumbnail_retries
+                    .iter()
+                    .any(|retry| retry.target == target)
+                    && self.content_owner.thumbnail_retries.len() < 128
+                {
+                    self.content_owner.thumbnail_retries.push(ThumbnailRetry {
+                        target: target.clone(),
+                        failures: 0,
+                        next: None,
+                        expires: now + Duration::from_secs(60),
+                    });
+                }
+                if let Some(retry) = self
+                    .content_owner
+                    .thumbnail_retries
+                    .iter_mut()
+                    .find(|retry| retry.target == target)
+                {
+                    retry.failed(now);
+                }
+            }
             if is_avatar(&target) {
                 self.content_owner
                     .avatars
@@ -1347,6 +1479,14 @@ impl Accounts {
                                 {
                                     return true;
                                 }
+                                // A confirmed thumbnail follows its exact
+                                // descriptor and room lifetime, not a minute
+                                // timer. Capacity/byte limits still evict it.
+                                if matches!(asset.target, view::AssetTarget::Thumbnail(_))
+                                    && matches!(asset.state, view::AssetState::Ready { .. })
+                                {
+                                    return true;
+                                }
                                 let ttl = if asset.state == view::AssetState::Failed {
                                     // A transient failure must not permanently
                                     // suppress the UI's one missing-asset intent.
@@ -1430,6 +1570,7 @@ impl Accounts {
             }
         }
         self.retry_content_asset(Instant::now());
+        self.retry_thumbnail_assets(Instant::now());
         if self.snapshot.selected.is_some()
             && self
                 .content_owner
@@ -1597,6 +1738,138 @@ mod tests {
                 placeholder: text("file"),
             },
         )
+    }
+
+    #[test]
+    fn window_preview_teardown_needs_no_network_and_preserves_confirmed_thumbnails() {
+        let (mut model, reference) = attachment_model();
+        let original = view::AssetTarget::Image(reference.clone());
+        let thumbnail = view::AssetTarget::Thumbnail(reference.clone());
+        let account = model.snapshot.active_account;
+        let context = model.snapshot.selected;
+        model.snapshot.content_panel.account = account;
+        model.snapshot.content_panel.preview = Some(reference.clone());
+        model.content_owner.preview_request = Some((RequestId(5), reference));
+        for (target, key) in [(thumbnail.clone(), 41), (original, 42)] {
+            model.set_asset(view::AssetView {
+                target,
+                state: view::AssetState::Ready { key },
+                emoji: None,
+                color: None,
+                document_pages: None,
+            });
+            model.content_owner.retained.push((key, 4));
+        }
+        let generation = model.content_owner.preview_generation;
+        assert!(model.current(account.unwrap()).is_err());
+        model.close_content_preview();
+        assert_eq!(model.snapshot.active_account, account);
+        assert_eq!(model.snapshot.selected, context);
+        assert!(model.snapshot.content_panel.preview.is_none());
+        assert!(model.content_owner.preview_request.is_none());
+        assert_eq!(model.content_owner.preview_generation, generation + 1);
+        assert_eq!(model.content_owner.retained, [(41, 4)]);
+        assert_eq!(model.snapshot.content_panel.assets.as_slice().len(), 1);
+        assert_eq!(
+            model.snapshot.content_panel.assets.as_slice()[0].target,
+            thumbnail
+        );
+        assert!(model.pending.is_empty());
+    }
+
+    #[test]
+    fn confirmed_thumbnail_survives_the_old_timer_but_not_an_attachment_replacement() {
+        let (mut model, reference) = attachment_model();
+        let target = view::AssetTarget::Thumbnail(reference.clone());
+        let descriptor = model.current_attachment_descriptor(&reference).unwrap();
+        model
+            .content_owner
+            .descriptors
+            .push((target.clone(), descriptor));
+        model.snapshot.content_panel.account = Some(reference.context.account);
+        model.set_asset(view::AssetView {
+            target: target.clone(),
+            state: view::AssetState::Ready { key: 42 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        });
+        model.content_owner.retained.push((42, 320 * 240 * 4));
+        model.content_owner.leases[0].1 = Instant::now() - Duration::from_secs(120);
+        model.reconcile_content_assets();
+        assert_eq!(
+            model.snapshot.content_panel.assets.as_slice()[0].state,
+            view::AssetState::Ready { key: 42 }
+        );
+        assert_eq!(model.content_owner.retained.len(), 1);
+
+        model.snapshot.messages = page(model.snapshot.messages.as_slice().iter().cloned().map(
+            |mut message| {
+                message.metadata.rich = page(message.metadata.rich.as_slice().iter().cloned().map(
+                    |mut rich| {
+                        rich.id = Some(text("replacement"));
+                        rich
+                    },
+                ));
+                message
+            },
+        ));
+        model.reconcile_content_assets();
+        assert!(model.snapshot.content_panel.assets.as_slice().is_empty());
+        assert!(model.content_owner.retained.is_empty());
+    }
+
+    #[test]
+    fn thumbnail_retries_never_repeat_denials_or_survive_a_room_switch() {
+        for (error, retry_expected) in [
+            (ErrorKind::Transport, true),
+            (ErrorKind::PermissionDenied, false),
+            (ErrorKind::NotFound, false),
+            (ErrorKind::Unsupported, false),
+        ] {
+            let (mut model, reference) = attachment_model();
+            let target = view::AssetTarget::Thumbnail(reference.clone());
+            let job = Job {
+                request: RequestId(1),
+                account: reference.context.account,
+                context: Some(reference.context),
+                operation: OperationId::from_local(1),
+                target: Some(target),
+                poll: None,
+                mutation: false,
+                cloud: false,
+                attachment: None,
+                preview_generation: None,
+                avatar_actor: None,
+            };
+            model.content_failure(&job, IdentityError::Request(error));
+            assert_eq!(
+                !model.content_owner.thumbnail_retries.is_empty(),
+                retry_expected
+            );
+            model.snapshot.selected = None;
+            model.retry_thumbnail_assets(Instant::now() + Duration::from_secs(2));
+            assert!(model.content_owner.thumbnail_retries.is_empty());
+            assert!(model.content_owner.jobs.is_empty());
+        }
+    }
+
+    #[test]
+    fn transient_thumbnail_retry_is_bounded_and_backed_off() {
+        let now = Instant::now();
+        let mut retry = ThumbnailRetry {
+            target: view::AssetTarget::Thumbnail(attachment_model().1),
+            failures: 0,
+            next: None,
+            expires: now + Duration::from_secs(60),
+        };
+        retry.failed(now);
+        assert_eq!(retry.next, Some(now + Duration::from_secs(1)));
+        retry.failed(now);
+        assert_eq!(retry.next, Some(now + Duration::from_secs(2)));
+        retry.failed(now);
+        assert_eq!(retry.next, None);
+        assert_eq!(retry.failures, 3);
     }
 
     #[test]

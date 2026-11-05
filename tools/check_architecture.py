@@ -126,6 +126,37 @@ def allow_input_caret_timer(source: str) -> str:
     return source[:start] + method + source[end - 1:]
 
 
+def allow_native_export_waiter(source: str) -> str:
+    """One foreground waiter observes bounded snapshots and submits typed intents.
+
+    The AppKit promise owns the task, with a 120-second platform deadline and
+    composition cancellation. This exception permits no worker or I/O calls.
+    """
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+wait_for_native_export\s*\([^;{}]*\)\s*->\s*gpui\s*::\s*Task\s*<\s*bool\s*>\s*\{", code))
+    if not starts:
+        return source
+    require(len(starts) == 1, "native export must have one foreground waiter")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "native export waiter method is not closed")
+    if depth:
+        return source
+    calls = list(re.finditer(r"\bcx\s*\.\s*spawn\s*\(", code[start:end - 1]))
+    require(len(calls) == 1, "native export waiter must own one foreground task")
+    if len(calls) != 1:
+        return source
+    call = calls[0]
+    method = source[start:end - 1]
+    method = method[:call.start()] + "cx.reviewed_native_export_waiter(" + method[call.end():]
+    return source[:start] + method + source[end - 1:]
+
+
 
 # The markup module is a bounded pure user-text parser, separately inspected by
 # the core I/O guard. Its public records use Text/Page, without transport authority.
@@ -148,7 +179,7 @@ UI_MODULE_TYPES = {
         "CsvFileError", "CsvFileOutcome", "CsvFileResult",
     },
     "messaging": {"MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
-    "content": {"ContentPanel", "ContentAction"},
+    "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
 }
 UNBOUNDED = (
     r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"
@@ -492,6 +523,8 @@ def check() -> None:
         if path == native / "presentation/input.rs":
             hidden_io = allow_input_caret_timer(hidden_io)
             hidden_io = re.sub(r"\.(?:read_from_clipboard|write_to_clipboard)\s*\(", ".reviewed_input_clipboard(", hidden_io)
+        if path == native / "presentation/attachments.rs":
+            hidden_io = allow_native_export_waiter(hidden_io)
         if path == native / "presentation/conversation_dialog.rs":
             # Explicit user Copy guest-link action; sensitive/classified rooms refuse it.
             # Clipboard reads, arbitrary OS operations and other views stay forbidden.

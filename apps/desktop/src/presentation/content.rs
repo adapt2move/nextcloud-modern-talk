@@ -141,6 +141,7 @@ impl Desktop {
             )
             .collect();
         let mut changed = false;
+        let mut thumbnail_layout_changed = false;
         let previous_account = self.content_ui.account;
         self.content_ui.images.retain(|(key, image)| {
             let keep = admitted && previous_account == account && keys.contains(key);
@@ -175,10 +176,28 @@ impl Desktop {
                     }
                 }
                 if self.content_ui.images.len() < MAX_IMAGES {
+                    thumbnail_layout_changed |= self
+                        .snapshot
+                        .content_panel
+                        .assets
+                        .as_slice()
+                        .iter()
+                        .any(|asset| {
+                            matches!(asset.target, AssetTarget::Thumbnail(_))
+                                && asset.state == (AssetState::Ready { key })
+                        });
                     self.content_ui.images.push((key, image));
                     changed = true;
                 }
             }
+        }
+        if thumbnail_layout_changed {
+            // Ready thumbnails change row height with their real aspect ratio.
+            // Retire cached list measurements without moving the reader's anchor.
+            let anchor = self.message_ui.list.logical_scroll_top();
+            let count = self.message_ui.list.item_count();
+            self.message_ui.list.splice(0..count, count);
+            self.message_ui.list.scroll_to(anchor);
         }
         if changed {
             cx.notify();
@@ -197,10 +216,11 @@ impl Desktop {
         .then_some(request)
     }
 
-    /// One missing asset per existing owner tick. The content owner settles
+    /// At most two missing assets per existing owner tick. The content owner settles
     /// enqueue success with admission, bounded Busy retry or a failed asset;
     /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
+        self.refresh_attachment_send(cx);
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
             self.content_ui.requested.clear();
@@ -344,7 +364,7 @@ impl Desktop {
                     .rich
                     .as_slice()
                     .iter()
-                    .filter(|o| o.kind.as_str() == "file")
+                    .filter(|o| o.kind.as_str() == "file" && super::attachments::previewable(o))
                     .take(4)
                 {
                     if targets.len() < MAX_IMAGES {
@@ -381,7 +401,7 @@ impl Desktop {
                         .rich
                         .as_slice()
                         .iter()
-                        .filter(|r| r.kind.as_str() == "file")
+                        .filter(|r| r.kind.as_str() == "file" && super::attachments::previewable(r))
                         .take(2)
                     {
                         if targets.len() < MAX_IMAGES {
@@ -421,19 +441,31 @@ impl Desktop {
                     .iter()
                     .any(|a| &a.target == t)
         });
-        let target = targets.into_iter().find(|target| {
-            !self.content_ui.requested.contains(target)
-                && !self
-                    .snapshot
-                    .content_panel
-                    .assets
-                    .as_slice()
-                    .iter()
-                    .any(|a| &a.target == target)
+        // Visible attachments get the lane before background avatar decoration.
+        targets.sort_by_key(|target| match target {
+            AssetTarget::Image(_) => 0,
+            AssetTarget::Thumbnail(_) => 1,
+            AssetTarget::SelfAvatar => 2,
+            _ => 3,
         });
-        if let Some(target) = target
-            && let Some(next) = self.content_ui.request.checked_add(1)
-        {
+        let missing: Vec<_> = targets
+            .into_iter()
+            .filter(|target| {
+                !self.content_ui.requested.contains(target)
+                    && !self
+                        .snapshot
+                        .content_panel
+                        .assets
+                        .as_slice()
+                        .iter()
+                        .any(|a| &a.target == target)
+            })
+            .take(2)
+            .collect();
+        for target in missing {
+            let Some(next) = self.content_ui.request.checked_add(1) else {
+                break;
+            };
             self.content_ui.request = next;
             if self
                 .port
@@ -561,6 +593,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if cx.has_active_drag() && matches!(action, Action::Preview(_) | Action::Download(_)) {
+            return;
+        }
         match action {
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {
@@ -1008,7 +1043,7 @@ fn poll_creation_pending(
     })
 }
 
-fn placeholder_key(value: &str) -> u128 {
+pub(in crate::presentation) fn placeholder_key(value: &str) -> u128 {
     value.bytes().fold(0u128, |hash, byte| {
         hash.wrapping_mul(131).wrapping_add(u128::from(byte))
     })

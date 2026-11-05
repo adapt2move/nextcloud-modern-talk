@@ -46,7 +46,7 @@ pub(super) struct History {
     pub(super) older: Option<u128>,
     pub(super) latest: Option<u128>,
     common_read: Option<u128>,
-    common_version: Version,
+    observation_version: Version,
     pub(super) state: RemoteState,
     state_owner: Work,
     pub(super) loaded: bool,
@@ -86,7 +86,7 @@ impl History {
             older: None,
             latest: None,
             common_read: None,
-            common_version: Version(0, false),
+            observation_version: Version(0, false),
             state: RemoteState::Idle,
             state_owner: Work::History,
             loaded: false,
@@ -672,7 +672,7 @@ impl Cache {
                 flight.context == context
                     && flight.operation == operation
                     && flight.work == work
-                    && flight.version >= room.common_version
+                    && flight.version >= room.observation_version
             })
         })
     }
@@ -868,16 +868,20 @@ impl Cache {
                     None
                 };
                 room.latest = room.latest.max(latest);
-                if flight.version >= room.common_version && work != Work::Recovery {
-                    room.common_read = common_read.map(|id| u128::from(id.sequence));
-                    room.common_version = flight.version;
+                if flight.version >= room.observation_version && work != Work::Recovery {
+                    // Missing headers on an older page are not a revocation.
+                    // Explicit zero still clears receipts (e.g. read privacy).
+                    if let Some(read) = common_read {
+                        room.common_read = Some(u128::from(read.sequence));
+                    }
+                    room.observation_version = flight.version;
                 }
                 room.loaded = true;
                 if (!work.background()
                     || room.state_owner.background()
                     || room.state_owner == Work::History
                     || room.state == RemoteState::Idle)
-                    && (!work.background() || flight.version >= room.common_version)
+                    && (!work.background() || flight.version >= room.observation_version)
                 {
                     room.state = RemoteState::Idle;
                     room.state_owner = work;
@@ -928,7 +932,7 @@ impl Cache {
                     && (work == Work::Older || flight.version >= room.connectivity_version)
                     && (!work.background()
                         || (room.state_owner.background() || room.state == RemoteState::Idle)
-                            && flight.version >= room.common_version) =>
+                            && flight.version >= room.observation_version) =>
             {
                 room.state = match *completion {
                     Completion::Failed(reason) => RemoteState::Failed(request, reason),

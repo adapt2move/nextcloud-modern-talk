@@ -95,6 +95,7 @@ fn files(
             let rich = row.metadata.rich.as_slice();
             rich.iter().enumerate().filter_map(move |(index, object)| {
                 (object.kind.as_str() == "file"
+                    && crate::presentation::attachments::previewable(object)
                     && !rich.iter().take(index).any(|previous| {
                         previous.kind.as_str() == "file"
                             && previous.placeholder == object.placeholder
@@ -154,6 +155,7 @@ mod tests {
         let context = room(1, 1);
         PresentationSnapshot {
             content_panel: Default::default(),
+            file_export: None,
             create_panel: None,
             revision: 1,
             login: LoginView {

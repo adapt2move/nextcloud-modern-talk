@@ -85,6 +85,7 @@ struct RoomBinding {
     id: ConversationId,
     token: String,
     server_id: Option<u64>,
+    read_through: Option<u64>,
 }
 struct PendingSend {
     operation: OperationId,
@@ -307,6 +308,7 @@ impl NextcloudClient {
             id,
             token: token.to_owned(),
             server_id,
+            read_through: None,
         });
         Ok(id)
     }
@@ -500,6 +502,7 @@ impl NextcloudClient {
             ("lookIntoFuture", "0".to_owned()),
             ("limit", "50".to_owned()),
             ("setReadMarker", "0".to_owned()),
+            ("lastCommonReadId", "0".to_owned()),
         ];
         if let Some(id) = before {
             query.push(("lastKnownMessageId", id.sequence.to_string()));
@@ -553,13 +556,17 @@ impl NextcloudClient {
             conversation,
             messages,
             older,
-            common_read: response
-                .common_read
-                .filter(|n| *n > 0 && caps.read_receipts == Some(true))
-                .map(|sequence| MessageId {
-                    conversation,
-                    sequence,
-                }),
+            // Missing observation preserves earlier receipts; privacy changes
+            // must explicitly retire them instead.
+            common_read: (if caps.read_receipts == Some(true) {
+                response.common_read
+            } else {
+                Some(0)
+            })
+            .map(|sequence| MessageId {
+                conversation,
+                sequence,
+            }),
         })
     }
     async fn send(

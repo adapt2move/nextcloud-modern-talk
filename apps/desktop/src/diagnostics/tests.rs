@@ -21,6 +21,7 @@ impl Drop for Temp {
 }
 fn row(request: u64, outcome: Outcome) -> Event {
     Event {
+        profile: None,
         request,
         operation: Operation::Send,
         outcome,
@@ -236,4 +237,22 @@ fn private_files_reject_symlinks_hardlinks_and_broad_permissions_without_touchin
     let alias = root.0.join("alias");
     symlink(&logs, &alias).unwrap();
     assert!(Sink::open(&alias, MAX_BYTES).is_err());
+}
+
+#[test]
+fn profile_diagnostics_are_allowlisted_without_directory_identifiers() {
+    for (failure, label) in [
+        (ProfileFailure::UnsafeLocation, "unsafe_location"),
+        (ProfileFailure::Incomplete, "incomplete"),
+        (ProfileFailure::BindingMismatch, "binding_mismatch"),
+        (ProfileFailure::DeviceChanged, "device_changed"),
+        (ProfileFailure::UnsupportedSchema, "unsupported_schema"),
+        (ProfileFailure::InvalidMetadata, "invalid_metadata"),
+    ] {
+        let mut event = Event::new(Operation::Connection, Outcome::Failed);
+        event.profile = Some(failure);
+        let line = test_line(event);
+        assert!(line.contains(&format!("\"profile_failure\":\"{label}\"")));
+        assert!(!line.contains("/Users/") && !line.contains("unix:") && !line.contains("macos:"));
+    }
 }

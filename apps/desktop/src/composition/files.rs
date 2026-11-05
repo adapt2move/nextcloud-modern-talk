@@ -30,7 +30,25 @@ impl Dialogs {
         let accounts = Rc::downgrade(accounts);
         let finished = self.finished.clone();
         self.task = Some(match &picker.kind {
-            Kind::Upload | Kind::Csv { .. } => {
+            Kind::Upload => {
+                let response = cx.prompt_for_paths(gpui::PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: true,
+                    prompt: None,
+                });
+                cx.spawn(async move |_| {
+                    let paths = response
+                        .await
+                        .map_err(|_| ())
+                        .and_then(|result| result.map_err(|_| ()));
+                    if let Some(accounts) = accounts.upgrade() {
+                        accounts.borrow_mut().finish_upload_picker(picker, paths);
+                    }
+                    finished.set(true);
+                })
+            }
+            Kind::Csv { .. } => {
                 let response = cx.prompt_for_paths(gpui::PathPromptOptions {
                     files: true,
                     directories: false,

@@ -244,6 +244,7 @@ pub enum MessagingResult {
         capabilities: Option<MessagingCapabilities>,
         messages: Page<MessageDetails, 50>,
         cursor: Option<MessageId>,
+        /// None preserves earlier receipts; sequence zero explicitly retires them.
         common_read: Option<MessageId>,
     },
     Message(Box<MessageDetails>),

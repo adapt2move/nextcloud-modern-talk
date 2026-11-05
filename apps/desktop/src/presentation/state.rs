@@ -77,6 +77,7 @@ pub(super) fn login_failure_detail(
 ) -> &'static str {
     use talk_core::ui::presentation::LoginFailure;
     match failure {
+        LoginFailure::AccountStorage(failure) => account_load_failure_copy(failure).1,
         LoginFailure::Connection(failure) => connection_failure_copy(failure).1,
         LoginFailure::Network => {
             connection_failure_copy(talk_core::ui::presentation::ConnectionFailure::Unreachable).1
@@ -98,6 +99,54 @@ pub(super) fn login_failure_detail(
         LoginFailure::Unconfigured => {
             "Diese Vorschau kann sich noch nicht mit eurer NextCloud verbinden."
         }
+    }
+}
+
+pub(super) fn account_load_failure_copy(
+    failure: talk_core::ui::presentation::AccountLoadFailure,
+) -> (&'static str, &'static str) {
+    use talk_core::ui::presentation::AccountLoadFailure;
+    match failure {
+        AccountLoadFailure::DeviceChanged => (
+            "Kontospeicher muss neu zugeordnet werden.",
+            "Das Laufwerk wird jetzt unter einer anderen Kennung geführt. Benutzerkonto und Datenordner stimmen überein. Wähle „Kontospeicher wieder verwenden“, um deine Konten wieder zu laden.",
+        ),
+        AccountLoadFailure::InUse => (
+            "Kontospeicher wird bereits verwendet.",
+            "Eine andere Instanz von Talk verwendet die gespeicherten Konten. Beende sie und klicke auf „Konten erneut laden“.",
+        ),
+        AccountLoadFailure::AccessDenied => (
+            "Kein Zugriff auf gespeicherte Konten.",
+            "Talk kann den lokalen Kontospeicher wegen seiner Zugriffsrechte nicht öffnen. Prüfe die Rechte des App-Datenordners und lade die Konten erneut.",
+        ),
+        AccountLoadFailure::Unavailable => (
+            "Gespeicherte Konten nicht erreichbar.",
+            "Talk kann den lokalen Kontospeicher gerade nicht öffnen. Prüfe, ob dein Benutzerordner verfügbar und genügend Speicherplatz frei ist. Lade die Konten anschließend erneut.",
+        ),
+        AccountLoadFailure::UnsafeLocation => (
+            "Kontospeicher am falschen Speicherort.",
+            "Der App-Datenordner liegt außerhalb des unterstützten lokalen Benutzerordners. Stelle den ursprünglichen Speicherort wieder her und lade die Konten erneut.",
+        ),
+        AccountLoadFailure::Incomplete => (
+            "Lokale Kontodaten sind unvollständig.",
+            "Im Kontospeicher fehlt eine benötigte Datei. Stelle den vollständigen App-Datenordner aus einer Sicherung wieder her und lade die Konten erneut.",
+        ),
+        AccountLoadFailure::BindingMismatch => (
+            "Kontospeicher gehört zu einem anderen Profil.",
+            "Die lokalen Kontodaten passen nicht zu diesem App-Datenordner. Das kann nach Kopieren oder Wiederherstellen auftreten. Stelle den ursprünglichen Ordner wieder her und lade die Konten erneut.",
+        ),
+        AccountLoadFailure::UnsupportedVersion => (
+            "Kontospeicher benötigt eine andere App-Version.",
+            "Diese App-Version kann das Format der gespeicherten Konten nicht lesen. Verwende die zuletzt funktionierende oder eine neuere Version von Talk.",
+        ),
+        AccountLoadFailure::InvalidData => (
+            "Lokale Kontodaten konnten nicht gelesen werden.",
+            "Die Kontodaten sind beschädigt oder haben ein unerwartetes Format. Stelle den App-Datenordner aus einer Sicherung wieder her. Ohne Sicherung benötigst du Hilfe zur Wiederherstellung.",
+        ),
+        AccountLoadFailure::RecoveryRequired => (
+            "Gespeicherte Konten konnten nicht geladen werden.",
+            "Talk kann die lokalen Kontodaten nicht zuordnen und startet deshalb keine Anmeldung. Lade die Konten erneut. Bleibt der Fehler bestehen, benötigst du Hilfe zur Wiederherstellung.",
+        ),
     }
 }
 
@@ -639,7 +688,7 @@ pub fn error_label(error: SubmitError) -> Option<&'static str> {
             "Die Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen."
         }
         SubmitError::StaleScope => {
-            "Dieser Stand ist überholt. Bitte das Gespräch neu öffnen; dein Text bleibt erhalten."
+            "Diese Ansicht ist nicht mehr aktuell. Bitte öffne sie erneut und wiederhole die Aktion."
         }
         SubmitError::Unavailable(UnavailableReason::PermissionDenied) => {
             "Keine Berechtigung für diese Aktion."
@@ -745,6 +794,7 @@ mod tests {
         };
         PresentationSnapshot {
             content_panel: Default::default(),
+            file_export: None,
             create_panel: None,
             revision: 1,
             login: LoginView {

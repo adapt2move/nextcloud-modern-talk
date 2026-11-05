@@ -755,6 +755,7 @@ pub(super) fn model() -> Accounts {
         picker: None,
         picker_open: false,
         csv_file_owner: files::CsvOwner::default(),
+        attachment_owner: files::Owner::default(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
     }
@@ -920,4 +921,84 @@ fn refused_login_retains_the_safe_cause_for_the_saved_account_row() {
     assert_eq!(model.snapshot.login.phase, LoginPhase::Failed(expected));
     assert_eq!(model.failures, vec![(account, expected)]);
     assert_eq!(model.login.as_ref().unwrap().reservation, Some(account));
+}
+
+#[test]
+fn startup_failure_has_its_own_reason_without_a_login_retry_destination() {
+    let mut model = model();
+    for (error, failure) in [
+        (
+            IdentityError::Storage {
+                backend: StorageBackend::PrivateFile,
+                failure: StorageFailure::Conflict,
+            },
+            AccountLoadFailure::InUse,
+        ),
+        (
+            IdentityError::Storage {
+                backend: StorageBackend::PrivateFile,
+                failure: StorageFailure::AccessDenied,
+            },
+            AccountLoadFailure::AccessDenied,
+        ),
+        (
+            IdentityError::Profile(ProfileFailure::DeviceChanged),
+            AccountLoadFailure::DeviceChanged,
+        ),
+        (
+            IdentityError::Profile(ProfileFailure::BindingMismatch),
+            AccountLoadFailure::BindingMismatch,
+        ),
+        (
+            IdentityError::Profile(ProfileFailure::UnsupportedSchema),
+            AccountLoadFailure::UnsupportedVersion,
+        ),
+        (
+            IdentityError::Profile(ProfileFailure::Incomplete),
+            AccountLoadFailure::Incomplete,
+        ),
+        (
+            IdentityError::RecoveryRequired,
+            AccountLoadFailure::RecoveryRequired,
+        ),
+    ] {
+        let snapshot = ConnectionSnapshot {
+            state: ConnectionState::Failed(error),
+            accounts: Page::empty(),
+            pending: Page::empty(),
+            retained: 0,
+        };
+        model.sync_accounts(&snapshot);
+        assert_eq!(
+            model.snapshot.login.phase,
+            LoginPhase::Failed(LoginFailure::AccountStorage(failure))
+        );
+        assert_eq!(model.snapshot.content, ContentState::Failed);
+        assert!(model.login.is_none() && model.login_retry_server.is_none());
+        model.dirty = false;
+        model.sync_accounts(&snapshot);
+        assert!(
+            !model.dirty,
+            "unchanged failure must not continuously refresh the view"
+        );
+    }
+}
+
+#[test]
+fn startup_diagnostics_keep_the_safe_storage_and_profile_causes() {
+    let error = IdentityError::Storage {
+        backend: StorageBackend::PrivateFile,
+        failure: StorageFailure::Conflict,
+    };
+    let mut event = Diagnostic::new(DiagnosticOperation::Connection, DiagnosticOutcome::Failed);
+    event.error = Some(diagnostic_error(error));
+    event.storage = diagnostic_storage(error);
+    let line = diagnostics::test_line(event);
+    assert!(line.contains("\"storage_backend\":\"private_file\""));
+    assert!(line.contains("\"storage_failure\":\"conflict\""));
+    event.storage = None;
+    event.profile = diagnostic_profile(IdentityError::Profile(ProfileFailure::DeviceChanged));
+    let line = diagnostics::test_line(event);
+    assert!(line.contains("\"profile_failure\":\"device_changed\""));
+    assert!(!line.contains("unix:") && !line.contains("macos:") && !line.contains("/Users/"));
 }

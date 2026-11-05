@@ -30,6 +30,7 @@ impl FocusStep {
             Self::Permission(_) => "permission-setup-next",
             Self::Done => "onboarding-done",
             Self::Failed(LoginFailure::AccountExists) => "login-open-accounts",
+            Self::Failed(LoginFailure::AccountStorage(_)) => "retry-account-load",
             Self::Failed(_) => "retry-login",
         })
     }

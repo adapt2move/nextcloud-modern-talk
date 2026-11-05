@@ -953,7 +953,9 @@ fn header_read_marker(
     name: &str,
 ) -> Result<Option<u64>, ErrorKind> {
     match headers.get(name).and_then(|v| v.to_str().ok()) {
-        Some("-1" | "-2") => Ok(None),
+        // Explicit unavailability must clear an earlier receipt. None is
+        // reserved for a missing header (e.g. an unchanged history response).
+        Some("-1" | "-2") => Ok(Some(0)),
         _ => header_number(headers, name),
     }
 }
@@ -985,7 +987,7 @@ mod tests {
             );
             assert_eq!(
                 header_read_marker(&headers, "x-chat-last-common-read"),
-                Ok(None)
+                Ok(Some(0))
             );
             assert_eq!(
                 header_number(&headers, "x-chat-last-common-read"),

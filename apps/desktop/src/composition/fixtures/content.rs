@@ -147,6 +147,58 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     };
 }
 
+pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
+    use talk_core::ui::messaging::{UploadState, UploadView};
+    let mut file = snapshot.messages.as_slice()[1].clone();
+    file.local_id = 104;
+    file.body = text("");
+    file.metadata.rich = page([
+        RichObject {
+            placeholder: text("data"),
+            kind: text("file"),
+            name: text("Projekt-Konfiguration.json"),
+            mime_type: Some(text("application/json")),
+            size: Some(2048),
+            id: Some(text("104")),
+            link: None,
+        },
+        RichObject {
+            placeholder: text("archive"),
+            kind: text("file"),
+            name: text("Projektunterlagen.zip"),
+            mime_type: Some(text("application/zip")),
+            size: Some(3180000),
+            id: Some(text("105")),
+            link: None,
+        },
+    ]);
+    snapshot.messages = page(
+        snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .filter(|message| message.local_id != 103)
+            .cloned()
+            .chain([file]),
+    );
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.uploads = page([
+            UploadView {
+                id: 1,
+                name: text("Konfiguration.json"),
+                bytes: Some(2048),
+                state: UploadState::Selected,
+            },
+            UploadView {
+                id: 2,
+                name: text("Meetingecke.png"),
+                bytes: Some(190313),
+                state: UploadState::Selected,
+            },
+        ]);
+    }
+}
+
 pub(super) fn transfer(snapshot: &mut PresentationSnapshot) {
     let context = snapshot.selected.unwrap();
     snapshot.content_panel.transfer = Some(DownloadView {
@@ -227,7 +279,16 @@ pub(super) fn action(
 }
 
 pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::content::ImageJob> {
-    if !matches!(scenario, Some("chat-content" | "chat-content-progress")) {
+    if !matches!(
+        scenario,
+        Some(
+            "chat-content"
+                | "chat-attachments"
+                | "chat-content-progress"
+                | "chat-content-loading"
+                | "chat-content-failed"
+        )
+    ) {
         return Vec::new();
     }
     [
@@ -245,6 +306,13 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
         ),
     ]
     .into_iter()
+    .filter(|(key, _)| {
+        *key == 1
+            || !matches!(
+                scenario,
+                Some("chat-content-loading" | "chat-content-failed")
+            )
+    })
     .map(|(key, bytes)| super::super::accounts::content::ImageJob {
         cached: false,
         attachment: None,

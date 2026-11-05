@@ -13,6 +13,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use talk_adapters::identity::ProfileFailure;
 use talk_core::identity::{StorageBackend, StorageFailure};
 use talk_core::ports::ErrorKind;
 
@@ -125,6 +126,7 @@ pub(crate) struct Event {
     pub count: u64,
     pub error: Option<ErrorKind>,
     pub storage: Option<(StorageBackend, StorageFailure)>,
+    pub profile: Option<ProfileFailure>,
 }
 impl Event {
     pub(crate) fn new(operation: Operation, outcome: Outcome) -> Self {
@@ -135,6 +137,7 @@ impl Event {
             count: 0,
             error: None,
             storage: None,
+            profile: None,
         }
     }
 }
@@ -346,6 +349,7 @@ fn encode(session: u128, record: Record) -> String {
         count,
         error,
         storage,
+        profile,
     } = record.event;
     let error = error.map_or("none", error_name);
     let detail = storage.map_or_else(String::new, |(backend, failure)| {
@@ -369,8 +373,19 @@ fn encode(session: u128, record: Record) -> String {
         };
         format!(",\"storage_backend\":\"{backend}\",\"storage_failure\":\"{failure}\"")
     });
+    let profile = profile.map_or_else(String::new, |failure| {
+        let failure = match failure {
+            ProfileFailure::UnsafeLocation => "unsafe_location",
+            ProfileFailure::Incomplete => "incomplete",
+            ProfileFailure::BindingMismatch => "binding_mismatch",
+            ProfileFailure::DeviceChanged => "device_changed",
+            ProfileFailure::UnsupportedSchema => "unsupported_schema",
+            ProfileFailure::InvalidMetadata => "invalid_metadata",
+        };
+        format!(",\"profile_failure\":\"{failure}\"")
+    });
     format!(
-        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"{detail}}}\n",
+        "{{\"timestamp_unix_ms\":{},\"session\":{session},\"pid\":{},\"version\":\"{}\",\"request\":{request},\"operation\":\"{}\",\"outcome\":\"{}\",\"count\":{count},\"error\":\"{error}\"{detail}{profile}}}\n",
         record.at,
         std::process::id(),
         env!("CARGO_PKG_VERSION"),

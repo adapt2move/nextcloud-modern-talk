@@ -124,9 +124,24 @@ impl PrivateDir {
     pub(in crate::identity) fn path(&self) -> &Path {
         &self.path
     }
-    pub(in crate::identity) fn binding(&self) -> Result<String> {
+    pub(in crate::identity) fn binding(&self) -> Result<super::binding::DirectoryBinding> {
+        self.check()?;
         let m = self.directory.metadata().map_err(error::io)?;
-        Ok(format!("unix:{}:{}:{}", self.uid, m.dev(), m.ino()))
+        let legacy = format!("unix:{}:{}:{}", self.uid, m.dev(), m.ino());
+        #[cfg(target_os = "macos")]
+        {
+            let volume = super::macos_volume::read(&self.directory)?;
+            self.check()?;
+            Ok(super::binding::DirectoryBinding {
+                current: format!("macos:{}:{}:{}", self.uid, volume, m.ino()),
+                legacy: Some(legacy),
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        Ok(super::binding::DirectoryBinding {
+            current: legacy,
+            legacy: None,
+        })
     }
     pub(in crate::identity) fn check(&self) -> Result<()> {
         let m = self.directory.metadata().map_err(error::io)?;

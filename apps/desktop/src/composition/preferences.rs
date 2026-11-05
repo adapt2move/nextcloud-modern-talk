@@ -158,6 +158,9 @@ impl Services {
             }
         }
     }
+    pub(super) fn shutdown_requested(&self) -> bool {
+        self.shutdown_deadline.get().is_some()
+    }
     pub fn request_shutdown(&self) {
         if self.shutdown_deadline.get().is_none() {
             self.shutdown_deadline.set(Some(

@@ -9,6 +9,8 @@ mod note_tests;
 mod notification_tests;
 #[path = "people_tests.rs"]
 mod people_tests;
+#[path = "read_tests.rs"]
+mod read_tests;
 #[path = "reconcile_tests.rs"]
 mod reconcile_tests;
 #[path = "tag_tests.rs"]
@@ -2219,6 +2221,10 @@ async fn common_read_requires_explicit_public_privacy() {
         else {
             panic!("history");
         };
-        assert_eq!(history.common_read.is_some(), privacy == json!(0));
+        assert_eq!(
+            history.common_read.map(|marker| marker.sequence),
+            Some(if privacy == json!(0) { 4 } else { 0 }),
+            "private or unknown privacy explicitly retires an earlier receipt"
+        );
     }
 }

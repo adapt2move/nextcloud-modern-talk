@@ -5,6 +5,7 @@ mod content_images;
 mod content_video;
 mod files;
 mod fixtures;
+mod lifecycle;
 mod preferences;
 mod updates;
 
@@ -210,6 +211,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         eprintln!("Bundled Google Sans Code unavailable; using native font fallback: {error}");
     }
     input::bind_keys(cx);
+    let mut menu_locale = lifecycle::install(services.clone(), cx);
     let saved = services.preferences.snapshot();
     let hidden = talk_core::preferences::starts_hidden(&saved.active, options.autostart);
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
@@ -292,6 +294,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         });
     match window {
         Ok(window) => {
+            let _ = window.update(cx, |_, window, cx| {
+                lifecycle::retain_on_close(services.clone(), window, cx)
+            });
             if hidden {
                 let _ = window.update(cx, |_, window, _| window.minimize_window());
             }
@@ -373,6 +378,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             Err(_) => break,
                         };
                     preview_services.poll_notifications(background);
+                    let _ = cx.update(|cx| {
+                        lifecycle::refresh_menus(&preview_services, &mut menu_locale, cx);
+                    });
                     if was_background && !background {
                         preview_services.preferences.refresh_native_interaction();
                     } else if !was_background && background {
@@ -500,15 +508,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     }
     cx.on_window_closed(move |cx| {
         if cx.windows().is_empty() {
-            services.request_shutdown();
-            let services = services.clone();
-            cx.spawn(async move |cx| {
-                while services.waiting_for_shutdown() {
-                    gpui::Timer::after(Duration::from_millis(20)).await;
-                }
-                let _ = cx.update(|cx| cx.quit());
-            })
-            .detach();
+            lifecycle::request_quit(services.clone(), cx);
         }
     })
     .detach();
