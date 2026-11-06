@@ -156,6 +156,7 @@ pub enum LocalAction {
         talk_core::preferences::permissions::PermissionAction,
     ),
     ToggleDevicePicker(talk_core::preferences::devices::DeviceKind),
+    CallDevicePicker(CallScope, talk_core::preferences::devices::DeviceKind),
     OpenDeviceSettings,
     SelectDevice(
         talk_core::preferences::devices::DeviceKind,
@@ -206,6 +207,7 @@ pub struct InitialView {
     pub prejoin: bool,
     pub focus_first_call_participant: bool,
     pub start_with_call_dock: bool,
+    pub start_with_call_devices: bool,
     pub onboarding: bool,
     pub scale: u16,
 }
@@ -291,6 +293,7 @@ pub struct Desktop {
         gpui::ImageSource,
     )>,
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
+    call_device_picker: Option<(CallScope, talk_core::preferences::devices::DeviceKind)>,
     pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
     startup_account_dialog: bool,
@@ -369,6 +372,7 @@ impl Desktop {
             prejoin,
             focus_first_call_participant,
             start_with_call_dock,
+            start_with_call_devices,
             onboarding,
             scale,
         } = initial;
@@ -476,6 +480,16 @@ impl Desktop {
         } else {
             None
         };
+        let call_device_picker = if development && start_with_call_devices {
+            snapshot.call.as_ref().map(|call| {
+                (
+                    call.scope,
+                    talk_core::preferences::devices::DeviceKind::Microphone,
+                )
+            })
+        } else {
+            None
+        };
         let call_started = snapshot
             .call
             .as_ref()
@@ -545,7 +559,8 @@ impl Desktop {
             applied_devices: None,
             camera_image: None,
             call_images: Vec::with_capacity(17),
-            device_picker: None,
+            device_picker: call_device_picker.map(|(_, kind)| kind),
+            call_device_picker,
             pending_device_focus: None,
             settings_tab: if development {
                 preferences::SettingsTab::Appearance
@@ -796,6 +811,13 @@ impl Desktop {
             .is_some_and(|(scope, _)| Some(scope) != live_scope)
         {
             self.call_started = None;
+        }
+        if self
+            .call_device_picker
+            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        {
+            self.call_device_picker = None;
+            self.device_picker = None;
         }
         if self.call_started.is_none() {
             if let Some(call) = next
@@ -1199,6 +1221,8 @@ impl Desktop {
                 {
                     self.call_minimized = Some(call.scope);
                 }
+                self.call_device_picker = None;
+                self.device_picker = None;
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
@@ -1339,6 +1363,8 @@ impl Desktop {
                         )
                 }) {
                     self.call_minimized = Some(scope);
+                    self.call_device_picker = None;
+                    self.device_picker = None;
                     self.root_focus.focus(window);
                 }
             }
@@ -1449,6 +1475,17 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if let Some((_, kind)) = self.call_device_picker.take() {
+                    self.device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
                 self.startup_account_dialog = false;
                 if self.close_forward_dialog(window, cx) {
                     cx.notify();
@@ -1801,6 +1838,22 @@ impl Desktop {
                 self.settings_tab = preferences::SettingsTab::Devices;
                 self.enter_device_page();
             }
+            LocalAction::CallDevicePicker(scope, kind) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    if self.call_device_picker == Some((scope, kind)) {
+                        self.call_device_picker = None;
+                        self.device_picker = None;
+                    } else {
+                        self.call_device_picker = Some((scope, kind));
+                        self.device_picker = None;
+                        self.enumerate_devices();
+                        self.toggle_device_picker(kind);
+                    }
+                }
+            }
             LocalAction::ToggleDevicePicker(kind) => self.toggle_device_picker(kind),
             LocalAction::RefreshDevice(kind) => self.refresh_device_kind(kind),
             LocalAction::Permission(kind, action) => {
@@ -1809,11 +1862,24 @@ impl Desktop {
                 }
             }
             LocalAction::SelectDevice(kind, selection) => {
+                let from_call = self
+                    .call_device_picker
+                    .is_some_and(|(_, current)| current == kind);
+                if from_call {
+                    self.call_device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                }
                 self.device_picker = None;
                 self.pending_device_focus = None;
-                if let Some(focus) = self
-                    .control_focus
-                    .current(&("device-picker", kind as usize).into())
+                if !from_call
+                    && let Some(focus) = self
+                        .control_focus
+                        .current(&("device-picker", kind as usize).into())
                 {
                     focus.focus(window);
                 }
@@ -2687,7 +2753,7 @@ impl Render for Desktop {
             });
         }
         if let Some(id) = self.pending_device_focus.take()
-            && self.devices_open()
+            && (self.devices_open() || self.call_device_picker.is_some())
             && let Some(focus) = self.control_focus.current(&id)
         {
             focus.focus(window);

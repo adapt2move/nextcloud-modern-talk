@@ -95,6 +95,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-gallery",
     "call-participants-raised",
     "call-dock",
+    "call-devices",
     "call-speaker",
     "call-screen-stage",
     "call-recording",
@@ -779,6 +780,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-gallery"
             | "call-participants-raised"
             | "call-dock"
+            | "call-devices"
             | "call-speaker"
             | "call-screen-stage"
             | "call-recording"

@@ -269,7 +269,22 @@ impl Desktop {
             return;
         }
         if key == "escape" {
-            self.toggle_device_picker(kind);
+            if self
+                .call_device_picker
+                .is_some_and(|(_, current)| current == kind)
+            {
+                self.call_device_picker = None;
+                self.device_picker = None;
+                if let Some(focus) = self
+                    .control_focus
+                    .current(&("call-device", kind as usize).into())
+                {
+                    focus.focus(window);
+                }
+                self.pending_device_focus = None;
+            } else {
+                self.toggle_device_picker(kind);
+            }
         } else if matches!(key, "down" | "up" | "home" | "end") {
             let ids = self.device_option_ids(kind);
             let current = ids.iter().position(|id| {
@@ -393,6 +408,44 @@ impl Desktop {
         }
         selector
     }
+    pub(super) fn call_device_popover(
+        &self,
+        scope: talk_core::ui::CallScope,
+        cx: &Context<Self>,
+    ) -> Option<gpui::Stateful<Div>> {
+        let (_, kind) = self
+            .call_device_picker
+            .filter(|(current, _)| *current == scope)?;
+        let chosen = match kind {
+            DeviceKind::Microphone => &self.preferences.active.devices.microphone,
+            DeviceKind::Camera => &self.preferences.active.devices.camera,
+            DeviceKind::Speaker => &self.preferences.active.devices.speaker,
+        };
+        let label = match chosen {
+            DeviceSelection::SystemDefault => self.l("Systemstandard").to_owned(),
+            DeviceSelection::Specific(id) => self
+                .devices
+                .as_ref()
+                .ok()
+                .and_then(|snapshot| {
+                    snapshot
+                        .devices
+                        .as_slice()
+                        .iter()
+                        .find(|device| device.kind == kind && device.id == *id)
+                })
+                .map_or_else(
+                    || self.l("Ausgewähltes Gerät nicht verfügbar").to_owned(),
+                    |device| device.label.as_str().to_owned(),
+                ),
+        };
+        Some(div().id("call-device-popover").absolute().right(px(16.)).bottom(px(100.)).w(px(300.))
+            .max_h(px(360.)).overflow_y_scroll().occlude().rounded(px(10.))
+            .border_1().border_color(self.theme.border).bg(self.theme.surface).text_color(self.theme.text).shadow_lg().p_3()
+            .child(self.hint(self.l("Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.")))
+            .child(self.device_selector(kind, chosen, label, None, cx)))
+    }
+
     pub(super) fn device_page(&self, cx: &Context<Self>) -> Div {
         let mut page = div()
             .flex()

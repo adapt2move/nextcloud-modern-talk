@@ -669,31 +669,67 @@ impl Desktop {
                     .items_center()
                     .gap_1()
                     .child(
-                        self.icon_button(
-                            id,
-                            (symbol, label),
-                            ButtonStyle::Stage,
-                            {
-                                let availability = Availability::when(
-                                    matches!(
-                                        state,
-                                        MediaState::Off
-                                            | MediaState::Active
-                                            | MediaState::Requested
-                                    ),
-                                    media_reason(state),
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(
+                                self.icon_button(
+                                    id,
+                                    (symbol, label),
+                                    ButtonStyle::Stage,
+                                    {
+                                        let availability = Availability::when(
+                                            matches!(
+                                                state,
+                                                MediaState::Off
+                                                    | MediaState::Active
+                                                    | MediaState::Requested
+                                            ),
+                                            media_reason(state),
+                                        )
+                                        .labelled();
+                                        match id {
+                                            "microphone" => availability.help("Tastenkürzel: M"),
+                                            "camera" => availability.help("Tastenkürzel: V"),
+                                            _ => availability,
+                                        }
+                                    },
+                                    action,
+                                    cx,
                                 )
-                                .labelled();
+                                .size(px(44.)),
+                            )
+                            .when_some(
                                 match id {
-                                    "microphone" => availability.help("Tastenkürzel: M"),
-                                    "camera" => availability.help("Tastenkürzel: V"),
-                                    _ => availability,
-                                }
-                            },
-                            action,
-                            cx,
-                        )
-                        .size(px(44.)),
+                                    "microphone" => Some(
+                                        talk_core::preferences::devices::DeviceKind::Microphone,
+                                    ),
+                                    "camera" => {
+                                        Some(talk_core::preferences::devices::DeviceKind::Camera)
+                                    }
+                                    _ => None,
+                                },
+                                |row, kind| {
+                                    row.child(
+                                        self.icon_button(
+                                            ("call-device", kind as usize),
+                                            (
+                                                "chevron-up",
+                                                if id == "microphone" {
+                                                    "Mikrofon auswählen"
+                                                } else {
+                                                    "Kamera auswählen"
+                                                },
+                                            ),
+                                            ButtonStyle::Stage,
+                                            Availability::available().hinted(),
+                                            LocalAction::CallDevicePicker(call.scope, kind),
+                                            cx,
+                                        )
+                                        .w(px(24.)),
+                                    )
+                                },
+                            ),
                     )
                     .child(
                         div()
@@ -823,6 +859,7 @@ impl Desktop {
         div().size_full().p_3().bg(t.chrome()).child(
             self.content_card(
                 div()
+                    .relative()
                     .flex()
                     .flex_col()
                     .bg(t.stage)
@@ -920,7 +957,8 @@ impl Desktop {
                         )
                     })
                     .child(body)
-                    .child(controls),
+                    .child(controls)
+                    .children(self.call_device_popover(call.scope, cx)),
             )
             .bg(t.stage),
         )

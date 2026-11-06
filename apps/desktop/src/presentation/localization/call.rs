@@ -32,9 +32,20 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Microphone and camera stay off until you accept. Devices are enabled only after permission is granted.",
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
+    (
+        "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",
+        "Changing devices stops the current stream. Enable the device again afterwards.",
+        "Cambiar de dispositivo detiene la transmisión actual. Vuelve a activarlo después.",
+    ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
     ("Hand senken", "Lower hand", "Bajar la mano"),
+    ("Kamera auswählen", "Choose camera", "Elegir cámara"),
+    (
+        "Mikrofon auswählen",
+        "Choose microphone",
+        "Elegir micrófono",
+    ),
     (
         "Mit Video annehmen",
         "Accept with video",
