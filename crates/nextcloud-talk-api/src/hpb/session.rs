@@ -310,8 +310,8 @@ async fn connected(
                             if pending.is_some() { let _ = reply.send(Err(ErrorKind::Busy)); continue; }
                             let value = {
                                 let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
-                                if !state.mcu { let _ = reply.send(Err(ErrorKind::Unsupported)); continue; }
                                 let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.purpose == RoomPurpose::Call && !state.mcu { let _ = reply.send(Err(ErrorKind::Unsupported)); continue; }
                                 if room.generation != generation || room.cancellation.is_cancelled() || reply.is_closed() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
@@ -323,6 +323,34 @@ async fn connected(
                             let sent = until(shared, end, &cancel, write(socket, value)).await;
                             if let Err(error) = sent { let _ = reply.send(Err(error)); return Err(error); }
                             pending = Some(PendingJoin { id, generation, deadline: end, cancel, reply });
+                        }
+                        Command::Typing { generation, started, deadline: end, cancel, reply } => {
+                            let peers = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || room.purpose != RoomPurpose::Chat || !room.joined
+                                    || room.cancellation.is_cancelled() || reply.is_closed() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                room.members.iter().filter(|member| member.talk != room.own)
+                                    .map(|member| member.sfu.clone()).collect::<Vec<_>>()
+                            };
+                            let mut result = Ok(());
+                            for peer in peers {
+                                if cancel.is_cancelled() || reply.is_closed() { result = Err(ErrorKind::Cancelled); break; }
+                                let valid = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?.room.as_ref()
+                                    .is_some_and(|room| room.generation == generation && room.joined && !room.cancellation.is_cancelled()
+                                        && room.members.iter().any(|member| member.sfu == peer));
+                                if !valid { continue; }
+                                let mut value = wire::typing_message(&peer, started);
+                                value["id"] = json!(next_id(counter)?);
+                                if let Err(error) = until(shared, end, &cancel, write(socket, value)).await {
+                                    result = Err(error); break;
+                                }
+                            }
+                            let failed = result.as_ref().err().copied();
+                            let _ = reply.send(result);
+                            if let Some(error @ (ErrorKind::Transport | ErrorKind::Deadline)) = failed { return Err(error); }
                         }
                         Command::Send { generation, peer, sid, signal, deadline: end, cancel, reply } => {
                             let value = {

@@ -49,7 +49,13 @@ struct State {
     generation: u64,
     room: Option<Room>,
 }
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RoomPurpose {
+    Call,
+    Chat,
+}
 struct Room {
+    purpose: RoomPurpose,
     token: RoomToken,
     own: PeerSession,
     generation: u64,
@@ -60,6 +66,7 @@ struct Room {
     retired: Vec<PeerSession>,
     signals: VecDeque<(usize, Event)>,
     signal_bytes: usize,
+    typing: Vec<(PeerSession, std::time::Instant)>,
 }
 struct Selection {
     talk: PeerSession,
@@ -104,6 +111,13 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    Typing {
+        generation: u64,
+        started: bool,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Send {
         generation: u64,
         peer: PeerSession,
@@ -117,7 +131,7 @@ enum Command {
 impl Command {
     fn reject(self, error: ErrorKind) {
         match self {
-            Self::Join { reply, .. } | Self::Send { reply, .. } => {
+            Self::Join { reply, .. } | Self::Typing { reply, .. } | Self::Send { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
         }
@@ -244,6 +258,24 @@ impl Handle {
         token: RoomToken,
         own: PeerSession,
     ) -> Result<Route, ErrorKind> {
+        self.join_for(context, token, own, RoomPurpose::Call).await
+    }
+    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
+    pub(crate) async fn join_chat(
+        &self,
+        context: &OperationContext,
+        token: RoomToken,
+        own: PeerSession,
+    ) -> Result<Route, ErrorKind> {
+        self.join_for(context, token, own, RoomPurpose::Chat).await
+    }
+    async fn join_for(
+        &self,
+        context: &OperationContext,
+        token: RoomToken,
+        own: PeerSession,
+        purpose: RoomPurpose,
+    ) -> Result<Route, ErrorKind> {
         self.shared.validate(context)?;
         let cancellation = Cancellation::default();
         let generation = {
@@ -258,6 +290,7 @@ impl Handle {
             state.generation = state.generation.checked_add(1).ok_or(ErrorKind::Busy)?;
             let generation = state.generation;
             state.room = Some(Room {
+                purpose,
                 token,
                 own,
                 generation,
@@ -268,6 +301,7 @@ impl Handle {
                 retired: Vec::with_capacity(100),
                 signals: VecDeque::new(),
                 signal_bytes: 0,
+                typing: Vec::with_capacity(100),
             });
             generation
         };
@@ -387,6 +421,58 @@ impl Route {
             }
             Ok(())
         });
+    }
+    /// Snapshot of remote Talk sessions that typed recently in this chat route.
+    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
+    pub(crate) fn typing_sessions(&self) -> Result<Vec<PeerSession>, ErrorKind> {
+        self.with_room(|room, _| {
+            if room.purpose != RoomPurpose::Chat {
+                return Err(ErrorKind::WrongScope);
+            }
+            let now = std::time::Instant::now();
+            room.typing
+                .retain(|(_, at)| now.saturating_duration_since(*at) < Duration::from_secs(8));
+            Ok(room
+                .typing
+                .iter()
+                .map(|(session, _)| session.clone())
+                .collect())
+        })
+    }
+    /// Send only to currently observed room sessions. A late command cannot
+    /// act after the route has been retired or replaced.
+    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
+    pub(crate) async fn send_typing(
+        &self,
+        context: &OperationContext,
+        started: bool,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if room.purpose == RoomPurpose::Chat {
+                Ok(())
+            } else {
+                Err(ErrorKind::WrongScope)
+            }
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Typing {
+                generation: self.generation,
+                started,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await
     }
     pub(crate) async fn request_offer(
         &self,

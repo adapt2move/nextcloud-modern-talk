@@ -68,6 +68,7 @@ fn state(binding: AccountBinding) -> Shared {
             mcu: true,
             generation: 1,
             room: Some(Room {
+                purpose: RoomPurpose::Call,
                 token: room(),
                 own: peer("talk-own"),
                 generation: 1,
@@ -78,6 +79,7 @@ fn state(binding: AccountBinding) -> Shared {
                 retired: Vec::new(),
                 signals: VecDeque::new(),
                 signal_bytes: 0,
+                typing: Vec::new(),
             }),
         }),
     }
@@ -577,4 +579,106 @@ async fn real_wss_native_roots() {
             assert_eq!(result.err(), Some(ErrorKind::Transport), "{name}");
         }
     }
+}
+
+#[test]
+fn chat_typing_is_scoped_to_current_signaling_membership_and_expires() {
+    let (_client, binding, _runtime) = account();
+    let shared = state(binding);
+    {
+        let mut guard = shared.state.lock().unwrap();
+        let room = guard.room.as_mut().unwrap();
+        room.purpose = RoomPurpose::Chat;
+        room.members.push(wire::Member {
+            sfu: peer("hpb-other"),
+            talk: peer("talk-other"),
+        });
+    }
+    let frame = |sender: &str, kind: &str| {
+        json!({"type":"message","message":{
+            "sender":{"type":"session","sessionid":sender},
+            "data":{"type":kind,"to":"hpb-own"}
+        }})
+    };
+    shared
+        .incoming(&frame("hpb-unknown", "startedTyping"))
+        .unwrap();
+    assert!(
+        shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .typing
+            .is_empty()
+    );
+    shared
+        .incoming(&frame("hpb-other", "startedTyping"))
+        .unwrap();
+    {
+        let mut guard = shared.state.lock().unwrap();
+        let room = guard.room.as_mut().unwrap();
+        assert_eq!(room.typing.len(), 1);
+        assert!(room.typing[0].0.matches(&peer("talk-other")));
+        room.typing[0].1 = std::time::Instant::now() - Duration::from_secs(9);
+    }
+    let route = Route {
+        handle: Handle {
+            shared: Arc::new(shared),
+            commands: mpsc::channel(1).0,
+        },
+        generation: 1,
+        cancellation: Cancellation::default(),
+    };
+    assert!(route.typing_sessions().unwrap().is_empty());
+    route
+        .handle
+        .shared
+        .incoming(&frame("hpb-other", "startedTyping"))
+        .unwrap();
+    route
+        .handle
+        .shared
+        .incoming(&frame("hpb-other", "stoppedTyping"))
+        .unwrap();
+    assert!(route.typing_sessions().unwrap().is_empty());
+    route
+        .handle
+        .shared
+        .incoming(&frame("hpb-other", "startedTyping"))
+        .unwrap();
+    route
+        .handle
+        .shared
+        .incoming(
+            &json!({"type":"event","event":{"target":"room","type":"leave","leave":["hpb-other"]}}),
+        )
+        .unwrap();
+    assert!(route.typing_sessions().unwrap().is_empty());
+    assert!(
+        route
+            .handle
+            .shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .is_empty()
+    );
+}
+
+#[test]
+fn chat_typing_wire_validates_sender_and_targets_one_session() {
+    let msg = wire::typing_message(&peer("hpb-peer"), true);
+    assert_eq!(msg["message"]["recipient"]["sessionid"], "hpb-peer");
+    assert_eq!(msg["message"]["data"]["type"], "startedTyping");
+    let stopped = wire::typing_message(&peer("hpb-peer"), false);
+    assert_eq!(stopped["message"]["data"]["type"], "stoppedTyping");
+    let spoofed = json!({"sender":{"type":"session","sessionid":"hpb-peer"},"data":{"from":"hpb-other","type":"startedTyping"}});
+    assert!(matches!(wire::typing(&spoofed), Err(ErrorKind::WrongScope)));
 }

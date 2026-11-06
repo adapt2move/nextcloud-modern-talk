@@ -40,8 +40,10 @@ impl Shared {
                                 room.members.push(member);
                             }
                         }
-                        let known = room.members.iter().map(|m| m.talk.clone()).collect();
-                        room.push(Event::SfuMembership(known))?;
+                        if room.purpose == RoomPurpose::Call {
+                            let known = room.members.iter().map(|m| m.talk.clone()).collect();
+                            room.push(Event::SfuMembership(known))?;
+                        }
                     }
                     (Some("room"), Some("leave")) => {
                         let values = event["leave"].as_array().ok_or(ErrorKind::Malformed)?;
@@ -58,12 +60,22 @@ impl Shared {
                                 room.cancellation.cancel();
                                 return Err(ErrorKind::WrongScope);
                             }
+                            if let Some(talk) = room
+                                .members
+                                .iter()
+                                .find(|m| m.sfu == sfu)
+                                .map(|m| m.talk.clone())
+                            {
+                                room.typing.retain(|(session, _)| session != &talk);
+                            }
                             room.members.retain(|m| m.sfu != sfu);
                             room.selected.retain(|p| p.sfu != sfu);
                         }
-                        room.push(Event::SfuMembership(
-                            room.members.iter().map(|m| m.talk.clone()).collect(),
-                        ))?;
+                        if room.purpose == RoomPurpose::Call {
+                            room.push(Event::SfuMembership(
+                                room.members.iter().map(|m| m.talk.clone()).collect(),
+                            ))?;
+                        }
                     }
                     (Some("room"), Some("switchto")) => {
                         // A breakout/federation switch is not a grant for a new
@@ -75,13 +87,16 @@ impl Shared {
                         if update["roomid"].as_str() != Some(room.token.as_str()) {
                             return Ok(());
                         }
-                        if update["all"].as_bool() == Some(true)
+                        if room.purpose == RoomPurpose::Call
+                            && update["all"].as_bool() == Some(true)
                             && crate::models::integer(update.get("incall"))
                                 .is_some_and(|v| v & 1 == 0)
                         {
                             room.cancellation.cancel();
                         }
-                        room.push(Event::PolicyChanged)?;
+                        if room.purpose == RoomPurpose::Call {
+                            room.push(Event::PolicyChanged)?;
+                        }
                     }
                     (Some("roomlist"), Some("disinvite")) => {
                         if event["disinvite"]["roomid"].as_str() == Some(room.token.as_str()) {
@@ -91,7 +106,9 @@ impl Shared {
                     (Some("roomlist"), Some("update"))
                         if event["update"]["roomid"].as_str() == Some(room.token.as_str()) =>
                     {
-                        room.push(Event::PolicyChanged)?;
+                        if room.purpose == RoomPurpose::Call {
+                            room.push(Event::PolicyChanged)?;
+                        }
                     }
                     _ => {}
                 }
@@ -108,6 +125,21 @@ impl Shared {
                 let data = &value["message"]["data"];
                 if data.get("to").is_some() && data["to"].as_str() != Some(own_sfu.0.as_str()) {
                     return Err(ErrorKind::WrongScope);
+                }
+                if room.purpose == RoomPurpose::Chat {
+                    if let Some((sender, started)) = wire::typing(&value["message"])?
+                        && let Some(member) = room
+                            .members
+                            .iter()
+                            .find(|member| member.sfu == sender && member.talk != room.own)
+                    {
+                        let talk = member.talk.clone();
+                        room.typing.retain(|(session, _)| session != &talk);
+                        if started && room.typing.len() < 100 {
+                            room.typing.push((talk, std::time::Instant::now()));
+                        }
+                    }
+                    return Ok(());
                 }
                 let Some((from, sid, signal)) = wire::signal(&value["message"])? else {
                     return Ok(());
@@ -150,6 +182,7 @@ impl Shared {
                 if data["action"].as_str() == Some("forceMute")
                     && data["peerId"].as_str() == own
                     && let Some(room) = state.room.as_mut()
+                    && room.purpose == RoomPurpose::Call
                 {
                     room.push(Event::ForceMute)?;
                 }
@@ -158,7 +191,7 @@ impl Shared {
                 if let Some(room) = state.room.as_mut() {
                     if value["room"]["roomid"].as_str() != Some(room.token.as_str()) {
                         room.cancellation.cancel();
-                    } else {
+                    } else if room.purpose == RoomPurpose::Call {
                         room.push(Event::PolicyChanged)?;
                     }
                 }
@@ -177,11 +210,12 @@ impl Shared {
         let mut state = self.state.lock().map_err(|_| ErrorKind::Uncertain)?;
         state.status = LiveState::Reconnecting;
         state.events.push(LiveEvent::RefreshAll);
-        if let Some(room) = state
-            .room
-            .as_mut()
-            .filter(|r| r.joined && !r.cancellation.is_cancelled())
-        {
+        if let Some(room) = state.room.as_mut() {
+            room.typing.clear();
+        }
+        if let Some(room) = state.room.as_mut().filter(|r| {
+            r.purpose == RoomPurpose::Call && r.joined && !r.cancellation.is_cancelled()
+        }) {
             room.push(Event::TransportInterrupted)?;
         }
         Ok(())
@@ -190,11 +224,9 @@ impl Shared {
         let mut state = self.state.lock().map_err(|_| ErrorKind::Uncertain)?;
         state.status = LiveState::Connected;
         state.events.push(LiveEvent::RefreshAll);
-        if let Some(room) = state
-            .room
-            .as_mut()
-            .filter(|r| r.joined && !r.cancellation.is_cancelled())
-        {
+        if let Some(room) = state.room.as_mut().filter(|r| {
+            r.purpose == RoomPurpose::Call && r.joined && !r.cancellation.is_cancelled()
+        }) {
             room.push(Event::TransportResumed)?;
         }
         Ok(())
