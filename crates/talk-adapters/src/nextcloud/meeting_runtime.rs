@@ -1,5 +1,6 @@
 //! Autonomous normal-call owner. Signaling polling, policy/HTTP writes and media
 //! have separate bounded lanes; none is driven by GPUI rendering or chat polling.
+mod activity;
 mod status;
 
 use super::{
@@ -71,6 +72,7 @@ struct PolicyUpdate {
 struct Peer {
     local: u128,
     status: StatusSnapshot,
+    raised_hand: activity::RaisedHand,
     session: PeerSession,
     negotiation: Option<Negotiation>,
     engine: NativePeer,
@@ -482,6 +484,7 @@ async fn reconcile(
         peers.push(Peer {
             local: 0,
             status: StatusSnapshot::default(),
+            raised_hand: activity::RaisedHand::default(),
             session: own.clone(),
             negotiation: Some(negotiation),
             engine,
@@ -547,6 +550,7 @@ async fn reconcile(
         peers.push(Peer {
             local: u128::from_le_bytes(identity),
             status: StatusSnapshot::default(),
+            raised_hand: activity::RaisedHand::default(),
             session: incoming.session.clone(),
             negotiation,
             engine,
@@ -672,8 +676,15 @@ async fn media_loop(
                             call.set_wishes(scope, wishes).map_err(|_| ())?;
                             refresh_needed = true;
                         }
-                        // Activity is presentation-only; until projected it cannot alter media authority.
-                        SignalEvent::Activity { .. } => {}
+                        // Membership reconciliation owns peer identity; unsolicited activity
+                        // cannot create a peer or change media authority.
+                        SignalEvent::Activity { from, activity } => {
+                            if let Some(peer) = peers.iter_mut().find(|peer| peer.session == from && peer.role != Role::Publisher) {
+                                if let api::signaling::activity::Activity::RaisedHand { state, timestamp } = activity {
+                                    peer.raised_hand.update(state, timestamp);
+                                }
+                            }
+                        }
                         SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_needed = true; }
                     }
                 }
@@ -805,7 +816,7 @@ async fn media_loop(
             for peer in peers.iter().filter(|p| p.role != Role::Publisher) {
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
                     participants.try_push(calls::Participant {
-                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera,
+                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: peer.raised_hand.raised(),
                     }).map_err(|_| ())?;
                 }
             }

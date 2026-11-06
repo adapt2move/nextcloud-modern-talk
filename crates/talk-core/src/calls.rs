@@ -468,6 +468,7 @@ pub struct Participant {
     pub name: crate::bounded::Text<256>,
     pub microphone: bool,
     pub camera: bool,
+    pub raised_hand: bool,
 }
 
 #[cfg(test)]
