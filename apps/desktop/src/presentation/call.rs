@@ -516,7 +516,7 @@ impl Desktop {
                 .rounded(px(12.))
                 .border_2()
                 .border_color(if participant.speaking {
-                    t.success
+                    stage_speaking_color(t)
                 } else {
                     t.stage_panel
                 })
@@ -1206,6 +1206,15 @@ fn media_label(microphone: bool, state: MediaState) -> &'static str {
     }
 }
 
+// The stage remains dark in both app appearances. Lift the existing success
+// token for that surface instead of using its light-surface foreground unchanged.
+fn stage_speaking_color(theme: super::Theme) -> gpui::Hsla {
+    gpui::Hsla {
+        l: theme.success.l.max(0.70),
+        ..theme.success
+    }
+}
+
 /// Bound the gallery to readable tiles without relying on participant identity
 /// or ordering. The scroll area owns rows that do not fit vertically.
 fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
@@ -1222,7 +1231,40 @@ fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
 
 #[cfg(test)]
 mod gallery_tests {
-    use super::gallery_columns;
+    use super::{gallery_columns, stage_speaking_color};
+
+    #[test]
+    fn speaking_ring_contrasts_with_the_stage_in_both_appearances() {
+        fn luminance(color: gpui::Hsla) -> f32 {
+            let color = gpui::Rgba::from(color);
+            let linear = |value: f32| {
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+        }
+        for palette in [
+            super::super::theme::Palette::Blue,
+            super::super::theme::Palette::Sage,
+        ] {
+            for appearance in [
+                super::super::theme::Appearance::Light,
+                super::super::theme::Appearance::Dark,
+            ] {
+                let theme = super::super::theme::Theme::resolve(
+                    palette,
+                    appearance,
+                    gpui::WindowAppearance::Light,
+                );
+                let ring = luminance(stage_speaking_color(theme));
+                let panel = luminance(theme.stage_panel);
+                assert!((ring.max(panel) + 0.05) / (ring.min(panel) + 0.05) >= 3.);
+            }
+        }
+    }
 
     #[test]
     fn gallery_respects_width_scale_and_participant_count() {
