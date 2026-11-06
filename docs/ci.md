@@ -2,17 +2,20 @@
 
 The [CI workflow](../.github/workflows/ci.yml) runs only the Linux job on pull requests.
 Pushes to `main` and manual runs on `main` also run Windows and macOS. Manual runs
-on other branches run Linux only.
+on other branches run Linux only by default. An explicit manual `signing_probe`
+run checks only a disposable macOS signing identity on the selected ref. It does
+not use release credentials or run the application, and does not replace full CI.
 
 | Job | Runner | Work |
 | --- | --- | --- |
 | Linux | `ubuntu-26.04` | Docs/policy checks, package fixtures, architecture and formatting, Clippy, Rust tests, desktop build and three native fixture captures |
 | Windows | `windows-2025` | Compile the workspace and test targets for MSVC; do not execute them |
 | macOS | `macos-26` | Compile the workspace, test targets and native Swift helper for Apple Silicon; assemble and inspect the self-contained app/DMG without executing the app |
+| Manual signing probe | `macos-26` | With `signing_probe=true`, compile two inert C fixtures and check disposable signing identity continuity; no release credentials, app launch or permission prompts |
 
 These standard GitHub-hosted runners are free for this public repository. macOS uses the Apple Silicon runner.
 
-Tests run only on Linux. Windows/macOS compilation does not establish native device, credential-store, permission or UI behavior. Linux synthetic captures are smoke checks, not a substitute for real server/device scenarios. New pull-request pushes cancel obsolete runs; a running main-branch run is allowed to finish.
+Rust/application tests run only on Linux. Windows/macOS compilation and the signing probe do not establish native device, credential-store, permission or UI behavior. Linux synthetic captures are smoke checks, not a substitute for real server/device scenarios. New pull-request pushes cancel obsolete runs; a running main-branch run is allowed to finish.
 
 ## Prerequisites and pins
 

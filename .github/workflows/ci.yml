@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      signing_probe:
+        description: Only check a disposable macOS signing identity (no app execution or release secrets)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -25,6 +31,7 @@ env:
 jobs:
   linux:
     name: Linux tests and native smoke
+    if: inputs.signing_probe != true
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
@@ -77,9 +84,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  macos-signing:
+    name: Disposable macOS signing contract
+    if: github.event_name == 'workflow_dispatch' && inputs.signing_probe
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 tools/native/check-macos-signing.py
+
   windows:
     name: Compile only (Windows x86_64 MSVC)
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && inputs.signing_probe != true
     runs-on: windows-2025
     timeout-minutes: 60
     env:
@@ -101,7 +119,7 @@ jobs:
 
   macos:
     name: Compile only (macOS Apple Silicon)
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && inputs.signing_probe != true
     runs-on: macos-26
     timeout-minutes: 60
     env:

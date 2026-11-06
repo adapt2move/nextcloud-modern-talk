@@ -69,6 +69,18 @@ class PolicyTests(unittest.TestCase):
         self.check("    name: Linux tests and native smoke",
                    "    if: " + policy.MAIN_ONLY + "\n    name: Linux tests and native smoke")
 
+    def test_linux_can_only_skip_the_explicit_manual_signing_probe(self):
+        self.check(policy.LINUX_NORMAL, "false")
+        self.check(policy.LINUX_NORMAL, "github.event_name != 'pull_request'")
+
+    def test_signing_probe_cannot_run_automatically_or_use_release_credentials(self):
+        self.check(policy.SIGNING_PROBE, "github.event_name == 'pull_request'")
+        self.check("    name: Disposable macOS signing contract", "    name: Disposable macOS signing contract\n    env:\n      SECRET: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}")
+
+    def test_signing_probe_cannot_replace_its_contract_with_app_execution(self):
+        self.check("      - run: python3 tools/native/check-macos-signing.py", "      - run: cargo run --locked")
+        self.check("      - run: python3 tools/native/check-macos-signing.py", "      - run: python3 tools/native/check-macos-signing.py\n        if: false")
+
     def test_release_builds_remain_unconditional(self):
         self.check("    runs-on: macos-26", "    if: " + policy.MAIN_ONLY + "\n    runs-on: macos-26",
                    file="release.yml")

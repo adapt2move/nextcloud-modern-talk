@@ -18,6 +18,16 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/release"))
 import internal_identity
 import macos_signing
+import macos_runtime
+
+
+def code_command(arguments):
+    # This lane only invokes codesign with public fixture paths, certificate
+    # hashes and requirements. Its diagnostics contain no import passwords or
+    # decrypted keys; credential-bearing setup keeps its redacted error route.
+    phase = "sign" if "--sign" in arguments else "verify"
+    print("Native signing contract: " + phase, flush=True)
+    return macos_runtime.run(arguments, timeout=30)
 
 
 def check():
@@ -48,8 +58,8 @@ def check():
                 source = root / "fixture.c"
                 source.write_text('int main(void) { return ' + str(version) + '; }\n')
                 internal_identity.run(["clang", source, "-o", executable])
-                macos_signing.sign(app, internal_identity.run, application=True)
-                macos_signing.verify_application(app, internal_identity.run)
+                macos_signing.sign(app, code_command, application=True)
+                macos_signing.verify_application(app, code_command)
                 result = subprocess.run(["codesign", "-d", "-r-", str(app)], capture_output=True, text=True, check=True, timeout=30)
                 requirement = next((line for line in (result.stdout + result.stderr).splitlines() if line.startswith("designated =>")), "")
                 if fingerprint.lower() not in requirement.lower() or macos_signing.IDENTIFIER not in requirement:
