@@ -996,6 +996,14 @@ impl Accounts {
                             && panel.thread_details_request == Some(request)
                     })
             }
+            Work::ThreadChange(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.state == RemoteState::Saving(request)
+                    })
+            }
             Work::ReactionAuthors => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {

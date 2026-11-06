@@ -60,6 +60,7 @@ pub(crate) enum Action {
 }
 pub(super) struct MessageUi {
     pub thread_load: Option<ThreadLoad>,
+    thread_info_retry: Option<(ConversationRef, u128, Instant)>,
     pub list: ListState,
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
@@ -240,6 +241,7 @@ impl MessageUi {
         });
         Self {
             thread_load: None,
+            thread_info_retry: None,
             list,
             arrival,
             geometry: Rc::new(RefCell::new(MessageGeometry::default())),
@@ -544,6 +546,31 @@ impl Desktop {
         preserve_edit: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.overlay == Some(Overlay::Thread)
+            && let Some((context, root)) = self.thread_parent
+            && Some(context) == self.snapshot.selected
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel.thread_root == Some(root)
+                    && panel
+                        .thread_details
+                        .as_ref()
+                        .is_none_or(|details| details.root != root)
+                    && panel.thread_details_request.is_none()
+            })
+            && self.message_feature_enabled(MessageFeature::Threads)
+            && self
+                .message_ui
+                .thread_info_retry
+                .is_none_or(|(room, id, at)| room != context || id != root || Instant::now() >= at)
+        {
+            self.message_ui.thread_info_retry = Some((
+                context,
+                root,
+                Instant::now() + std::time::Duration::from_secs(5),
+            ));
+            self.submit_message(MessageAction::ThreadInfo(root));
+        }
         self.refresh_pin_banner();
         let rows = self.snapshot.messages.as_slice();
         let pins: Vec<_> = self
