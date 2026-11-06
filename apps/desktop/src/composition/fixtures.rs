@@ -1350,6 +1350,22 @@ impl NativeDesktopPort for DevelopmentPort {
                 self.snapshot.threads.content = ContentState::Ready;
             }
             UiIntent::Message {
+                context,
+                action: talk_core::ui::messaging::MessageAction::ReactionAuthors { message, emoji },
+                ..
+            } if self.reaction_fixture.is_some() && self.snapshot.selected == Some(context) => {
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                panel.reaction_authors = page([talk_core::ui::messaging::ReactionAuthors {
+                    message,
+                    emoji,
+                    authors: page([text("Mara Fischer"), text("Alex Sommer")]),
+                }]);
+            }
+            UiIntent::Message {
                 request,
                 context,
                 action:

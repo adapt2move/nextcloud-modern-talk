@@ -35,6 +35,7 @@ pub(crate) enum Action {
     Menu(u128),
     ReactionPalette(u128, menu::Source),
     React(u128, Text<64>),
+    ReactionAuthors(u128, Text<64>),
     Recovery(recovery::RecoveryAction),
     MenuChoice(menu::Target, menu::Choice),
     Forward(forward::Action),
@@ -74,6 +75,7 @@ pub(super) struct MessageUi {
     pub(super) forward: forward::Forward,
     pins: pins::Pins,
     reaction_request: Option<RequestId>,
+    reaction_authors_visible: Option<(ConversationRef, u128, Text<64>, bool)>,
     pending_action: Option<(RequestId, Option<&'static str>)>,
     failed_selection: Option<(ConversationRef, u128)>,
     history: Rc<RefCell<history::History>>,
@@ -249,6 +251,7 @@ impl MessageUi {
             forward: forward::Forward::new(theme, cx),
             pins,
             reaction_request: None,
+            reaction_authors_visible: None,
             pending_action: None,
             failed_selection: None,
             history: Rc::new(RefCell::new(history::History::default())),
@@ -586,6 +589,7 @@ impl Desktop {
             self.message_ui.observed = rows.to_vec();
             self.message_ui.menu.clear();
             self.message_ui.reaction_request = None;
+            self.message_ui.reaction_authors_visible = None;
             self.message_ui.pending_action = None;
             if !preserve_edit {
                 self.message_ui.editing = None;
@@ -1043,6 +1047,71 @@ impl Desktop {
             None
         }
     }
+    pub(super) fn show_reaction_authors(
+        &mut self,
+        context: ConversationRef,
+        message: u128,
+        emoji: Text<64>,
+        sticky: bool,
+    ) {
+        if Some(context) != self.snapshot.selected
+            || !self.reaction_available(message).is_enabled()
+            || !self.snapshot.messages.as_slice().iter().any(|row| {
+                row.local_id == message
+                    && row
+                        .metadata
+                        .reactions
+                        .as_slice()
+                        .iter()
+                        .any(|reaction| reaction.emoji == emoji)
+            })
+        {
+            return;
+        }
+        let cached = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && panel
+                    .reaction_authors
+                    .as_slice()
+                    .iter()
+                    .any(|entry| entry.message == message && entry.emoji == emoji)
+        });
+        let busy = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.reaction_authors_load.is_some());
+        let sticky = sticky
+            || self
+                .message_ui
+                .reaction_authors_visible
+                .as_ref()
+                .is_some_and(|(room, id, current, retained)| {
+                    *room == context && *id == message && current == &emoji && *retained
+                });
+        self.message_ui.reaction_authors_visible = Some((context, message, emoji.clone(), sticky));
+        if !cached && !busy {
+            self.submit_message(MessageAction::ReactionAuthors { message, emoji });
+        }
+    }
+
+    pub(super) fn hide_hovered_reaction_authors(
+        &mut self,
+        context: ConversationRef,
+        message: u128,
+        emoji: &Text<64>,
+    ) {
+        if self
+            .message_ui
+            .reaction_authors_visible
+            .as_ref()
+            .is_some_and(|(room, id, current, sticky)| {
+                *room == context && *id == message && current == emoji && !sticky
+            })
+        {
+            self.message_ui.reaction_authors_visible = None;
+        }
+    }
     pub(super) fn message_action(
         &mut self,
         action: Action,
@@ -1101,6 +1170,20 @@ impl Desktop {
             }
             Action::React(message, emoji) => {
                 self.toggle_reaction(message, emoji);
+            }
+            Action::ReactionAuthors(message, emoji) => {
+                if self
+                    .message_ui
+                    .reaction_authors_visible
+                    .as_ref()
+                    .is_some_and(|(room, id, current, sticky)| {
+                        *room == context && *id == message && *current == emoji && *sticky
+                    })
+                {
+                    self.message_ui.reaction_authors_visible = None;
+                } else {
+                    self.show_reaction_authors(context, message, emoji, true);
+                }
             }
             Action::MenuChoice(target, choice) => {
                 self.choose_message_menu(target, choice, window, cx)

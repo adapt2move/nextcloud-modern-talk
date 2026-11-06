@@ -250,7 +250,19 @@ impl Desktop {
                             )
                             .into(),
                         );
-                        self.control_with_geometry(
+                        let emoji = r.emoji.clone();
+                        let hover_emoji = emoji.clone();
+                        let message = m.local_id;
+                        let group: gpui::SharedString = format!(
+                            "{}:{}",
+                            scoped_id("reaction-authors", context, message, 0),
+                            emoji.as_str()
+                        )
+                        .into();
+                        let info_id = gpui::ElementId::Name(group.clone());
+                        let wrapper_id =
+                            gpui::ElementId::Name(format!("reaction-wrap:{group}").into());
+                        let badge = self.control_with_geometry(
                             id,
                             ButtonStyle::Quiet,
                             self.reaction_available(m.local_id),
@@ -269,26 +281,104 @@ impl Desktop {
                                 },
                             ),
                             cx,
-                        )
-                        .min_w(px(32.))
-                        .min_h(reaction_height + px(8.))
-                        .p_0()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.))
-                                .px(px(6.))
-                                .h(reaction_height)
-                                .text_color(if r.own { t.accent } else { t.muted })
-                                .text_size(self.sp(11.))
-                                .line_height(self.sp(16.))
-                                .child(r.emoji.as_str().to_owned())
-                                .child(r.count.to_string()),
-                        )
+                        );
+                        div()
+                            .id(wrapper_id)
+                            .group(group.clone())
+                            .flex()
+                            .items_center()
+                            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                if *hovered {
+                                    this.show_reaction_authors(
+                                        context,
+                                        message,
+                                        hover_emoji.clone(),
+                                        false,
+                                    );
+                                } else {
+                                    this.hide_hovered_reaction_authors(
+                                        context,
+                                        message,
+                                        &hover_emoji,
+                                    );
+                                }
+                                cx.notify();
+                            }))
+                            .child(
+                                badge
+                                    .min_w(px(32.))
+                                    .min_h(reaction_height + px(8.))
+                                    .p_0()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.))
+                                            .px(px(6.))
+                                            .h(reaction_height)
+                                            .text_color(if r.own { t.accent } else { t.muted })
+                                            .text_size(self.sp(11.))
+                                            .line_height(self.sp(16.))
+                                            .child(r.emoji.as_str().to_owned())
+                                            .child(r.count.to_string()),
+                                    ),
+                            )
+                            .child(
+                                self.icon_button(
+                                    info_id.clone(),
+                                    ("users", "Wer hat reagiert?"),
+                                    ButtonStyle::Quiet,
+                                    self.reaction_available(message),
+                                    LocalAction::MessageIn(
+                                        context,
+                                        Action::ReactionAuthors(message, emoji),
+                                    ),
+                                    cx,
+                                )
+                                .size(px(24.))
+                                .opacity(0.)
+                                .group_hover(group, |d| d.opacity(1.))
+                                .focus(|d| d.opacity(1.)),
+                            )
                     }))
                     .child(self.reaction_picker_button(m, menu::Source::Badges, cx)),
             );
+            if let Some((active_context, message, emoji, _)) =
+                &self.message_ui.reaction_authors_visible
+                && *active_context == context
+                && *message == m.local_id
+            {
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context);
+                let authors = panel.and_then(|panel| {
+                    panel
+                        .reaction_authors
+                        .as_slice()
+                        .iter()
+                        .find(|entry| entry.message == *message && entry.emoji == *emoji)
+                });
+                let label = if let Some(authors) = authors {
+                    if authors.authors.as_slice().is_empty() {
+                        self.l("Keine Reaktionen mehr.").to_owned()
+                    } else {
+                        authors
+                            .authors
+                            .as_slice()
+                            .iter()
+                            .map(|name| name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                } else if panel.is_some_and(|panel| panel.reaction_authors_load.is_some()) {
+                    self.l("Namen werden geladen …").to_owned()
+                } else {
+                    self.l("Namen sind derzeit nicht verfügbar.").to_owned()
+                };
+                content = content.child(self.hint(&label));
+            }
         }
         if m.reply_count > 0 {
             let count = self.count(

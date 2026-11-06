@@ -18,6 +18,7 @@ pub(super) enum Work {
     Reminder(u128),
     CancelScheduled(u128),
     Reaction(u128),
+    ReactionAuthors,
     Files,
     Search,
     Reminders,
@@ -665,6 +666,7 @@ impl Accounts {
                 pinned: false,
             },
             V::React { message, .. } => Work::Reaction(*message),
+            V::ReactionAuthors { .. } => Work::ReactionAuthors,
             V::Context(id) => Work::Context(*id),
             V::Forward { destination, .. } => Work::Forward(*destination),
             V::Reminder { message, .. } => Work::Reminder(*message),
@@ -697,6 +699,20 @@ impl Accounts {
             Some(*root)
         } else {
             None
+        };
+        let author_target = match &action {
+            V::ReactionAuthors { message, emoji } => {
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.reaction_authors_load.is_some())
+                {
+                    return Err(SubmitError::Busy);
+                }
+                Some((*message, emoji.clone()))
+            }
+            _ => None,
         };
         let command = match action {
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
@@ -760,6 +776,10 @@ impl Accounts {
                 message: message_id(context, message)?,
                 emoji,
                 add,
+            },
+            V::ReactionAuthors { message, emoji } => W::ReactionAuthors {
+                message: message_id(context, message)?,
+                emoji,
             },
             V::MarkRead(id) => W::MarkRead(message_id(context, id)?),
             V::MarkUnread => W::MarkUnread,
@@ -834,6 +854,19 @@ impl Accounts {
             V::ShareFile { path, caption } => W::ShareFile { path, caption },
         };
         self.start_message(request, context, command, work)?;
+        if let Some((message, emoji)) = author_target
+            && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+        {
+            panel.reaction_authors_load = Some(view::ReactionAuthorsLoad {
+                request,
+                message,
+                emoji,
+            });
+        }
         if let Some(root) = thread_root
             && let Some(panel) = self.snapshot.message_panel.as_mut()
         {
@@ -915,6 +948,16 @@ impl Accounts {
         // Retire obsolete cache tickets as no-effect cancellations below, so
         // neither a stale success nor failure changes rows or current feedback.
         let current_target = match work {
+            Work::ReactionAuthors => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel
+                                .reaction_authors_load
+                                .as_ref()
+                                .is_some_and(|load| load.request == request)
+                    })
+            }
             Work::Thread => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -1322,6 +1365,24 @@ impl Accounts {
                             panel.uploaded = None;
                         }
                     }
+                    wire::MessagingResult::ReactionAuthors(authors)
+                        if work == Work::ReactionAuthors =>
+                    {
+                        if let Some(load) = panel
+                            .reaction_authors_load
+                            .take()
+                            .filter(|load| load.request == request)
+                        {
+                            panel.reaction_authors = cache_reaction_authors(
+                                &panel.reaction_authors,
+                                view::ReactionAuthors {
+                                    message: load.message,
+                                    emoji: load.emoji,
+                                    authors,
+                                },
+                            );
+                        }
+                    }
                     wire::MessagingResult::ReactionAuthors(_)
                     | wire::MessagingResult::Threads(_)
                     | wire::MessagingResult::Thread(_) => (),
@@ -1335,6 +1396,24 @@ impl Accounts {
             Completion::Failed(reason) => RemoteState::Failed(request, reason),
             Completion::Uncertain => RemoteState::Uncertain(request),
         };
+        if work == Work::ReactionAuthors
+            && panel
+                .reaction_authors_load
+                .as_ref()
+                .is_some_and(|load| load.request == request)
+        {
+            panel.reaction_authors_load = None;
+        }
+        if !changed.is_empty() {
+            panel.reaction_authors = page(
+                panel
+                    .reaction_authors
+                    .as_slice()
+                    .iter()
+                    .filter(|entry| !changed.contains(&entry.message))
+                    .cloned(),
+            );
+        }
         if work == Work::Thread {
             panel.thread_state = state;
             if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
@@ -1454,6 +1533,22 @@ impl Accounts {
         });
         self.touch();
     }
+}
+fn cache_reaction_authors(
+    cache: &Page<view::ReactionAuthors, 16>,
+    entry: view::ReactionAuthors,
+) -> Page<view::ReactionAuthors, 16> {
+    let mut values: Vec<_> = cache
+        .as_slice()
+        .iter()
+        .filter(|old| old.message != entry.message || old.emoji != entry.emoji)
+        .cloned()
+        .collect();
+    if values.len() >= 16 {
+        values.remove(0);
+    }
+    values.push(entry);
+    page(values)
 }
 
 #[cfg(test)]
@@ -1927,6 +2022,27 @@ pub(super) fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reaction_author_cache_is_bounded_and_replaces_matching_entry() {
+        let make = |message, name: &str| view::ReactionAuthors {
+            message,
+            emoji: text("👍"),
+            authors: page([text(name)]),
+        };
+        let mut cache = Page::empty();
+        for message in 1..=17 {
+            cache = cache_reaction_authors(&cache, make(message, "Synthetic"));
+        }
+        assert_eq!(cache.as_slice().len(), 16);
+        assert_eq!(cache.as_slice()[0].message, 2);
+        cache = cache_reaction_authors(&cache, make(10, "Updated"));
+        assert_eq!(cache.as_slice().len(), 16);
+        assert_eq!(
+            cache.as_slice().last().unwrap().authors.as_slice()[0].as_str(),
+            "Updated"
+        );
+    }
     #[test]
     fn metadata_warmup_is_single_flight_across_room_switches() {
         let mut model = super::super::tests::model();

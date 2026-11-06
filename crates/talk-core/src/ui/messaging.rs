@@ -30,6 +30,19 @@ pub struct Reaction {
     pub own: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthors {
+    pub message: u128,
+    pub emoji: Text<64>,
+    pub authors: Page<Text<256>, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionAuthorsLoad {
+    pub request: RequestId,
+    pub message: u128,
+    pub emoji: Text<64>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
     pub id: Option<Text<1024>>,
     pub mime_type: Option<Text<256>>,
@@ -248,6 +261,8 @@ pub struct MessagePanel {
     pub state: RemoteState,
     /// One admitted reaction mutation, cleared only by its correlated result.
     pub reaction_pending: Option<u128>,
+    pub reaction_authors: Page<ReactionAuthors, 16>,
+    pub reaction_authors_load: Option<ReactionAuthorsLoad>,
     pub history: RemoteState,
     pub older: Option<u128>,
     pub latest: Option<u128>,
@@ -292,6 +307,8 @@ impl MessagePanel {
             context,
             state: RemoteState::Idle,
             reaction_pending: None,
+            reaction_authors: Page::empty(),
+            reaction_authors_load: None,
             history: RemoteState::Idle,
             older: None,
             latest: None,
@@ -367,6 +384,10 @@ pub enum MessageAction {
         message: u128,
         emoji: Text<64>,
         add: bool,
+    },
+    ReactionAuthors {
+        message: u128,
+        emoji: Text<64>,
     },
     MarkRead(u128),
     MarkUnread,
