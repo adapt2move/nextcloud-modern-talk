@@ -106,6 +106,10 @@ pub enum LocalAction {
     OpenSubscribedThread(ConversationRef, u128),
     ResizeThread(bool),
     SendThread,
+    ToggleThreadOptions,
+    BeginThreadRename,
+    SaveThreadRename,
+    ThreadNotification(i8),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     Favorite(ConversationRef, bool),
@@ -302,6 +306,7 @@ pub struct Desktop {
     pub sidebar_filter: Entity<TextInput>,
     pub composer: Entity<TextInput>,
     thread_composer: Entity<TextInput>,
+    thread_title: Entity<TextInput>,
     composer_focus: FocusHandle,
     composer_active: bool,
     file_send: Option<attachments::PendingSend>,
@@ -317,6 +322,8 @@ pub struct Desktop {
     pub thread_parent: Option<(ConversationRef, u128)>,
     pending_thread_open: Option<(ConversationRef, u128)>,
     thread_width: f32,
+    thread_options_open: bool,
+    thread_renaming: bool,
     drafts: Drafts,
     thread_drafts: Drafts,
     root_focus: FocusHandle,
@@ -401,6 +408,7 @@ impl Desktop {
             input.markdown = true;
             input
         });
+        let thread_title = cx.new(|cx| TextInput::new("Thread-Titel", 256, theme, cx));
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
         let group_name = cx.new(|cx| TextInput::new("Name der Gruppe", 128, theme, cx));
         let upload_folder = cx.new(|cx| TextInput::new("/Talk", 2048, theme, cx));
@@ -456,6 +464,7 @@ impl Desktop {
                 message_ui.search.clone(),
                 message_ui.time_input.clone(),
                 thread_composer.clone(),
+                thread_title.clone(),
             ])
             .chain(content_ui.inputs().cloned())
         {
@@ -551,6 +560,7 @@ impl Desktop {
             sidebar_filter,
             composer,
             thread_composer,
+            thread_title,
             composer_focus,
             composer_active: false,
             file_send: None,
@@ -566,6 +576,8 @@ impl Desktop {
             thread_parent: None,
             pending_thread_open: None,
             thread_width: 400.,
+            thread_options_open: false,
+            thread_renaming: false,
             drafts: Drafts::default(),
             thread_drafts: Drafts::thread_editor(),
             root_focus,
@@ -853,6 +865,8 @@ impl Desktop {
             self.thread_parent = None;
             self.return_focus = None;
             self.pending_modal_focus = false;
+            self.thread_options_open = false;
+            self.thread_renaming = false;
         }
         self.open_pending_thread(cx);
         if (previous != self.snapshot.selected || reset_draft)
@@ -1222,9 +1236,14 @@ impl Desktop {
                     if !self.prepare_thread_draft(context, id, cx) {
                         return;
                     }
+                    if self.thread_parent != Some((context, id)) {
+                        self.thread_options_open = false;
+                        self.thread_renaming = false;
+                    }
                     self.thread_parent = Some((context, id));
                     let request =
                         self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
+                    self.submit_message(talk_core::ui::messaging::MessageAction::ThreadInfo(id));
                     self.message_ui.thread_load = Some(messaging::ThreadLoad {
                         context,
                         root: id,
@@ -1340,6 +1359,8 @@ impl Desktop {
                 if self.overlay == Some(Overlay::Thread) && !self.save_thread_draft(cx) {
                     return;
                 }
+                self.thread_options_open = false;
+                self.thread_renaming = false;
                 self.startup_account_dialog = false;
                 if self.close_forward_dialog(window, cx) {
                     cx.notify();
@@ -1431,6 +1452,58 @@ impl Desktop {
                     (self.thread_width + if wider { 64. } else { -64. }).clamp(288., 608.);
             }
             LocalAction::SendThread => self.send_thread_draft(cx),
+            LocalAction::ToggleThreadOptions => {
+                self.thread_options_open = !self.thread_options_open
+            }
+            LocalAction::BeginThreadRename => {
+                if let Some((context, root)) = self.thread_parent
+                    && let Some(details) = self
+                        .snapshot
+                        .message_panel
+                        .as_ref()
+                        .filter(|panel| panel.context == context)
+                        .and_then(|panel| panel.thread_details.as_ref())
+                        .filter(|details| details.root == root)
+                {
+                    let title = details.title.as_str().to_owned();
+                    self.thread_title.update(cx, |input, cx| {
+                        input.set_context_value(&title);
+                        cx.notify();
+                    });
+                    self.thread_renaming = true;
+                    self.thread_title.focus_handle(cx).focus(window);
+                }
+            }
+            LocalAction::SaveThreadRename => {
+                if let Some((context, root)) = self.thread_parent
+                    && Some(context) == self.snapshot.selected
+                    && !self.thread_title.read(cx).composing()
+                    && let Ok(title) =
+                        talk_core::ui::Text::new(self.thread_title.read(cx).content.trim())
+                    && !title.as_str().is_empty()
+                    && self
+                        .submit_message(talk_core::ui::messaging::MessageAction::RenameThread {
+                            root,
+                            title,
+                        })
+                        .is_some()
+                {
+                    self.thread_renaming = false;
+                }
+            }
+            LocalAction::ThreadNotification(level) => {
+                if let Some((context, root)) = self.thread_parent
+                    && Some(context) == self.snapshot.selected
+                    && (0..=3).contains(&level)
+                {
+                    self.submit_message(
+                        talk_core::ui::messaging::MessageAction::ThreadNotifications {
+                            root,
+                            level,
+                        },
+                    );
+                }
+            }
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
@@ -2047,6 +2120,7 @@ impl Desktop {
             &self.sidebar_filter,
             &self.composer,
             &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2067,6 +2141,7 @@ impl Desktop {
             &self.sidebar_filter,
             &self.composer,
             &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2196,6 +2271,7 @@ impl Render for Desktop {
             &self.sidebar_filter,
             &self.composer,
             &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2331,6 +2407,12 @@ impl Render for Desktop {
             input.clipboard_export_allowed = clipboard_export;
             input.max_visible_rows = max_rows.clamp(1, 4);
         });
+        self.thread_title.update(cx, |input, _| {
+            input.set_placeholder(self.l("Thread-Titel"));
+            input.interactive =
+                !incoming && self.overlay == Some(Overlay::Thread) && self.thread_renaming;
+            input.clipboard_export_allowed = clipboard_export;
+        });
         if self.update_restart_pending {
             self.disable_update_inputs(cx);
         }
@@ -2340,6 +2422,7 @@ impl Render for Desktop {
             &self.sidebar_filter,
             &self.composer,
             &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,

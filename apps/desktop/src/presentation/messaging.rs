@@ -306,6 +306,9 @@ impl Desktop {
             return;
         }
         if let Some(request) = self.submit_message(MessageAction::Thread(root)) {
+            self.submit_message(MessageAction::ThreadInfo(root));
+            self.thread_options_open = false;
+            self.thread_renaming = false;
             self.thread_parent = Some((context, root));
             self.message_ui.thread_load = Some(ThreadLoad {
                 context,

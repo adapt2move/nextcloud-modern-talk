@@ -378,6 +378,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         let root = Some(1);
         if let (Some(root), Some(panel)) = (root, state.message_panel.as_mut()) {
             panel.thread_root = Some(root);
+            panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                root,
+                title: text("Design review"),
+                notification_level: Some(0),
+            });
             let mut reply = message(
                 40,
                 "Mara Fischer",
@@ -1817,6 +1822,37 @@ impl NativeDesktopPort for DevelopmentPort {
                         row.metadata.replyable = true;
                         row.metadata.thread = Some(root);
                         panel.thread_messages = page([row]);
+                    }
+                    MessageAction::ThreadInfo(root) if self.thread_fixture.is_some() => {
+                        panel.thread_details = Some(talk_core::ui::messaging::ThreadDetails {
+                            root,
+                            title: text("Design review"),
+                            notification_level: Some(0),
+                        });
+                    }
+                    MessageAction::RenameThread { root, title }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.title = title;
+                            panel.result = Some((request, Completion::ServerAccepted));
+                        }
+                    }
+                    MessageAction::ThreadNotifications { root, level }
+                        if self.thread_fixture.is_some() =>
+                    {
+                        if let Some(details) = panel
+                            .thread_details
+                            .as_mut()
+                            .filter(|details| details.root == root)
+                        {
+                            details.notification_level = Some(level);
+                            panel.result = Some((request, Completion::ServerAccepted));
+                        }
                     }
                     MessageAction::Search(query) => {
                         let query = query.as_str().to_lowercase();

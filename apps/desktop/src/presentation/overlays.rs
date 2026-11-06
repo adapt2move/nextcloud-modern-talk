@@ -55,6 +55,19 @@ impl Desktop {
                                     .font_weight(FontWeight::BOLD)
                                     .child(self.l("Antworten")),
                             )
+                            .when(self.current_thread_details().is_some(), |header| {
+                                header.child(
+                                    self.icon_button(
+                                        "thread-options",
+                                        ("more", "Thread-Optionen"),
+                                        ButtonStyle::Quiet,
+                                        Availability::available(),
+                                        LocalAction::ToggleThreadOptions,
+                                        cx,
+                                    )
+                                    .size(px(32.)),
+                                )
+                            })
                             .child(
                                 self.icon_button(
                                     "thread-narrower",
@@ -92,6 +105,9 @@ impl Desktop {
                                 .size(px(32.)),
                             ),
                     )
+                    .when(self.thread_options_open, |pane| {
+                        pane.child(self.thread_options(cx))
+                    })
                     .child(
                         self.scroll_area(super::navigation::Region::Overlay)
                             .flex_1()
@@ -235,6 +251,20 @@ impl Desktop {
                                         .font_weight(FontWeight::BOLD)
                                         .child(self.l(title)),
                                 )
+                                .when(
+                                    overlay == Overlay::Thread
+                                        && self.current_thread_details().is_some(),
+                                    |header| {
+                                        header.child(self.icon_button(
+                                            "thread-options",
+                                            ("more", "Thread-Optionen"),
+                                            ButtonStyle::Quiet,
+                                            Availability::available(),
+                                            LocalAction::ToggleThreadOptions,
+                                            cx,
+                                        ))
+                                    },
+                                )
                                 .child(self.icon_button(
                                     "close-overlay",
                                     ("x", "Schließen"),
@@ -243,6 +273,10 @@ impl Desktop {
                                     LocalAction::Close,
                                     cx,
                                 )),
+                        )
+                        .when(
+                            overlay == Overlay::Thread && self.thread_options_open,
+                            |pane| pane.child(self.thread_options(cx)),
                         )
                         .child(content)
                         .when(overlay == Overlay::Thread, |d| {
@@ -570,6 +604,121 @@ impl Desktop {
                     body = body.child(self.thread_message(message));
                 }
             }
+        }
+        body
+    }
+    fn current_thread_details(&self) -> Option<&talk_core::ui::messaging::ThreadDetails> {
+        let (context, root) = self.thread_parent?;
+        self.snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .and_then(|panel| panel.thread_details.as_ref())
+            .filter(|details| details.root == root)
+    }
+    fn thread_options(&self, cx: &Context<Self>) -> Div {
+        let Some(details) = self.current_thread_details() else {
+            return div();
+        };
+        let Some((context, root)) = self.thread_parent else {
+            return div();
+        };
+        let can_change = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.context == context && !panel.state.pending())
+            && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Threads);
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .border_b_1()
+            .border_color(self.theme.border);
+        let following = details.notification_level.is_some_and(|level| level != 3);
+        body = body.child(
+            self.button(
+                "thread-follow",
+                if following {
+                    "Thread nicht mehr folgen"
+                } else {
+                    "Thread folgen"
+                },
+                ButtonStyle::Quiet,
+                can_change && details.notification_level.is_some(),
+                LocalAction::ThreadNotification(if following { 3 } else { 0 }),
+                cx,
+            )
+            .justify_start(),
+        );
+        if following {
+            body = body.child(
+                div().flex().flex_wrap().gap_1().children(
+                    [
+                        ("thread-notify-all", "Alle Antworten", 1),
+                        ("thread-notify-mentions", "Nur Erwähnungen", 2),
+                    ]
+                    .into_iter()
+                    .map(|(id, label, level)| {
+                        self.button(
+                            id,
+                            label,
+                            ButtonStyle::Secondary,
+                            can_change,
+                            LocalAction::ThreadNotification(level),
+                            cx,
+                        )
+                        .when(details.notification_level == Some(level), |button| {
+                            button.bg(self.theme.selected)
+                        })
+                    }),
+                ),
+            );
+        }
+        let can_rename = self
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .chain(
+                self.snapshot
+                    .message_panel
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|panel| panel.thread_messages.as_slice()),
+            )
+            .any(|message| {
+                message.local_id == root
+                    && message.metadata.edit == talk_core::ui::Decision::Allowed
+            });
+        if can_rename {
+            body = if self.thread_renaming {
+                body.child(
+                    self.input_surface(&self.thread_title, cx)
+                        .child(self.thread_title.clone()),
+                )
+                .child(self.button(
+                    "thread-save-title",
+                    "Speichern",
+                    ButtonStyle::Secondary,
+                    can_change && !self.thread_title.read(cx).content.trim().is_empty(),
+                    LocalAction::SaveThreadRename,
+                    cx,
+                ))
+            } else {
+                body.child(
+                    self.button(
+                        "thread-rename",
+                        "Thread umbenennen",
+                        ButtonStyle::Quiet,
+                        can_change,
+                        LocalAction::BeginThreadRename,
+                        cx,
+                    )
+                    .justify_start(),
+                )
+            };
         }
         body
     }

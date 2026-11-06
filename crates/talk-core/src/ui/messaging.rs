@@ -43,6 +43,12 @@ pub struct ReactionAuthorsLoad {
     pub emoji: Text<64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadDetails {
+    pub root: u128,
+    pub title: Text<256>,
+    pub notification_level: Option<i8>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
     pub id: Option<Text<1024>>,
     pub mime_type: Option<Text<256>>,
@@ -256,6 +262,8 @@ pub struct MessagePanel {
     pub thread_root: Option<u128>,
     pub thread_state: RemoteState,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
+    pub thread_details: Option<ThreadDetails>,
+    pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
     pub state: RemoteState,
@@ -304,6 +312,8 @@ impl MessagePanel {
             thread_root: None,
             thread_state: RemoteState::Idle,
             thread_messages: Page::empty(),
+            thread_details: None,
+            thread_details_request: None,
             context,
             state: RemoteState::Idle,
             reaction_pending: None,
@@ -368,6 +378,15 @@ pub enum MessageAction {
     DismissUpload,
     Files,
     Thread(u128),
+    ThreadInfo(u128),
+    RenameThread {
+        root: u128,
+        title: Text<256>,
+    },
+    ThreadNotifications {
+        root: u128,
+        level: i8,
+    },
     Older,
     Refresh,
     Context(u128),
