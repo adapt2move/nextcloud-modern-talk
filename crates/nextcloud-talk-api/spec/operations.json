@@ -636,24 +636,24 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}",
       "status": "partial",
-      "api": "Client::poll / poll::Command::Create",
-      "scope": "Published polls only; bounded options and vote limits, hidden/public results and uncertain-write retention. Server draft creation is not implemented."
+      "api": "Client::poll / poll::Command::Create; Client::poll_draft_mutation / poll::Command::CreateDraft",
+      "scope": "Published and draft creation with bounded options and uncertain-write retention; caller enforces talk-polls-drafts and moderator authority. Draft response follows Talk PollController::createPoll."
     },
     {
       "operation_id": "poll-update-draft-poll",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/draft/{pollId}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Client::poll_draft_mutation / poll::Command::UpdateDraft",
+      "scope": "Bounded draft update, correlated by poll ID; caller enforces edit-draft-poll and room authority. Response shape follows Talk PollController::updateDraftPoll."
     },
     {
       "operation_id": "poll-get-all-draft-polls",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/drafts",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Client::poll_drafts",
+      "scope": "Bounded moderator draft list; response shape follows Talk PollController::getAllDraftPolls and Poll::renderAsDraft. Application capability and authority checks remain required."
     },
     {
       "operation_id": "poll-show-poll",
@@ -676,8 +676,8 @@
       "method": "DELETE",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/poll/{token}/{pollId}",
       "status": "partial",
-      "api": "Client::poll / poll::Command::Close",
-      "scope": "Published poll closure retains the poll and reads final results. Draft deletion through the same route is intentionally unsupported."
+      "api": "Client::poll / poll::Command::Close; Client::delete_poll_draft",
+      "scope": "Published poll closure retains the poll; draft deletion accepts the empty response. Caller must establish draft status and moderator authority before deletion."
     },
     {
       "operation_id": "poll-export-poll",
