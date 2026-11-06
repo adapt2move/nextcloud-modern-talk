@@ -6,7 +6,9 @@ on other branches run Linux only by default. An explicit manual `signing_probe`
 run checks only a disposable macOS signing identity on the selected ref. It does
 not use release credentials or run the application, and does not replace full CI.
 The probe installs no trust, changes no authorization rules and does not affect
-end-user Macs.
+end-user Macs. Its disposable keychain is temporarily included in the runner
+user's search list; teardown restores the original list without changing the
+default keychain.
 
 | Job | Runner | Work |
 | --- | --- | --- |
