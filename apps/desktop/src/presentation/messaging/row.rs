@@ -332,7 +332,20 @@ impl Desktop {
                 .gap_3()
                 .when(
                     self.highlighted_message == Some((context, m.local_id)),
-                    |d| d.bg(t.selected),
+                    |d| {
+                        let elapsed = self.highlight_started.map_or(1400., |started| {
+                            started.elapsed().as_secs_f32() * 1000.
+                        });
+                        let opacity = if self.reduced_motion {
+                            1.
+                        } else {
+                            (1. - ((elapsed - 600.) / 800.).clamp(0., 1.)).max(0.)
+                        };
+                        d.bg(gpui::Hsla {
+                            a: t.selected.a * opacity,
+                            ..t.selected
+                        })
+                    },
                 )
                 .child(if continuation {
                     div()

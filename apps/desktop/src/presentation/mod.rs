@@ -231,6 +231,7 @@ pub struct Desktop {
     emoji_picker_context: Option<ConversationRef>,
     keyboard_navigation: bool,
     highlighted_message: Option<(ConversationRef, u128)>,
+    highlight_started: Option<Instant>,
     dismissed_terminal_call: Option<CallScope>,
     pub snapshot: PresentationSnapshot,
     projection_blocked: bool,
@@ -468,6 +469,7 @@ impl Desktop {
             emoji_picker_context: None,
             keyboard_navigation: false,
             highlighted_message: None,
+            highlight_started: None,
             dismissed_terminal_call: None,
             snapshot,
             projection_blocked: false,
@@ -755,6 +757,7 @@ impl Desktop {
             self.stop_device_preview(cx);
             self.feedback = None;
             self.highlighted_message = None;
+            self.highlight_started = None;
             self.sidebar_filter.update(cx, |i, _| i.reset());
             self.feedback_return_focus = None;
             self.pending_feedback_focus = false;
@@ -1169,6 +1172,7 @@ impl Desktop {
                     self.overlay = None;
                     self.return_focus = None;
                     self.highlighted_message = Some((context, id));
+                    self.highlight_started = Some(Instant::now());
                     self.message_ui.list.scroll_to_reveal_item(index);
                     self.navigation.locate_message(index, window);
                 }
@@ -1991,6 +1995,14 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(started) = self.highlight_started {
+            if started.elapsed() >= std::time::Duration::from_millis(1400) {
+                self.highlight_started = None;
+                self.highlighted_message = None;
+            } else {
+                window.request_animation_frame();
+            }
+        }
         self.text_selection
             .update(cx, |owner, _| owner.begin_frame());
         // Retained parent focus includes toolbar controls reached by Tab.
