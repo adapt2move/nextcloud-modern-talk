@@ -99,6 +99,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-speaker",
     "call-screen-stage",
     "call-recording",
+    "call-end-confirm",
     "call-reactions",
     "call-active",
     "call-requested",
@@ -784,6 +785,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-speaker"
             | "call-screen-stage"
             | "call-recording"
+            | "call-end-confirm"
             | "call-reactions"
             | "sharing"
             | "call-denied"
@@ -910,7 +912,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 Page::empty()
             },
             ring_status: None,
-            can_end_everyone: false,
+            can_end_everyone: scenario == "call-end-confirm",
             end_pending: false,
             end_failed: false,
             participants: page(
@@ -1935,6 +1937,15 @@ impl NativeDesktopPort for DevelopmentPort {
                         page(participants())
                     },
                 });
+            }
+            UiIntent::EndCallForEveryone(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.can_end_everyone)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.end_pending = true;
             }
             UiIntent::RingCallParticipant { call, target } => {
                 let view = self

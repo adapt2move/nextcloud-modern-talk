@@ -667,7 +667,7 @@ async fn media_loop(
             let mut refresh_needed = false;
             while let Ok(command) = control.try_recv() {
                 match command {
-                    Command::Change { wishes, .. } => {
+                    Command::Change { wishes, .. } if !end_pending => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
                     }
                     Command::Ring { target, .. } if transport_ready && received_policy >= required_policy && bundle.ring_supported
@@ -1027,7 +1027,7 @@ async fn media_loop(
                 snapshot.invitees_loaded = policy_ready;
                 snapshot.invitees = invitees;
                 snapshot.ring_status = ring_status;
-                snapshot.can_end_everyone = policy_ready && bundle.end_supported && call.phase() == Phase::Active;
+                snapshot.can_end_everyone = policy_ready && bundle.end_supported && call.phase() == Phase::Active && !end_failed;
                 snapshot.end_pending = end_pending;
                 snapshot.end_failed = end_failed;
                 snapshot.counters = totals;

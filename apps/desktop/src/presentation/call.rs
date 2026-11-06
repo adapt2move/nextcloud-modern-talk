@@ -824,6 +824,16 @@ impl Desktop {
                     ),
             );
         }
+        if call.can_end_everyone {
+            controls = controls.child(self.button(
+                "end-everyone",
+                "Für alle beenden",
+                ButtonStyle::Stage,
+                Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
+                LocalAction::Open(Overlay::ConfirmEndCall),
+                cx,
+            ));
+        }
         controls = controls.child(
             div()
                 .flex()
@@ -947,6 +957,8 @@ impl Desktop {
                                 cx,
                             )),
                     )
+                    .when(call.end_pending || call.end_failed, |d| d.child(div().px_5().py_2().text_size(self.sp(12.))
+                        .child(self.l(if call.end_pending { "Anruf wird für alle beendet …" } else { "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde." }))))
                     .when(self.local_feedback_visible(), |d| {
                         d.child(
                             div()

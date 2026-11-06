@@ -1,7 +1,22 @@
 pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
+    (
+        "Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.",
+        "Everyone will leave the call. The conversation and its messages remain.",
+        "Todas las personas saldrán de la llamada. La conversación y sus mensajes se conservarán.",
+    ),
+    (
+        "Anruf für alle beenden?",
+        "End the call for everyone?",
+        "¿Finalizar la llamada para todas las personas?",
+    ),
     ("Anruf läuft", "Call in progress", "Llamada en curso"),
     ("Anruf minimieren", "Minimize call", "Minimizar llamada"),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
+    (
+        "Anruf wird für alle beendet …",
+        "Ending the call for everyone…",
+        "Finalizando la llamada para todas las personas…",
+    ),
     (
         "Aufzeichnung fehlgeschlagen",
         "Recording failed",
@@ -33,6 +48,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     (
+        "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde.",
+        "The call status is unclear. Leave the call and check whether it ended.",
+        "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
+    ),
+    (
         "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",
         "Changing devices stops the current stream. Enable the device again afterwards.",
         "Cambiar de dispositivo detiene la transmisión actual. Vuelve a activarlo después.",
@@ -43,6 +63,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Ya hay una solicitud en curso.",
     ),
     ("Erneut klingeln", "Ring again", "Volver a llamar"),
+    (
+        "Für alle beenden",
+        "End for everyone",
+        "Finalizar para todas las personas",
+    ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
     ("Hand senken", "Lower hand", "Bajar la mano"),

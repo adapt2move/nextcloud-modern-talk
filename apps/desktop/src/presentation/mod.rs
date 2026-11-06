@@ -57,6 +57,7 @@ pub enum Overlay {
     Forward,
     CallParticipants,
     CallChat,
+    ConfirmEndCall,
     Search,
     Create,
     Discover,
@@ -101,6 +102,7 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ConfirmEndCall,
     MinimizeCall(CallScope),
     ExpandCall(CallScope),
     ToggleCallFullscreen(CallScope),
@@ -1203,6 +1205,15 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                if overlay == Overlay::ConfirmEndCall
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        !call.can_end_everyone
+                            || call.end_pending
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1451,6 +1462,21 @@ impl Desktop {
                 }) {
                     self.call_focus = participant.map(|id| (scope, id));
                     self.call_speaker = None;
+                }
+            }
+            LocalAction::ConfirmEndCall => {
+                if self.overlay == Some(Overlay::ConfirmEndCall)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.can_end_everyone
+                            && !call.end_pending
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::EndCallForEveryone(scope)) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
                 }
             }
             LocalAction::ToggleCallChat => {

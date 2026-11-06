@@ -54,10 +54,11 @@ impl Desktop {
             );
         }
         let media = |state: MediaState| {
-            matches!(
-                state,
-                MediaState::Off | MediaState::Active | MediaState::Requested
-            )
+            !call.end_pending
+                && matches!(
+                    state,
+                    MediaState::Off | MediaState::Active | MediaState::Requested
+                )
         };
         div()
             .flex_none()
