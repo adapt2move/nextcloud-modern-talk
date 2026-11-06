@@ -135,10 +135,14 @@ impl Desktop {
                                 .child(
                                     div()
                                         .min_w_0()
+                                        .flex_1()
                                         .text_size(self.sp(if side { 18. } else { 24. }))
                                         .font_weight(FontWeight::BOLD)
                                         .child(self.l(title)),
                                 )
+                                .when(overlay == Overlay::CreatePoll, |d| {
+                                    d.children(self.poll_drafts_header(cx))
+                                })
                                 .child(self.icon_button(
                                     "close-overlay",
                                     ("x", "Schließen"),
@@ -151,6 +155,9 @@ impl Desktop {
                         .child(content)
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
+                        })
+                        .when(overlay == Overlay::CreatePoll, |d| {
+                            d.child(self.poll_creation_footer(cx))
                         })
                         .when(
                             self.feedback_visible() && overlay != Overlay::CallChat,

@@ -1,11 +1,13 @@
 //! Poll and voice message interface copy.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
+    ("Abstimmen", "Vote", "Votar"),
     (
         "Als Entwurf speichern",
         "Save as draft",
         "Guardar como borrador",
     ),
     ("Anonym", "Anonymous", "Anónima"),
+    ("Anonym abstimmen", "Anonymous voting", "Votación anónima"),
     (
         "Anonym abstimmen (Ergebnisse erst nach Abschluss)",
         "Anonymous voting (results appear after closing)",
@@ -78,7 +80,15 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Eliminar borrador definitivamente",
     ),
     ("Entwurf löschen", "Delete draft", "Eliminar borrador"),
+    ("Entwürfe", "Drafts", "Borradores"),
+    ("Entwürfe · {n}", "Drafts · {n}", "Borradores · {n}"),
+    (
+        "Ergebnisse erscheinen nach dem Ende; Stimmen bleiben anonym.",
+        "Results appear after closing; votes remain anonymous.",
+        "Los resultados aparecen al finalizar; los votos siguen siendo anónimos.",
+    ),
     ("Erneut abstimmen", "Retry vote", "Reintentar voto"),
+    ("Frage", "Question", "Pregunta"),
     (
         "Für neue Umfrage verwenden",
         "Use for a new poll",
@@ -142,6 +152,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Cargando mensaje de voz…",
     ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
+    ("Stimme zurückziehen", "Withdraw vote", "Retirar voto"),
     (
         "Umfrage erneut prüfen",
         "Check poll again",
@@ -185,6 +196,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Reconnect to send the recording.",
         "Vuelve a conectarte para enviar la grabación.",
     ),
+    ("Veröffentlichen", "Publish", "Publicar"),
     ("Weniger Stimmen", "Fewer votes", "Menos votos"),
     (
         "Wiedergabe nicht verfügbar. Lade die Datei herunter.",

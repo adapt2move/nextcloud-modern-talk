@@ -42,6 +42,12 @@ impl Desktop {
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
+        let poll_message = m
+            .metadata
+            .rich
+            .as_slice()
+            .iter()
+            .any(|object| matches!(object.kind.as_str(), "poll" | "talk-poll"));
         let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
             .to_string()
             .into();
@@ -351,8 +357,8 @@ impl Desktop {
                         d.child(
                         div()
                             .absolute()
-                            .when(!m.own, |d| d.top(px(8.)))
-                            .when(m.own, |d| {
+                            .when(!m.own || poll_message, |d| d.top(px(8.)))
+                            .when(m.own && !poll_message, |d| {
                                 // Centre the 34 px action beside the 20 sp status.
                                 d.bottom(
                                     px(if continuation { 3. } else { 12. }) + self.sp(10.)

@@ -183,7 +183,7 @@ impl Desktop {
             .justify_between()
             .gap(px(1.))
             .when_some(focus, |d, focus| {
-                d.track_focus(&focus.tab_stop(enabled && !self.background_inert))
+                d.track_focus(&focus.clone().tab_stop(enabled && !self.background_inert))
                     .child(self.field_ring(focus, 5.))
             })
             .children(bars.into_iter().enumerate().map(|(index, height)| {

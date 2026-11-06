@@ -181,6 +181,11 @@ impl Desktop {
     /// their fictional snapshot; it never opens a server or a media device.
     pub(crate) fn configure_content_scenario(&mut self, scenario: Option<&str>) {
         match scenario {
+            Some("chat-polls") => {
+                let mut selection = Page::empty();
+                let _ = selection.try_push(1);
+                self.content_ui.selections.push((9001, selection));
+            }
             Some("poll-drafts") => self.content_ui.drafts_open = true,
             Some("poll-details") => self.content_ui.details_poll = Some(9001),
             Some("voice-recording") => {
@@ -981,6 +986,11 @@ impl Desktop {
                 |scrub| scrub.position_ms,
             );
         let duration = playback.and_then(|p| p.duration_ms).unwrap_or(0);
+        let elapsed = if loading {
+            "…".to_owned()
+        } else {
+            format!("{:02}:{:02}", position / 60_000, position / 1_000 % 60)
+        };
         let failed = playback.is_some_and(|p| matches!(p.state, PlaybackState::Failed(_)));
         let source = object
             .id
@@ -1032,11 +1042,7 @@ impl Desktop {
                 controllable,
                 cx,
             ))
-            .child(self.hint(if loading {
-                "…"
-            } else {
-                &format!("{:02}:{:02}", position / 60_000, position / 1_000 % 60)
-            }))
+            .child(self.hint(&elapsed))
             .child(
                 self.button(
                     scoped_id(
@@ -1728,6 +1734,37 @@ impl Desktop {
             self.content_ui.hidden_results,
         )
     }
+    pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
+        (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
+            .then(|| {
+                let label = if self.content_ui.drafts_open {
+                    self.lf(
+                        "Entwürfe · {n}",
+                        &[(
+                            "n",
+                            &self
+                                .snapshot
+                                .content_panel
+                                .poll_drafts
+                                .as_slice()
+                                .len()
+                                .to_string(),
+                        )],
+                    )
+                } else {
+                    self.l("Entwürfe").to_owned()
+                };
+                self.button(
+                    "poll-drafts-toggle",
+                    label,
+                    ButtonStyle::Quiet,
+                    !self.poll_submission_blocked(),
+                    LocalAction::Content(Action::ToggleDrafts),
+                    cx,
+                )
+            })
+    }
+
     pub(super) fn poll_creation_body(&self, cx: &Context<Self>) -> Div {
         let busy = self.poll_submission_blocked();
         let online = self.snapshot.content == ContentState::Ready && !self.media_offline();
@@ -1738,21 +1775,13 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.title(self.l("Frage der Umfrage")))
+            .child(self.hint(self.l("Frage")))
             .child(
                 self.input_surface(&self.content_ui.question, cx)
                     .child(self.content_ui.question.clone()),
             );
         if self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled()
         {
-            body = body.child(self.button(
-                "poll-drafts-toggle",
-                "Umfrageentwürfe",
-                ButtonStyle::Quiet,
-                !busy,
-                LocalAction::Content(Action::ToggleDrafts),
-                cx,
-            ));
             if self.content_ui.drafts_open {
                 if self
                     .snapshot
@@ -1903,20 +1932,17 @@ impl Desktop {
                 LocalAction::Content(Action::AddOption),
                 cx,
             )))
-            .child(self.button_with_icon(
-                "poll-multiple",
-                (
+            .child(self.dialog_row(
+                "Mehrere Antworten erlauben",
+                None,
+                self.switch(
+                    "poll-multiple",
                     "Mehrere Antworten erlauben",
-                    if self.content_ui.multiple {
-                        "check"
-                    } else {
-                        "plus"
-                    },
+                    Some(self.content_ui.multiple),
+                    (!busy).into(),
+                    LocalAction::Content(Action::Multiple),
+                    cx,
                 ),
-                ButtonStyle::Quiet,
-                !busy,
-                LocalAction::Content(Action::Multiple),
-                cx,
             ))
             .when(self.content_ui.multiple, |d| {
                 d.child(
@@ -1952,22 +1978,30 @@ impl Desktop {
                         )),
                 )
             })
-            .child(self.button_with_icon(
-                "poll-hidden",
-                (
-                    "Anonym abstimmen (Ergebnisse erst nach Abschluss)",
-                    if self.content_ui.hidden_results {
-                        "check"
-                    } else {
-                        "plus"
-                    },
+            .child(self.dialog_row(
+                "Anonym abstimmen",
+                Some("Ergebnisse erscheinen nach dem Ende; Stimmen bleiben anonym."),
+                self.switch(
+                    "poll-hidden",
+                    "Anonym abstimmen",
+                    Some(self.content_ui.hidden_results),
+                    (!busy).into(),
+                    LocalAction::Content(Action::HiddenResults),
+                    cx,
                 ),
-                ButtonStyle::Quiet,
-                !busy,
-                LocalAction::Content(Action::HiddenResults),
-                cx,
-            ))
-            .child(self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")));
+            ));
+        let interacted = !self.content_ui.question.read(cx).content.is_empty()
+            || self
+                .content_ui
+                .options
+                .iter()
+                .take(self.content_ui.option_count)
+                .any(|input| !input.read(cx).content.is_empty());
+        if interacted && self.poll_draft(cx).is_none() {
+            body = body.child(
+                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")),
+            );
+        }
         if !available {
             body = body.child(self.hint(self.l(if !online {
                 "Die Verbindung ist derzeit nicht bereit."
@@ -1975,40 +2009,6 @@ impl Desktop {
                 super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create)
             })));
         }
-        if self.snapshot.content_panel.poll_drafts_manage.enabled() {
-            body = body.child(self.button(
-                "poll-save-draft",
-                "Als Entwurf speichern",
-                ButtonStyle::Secondary,
-                !busy
-                    && online
-                    && self.poll_draft(cx).is_some()
-                    && (self.content_ui.editing_draft.is_none()
-                        || self.snapshot.content_panel.poll_drafts_edit.enabled()),
-                LocalAction::Content(Action::SaveDraft),
-                cx,
-            ));
-        }
-        body = body.child(
-            self.button(
-                "poll-submit",
-                "Umfrage veröffentlichen",
-                ButtonStyle::Primary,
-                if poll_creation_pending(
-                    self.content_ui.pending_poll,
-                    self.snapshot
-                        .selected
-                        .filter(|_| self.content_scope_current()),
-                    self.snapshot.content_panel.poll_state,
-                ) {
-                    Availability::pending()
-                } else {
-                    (available && !busy && self.poll_draft(cx).is_some()).into()
-                },
-                LocalAction::Content(Action::SubmitPoll),
-                cx,
-            ),
-        );
         let status = match self.snapshot.content_panel.poll_state {
             RemoteState::Failed(request, _) if request != RequestId(0) => {
                 Some("Die Umfrage konnte nicht gespeichert werden. Dein Entwurf bleibt erhalten.")
@@ -2022,6 +2022,62 @@ impl Desktop {
             | RemoteState::Failed(_, _) => None,
         };
         body.when_some(status, |d, s| d.child(self.hint(self.l(s))))
+    }
+
+    pub(super) fn poll_creation_footer(&self, cx: &Context<Self>) -> Div {
+        let busy = self.poll_submission_blocked();
+        let online = self.snapshot.content == ContentState::Ready && !self.media_offline();
+        let valid = self.poll_draft(cx).is_some();
+        let available = self.content_scope_current()
+            && online
+            && self.snapshot.content_panel.poll_create.enabled();
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_6()
+            .py_3()
+            .border_t_1()
+            .border_color(self.theme.border)
+            .child(div().when(
+                self.snapshot.content_panel.poll_drafts_manage.enabled(),
+                |d| {
+                    d.child(self.button(
+                        "poll-save-draft",
+                        "Als Entwurf speichern",
+                        ButtonStyle::Quiet,
+                        !busy
+                            && online
+                            && valid
+                            && (self.content_ui.editing_draft.is_none()
+                                || self.snapshot.content_panel.poll_drafts_edit.enabled()),
+                        LocalAction::Content(Action::SaveDraft),
+                        cx,
+                    ))
+                },
+            ))
+            .child(
+                self.button(
+                    "poll-submit",
+                    "Veröffentlichen",
+                    ButtonStyle::Primary,
+                    if poll_creation_pending(
+                        self.content_ui.pending_poll,
+                        self.snapshot
+                            .selected
+                            .filter(|_| self.content_scope_current()),
+                        self.snapshot.content_panel.poll_state,
+                    ) {
+                        Availability::pending()
+                    } else {
+                        (available && !busy && valid).into()
+                    },
+                    LocalAction::Content(Action::SubmitPoll),
+                    cx,
+                ),
+            )
     }
     pub(super) fn poll_card(&self, id: u64, cx: &Context<Self>) -> Div {
         let Some(poll) = self
@@ -2230,16 +2286,24 @@ impl Desktop {
             }
             body = body.child(row);
         }
-        if !poll.closed && poll.vote.enabled() {
+        let changed_vote = self
+            .content_ui
+            .selections
+            .iter()
+            .find(|(id, _)| *id == poll.id);
+        if !poll.closed && poll.vote.enabled() && changed_vote.is_some() {
             body = body.child(
                 self.button(
                     ("poll-vote-submit", poll.id as usize),
                     if self.content_ui.vote_error == Some(poll.id) {
                         "Erneut abstimmen"
+                    } else if changed_vote.is_some_and(|(_, choices)| choices.as_slice().is_empty())
+                    {
+                        "Stimme zurückziehen"
                     } else {
-                        "Stimme abgeben"
+                        "Abstimmen"
                     },
-                    ButtonStyle::Secondary,
+                    ButtonStyle::Primary,
                     !self.poll_submission_blocked()
                         && self.snapshot.content == ContentState::Ready
                         && !self.media_offline()
@@ -2328,8 +2392,9 @@ impl Desktop {
                 }
             }
         }
+        let mut secondary = div().flex().flex_wrap().items_center().gap_1();
         if !full {
-            body = body.child(self.button(
+            secondary = secondary.child(self.button(
                 ("poll-details", poll.id as usize),
                 "Details und Ergebnisse",
                 ButtonStyle::Quiet,
@@ -2340,7 +2405,7 @@ impl Desktop {
         }
         if !poll.closed && poll.close.enabled() {
             if self.content_ui.confirm_close == Some(poll.id) {
-                body = body
+                secondary = secondary
                     .child(self.hint(self.l("Umfrage wirklich beenden?")))
                     .child(self.button(
                         ("poll-close-confirm", poll.id as usize),
@@ -2359,7 +2424,7 @@ impl Desktop {
                         cx,
                     ));
             } else {
-                body = body.child(self.button(
+                secondary = secondary.child(self.button(
                     ("close-poll", poll.id as usize),
                     "Umfrage beenden",
                     ButtonStyle::Quiet,
@@ -2369,7 +2434,7 @@ impl Desktop {
                 ));
             }
         }
-        body
+        body.child(secondary)
     }
 }
 
