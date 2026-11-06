@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Real macOS signing contract: two app versions, one disposable internal signer.
 
-Does not run the app, request OS permissions or change the default keychain.
-Only the newly generated fixture certificate can receive temporary runner-local
-code-signing trust; teardown removes it. This does not qualify TCC behavior.
+Does not run the app, request OS permissions, install trust or change the default
+keychain. It proves native import/sealing/requirement continuity, not TCC behavior.
 """
 import base64
 import importlib.util
@@ -28,6 +27,7 @@ def code_command(arguments):
     # decrypted keys; credential-bearing setup keeps its redacted error route.
     phase = "sign" if "--sign" in arguments else "verify"
     print("Native signing contract: " + phase, flush=True)
+    print("Public fixture invocation: " + " ".join(map(str, arguments)), flush=True)
     try:
         return macos_runtime.run(arguments, timeout=30)
     except (ValueError, subprocess.SubprocessError) as error:
@@ -49,23 +49,13 @@ def check():
         os.environ.update({"MACOS_CERTIFICATE_P12_BASE64": base64.b64encode((backup / "identity.p12").read_bytes()).decode(),
             "MACOS_CERTIFICATE_PASSWORD": (backup / "password").read_text(), "MACOS_SIGNING_MODE": "internal",
             "MACOS_SIGNING_CERTIFICATE": fingerprint, "MACOS_SIGNING_TEAM": "", "GITHUB_ENV": str(root / "env")})
-        trusted = False
         try:
             ci.prepare()
             for line in (root / "env").read_text().splitlines():
                 name, value = line.split("=", 1)
                 os.environ[name] = value
             valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
-            print("Fixture identity valid for code signing before trust: " + str(fingerprint in valid), flush=True)
-            if fingerprint not in valid:
-                if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "macOS":
-                    raise ValueError("Temporary fixture trust requires an isolated macOS Actions runner")
-                print("Adding temporary code-signing-only trust for the disposable fixture", flush=True)
-                macos_runtime.run(["sudo", "-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "codeSign",
-                    "-k", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"], str(backup / "certificate.pem")])
-                trusted = True
-                valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
-                print("Fixture identity valid for code signing after scoped trust: " + str(fingerprint in valid), flush=True)
+            print("Fixture has system-trusted code-signing identity: " + str(fingerprint in valid), flush=True)
             requirements = []
             for version in (1, 2):
                 app = root / ("Version" + str(version) + ".app")
@@ -92,15 +82,11 @@ def check():
                 raise ValueError("The designated requirement changed between application versions")
         finally:
             try:
-                if trusted:
-                    macos_runtime.run(["sudo", "-n", "security", "remove-trusted-cert", "-d", str(backup / "certificate.pem")], timeout=30)
+                if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
+                    ci.cleanup(Path(directory))
             finally:
-                try:
-                    if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
-                        ci.cleanup(Path(directory))
-                finally:
-                    for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):
-                        os.environ.pop(name, None)
+                for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):
+                    os.environ.pop(name, None)
     print("Native internal-signing import, version continuity and wrong-signer rejection passed; no OS permission qualification.")
 
 

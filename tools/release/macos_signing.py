@@ -64,15 +64,16 @@ def sign(path, run, *, application=False):
     if not config:
         run(["codesign", "--force", "--sign", "-", "--timestamp=none", path])
         return
-    args = ["codesign", "--force", "--sign", config["identity"]]
+    args = ["codesign", "--force"]
+    if config["keychain"]:
+        args += ["--keychain", config["keychain"]]
+    args += ["--sign", config["identity"]]
     if config["mode"] == "developer-id":
         args += ["--options", "runtime", "--timestamp"]
     else:
         # Preserve the alpha runtime profile. A self-signed certificate cannot
         # supply the Apple Team ID required by hardened library validation.
         args += ["--timestamp=none"]
-    if config["keychain"]:
-        args += ["--keychain", config["keychain"]]
     if application:
         args += ["--identifier", IDENTIFIER, "--entitlements", Path(__file__).with_name("macos-entitlements.plist")]
         if config["mode"] == "internal":
