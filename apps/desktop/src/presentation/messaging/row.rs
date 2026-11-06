@@ -70,7 +70,21 @@ impl Desktop {
                     .child(self.hint(m.time_label.as_str())),
             );
         }
-        let delivery = self.message_delivery(m);
+        let upload = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+            .and_then(|p| {
+                p.uploads.as_slice().iter().find(|f| {
+                    f.submitted && f.server_message.is_none() && f.message_id() == m.local_id
+                })
+            });
+        let delivery = if upload.is_some() {
+            None
+        } else {
+            self.message_delivery(m)
+        };
         let pinned = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
             panel.context == context
                 && panel
@@ -130,7 +144,8 @@ impl Desktop {
             );
         if m.metadata.deleted {
             content = content.child(self.hint(self.l("Nachricht gelöscht.")));
-        } else if !self.bare_attachment_body(m) {
+        } else if !self.bare_attachment_body(m) && (upload.is_none() || !m.body.as_str().is_empty())
+        {
             content = content.child(
                 div().flex().items_start().gap_2().pr(px(76.)).child(
                     div()
@@ -144,6 +159,9 @@ impl Desktop {
                         }),
                 ),
             );
+        }
+        if let Some(upload) = upload {
+            content = content.child(self.pending_upload_card(context, upload, cx));
         }
         let media = self.media_attachments(m);
         if !m.metadata.deleted && !media.is_empty() {
@@ -327,7 +345,7 @@ impl Desktop {
                 // Hover/menu controls never enter the message's flex layout.
                 // Revealing them cannot move text, metadata or delivery status.
                 .when(
-                    !m.metadata.deleted && self.media_span(m.local_id).is_none(),
+                    !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none(),
                     |d| {
                         d.child(
                         div()

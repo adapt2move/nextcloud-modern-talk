@@ -19,6 +19,17 @@ fn eligible(account: &talk_adapters::identity::ConnectionAccount) -> bool {
 }
 
 impl Restoration {
+    pub(super) fn connecting(&self, account: &talk_adapters::identity::ConnectionAccount) -> bool {
+        account.state == SavedAccountState::Restoring
+            || eligible(account)
+                && (!self.planned
+                    || self
+                        .queue
+                        .iter()
+                        .any(|(id, _)| *id == account.summary.account))
+                && self.deadline.is_none_or(|at| Instant::now() < at)
+    }
+
     fn next(
         &mut self,
         snapshot: &ConnectionSnapshot,
@@ -106,6 +117,27 @@ mod tests {
     use talk_adapters::identity::{AccountPhase, ConnectionAccount};
     use talk_core::identity::{ProviderBinding, QualifiedItem};
     use talk_core::ids::{ProfileId, RuntimeGeneration, VaultGeneration};
+
+    #[test]
+    fn connecting_is_visible_only_while_a_qualified_restore_is_planned_or_running() {
+        let mut plan = Restoration::default();
+        let mut account = saved(1);
+        assert!(plan.connecting(&account));
+        assert_eq!(
+            plan.next(&ready([account.clone()]), Instant::now()),
+            candidate(1)
+        );
+        assert!(plan.connecting(&account));
+        plan.settled(account.summary.account);
+        assert!(
+            !plan.connecting(&account),
+            "failed/completed admissions do not stay connecting"
+        );
+        account.state = SavedAccountState::Restoring;
+        assert!(plan.connecting(&account));
+        account.state = SavedAccountState::RecoveryRequired;
+        assert!(!plan.connecting(&account));
+    }
 
     fn saved(id: u128) -> ConnectionAccount {
         let account = AccountId::from_local(id);

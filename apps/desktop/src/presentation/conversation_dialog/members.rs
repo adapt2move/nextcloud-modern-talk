@@ -423,8 +423,10 @@ impl Desktop {
                 .iter()
                 .find(|account| account.scope == context.account)
                 .is_some_and(|account| {
-                    account.connection != AccountConnectionState::Disconnected
-                        && account.connection_failure.is_none()
+                    matches!(
+                        account.connection,
+                        AccountConnectionState::Connected | AccountConnectionState::Guest
+                    ) && account.connection_failure.is_none()
                 })
     }
     pub(super) fn bots_available(&self) -> Availability {

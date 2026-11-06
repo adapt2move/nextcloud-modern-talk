@@ -389,12 +389,15 @@ async fn binary_limits_and_create_only_conflict_do_not_weaken_json_or_replay() {
         ErrorKind::TooLarge
     );
     assert_eq!(server.count(), 0);
+    let progress = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observe = progress.clone();
     assert_eq!(
-        c.upload_file(
+        c.upload_file_progress(
             &context(&r),
             files::FilePath::parse("/file").unwrap(),
             std::io::Cursor::new(b"content".to_vec()),
-            7
+            7,
+            std::sync::Arc::new(move |bytes, total| observe.lock().unwrap().push((bytes, total))),
         )
         .await
         .err()
@@ -403,6 +406,14 @@ async fn binary_limits_and_create_only_conflict_do_not_weaken_json_or_replay() {
         ErrorKind::Conflict
     );
     assert_eq!(server.count(), 1);
+    let progress = progress.lock().unwrap();
+    assert_eq!(progress.first(), Some(&(0, Some(7))));
+    assert_eq!(progress.last(), Some(&(7, Some(7))));
+    assert!(
+        progress
+            .windows(2)
+            .all(|pair| pair[0].0 <= pair[1].0 && pair[1].0 <= 7)
+    );
     for path in [
         "/../secret",
         "/folder//file",

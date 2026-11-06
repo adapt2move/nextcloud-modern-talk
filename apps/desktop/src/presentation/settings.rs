@@ -567,6 +567,21 @@ impl Desktop {
             content = content.child(switcher);
             let mut accounts = self.dialog_section(None).gap_0();
             for a in self.snapshot.accounts.as_slice() {
+                use talk_core::ui::presentation::{AccountConnectionState, SavedAccountPhase};
+                let saved = self
+                    .snapshot
+                    .saved_accounts
+                    .as_slice()
+                    .iter()
+                    .find(|s| s.id == a.scope.account);
+                let restore = saved.filter(|s| {
+                    a.connection == AccountConnectionState::Disconnected
+                        && matches!(
+                            s.phase,
+                            SavedAccountPhase::Dormant
+                                | SavedAccountPhase::ReauthenticationRequired
+                        )
+                });
                 accounts = accounts.child(
                     div()
                         .flex()
@@ -599,27 +614,38 @@ impl Desktop {
                                     super::state::connection_failure_copy(failure).1
                                 } else { match a.connection {
                                     talk_core::ui::presentation::AccountConnectionState::Connected => "Verbunden",
+                                    talk_core::ui::presentation::AccountConnectionState::Connecting => "Konto wird verbunden …",
                                     talk_core::ui::presentation::AccountConnectionState::Guest => "Gastzugang",
                                     talk_core::ui::presentation::AccountConnectionState::Disconnected => "Nicht verbunden",
-                                }}))),
+                                }})))
+                                .when_some(saved.and_then(|s| s.failure), |d, failure| d.child(
+                                    self.hint(self.l(super::state::login_failure_detail(failure))))),
                         )
                         .child(
                             self.button(
                                 super::focus::account_id("account", a.scope),
-                                if Some(a.scope) == self.snapshot.active_account {
+                                if restore.is_some() {
+                                    "Verbinden"
+                                } else if a.connection == AccountConnectionState::Connecting {
+                                    "Konto wird verbunden …"
+                                } else if Some(a.scope) == self.snapshot.active_account {
                                     "Ausgewählt"
                                 } else {
                                     "Öffnen"
                                 },
                                 ButtonStyle::Secondary,
                                 Availability::when(
-                                    Some(a.scope) != self.snapshot.active_account,
+                                    restore.is_some() || Some(a.scope) != self.snapshot.active_account,
                                     "Dieses Konto ist bereits ausgewählt.",
                                 )
                                 .below_control(),
-                                LocalAction::Intent(
+                                if let Some(saved) = restore {
+                                    if saved.phase == SavedAccountPhase::ReauthenticationRequired {
+                                        LocalAction::Reauthenticate(saved.id)
+                                    } else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::RestoreAccount(saved.id)) }
+                                } else { LocalAction::Intent(
                                     talk_core::ui::presentation::UiIntent::SelectAccount(a.scope),
-                                ),
+                                ) },
                                 cx,
                             ),
                         )
@@ -630,13 +656,15 @@ impl Desktop {
                             LocalAction::RemoveAccount(a.scope.account, Some(a.scope)), cx)),
                 );
             }
-            for saved in self
-                .snapshot
-                .saved_accounts
-                .as_slice()
-                .iter()
-                .filter(|a| a.phase != talk_core::ui::presentation::SavedAccountPhase::Active)
-            {
+            for saved in self.snapshot.saved_accounts.as_slice().iter().filter(|a| {
+                a.phase != talk_core::ui::presentation::SavedAccountPhase::Active
+                    && !self
+                        .snapshot
+                        .accounts
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.scope.account == a.id)
+            }) {
                 use talk_core::ui::presentation::SavedAccountPhase;
                 let status = match saved.phase {
                     SavedAccountPhase::Dormant => "Gespeichert · nicht verbunden",
@@ -927,9 +955,9 @@ impl Desktop {
                                 d.child(
                                     div()
                                         .absolute()
-                                        .right(px(-2.))
-                                        .bottom(px(-2.))
-                                        .size(px(20.))
+                                        .right(px(7.))
+                                        .bottom(px(7.))
+                                        .size(px(16.))
                                         .rounded_full()
                                         .bg(t.surface)
                                         .border_1()
@@ -939,7 +967,7 @@ impl Desktop {
                                         .justify_center()
                                         .child(icon(
                                             if dark { "moon" } else { "sun" },
-                                            14.,
+                                            11.,
                                             t.text,
                                         )),
                                 )

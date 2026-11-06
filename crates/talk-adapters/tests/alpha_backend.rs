@@ -779,6 +779,7 @@ async fn released_server_messaging_and_room_controls() {
         M::UploadFile {
             local_path: text(local.to_str().unwrap()),
             name: text("alpha-file.txt"),
+            progress: talk_core::protocol::content::TransferProgress::default(),
         },
     )
     .await

@@ -64,6 +64,8 @@ pub struct MessageMetadata {
     /// Opaque correlation for the local outbox and a validated own-message
     /// reference. It never establishes identity from text or timestamps.
     pub local_operation: Option<u128>,
+    /// Session-local admission order for pending text and attachment rows.
+    pub local_order: Option<u64>,
     /// Opaque, room-scoped actor identity; display names do not identify senders.
     /// Missing or oversized protocol identities deliberately prevent grouping.
     pub author_key: Option<Text<256>>,
@@ -93,6 +95,7 @@ impl Default for MessageMetadata {
     fn default() -> Self {
         Self {
             local_operation: None,
+            local_order: None,
             author_key: None,
             expires_at: None,
             timestamp: 0,
@@ -155,6 +158,8 @@ pub enum UploadState {
     Selected,
     Uploading,
     Sharing,
+    Confirming,
+    Shared,
     Failed(UploadFailure),
     Uncertain,
 }
@@ -164,6 +169,19 @@ pub struct UploadView {
     pub name: Text<255>,
     pub bytes: Option<u64>,
     pub state: UploadState,
+    pub submitted: bool,
+    pub transferred: u64,
+    pub uploaded: bool,
+    /// A reference-correlated canonical message, never guessed from its name.
+    pub server_message: Option<u128>,
+}
+impl UploadView {
+    pub fn message_id(&self) -> u128 {
+        (1u128 << 126) | u128::from(self.id)
+    }
+    pub fn is_message_id(id: u128) -> bool {
+        id & !u128::from(u64::MAX) == 1u128 << 126
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextLoad {
@@ -211,6 +229,8 @@ pub struct MessagePanel {
     pub uploaded: Option<UploadedFile>,
     pub uploads: Page<UploadView, 8>,
     pub uploads_running: bool,
+    /// Local batch admission; the composer may clear without claiming delivery.
+    pub files_queued: Option<RequestId>,
     pub files_sent: Option<RequestId>,
     pub file_error: Option<UploadFailure>,
     pub upload_name: Option<Text<255>>,
@@ -256,6 +276,7 @@ impl MessagePanel {
             uploaded: None,
             uploads: Page::empty(),
             uploads_running: false,
+            files_queued: None,
             files_sent: None,
             file_error: None,
             upload_name: None,

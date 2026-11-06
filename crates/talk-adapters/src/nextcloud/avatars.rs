@@ -1,15 +1,28 @@
 //! Canonical account-local avatar identities, independent of message/row IDs.
-//! Encoded images only: 128 entries / 8 MiB in memory, 24-hour freshness. Room
+//! Profile images: 128 entries / 8 MiB in memory, seven-day offline retention. Room
 //! policy is checked by content before lookup; a cache hit grants no authority.
 use sha2::{Digest, Sha256};
 
-pub(crate) const TTL: u64 = 24 * 60 * 60;
+pub(crate) const TTL: u64 = 7 * 24 * 60 * 60;
 const ENTRIES: usize = 128;
 const BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Clone)]
+pub(crate) struct Profile {
+    pub name: Option<talk_core::bounded::Text<256>>,
+    pub organization: Option<talk_core::bounded::Text<256>>,
+    pub saved_at: u64,
+}
 
 /// The identity owner installs this only for a durably eligible account. Errors
 /// disable disk caching for this client, retaining the ordinary network path.
 pub(crate) trait AvatarStore: Send + Sync {
+    fn profile(&mut self, _now: u64) -> Result<Option<Profile>, ()> {
+        Ok(None)
+    }
+    fn put_profile(&mut self, _profile: &Profile) -> Result<(), ()> {
+        Ok(())
+    }
     fn get(&mut self, key: &str, now: u64) -> Result<Option<(Vec<u8>, u64)>, ()>;
     fn put(&mut self, key: &str, bytes: &[u8], now: u64) -> Result<(), ()>;
     fn remove(&mut self, key: &str) -> Result<(), ()>;
@@ -19,6 +32,7 @@ pub(crate) trait AvatarStore: Send + Sync {
 #[derive(Default)]
 pub(super) struct Avatars {
     entries: Vec<(String, Vec<u8>, u64)>,
+    profile: Option<Profile>,
     pub(super) store: Option<Box<dyn AvatarStore>>,
 }
 pub(super) fn key(kind: &str, identity: &str) -> String {
@@ -36,6 +50,32 @@ pub(super) fn canonical_identity(kind: &str, identity: &str) -> [u8; 32] {
     hash.finalize().into()
 }
 impl Avatars {
+    pub(super) fn profile(&mut self, now: u64) -> Option<Profile> {
+        if self
+            .profile
+            .as_ref()
+            .is_some_and(|p| !fresh(p.saved_at, now))
+        {
+            self.profile = None;
+        }
+        if self.profile.is_none()
+            && let Some(store) = self.store.as_mut()
+        {
+            match store.profile(now) {
+                Ok(profile) => self.profile = profile.filter(|p| fresh(p.saved_at, now)),
+                Err(()) => self.disable_disk(),
+            }
+        }
+        self.profile.clone()
+    }
+    pub(super) fn put_profile(&mut self, profile: Profile) {
+        if let Some(store) = self.store.as_mut()
+            && store.put_profile(&profile).is_err()
+        {
+            self.disable_disk();
+        }
+        self.profile = Some(profile);
+    }
     /// A complete fresh room list is the only source with removal authority.
     /// Hash namespaces let disk cleanup work across process restarts without
     /// persisting room tokens or an additional identity map.

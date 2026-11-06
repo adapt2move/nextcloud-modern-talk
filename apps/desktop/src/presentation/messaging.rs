@@ -1968,25 +1968,7 @@ impl Desktop {
     }
     pub(super) fn composer_context(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
         // The composer owns row spacing; absent context must not leave empty flex items.
-        let show_transfer = self
-            .snapshot
-            .content_panel
-            .transfer
-            .as_ref()
-            .is_some_and(|transfer| {
-                matches!(
-                    transfer.state,
-                    talk_core::ui::content::DownloadState::Transferring
-                        | talk_core::ui::content::DownloadState::Committing
-                        | talk_core::ui::content::DownloadState::Failed(_)
-                )
-            });
-        let mut rows: Vec<_> = show_transfer
-            .then(|| self.download_status(cx))
-            .flatten()
-            .into_iter()
-            .map(|status| status.into_any_element())
-            .collect();
+        let mut rows = Vec::new();
         let Some(context) = self.snapshot.selected else {
             return rows;
         };

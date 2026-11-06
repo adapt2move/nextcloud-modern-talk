@@ -348,6 +348,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
             M::UploadFile {
                 local_path: text(local.to_str().unwrap()),
                 name: text(name),
+                progress: talk_core::protocol::content::TransferProgress::default(),
             },
         )
         .await

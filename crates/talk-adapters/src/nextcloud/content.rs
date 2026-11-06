@@ -70,6 +70,7 @@ impl NextcloudClient {
         command: ContentCommand,
         caps: &Capabilities,
     ) -> Result<ContentResult, PortError> {
+        let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
             ContentCommand::Video {
                 message,
@@ -103,12 +104,23 @@ impl NextcloudClient {
                     VideoBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
                 ))
             }
-            ContentCommand::SelfProfile => {
+            ContentCommand::SelfProfile | ContentCommand::RevalidateProfile => {
+                let now = messaging::now_unix();
+                if matches!(command, ContentCommand::SelfProfile)
+                    && let Some(profile) = self.avatars.profile(now)
+                {
+                    self.transport.validate(c)?;
+                    return Ok(ContentResult::SelfProfile {
+                        name: profile.name,
+                        organization: profile.organization,
+                        saved_at: profile.saved_at,
+                    });
+                }
                 let reply = self.transport.api_request(c, api::Request::Account).await?;
                 let api::Reply::Account(profile) = reply else {
                     return Err(self.error(ErrorKind::Malformed));
                 };
-                Ok(ContentResult::SelfProfile {
+                let profile = avatars::Profile {
                     name: profile
                         .display_name
                         .as_deref()
@@ -121,6 +133,14 @@ impl NextcloudClient {
                         .map(Text::new)
                         .transpose()
                         .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                    saved_at: now,
+                };
+                self.transport.validate(c)?;
+                self.avatars.put_profile(profile.clone());
+                Ok(ContentResult::SelfProfile {
+                    name: profile.name,
+                    organization: profile.organization,
+                    saved_at: profile.saved_at,
                 })
             }
             ContentCommand::OpenCloud {
@@ -139,7 +159,10 @@ impl NextcloudClient {
                     Text::new(&link).map_err(|_| self.error(ErrorKind::TooLarge))?,
                 ))
             }
-            ContentCommand::Asset(request) => {
+            ContentCommand::Asset(request) | ContentCommand::RevalidateAvatar(request) => {
+                if revalidate && matches!(request, AssetRequest::Attachment { .. }) {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
                 use api::content::ImageRequest as I;
                 let mut durable = true;
                 let mut room_key = None;
@@ -240,7 +263,9 @@ impl NextcloudClient {
                 };
                 self.transport.validate(c)?;
                 let now = messaging::now_unix();
-                let (bytes, saved_at) = if let Some(cached) = self.avatars.get(&key, now, durable) {
+                let (bytes, saved_at) = if let Some(cached) =
+                    self.avatars.get(&key, now, durable).filter(|_| !revalidate)
+                {
                     cached
                 } else {
                     let bytes = self.transport.image(c, image).await?;

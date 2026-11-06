@@ -471,7 +471,9 @@ async fn runtime_logout_is_priority_and_late_flow_cannot_activate() {
     runtime.logout(account).unwrap();
     wait_phase(&runtime, account, AccountPhase::Disconnected).await;
     assert!(pending.wait().await.is_err());
-    drop(queued);
+    for queued in queued {
+        assert!(queued.wait().await.is_err());
+    }
     assert!(matches!(
         command(
             &runtime,
@@ -1584,7 +1586,7 @@ fn connected_history_survives_restart_without_restoring_authority() {
 #[test]
 fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
     use super::avatars::Store;
-    use crate::nextcloud::avatars::{AvatarStore, TTL};
+    use crate::nextcloud::avatars::{AvatarStore, Profile, TTL};
     use std::sync::Mutex;
     let fixture = Fixture::new();
     let mut ledger = fixture.ledger();
@@ -1613,6 +1615,17 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
     let mut b = Store::new(ledger.clone(), accounts[1]);
     let mut temporary = Store::new(ledger.clone(), session);
     let key = format!("u-{:064x}", 159);
+    let profile = Profile {
+        name: Some(talk_core::bounded::Text::new("Synthetic person").unwrap()),
+        organization: Some(talk_core::bounded::Text::new("Synthetic organization").unwrap()),
+        saved_at: 100,
+    };
+    assert!(temporary.put_profile(&profile).is_err());
+    a.put_profile(&profile).unwrap();
+    assert!(
+        b.profile(101).unwrap().is_none(),
+        "profile metadata is account scoped too"
+    );
     assert!(temporary.put(&key, b"temporary", 100).is_err());
     a.put(&key, b"account-a", 100).unwrap();
     b.put(&key, b"account-b", 100).unwrap();
@@ -1630,6 +1643,16 @@ fn avatar_disk_cache_is_account_scoped_durable_bounded_and_removed_on_logout() {
     let ledger = Arc::new(Mutex::new(fixture.ledger()));
     let mut a = Store::new(ledger.clone(), accounts[0]);
     let mut b = Store::new(ledger.clone(), accounts[1]);
+    assert_eq!(
+        a.profile(103).unwrap().unwrap().name.unwrap().as_str(),
+        "Synthetic person"
+    );
+    assert!(a.profile(100 + TTL).unwrap().is_none());
+    b.put_profile(&profile).unwrap();
+    assert!(
+        b.profile(99).unwrap().is_none(),
+        "clock rollback also expires profile metadata"
+    );
     assert_eq!(a.get(&key, 103).unwrap().unwrap().0, b"after-eviction");
     let lost_room = format!("r-{:064x}", 1);
     let retained_room = format!("r-{:064x}", 2);

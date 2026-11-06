@@ -38,6 +38,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Attachment selection supports up to eight files and sequential upload/share,
   limited to 32 MiB each before any stricter server limit. Unsent paths are
   session-local and retire on a room/account change or after thirty minutes.
+  Submission creates immediate session-local chat rows with inline upload
+  progress; a reference-correlated own message replaces each row after sharing.
+  Lost share acknowledgements are reconciled by reading history, never replaying
+  that share. These pending attachment intents are not durable across restart.
+  Local raster previews use the same bounded decoder and stay out of disk caches.
   Attachment paste and sending in reply/thread/silent modes remain unsupported.
   Native outgoing file drags use AppKit file promises on macOS and still need
   Finder qualification; Linux and Windows use the Download action.
@@ -52,7 +57,7 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   remain incomplete. Unknown notification eligibility stays suppressed.
   macOS Notifications settings now separate local choices from observed OS
   authorization and offer an explicit first request or denial guidance. The
-  packaged permission prompt and its identity in System Settings still require
+  main-process permission prompt and delivery through the bundled notification helper still require
   native Mac qualification; Linux fixtures and macOS compilation do not prove it.
   macOS window closing keeps the application services alive; native close/reopen
   and notification reception with a hidden window still need Mac qualification.
@@ -74,7 +79,14 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Platforms
 
-- The macOS app is ad-hoc signed and is not notarized. See the
+- macOS publication requires a persistent signing identity: an internal alpha
+  certificate pinned to the app identifier, or a Developer ID Application
+  certificate verified against its Apple team. The internal mode provides no
+  Developer ID, hardened runtime or notarization. Non-publishing CI packages and
+  releases through v0.0.10 remain ad-hoc signed. Moving from an old ad-hoc build,
+  or later changing the signer, can require a new Keychain/TCC approval. Permission
+  retention across updates still needs native qualification; no trust settings,
+  credential ACLs or TCC databases are changed. See the
   [first-launch instructions](install.md#first-launch-blocked-by-macos).
 - Mac CI checks compilation, package structure, native library paths and
   signatures. Native login, permissions, devices, PDF rendering and update installation still

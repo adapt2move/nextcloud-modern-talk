@@ -16,6 +16,7 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+import macos_signing
 import time
 import urllib.request
 
@@ -291,7 +292,7 @@ def relocate(path, info, physical, libraries):
         args += ["-id", "@rpath/" + path.name]
     if len(args) > 1:
         run([*args, path])
-    run(["codesign", "--force", "--sign", "-", "--timestamp=none", path])
+    macos_signing.sign(path, run)
     run(["codesign", "--verify", "--strict", path])
 
 
@@ -428,7 +429,7 @@ def collect_sources(root, stage, files):
         "The LGPL-covered libraries remain dynamically replaceable. Their license "
         "terms, including modification and debugging rights, are preserved. "
         "Modified native code requires fresh local code signatures on macOS. "
-        "This app has no Developer ID signature and is not notarized.\n"
+        "Application signing: " + macos_signing.description() + ".\n"
     )
     return {"lock_sha256": sha(lock_path), "source_bytes": total, "sources": lock["sources"]}
 
@@ -472,7 +473,7 @@ def prepare(root, stage, temporary):
         "plugins": PLUGINS,
         "plugin_usage_sources": ["crates/talk-adapters/src/media/codecs.rs", "apps/desktop/src/devices/camera.rs", "apps/desktop/src/composition/content_video/pipeline.rs"],
         "files": records, "source_distribution": sources,
-        "modifications": "arm64 thinning, loader-relative install names, removed runpaths, ad-hoc signing",
+        "modifications": "arm64 thinning, loader-relative install names, removed runpaths; " + macos_signing.description(),
         "qualification": "structural inspection only; no application, plugin or scanner execution",
     }
     (stage / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")

@@ -2,6 +2,8 @@
 //! One thread owns storage and startup effects, with one replaceable desired slot.
 //! No per-click threads, unbounded channels, credentials or account restoration.
 mod interaction;
+#[cfg(target_os = "macos")]
+mod macos_access;
 mod native_process;
 pub mod notifications;
 pub mod permissions;

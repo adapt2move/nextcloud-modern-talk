@@ -220,132 +220,80 @@ fn platform(
         native_process::launch(&mut command, Duration::from_secs(3), cancelled)?;
         return Ok(None); // Opening Settings is not a grant. A fresh Check is required.
     }
-    if cfg!(target_os = "macos") {
-        #[cfg(target_os = "macos")]
-        if kind == PermissionKind::ScreenSharing && intent.action == PermissionAction::Check {
-            // Observe the desktop process, not a freshly launched helper that may
-            // see a grant before the desktop restarts. Preflight never prompts.
-            let status = screen_status(core_graphics::access::ScreenCaptureAccess.preflight());
-            let mut value = mac_observation(kind, status);
-            value.can_request &= native_process::mac_helper().is_ok();
-            return Ok(Some(value));
-        }
-        // macos-privacy 0.1.0 maps unknown AVFoundation values to NotDetermined
-        // and cannot retire its retained request callback on cancellation. Keep
-        // exact AV status mapping and kill/reap ownership in the bounded helper.
-        let helper = match native_process::mac_helper() {
-            Ok(helper) => helper,
-            Err(_) => {
-                return Ok(Some(PermissionObservation {
-                    kind,
-                    status: PermissionStatus::Unavailable,
-                    guidance: PermissionGuidance::HelperUnavailable,
-                    can_request: false,
-                    can_open_settings: true,
-                }));
-            }
+    #[cfg(target_os = "macos")]
+    {
+        let native_kind = match kind {
+            PermissionKind::Microphone => gpui::MacPermissionKind::Microphone,
+            PermissionKind::Camera => gpui::MacPermissionKind::Camera,
+            PermissionKind::ScreenSharing => gpui::MacPermissionKind::Screen,
         };
-        let name = match kind {
-            PermissionKind::Microphone => "microphone",
-            PermissionKind::Camera => "camera",
-            PermissionKind::ScreenSharing => "screen",
-        };
-        let action = if intent.action == PermissionAction::Request {
-            "request"
-        } else {
-            "check"
-        };
-        let output = native_process::capture(
-            Command::new(helper).args(["permission", name, action]),
-            Duration::from_secs(120),
+        let status = super::macos_access::observe(
+            native_kind,
+            intent.action == PermissionAction::Request,
             cancelled,
         )?;
-        let status = helper_status(&output)?;
-        #[cfg(target_os = "macos")]
-        if kind == PermissionKind::ScreenSharing {
-            // A successful prompt in the helper does not grant this process access.
-            return Ok(Some(mac_screen_observation(
-                status,
-                core_graphics::access::ScreenCaptureAccess.preflight(),
-            )));
+        let mut observation = mac_observation(kind, native_status(status));
+        if status == gpui::MacPermissionStatus::RestartRequired {
+            observation.guidance = PermissionGuidance::RestartRequired;
+            observation.can_request = false;
         }
-        return Ok(Some(mac_observation(kind, status)));
+        return Ok(Some(observation));
     }
-    if intent.action == PermissionAction::Request {
-        return Err(PermissionError::Unsupported);
-    }
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     {
-        if kind == PermissionKind::ScreenSharing {
-            return screen::check(cancelled).map(Some);
+        if intent.action == PermissionAction::Request {
+            return Err(PermissionError::Unsupported);
         }
-        let sandboxed =
-            std::path::Path::new("/.flatpak-info").exists() || std::env::var_os("SNAP").is_some();
+        #[cfg(target_os = "linux")]
+        {
+            if kind == PermissionKind::ScreenSharing {
+                return screen::check(cancelled).map(Some);
+            }
+            let sandboxed = std::path::Path::new("/.flatpak-info").exists()
+                || std::env::var_os("SNAP").is_some();
+            Ok(Some(PermissionObservation {
+                kind,
+                status: if sandboxed {
+                    PermissionStatus::Unknown
+                } else {
+                    PermissionStatus::NotRequired
+                },
+                guidance: PermissionGuidance::DeviceAccessCheckedAtOpen,
+                can_request: false,
+                can_open_settings: false,
+            }))
+        }
+        // Windows picker consent is per share, not a durable setting. Without the
+        // admitted native capture adapter no successful IsSupported observation exists.
+        #[cfg(not(target_os = "linux"))]
         Ok(Some(PermissionObservation {
             kind,
-            status: if sandboxed {
-                PermissionStatus::Unknown
+            status: PermissionStatus::Unknown,
+            guidance: if kind == PermissionKind::ScreenSharing {
+                PermissionGuidance::SelectForEachShare
             } else {
-                PermissionStatus::NotRequired
+                PermissionGuidance::SystemSettings
             },
-            guidance: PermissionGuidance::DeviceAccessCheckedAtOpen,
             can_request: false,
-            can_open_settings: false,
+            can_open_settings: cfg!(windows) && kind != PermissionKind::ScreenSharing,
         }))
     }
-    // Windows picker consent is per share, not a durable setting. Without the
-    // admitted native capture adapter no successful IsSupported observation exists.
-    #[cfg(not(target_os = "linux"))]
-    Ok(Some(PermissionObservation {
-        kind,
-        status: PermissionStatus::Unknown,
-        guidance: if kind == PermissionKind::ScreenSharing {
-            PermissionGuidance::SelectForEachShare
-        } else {
-            PermissionGuidance::SystemSettings
-        },
-        can_request: false,
-        can_open_settings: cfg!(windows) && kind != PermissionKind::ScreenSharing,
-    }))
+}
+
+#[cfg(target_os = "macos")]
+fn native_status(status: gpui::MacPermissionStatus) -> PermissionStatus {
+    match status {
+        gpui::MacPermissionStatus::NotDetermined => PermissionStatus::NotDetermined,
+        gpui::MacPermissionStatus::Granted => PermissionStatus::Granted,
+        gpui::MacPermissionStatus::Denied => PermissionStatus::Denied,
+        gpui::MacPermissionStatus::Restricted => PermissionStatus::Restricted,
+        gpui::MacPermissionStatus::Unknown | gpui::MacPermissionStatus::RestartRequired => {
+            PermissionStatus::Unknown
+        }
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn mac_screen_observation(
-    helper: PermissionStatus,
-    desktop_granted: bool,
-) -> PermissionObservation {
-    let mut observation = mac_observation(
-        PermissionKind::ScreenSharing,
-        screen_status(desktop_granted),
-    );
-    if helper == PermissionStatus::Granted && !desktop_granted {
-        observation.guidance = PermissionGuidance::RestartRequired;
-        observation.can_request = false;
-    }
-    observation
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn screen_status(authorized: bool) -> PermissionStatus {
-    // A negative preflight cannot distinguish never-asked, denial or a stale grant.
-    if authorized {
-        PermissionStatus::Granted
-    } else {
-        PermissionStatus::Unknown
-    }
-}
-
-fn helper_status(output: &str) -> Result<PermissionStatus, PermissionError> {
-    match output.trim() {
-        "granted" => Ok(PermissionStatus::Granted),
-        "not-determined" => Ok(PermissionStatus::NotDetermined),
-        "denied" => Ok(PermissionStatus::Denied),
-        "restricted" => Ok(PermissionStatus::Restricted),
-        "unknown" => Ok(PermissionStatus::Unknown),
-        _ => Err(PermissionError::Failed),
-    }
-}
-
 fn mac_observation(kind: PermissionKind, status: PermissionStatus) -> PermissionObservation {
     PermissionObservation {
         kind,

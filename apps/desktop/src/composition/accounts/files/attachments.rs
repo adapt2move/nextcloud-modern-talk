@@ -1,5 +1,7 @@
 //! One selected-room batch (eight paths, thirty minutes) and one native export.
 //! Upload/share writes are sequential; uncertain writes are never replayed.
+mod previews;
+mod projection;
 #[cfg(test)]
 mod tests;
 use super::*;
@@ -24,11 +26,20 @@ struct File {
     local: Text<16384>,
     remote: Option<Text<16384>>,
     view: UploadView,
+    progress: protocol::content::TransferProgress,
+    outgoing: Option<Outgoing>,
+    preview_queued: bool,
+}
+struct Outgoing {
+    request: RequestId,
+    caption: Text<4096>,
+    created: u64,
+    operation: Option<OperationId>,
 }
 struct Batch {
     context: ConversationRef,
     files: Vec<File>,
-    caption: Option<(RequestId, Text<4096>)>,
+    captions: Vec<(RequestId, Text<4096>)>,
     running: bool,
     created: Instant,
 }
@@ -40,15 +51,20 @@ impl Batch {
         let file = self
             .files
             .iter()
-            .find(|file| file.view.state == UploadState::Selected)?;
+            .find(|file| file.view.submitted && file.view.state == UploadState::Selected)?;
         let (step, command) = if let Some(path) = &file.remote {
             (
                 Step::Share,
                 Command::ShareFile {
                     path: path.clone(),
-                    caption: self
-                        .caption
+                    caption: file
+                        .outgoing
                         .as_ref()
+                        .and_then(|outgoing| {
+                            self.captions
+                                .iter()
+                                .find(|(request, _)| *request == outgoing.request)
+                        })
                         .map_or_else(|| text(""), |(_, caption)| caption.clone()),
                 },
             )
@@ -58,6 +74,7 @@ impl Batch {
                 Command::UploadFile {
                     local_path: file.local.clone(),
                     name: file.view.name.clone(),
+                    progress: file.progress.clone(),
                 },
             )
         };
@@ -180,21 +197,24 @@ impl Accounts {
                 return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
             };
             if additions.iter().any(|(prior, _)| prior == path)
-                || self
-                    .attachment_owner
-                    .batch
-                    .as_ref()
-                    .is_some_and(|batch| batch.files.iter().any(|file| file.local == *path))
+                || self.attachment_owner.batch.as_ref().is_some_and(|batch| {
+                    batch
+                        .files
+                        .iter()
+                        .any(|file| file.local == *path && file.view.state != UploadState::Shared)
+                })
             {
                 continue;
             }
             additions.push((path.clone(), name));
         }
-        let old = self
-            .attachment_owner
-            .batch
-            .as_ref()
-            .map_or(0, |batch| batch.files.len());
+        let old = self.attachment_owner.batch.as_ref().map_or(0, |batch| {
+            batch
+                .files
+                .iter()
+                .filter(|f| f.view.state != UploadState::Shared)
+                .count()
+        });
         if old + additions.len() > 8
             || self
                 .attachment_owner
@@ -214,10 +234,20 @@ impl Accounts {
         let batch = self.attachment_owner.batch.get_or_insert_with(|| Batch {
             context,
             files: Vec::new(),
-            caption: None,
+            captions: Vec::new(),
             running: false,
             created: Instant::now(),
         });
+        // Keep confirmed local pixels while the server thumbnail is pending.
+        // Reclaim only the oldest confirmed fallback needed for this selection.
+        while batch.files.len() + additions.len() > 8 {
+            let index = batch
+                .files
+                .iter()
+                .position(|f| f.view.state == UploadState::Shared)
+                .expect("non-confirmed capacity was checked before admission");
+            batch.files.remove(index).progress.cancel();
+        }
         for (local, name) in additions {
             self.attachment_owner.next += 1;
             batch.files.push(File {
@@ -228,13 +258,21 @@ impl Accounts {
                     name,
                     bytes: None,
                     state: UploadState::Selected,
+                    submitted: false,
+                    transferred: 0,
+                    uploaded: false,
+                    server_message: None,
                 },
+                progress: protocol::content::TransferProgress::default(),
+                outgoing: None,
+                preview_queued: false,
             });
         }
         if let Some(panel) = self.snapshot.message_panel.as_mut() {
             panel.file_error = None;
         }
         self.project_uploads();
+        self.queue_upload_previews();
         Ok(())
     }
     pub(in crate::composition::accounts) fn send_files(
@@ -275,12 +313,35 @@ impl Accounts {
         if !batch
             .files
             .iter()
-            .any(|file| file.view.state == UploadState::Selected)
+            .any(|file| !file.view.submitted && file.view.state == UploadState::Selected)
         {
             return Err(SubmitError::StaleScope);
         }
-        batch.caption = Some((request, caption));
+        let mut first = true;
+        for file in batch
+            .files
+            .iter_mut()
+            .filter(|file| !file.view.submitted && file.view.state == UploadState::Selected)
+        {
+            file.view.submitted = true;
+            file.outgoing = Some(Outgoing {
+                request,
+                caption: if first { caption.clone() } else { text("") },
+                created: history::now_unix(),
+                operation: None,
+            });
+            first = false;
+        }
+        batch.captions.push((request, caption));
         batch.running = true;
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_mut()
+            .filter(|p| p.context == context)
+        {
+            panel.files_queued = Some(request);
+        }
         self.project_uploads();
         Ok(())
     }
@@ -298,7 +359,21 @@ impl Accounts {
         if batch.running {
             return Err(SubmitError::Busy);
         }
-        batch.files.retain(|file| file.view.id != id);
+        batch.files.retain(|file| {
+            if file.view.id == id {
+                file.progress.cancel();
+                false
+            } else {
+                true
+            }
+        });
+        batch.captions.retain(|(request, _)| {
+            batch.files.iter().any(|file| {
+                file.outgoing
+                    .as_ref()
+                    .is_some_and(|outgoing| outgoing.request == *request)
+            })
+        });
         self.project_uploads();
         Ok(())
     }
@@ -322,7 +397,7 @@ impl Accounts {
             || batch
                 .files
                 .iter()
-                .any(|file| file.view.state == UploadState::Uncertain)
+                .any(|file| file.view.state == UploadState::Uncertain && file.remote.is_some())
         {
             return Err(SubmitError::Busy);
         }
@@ -331,15 +406,28 @@ impl Accounts {
             .iter_mut()
             .find(|file| file.view.id == id)
             .ok_or(SubmitError::StaleScope)?;
-        if !matches!(file.view.state, UploadState::Failed(_)) {
+        if !matches!(file.view.state, UploadState::Failed(_))
+            && !(file.view.state == UploadState::Uncertain && file.remote.is_none())
+        {
             return Err(SubmitError::StaleScope);
         }
         file.view.state = UploadState::Selected;
+        file.progress.cancel();
+        file.progress = protocol::content::TransferProgress::default();
+        file.preview_queued = false;
+        if let Some(outgoing) = file.outgoing.as_mut() {
+            outgoing.operation = None;
+        }
         batch.running = true;
         self.project_uploads();
         Ok(())
     }
     pub(in crate::composition::accounts) fn clear_attachment_work(&mut self) {
+        if let Some(batch) = self.attachment_owner.batch.as_ref() {
+            for file in &batch.files {
+                file.progress.cancel();
+            }
+        }
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if matches!(pending.purpose, Purpose::Files(_)) {
@@ -485,28 +573,6 @@ impl Accounts {
     pub(in crate::composition::accounts) fn file_export_pending(&self) -> bool {
         self.attachment_owner.export.is_some()
     }
-    fn project_uploads(&mut self) {
-        let mut changed = false;
-        if let Some(panel) = self.snapshot.message_panel.as_mut() {
-            let batch = self
-                .attachment_owner
-                .batch
-                .as_ref()
-                .filter(|batch| batch.context == panel.context);
-            let uploads = page(
-                batch
-                    .into_iter()
-                    .flat_map(|batch| batch.files.iter().map(|file| file.view.clone())),
-            );
-            let running = batch.is_some_and(|batch| batch.running);
-            changed = panel.uploads != uploads || panel.uploads_running != running;
-            panel.uploads = uploads;
-            panel.uploads_running = running;
-        }
-        if changed {
-            self.touch();
-        }
-    }
     pub(in crate::composition::accounts) fn tick_file_work(&mut self) {
         if let Some(export) = self.attachment_owner.export.as_ref() {
             if Instant::now() >= export.deadline + Duration::from_secs(5) {
@@ -526,6 +592,8 @@ impl Accounts {
             self.clear_attachment_work();
             self.project_uploads();
         }
+        self.project_uploads();
+        self.queue_upload_previews();
         if self.attachment_owner.flight.is_some() || self.file_export_pending() {
             return;
         }
@@ -558,6 +626,31 @@ impl Accounts {
                 Purpose::Files(work),
             )?;
             self.attachment_owner.flight = Some(work);
+            if step == Step::Share
+                && let Some(batch) = self.attachment_owner.batch.as_mut()
+                && let Some(index) = batch.files.iter().position(|f| f.view.id == id)
+                && let Some(outgoing) = batch.files[index].outgoing.as_ref()
+            {
+                let request = outgoing.request;
+                let caption = batch
+                    .captions
+                    .iter()
+                    .find(|(r, _)| *r == request)
+                    .map(|(_, c)| c.clone());
+                for file in &mut batch.files {
+                    if let Some(outgoing) = file.outgoing.as_mut().filter(|o| o.request == request)
+                    {
+                        outgoing.caption = if file.view.id == id {
+                            caption.clone().unwrap_or_else(|| text(""))
+                        } else {
+                            text("")
+                        };
+                        if file.view.id == id {
+                            outgoing.operation = Some(operation);
+                        }
+                    }
+                }
+            }
             Ok(())
         });
         if result == Err(SubmitError::Busy) {
@@ -627,17 +720,21 @@ impl Accounts {
                 batch.files[index].remote = Some(path);
                 batch.files[index].view.bytes = Some(u64::from(bytes));
                 batch.files[index].view.state = UploadState::Selected;
+                batch.files[index].view.uploaded = true;
             }
             Ok(Reply::Changed) if work.step == Step::Share => {
-                batch.files.remove(index);
-                if let Some((request, _)) = batch.caption.take()
+                batch.files[index].view.state = UploadState::Confirming;
+                if let Some(outgoing) = batch.files[index].outgoing.as_ref()
                     && let Some(panel) = self
                         .snapshot
                         .message_panel
                         .as_mut()
                         .filter(|panel| panel.context == work.context)
                 {
-                    panel.files_sent = Some(request);
+                    panel.files_sent = Some(outgoing.request);
+                    batch
+                        .captions
+                        .retain(|(request, _)| *request != outgoing.request);
                 }
                 // The next ordinary poll discovers the canonical shared message.
                 self.message_poll_at = Instant::now();
@@ -657,7 +754,11 @@ impl Accounts {
                 }
             }
         }
-        if batch.files.is_empty() {
+        if !batch
+            .files
+            .iter()
+            .any(|f| f.view.submitted && f.view.state == UploadState::Selected)
+        {
             batch.running = false;
         }
         self.project_uploads();

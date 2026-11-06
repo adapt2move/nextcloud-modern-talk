@@ -217,6 +217,7 @@ pub enum MessagingCommand {
     UploadFile {
         local_path: Text<16384>,
         name: Text<255>,
+        progress: super::content::TransferProgress,
     },
     DownloadFile {
         message: MessageId,

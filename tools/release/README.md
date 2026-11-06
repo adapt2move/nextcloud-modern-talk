@@ -5,14 +5,14 @@ Build from a clean committed checkout using the repository toolchain and lockfil
 ```sh
 python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
 python3 tools/release/build.py --target x86_64-unknown-linux-gnu \
-  --version 0.0.10 --output /absolute/new/package-directory
+  --version 0.0.11 --output /absolute/new/package-directory
 ```
 
 Use `aarch64-apple-darwin` on Apple Silicon. Prepare native prerequisites as described in [CI](../../docs/ci.md). Output belongs outside the checkout. The builder records source/toolchain/dependency identities and collects license notices. The assembler checks the closed file inventory, executable architecture and checksums, then writes Linux `.deb`/`.tar.gz` or a self-contained macOS app ZIP and styled DMG, plus source and provenance.
 
 When a published crate omits its license files, the builder can use the original upstream texts or explicitly identified official license texts in [notices/manifest.json](notices/manifest.json). Each supplement records its source and file hashes and must match the exact crate name, version, registry checksum and declared license. Collection verifies those checked-in files without fetching replacements; unresolved notices still stop packaging. Notice collection does not establish license approval.
 
-The macOS builder embeds the required libraries, plugins and scanner from the checksum-pinned official GStreamer runtime. Native dependencies must resolve within the app or to macOS system libraries; external SDK, Homebrew and developer paths are rejected. It signs bundled code from the inside out with ad-hoc signatures and verifies the final bundle. There is no Developer ID signature or notarization. Retain project, font, audio, Lucide, Rust dependency and native runtime notices/source information when redistributing.
+The macOS builder embeds the required libraries, plugins and scanner from the checksum-pinned official GStreamer runtime. Native dependencies must resolve within the app or to macOS system libraries; external SDK, Homebrew and developer paths are rejected. It signs bundled code from the inside out and verifies the final bundle. Publishing requires a persistent internal alpha certificate or Developer ID Application identity configured in [CI](../../docs/ci.md). Internal signatures pin the certificate and bundle identifier; Developer ID signatures verify the Apple team and enable hardened runtime. Neither mode changes end-user trust settings. Non-publishing builds remain ad-hoc signed. Notarization is not implemented. The legacy `macos-arm64-unsigned` asset-name suffix is retained for existing updater compatibility; the signed package provenance records the actual signer. Retain project, font, audio, Lucide, Rust dependency and native runtime notices/source information when redistributing.
 
 ## Local tooling checks
 

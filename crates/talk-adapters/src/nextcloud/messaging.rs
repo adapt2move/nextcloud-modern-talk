@@ -11,6 +11,18 @@ pub(super) struct UploadName {
     conversation: ConversationId,
     path: String,
     name: String,
+    share: Option<OperationId>,
+}
+#[cfg(test)]
+impl UploadName {
+    pub(super) fn fixture(conversation: ConversationId) -> Self {
+        Self {
+            conversation,
+            path: "/draft/one".into(),
+            name: "one.png".into(),
+            share: None,
+        }
+    }
 }
 pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
     !matches!(
@@ -742,8 +754,16 @@ impl NextcloudClient {
             if caps.conversation_subfolders != Some(true) {
                 return Err(self.error(ErrorKind::Unsupported));
             }
+            if !caps.has("chat-reference-id") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
         }
-        if let C::UploadFile { local_path, name } = &command {
+        if let C::UploadFile {
+            local_path,
+            name,
+            progress,
+        } = &command
+        {
             if caps.attachments_allowed != Some(true) || room.classified {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
@@ -793,13 +813,17 @@ impl NextcloudClient {
                 api::files::FilePath::parse(&path).map_err(|k| self.error(transport::kind(k)))?;
             let length = size as u32;
             self.admit_action(id, operation)?;
-            let result = self.transport.upload_file(c, remote, file, size).await;
+            let result = self
+                .transport
+                .upload_file(c, remote, file, size, progress.clone())
+                .await;
             self.settle_action(operation, result.as_ref().err());
             result?;
             self.uploads.push(UploadName {
                 conversation: id,
                 path: path.clone(),
                 name: name.as_str().into(),
+                share: None,
             });
             return Ok(R::Uploaded {
                 path: Text::new(&path).map_err(|_| self.error(ErrorKind::TooLarge))?,
@@ -1133,7 +1157,7 @@ impl NextcloudClient {
                         .name
                         .clone(),
                     caption: caption.as_str().into(),
-                    reference: format!("{:032x}{:032x}", self.opaque()?, self.opaque()?),
+                    reference: send_reference(operation),
                 }
             }
             _ => return Err(self.error(ErrorKind::Unconfigured)),
@@ -1142,6 +1166,36 @@ impl NextcloudClient {
             .map_err(|k| self.error(transport::kind(k)))?;
         if mutation {
             self.admit_action(id, operation)?
+        }
+        if let C::ShareFile { path, .. } = &command {
+            // A following poll can confirm this exact share even if its POST
+            // acknowledgement is lost. Never repeat the POST to reconcile it.
+            if self.sends.len() >= 100 {
+                if let Some(index) = self
+                    .sends
+                    .iter()
+                    .position(|s| s.state != SendState::Uncertain)
+                {
+                    self.sends.remove(index);
+                } else {
+                    let error = self.error(ErrorKind::Busy);
+                    self.settle_action(operation, Some(&error));
+                    return Err(error);
+                }
+            }
+            self.sends.push(PendingSend {
+                operation,
+                conversation: id,
+                reference: send_reference(operation),
+                state: SendState::Uncertain,
+            });
+            if let Some(upload) = self
+                .uploads
+                .iter_mut()
+                .find(|u| u.conversation == id && u.path == path.as_str())
+            {
+                upload.share = Some(operation);
+            }
         }
         let response = self
             .transport
@@ -1155,6 +1209,25 @@ impl NextcloudClient {
             .await;
         if mutation && response.is_err() {
             self.settle_action(operation, response.as_ref().err())
+        }
+        if matches!(command, C::ShareFile { .. })
+            && response.as_ref().err().is_some_and(|e| {
+                matches!(
+                    e.kind,
+                    ErrorKind::PermissionDenied
+                        | ErrorKind::NotFound
+                        | ErrorKind::Unsupported
+                        | ErrorKind::ReauthenticationRequired
+                        | ErrorKind::Conflict
+                        | ErrorKind::TooLarge
+                )
+            })
+            && let Some(send) = self
+                .sends
+                .iter_mut()
+                .find(|s| s.operation == operation && s.conversation == id)
+        {
+            send.state = SendState::Rejected;
         }
         let mut response = match response {
             Err(e) if matches!(command, C::ReadReminder(_)) && e.kind == ErrorKind::NotFound => {
@@ -1322,6 +1395,10 @@ impl NextcloudClient {
                             .find(|s| s.operation == operation && s.conversation == id)
                     {
                         send.state = SendState::ServerAccepted(detail.message.id)
+                    }
+                    if let Some(operation) = detail.message.own_operation {
+                        self.uploads
+                            .retain(|u| u.conversation != id || u.share != Some(operation));
                     }
                     out.try_push(detail)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;

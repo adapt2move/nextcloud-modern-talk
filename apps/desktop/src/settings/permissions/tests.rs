@@ -2,24 +2,6 @@ use super::*;
 use std::time::Instant;
 
 #[test]
-fn screen_helper_grant_does_not_claim_desktop_grant_before_restart() {
-    let value = mac_screen_observation(PermissionStatus::Granted, false);
-    assert_eq!(value.status, PermissionStatus::Unknown);
-    assert_eq!(value.guidance, PermissionGuidance::RestartRequired);
-    assert!(!value.can_request);
-    assert!(!value.allows_device_preview());
-    let denied_or_first = mac_screen_observation(PermissionStatus::Unknown, false);
-    assert_eq!(denied_or_first.status, PermissionStatus::Unknown);
-    assert_ne!(
-        denied_or_first.guidance,
-        PermissionGuidance::RestartRequired
-    );
-    let granted = mac_screen_observation(PermissionStatus::Granted, true);
-    assert_eq!(granted.status, PermissionStatus::Granted);
-    assert_ne!(granted.guidance, PermissionGuidance::RestartRequired);
-}
-
-#[test]
 fn permission_owner_starts_without_prompt_and_rejects_unchecked_requests() {
     let owner = PermissionRuntime::start().unwrap();
     let first = owner.snapshot();
@@ -90,15 +72,15 @@ fn screen_observation_never_admits_capture_and_unknown_device_does_not_meter() {
 #[test]
 fn mac_status_mapping_preserves_refusal_restriction_and_unknown() {
     let owner = PermissionRuntime::start().unwrap();
-    for (output, expected) in [
-        ("granted\n", PermissionStatus::Granted),
-        ("not-determined", PermissionStatus::NotDetermined),
-        ("denied", PermissionStatus::Denied),
-        ("restricted", PermissionStatus::Restricted),
-        ("unknown", PermissionStatus::Unknown),
+    for expected in [
+        PermissionStatus::Granted,
+        PermissionStatus::NotDetermined,
+        PermissionStatus::Denied,
+        PermissionStatus::Restricted,
+        PermissionStatus::Unknown,
     ] {
         for kind in [PermissionKind::Microphone, PermissionKind::Camera] {
-            let value = mac_observation(kind, helper_status(output).unwrap());
+            let value = mac_observation(kind, expected);
             assert_eq!(value.status, expected);
             assert_eq!(
                 value.can_request,
@@ -125,20 +107,14 @@ fn mac_status_mapping_preserves_refusal_restriction_and_unknown() {
             }
         }
     }
-    for malformed in ["", "authorized", "denied\ngranted", "future-status"] {
-        assert_eq!(helper_status(malformed), Err(PermissionError::Failed));
-    }
 }
 
 #[test]
 fn negative_screen_preflight_is_unknown_and_settings_never_confer_capture() {
-    for (authorized, status) in [
-        (false, PermissionStatus::Unknown),
-        (true, PermissionStatus::Granted),
-    ] {
-        let value = mac_observation(PermissionKind::ScreenSharing, screen_status(authorized));
+    for status in [PermissionStatus::Unknown, PermissionStatus::Granted] {
+        let value = mac_observation(PermissionKind::ScreenSharing, status);
         assert_eq!(value.status, status);
-        assert_eq!(value.can_request, !authorized);
+        assert_eq!(value.can_request, status == PermissionStatus::Unknown);
         assert!(value.can_open_settings);
         assert_eq!(value.guidance, PermissionGuidance::RestartAfterGrant);
         assert!(!value.allows_device_preview());

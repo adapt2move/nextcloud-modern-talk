@@ -506,7 +506,7 @@ impl Desktop {
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
     }
-    fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
+    pub(in crate::presentation) fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
         let AssetState::Ready { key } = self.asset(target)?.state else {
             return None;
         };
@@ -726,17 +726,17 @@ impl Desktop {
             self.message_available(talk_core::ui::messaging::MessageFeature::Files)
         }
     }
+    /// Application-wide status: the transfer owner outlives a mounted file row.
     pub(super) fn download_status(&self, cx: &Context<Self>) -> Option<Div> {
         let transfer = self.snapshot.content_panel.transfer.as_ref()?;
-        if Some(transfer.attachment.context) != self.snapshot.selected {
-            return None;
-        }
-        let label = match transfer.state {
-            DownloadState::Transferring => "Datei wird heruntergeladen …",
-            DownloadState::Committing => "Datei wird gespeichert …",
-            DownloadState::Saved => "Datei gespeichert.",
-            DownloadState::Cancelled => "Download abgebrochen.",
-            DownloadState::Failed(_) => "Download fehlgeschlagen. Erneut versuchen.",
+        let (symbol, label) = match transfer.state {
+            DownloadState::Transferring => ("download", "Datei wird heruntergeladen …"),
+            DownloadState::Committing => ("download", "Datei wird gespeichert …"),
+            DownloadState::Saved => ("check", "Datei gespeichert."),
+            DownloadState::Cancelled => ("x", "Download abgebrochen."),
+            DownloadState::Failed(_) => {
+                ("alert-circle", "Download fehlgeschlagen. Erneut versuchen.")
+            }
         };
         let active = matches!(
             transfer.state,
@@ -746,50 +746,89 @@ impl Desktop {
             .total
             .filter(|total| *total > 0)
             .map(|total| (transfer.received.min(total) as f64 / total as f64) as f32);
-        let status = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(self.hint(transfer.name.as_str()))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(self.hint(self.l(label)))
-                    .when(active, |d| {
-                        d.child(self.button(
-                            "cancel-content-download",
-                            "Abbrechen",
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::Content(Action::Command(ContentAction::CancelDownload)),
-                            cx,
-                        ))
-                    }),
-            )
-            .when(active, |d| {
-                d.child(self.hint(&match transfer.total {
-                    Some(total) => format!("{} / {} KiB", transfer.received / 1024, total / 1024),
-                    None => format!("{} KiB", transfer.received / 1024),
-                }))
-            })
-            .when_some(fraction.filter(|_| active), |d, fraction| {
-                d.child(
+        Some(
+            div()
+                .relative()
+                .flex_none()
+                .w(px(280.))
+                .max_w(gpui::relative(0.45))
+                .min_w(px(100.))
+                .h(px(32.))
+                .rounded(px(6.))
+                .bg(self.theme.subtle)
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .gap_2()
+                .pl_2()
+                .pr_1()
+                .child(self.scaled_icon(symbol, 16., self.theme.muted))
+                .child(
                     div()
-                        .h(px(4.))
-                        .rounded_full()
-                        .overflow_hidden()
-                        .bg(self.theme.border)
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
                         .child(
                             div()
-                                .h_full()
-                                .w(gpui::relative(fraction))
-                                .bg(self.theme.accent),
+                                .truncate()
+                                .text_size(self.sp(11.))
+                                .child(transfer.name.as_str().to_owned()),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(self.sp(10.))
+                                .text_color(self.theme.muted)
+                                .child(if active {
+                                    match transfer.total {
+                                        Some(total) => format!(
+                                            "{} / {} KiB",
+                                            transfer.received / 1024,
+                                            total / 1024
+                                        ),
+                                        None => format!("{} KiB", transfer.received / 1024),
+                                    }
+                                } else {
+                                    self.l(label).to_owned()
+                                }),
                         ),
                 )
-            });
-        Some(status)
+                .child(
+                    self.icon_button(
+                        "download-status-action",
+                        (
+                            "x",
+                            if active {
+                                "Download abbrechen"
+                            } else {
+                                "Schließen"
+                            },
+                        ),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        LocalAction::Content(Action::Command(if active {
+                            ContentAction::CancelDownload
+                        } else {
+                            ContentAction::DismissDownload
+                        })),
+                        cx,
+                    )
+                    .size(px(26.))
+                    .min_h(px(26.)),
+                )
+                .when_some(fraction.filter(|_| active), |d, fraction| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .bottom_0()
+                            .h(px(2.))
+                            .w(gpui::relative(fraction))
+                            .bg(self.theme.accent),
+                    )
+                }),
+        )
     }
 
     fn poll_draft(&self, cx: &Context<Self>) -> Option<PollDraft> {

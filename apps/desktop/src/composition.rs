@@ -335,7 +335,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             let copy=job.clone();
                             let decoded=cx.background_executor().spawn(async move {
                                 let (image,bytes)=content_images::decode(&copy)?;
-                                let thumbnail=matches!(copy.target,talk_core::ui::content::AssetTarget::Thumbnail(_)).then(||content_images::thumbnail_bytes(&image)).flatten();
+                                let thumbnail=(copy.local.is_none() && matches!(copy.target,talk_core::ui::content::AssetTarget::Thumbnail(_))).then(||content_images::thumbnail_bytes(&image)).flatten();
                                 Some((image,bytes,thumbnail))
                             }).await;
                             let accepted=accounts.borrow_mut().finish_content_image(&job,decoded.as_ref().map(|(_,bytes,_)|*bytes));

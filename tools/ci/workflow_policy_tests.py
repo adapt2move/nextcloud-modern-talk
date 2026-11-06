@@ -73,6 +73,9 @@ class PolicyTests(unittest.TestCase):
         self.check("    runs-on: macos-26", "    if: " + policy.MAIN_ONLY + "\n    runs-on: macos-26",
                    file="release.yml")
 
+    def test_only_unconditional_native_teardown_may_have_a_step_condition(self):
+        self.check("        if: always()", "        if: inputs.publish", file="release.yml")
+
 
 if __name__ == "__main__":
     unittest.main()

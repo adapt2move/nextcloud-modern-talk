@@ -230,6 +230,14 @@ class ImportStrings(unittest.TestCase):
                       self.native('let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();'))
         self.assertIn('renderer contract contains secret/transport-bearing identifiers',
                       self.native('', core_ui='const S: &str = "use releases; password";'))
+
+    def test_native_permission_bridge_stays_behind_its_service_owner(self):
+        for source in ('use gpui::{macos_permission as probe};',
+                       'let kind = gpui::MacPermissionKind::Notifications;',
+                       'let result: gpui::MacPermissionStatus;'):
+            with self.subTest(source=source):
+                self.assertIn('native presentation cannot use the macOS permission bridge directly',
+                              self.native(source))
         malformed = 'use talk_core::ui::Text "https://example.invalid/";'
         self.guard['failures'].clear()
         self.assertEqual(self.guard['checked_imports'](malformed, False), malformed)

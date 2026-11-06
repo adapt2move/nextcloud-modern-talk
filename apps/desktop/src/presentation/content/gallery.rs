@@ -74,7 +74,7 @@ impl Swipe {
     }
 }
 // Contain the complete image, keeping portrait, square and panoramic ratios.
-fn media_size(width: f32, height: f32) -> (f32, f32) {
+pub(in crate::presentation) fn media_size(width: f32, height: f32) -> (f32, f32) {
     if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
         return (320., 180.);
     }
@@ -205,7 +205,14 @@ impl Desktop {
     ) -> Div {
         let media = matches!(kind(object), Kind::Image | Kind::Video);
         let target = AssetTarget::Thumbnail(reference.clone());
-        let preview = self.asset_image(&target);
+        let preview = self.asset_image(&target).or_else(|| {
+            (!matches!(
+                self.asset(&target).map(|a| a.state),
+                Some(AssetState::Denied | AssetState::Missing | AssetState::Unsupported)
+            ))
+            .then(|| self.confirmed_upload_image(&reference))
+            .flatten()
+        });
         let state = self.asset(&target).map(|asset| asset.state);
         if !crate::presentation::attachments::previewable(object)
             || preview.is_none()

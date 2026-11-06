@@ -34,7 +34,7 @@ composition outcome releases its slot after five further seconds. The presentati
 waiter performs no I/O. AppKit owns its task and receives no authenticated route.
 The vendored GPUI patch retains the weak delegate's source and releases the active
 UI drag on native completion. Other platforms retain the default unsupported
-outgoing-drag implementation.
+outgoing-drag implementation. Download action buttons stop the ancestor drag admission on mouse-down; the file body remains draggable. Transfer progress is projected in the application title bar, outside the composer.
 
 User-authored message links are separate from authenticated Cloud handoffs. Presentation emits the exact source and a bounded link ordinal. Composition resolves that ordinal through the pure text owner only after checking the current account, room, source, retention and exposure policy, then repeats those checks when draining its single two-second handoff slot. Only a canonical public HTTP/HTTPS value reaches the OS opener. Parsing or rendering never starts network or external-resource work.
 

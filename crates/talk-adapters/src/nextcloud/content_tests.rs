@@ -1031,10 +1031,15 @@ async fn avatar_requests_reuse_encoded_bytes_and_cancelled_hits_never_escape() {
     let mut binary = Reply::data(json!({}));
     binary.headers = "Content-Type: image/png\r\n".into();
     binary.body = b"\x89PNG\r\n\x1a\nsynthetic-profile".to_vec();
+    let mut refreshed = Reply::data(json!({}));
+    refreshed.headers = "Content-Type: image/png\r\n".into();
+    refreshed.body = b"\x89PNG\r\n\x1a\nchanged-profile".to_vec();
     let server = Server::start(vec![
         Reply::data(features()),
         binary,
         Reply::data(features()),
+        Reply::data(features()),
+        refreshed,
     ])
     .await;
     let runtime = runtime();
@@ -1063,18 +1068,99 @@ async fn avatar_requests_reuse_encoded_bytes_and_cancelled_hits_never_escape() {
         3,
         "two fresh capability reads and one image GET"
     );
+    let refreshed = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(3),
+                command: C::RevalidateAvatar(AssetRequest::SelfAvatar),
+            },
+        )
+        .await
+        .unwrap();
+    let ProtocolReply::Content {
+        result: R::Image(bytes),
+        ..
+    } = refreshed
+    else {
+        panic!("expected refreshed avatar");
+    };
+    assert!(bytes.as_slice().ends_with(b"changed-profile"));
+    assert_eq!(
+        server.count(),
+        5,
+        "only an explicit background check reads the avatar again"
+    );
     client.cancellation().cancel();
     let result = client
         .request(
             context(&runtime),
             ProtocolRequest::Content {
-                operation: OperationId::from_local(3),
+                operation: OperationId::from_local(4),
                 command: C::Asset(AssetRequest::SelfAvatar),
             },
         )
         .await;
     assert_eq!(result.err().unwrap().kind, ErrorKind::Cancelled);
-    assert_eq!(server.count(), 3);
+    assert_eq!(server.count(), 5);
+}
+
+#[tokio::test]
+async fn profile_metadata_uses_the_account_cache_until_explicit_background_revalidation() {
+    let profile = |name| {
+        Reply::data(
+            json!({"id":"fixture_user", "displayname":name, "organisation":"Synthetic organization"}),
+        )
+    };
+    let server = Server::start(vec![
+        Reply::data(features()),
+        profile("Before"),
+        Reply::data(features()),
+        Reply::data(features()),
+        profile("After"),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    for (index, (command, expected)) in [
+        (C::SelfProfile, "Before"),
+        (C::SelfProfile, "Before"),
+        (C::RevalidateProfile, "After"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Content {
+                    operation: OperationId::from_local(index as u128 + 1),
+                    command,
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Content {
+            result:
+                R::SelfProfile {
+                    name,
+                    organization,
+                    saved_at,
+                },
+            ..
+        } = reply
+        else {
+            panic!("expected profile");
+        };
+        assert_eq!(name.unwrap().as_str(), expected);
+        assert_eq!(organization.unwrap().as_str(), "Synthetic organization");
+        assert!(saved_at > 0);
+    }
+    assert_eq!(
+        server.count(),
+        5,
+        "cached metadata does not repeat the account GET"
+    );
 }
 
 #[tokio::test]
@@ -1121,7 +1207,7 @@ async fn emoji_disk_and_memory_hits_keep_original_source_timestamp_and_skip_imag
     let mut client = client(&server.origin, runtime.clone());
     let conversation = bind(&mut client);
     let now = super::super::messaging::now_unix();
-    let saved_at = now - 23 * 60 * 60;
+    let saved_at = now - (super::super::avatars::TTL - 60 * 60);
     let reads = Arc::new(AtomicUsize::new(0));
     client.set_avatar_store(Box::new(Disk {
         saved_at,

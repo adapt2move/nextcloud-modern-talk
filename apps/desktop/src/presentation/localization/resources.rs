@@ -1004,6 +1004,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Direct conversations",
         "Conversaciones directas",
     ),
+    ("Download abbrechen", "Cancel download", "Cancelar descarga"),
     ("Du", "You", "Tú"),
     (
         "Du bist nicht mehr im Anruf.",
@@ -1342,6 +1343,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Gespeichertes Konto", "Saved account", "Cuenta guardada"),
     ("Gespräch", "Conversation", "Conversación"),
     (
+        "Gespräch aktualisieren",
+        "Refresh conversation",
+        "Actualizar conversación",
+    ),
+    (
         "Gespräch mit Gastzugang",
         "Guest-accessible conversation",
         "Conversación con acceso de invitados",
@@ -1419,6 +1425,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Hinweise auf neue Nachrichten.",
         "Alerts for new messages.",
         "Avisos de mensajes nuevos.",
+    ),
+    (
+        "Hochladen unterbrochen. Erneut versuchen.",
+        "Upload interrupted. Try again.",
+        "Subida interrumpida. Vuelve a intentarlo.",
     ),
     ("Huddles", "Huddles", "Reuniones rápidas"),
     ("Im Anruf", "In call", "En llamada"),
@@ -1597,6 +1608,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Konto hinzufügen", "Add account", "Añadir cuenta"),
     ("Konto unbekannt", "Unknown account", "Cuenta desconocida"),
+    (
+        "Konto wird verbunden …",
+        "Connecting account …",
+        "Conectando la cuenta …",
+    ),
     (
         "Kontoeinstellungen",
         "Account settings",
@@ -1924,6 +1940,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Show sidebar",
         "Mostrar barra lateral",
     ),
+    (
+        "Sendehinweis ausblenden",
+        "Hide send status",
+        "Ocultar estado del envío",
+    ),
     ("Senden", "Send", "Enviar"),
     (
         "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten.",
@@ -1951,6 +1972,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede acceder al servidor.",
     ),
     ("Serveradresse", "Server address", "Dirección del servidor"),
+    (
+        "Serverbestätigung fehlt. Das Gespräch wird abgeglichen …",
+        "Waiting for server confirmation. Checking the conversation …",
+        "Falta la confirmación del servidor. Comprobando la conversación …",
+    ),
     (
         "Sicher anmelden",
         "Sign in securely",
@@ -2006,6 +2032,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Starte die App nur neu, wenn macOS dich nach der Freigabe dazu auffordert.",
         "Restart the app only if macOS asks you to after allowing access.",
         "Reinicia la app solo si macOS te lo pide después de permitir el acceso.",
+    ),
+    (
+        "Starte die installierte App, um macOS-Freigaben zu verwalten.",
+        "Launch the installed app to manage macOS permissions.",
+        "Abre la aplicación instalada para gestionar los permisos de macOS.",
     ),
     ("Status unbekannt", "Unknown status", "Estado desconocido"),
     ("Status unklar", "Status uncertain", "Estado incierto"),
@@ -2222,6 +2253,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Waiting for you to sign in …",
         "Esperando a que inicies sesión…",
     ),
+    (
+        "Wartet auf Hochladen …",
+        "Waiting to upload …",
+        "Esperando para subir …",
+    ),
     ("Webinar", "Webinar", "Seminario web"),
     ("Weiter", "Continue", "Continuar"),
     (
@@ -2261,6 +2297,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Wiederholen", "Redo", "Rehacer"),
     ("Wird gespeichert …", "Saving …", "Guardando…"),
+    (
+        "Wird im Gespräch bestätigt …",
+        "Confirming in the conversation …",
+        "Confirmando en la conversación …",
+    ),
     ("Wird verarbeitet", "Processing", "Procesando"),
     (
         "Wähle ein Gespräch.",
@@ -2392,6 +2433,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "macOS hat den Zugriff auf den Schlüsselbund verweigert. Erlaube dieser App den Zugriff auf ihre gespeicherte Anmeldung und versuche das Entfernen erneut.",
         "macOS denied access to the keychain. Allow this app to access its saved sign-in, then try removing the account again.",
         "macOS ha denegado el acceso al llavero. Permite que esta app acceda a su inicio de sesión guardado y vuelve a eliminar la cuenta.",
+    ),
+    (
+        "macOS konnte die Freigabe nicht anfragen. Öffne die Systemeinstellungen und prüfe den Eintrag für NextCloud Modern Talk.",
+        "macOS could not request permission. Open System Settings and check the entry for NextCloud Modern Talk.",
+        "macOS no ha podido solicitar el permiso. Abre Ajustes del Sistema y comprueba la entrada de NextCloud Modern Talk.",
     ),
     ("macOS-Freigabe", "macOS permission", "Permiso de macOS"),
     ("{n} Antwort", "{n} reply", "{n} respuesta"),

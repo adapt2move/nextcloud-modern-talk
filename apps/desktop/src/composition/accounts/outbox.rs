@@ -1189,6 +1189,7 @@ fn append_pending(
     };
     row.metadata.timestamp = entry.created;
     row.metadata.local_operation = Some(entry.record.operation.as_local());
+    row.metadata.local_order = entry.request.map(|(request, _)| request.0);
     let _ = messages.try_push(row);
 }
 fn conflicts(earlier: &Entry, later: &Entry) -> bool {

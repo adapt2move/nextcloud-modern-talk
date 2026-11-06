@@ -493,42 +493,32 @@ impl Desktop {
         let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
-        let attached = self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|panel| !panel.uploads.as_slice().is_empty());
-        let files_pending = self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|panel| panel.uploads_running);
+        let attached = self.has_staged_attachments();
         let unloaded = self.message_ui.composer_load_failed == Some(row.context);
         let emoji_availability = self.emoji_availability(cx).above_composer();
         let options_availability = Availability::available().above_composer();
-        let send_availability =
-            if files_pending || pending && !self.drafts.uncertain(row.context) {
-                Availability::pending()
-            } else {
-                Availability::when(
-                    ready
-                        && !pending
-                        && !unloaded
-                        && (!attached || self.can_send_attachments())
-                        && self.composer.read(cx).submitted_value().is_some(),
-                    if attached
-                        && self.drafts.target(row.context)
-                            != talk_core::ui::messaging::ComposeTarget::default()
-                    {
-                        "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen."
-                    } else if self.drafts.uncertain(row.context) {
-                        "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
-                    } else {
-                        "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
-                    },
-                )
-            }
-            .above_composer();
+        let send_availability = if pending && !self.drafts.uncertain(row.context) {
+            Availability::pending()
+        } else {
+            Availability::when(
+                ready
+                    && !pending
+                    && !unloaded
+                    && (!attached || self.can_send_attachments())
+                    && self.composer.read(cx).submitted_value().is_some(),
+                if attached
+                    && self.drafts.target(row.context)
+                        != talk_core::ui::messaging::ComposeTarget::default()
+                {
+                    "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen."
+                } else if self.drafts.uncertain(row.context) {
+                    "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
+                } else {
+                    "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
+                },
+            )
+        }
+        .above_composer();
         div()
             .track_focus(&self.composer_focus)
             .flex_none()

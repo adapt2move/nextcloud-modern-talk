@@ -935,7 +935,10 @@ fn bots_online(snapshot: &PresentationSnapshot, context: ConversationRef) -> boo
         && snapshot.conversation_list.content != ContentState::Offline
         && snapshot.accounts.as_slice().iter().any(|account| {
             account.scope == context.account
-                && account.connection != AccountConnectionState::Disconnected
+                && matches!(
+                    account.connection,
+                    AccountConnectionState::Connected | AccountConnectionState::Guest
+                )
                 && account.connection_failure.is_none()
         })
 }

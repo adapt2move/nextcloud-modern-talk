@@ -316,6 +316,7 @@ impl Accounts {
         self.project_cache(context);
         self.project_queued_read(context);
         self.project_outbox(context);
+        self.project_uploads();
     }
     pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
         if self.snapshot.selected == Some(context) {
@@ -1755,6 +1756,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
         reply_count: 0,
         metadata: view::MessageMetadata {
             local_operation: m.message.own_operation.map(OperationId::as_local),
+            local_order: None,
             author_key: m.author_key.clone(),
             expires_at: m.message.expires_at,
             timestamp: m.message.timestamp,

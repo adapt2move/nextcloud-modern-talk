@@ -290,3 +290,94 @@ async fn a_confirmed_forward_reads_its_canonical_destination_row_before_the_pend
             .starts_with("GET /cloud/ocs/v2.php/apps/spreed/api/v1/chat/destination/91/context")
     }));
 }
+
+#[tokio::test]
+async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post() {
+    for own in [false, true] {
+        let mut capabilities = caps(35);
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("rich-object-sharing"));
+        capabilities["capabilities"]["spreed"]["config"]["attachments"] =
+            json!({"allowed": true, "conversation-subfolders":true});
+        let mut dropped = Reply::data(json!({"renames":[{"one.png":"one.png"}]}));
+        dropped.drop_write_ack = true;
+        let mut row = fixture_message("testroom");
+        row["messageType"] = json!("system");
+        row["systemMessage"] = json!("file_shared");
+        if !own {
+            row["actorId"] = json!("another_user");
+        }
+        let mut history = Reply::data(json!([row]));
+        history.history_reference = true;
+        let server = Server::start(vec![
+            Reply::data(capabilities.clone()),
+            Reply::data(room()),
+            dropped,
+            Reply::data(capabilities),
+            Reply::data(room()),
+            history,
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        client
+            .uploads
+            .push(messaging::UploadName::fixture(conversation));
+        let operation = OperationId::from_local(720);
+        let failed = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation,
+                    command: M::ShareFile {
+                        path: Text::new("/draft/one").unwrap(),
+                        caption: Text::new("caption").unwrap(),
+                    },
+                },
+            )
+            .await;
+        assert_eq!(failed.err().unwrap().kind, ErrorKind::Uncertain);
+        let recovered = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(721),
+                    command: M::History {
+                        before: None,
+                        thread: None,
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Messaging {
+            result: R::Messages { messages, .. },
+            ..
+        } = recovered
+        else {
+            panic!("history")
+        };
+        assert_eq!(
+            messages.as_slice()[0].message.own_operation,
+            own.then_some(operation)
+        );
+        assert_eq!(client.uploads.len(), usize::from(!own));
+        let requests = server.seen.lock().unwrap();
+        let posts: Vec<_> = requests
+            .iter()
+            .filter(|r| r.starts_with(b"POST "))
+            .collect();
+        assert_eq!(posts.len(), 1);
+        let post = String::from_utf8_lossy(posts[0]);
+        assert_eq!(
+            post.split_whitespace().nth(1).unwrap().split('?').next(),
+            Some("/cloud/ocs/v2.php/apps/spreed/api/v1/chat/testroom/attachment")
+        );
+        assert!(post.contains(&format!("referenceId={}", client.sends[0].reference)));
+    }
+}

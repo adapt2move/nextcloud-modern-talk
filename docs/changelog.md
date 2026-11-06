@@ -1,17 +1,27 @@
-# v0.0.10 alpha
+# v0.0.11 alpha
 
-- Separate macOS notification permission from saved Banner/Sound choices. Add an
-  explicit first request, guidance after denial and a fresh check when returning
-  from System Settings. Ordinary delivery and local tests never open a prompt.
-- Follow the official NextCloud Notifications v2 distinction between an empty
-  list and an unavailable provider. Respect hourly retries for HTTP 204, retain
-  bounded server retry hints and back off on transient failures without treating
-  a failed read as a fresh notification source.
-- Expire queued alerts and cancel ordinary message alerts on foreground entry,
-  preventing old notices from replaying after a busy helper or permission sheet.
-- Migrate direct Linux system integrations to zbus 6.2.1 and split credential and
-  package-management modules by responsibility. Remove a redundant Secret Service
-  connection while preserving the existing provider and saved credential format.
+- Keep ordinary user avatars decoded across chat-row changes. Retain eligible
+  avatar bytes and self-profile metadata locally for seven days, revalidate in
+  the background after four hours and keep the previous image on network errors.
+  Unchanged images keep their renderer allocation.
+- Move download progress, cancellation and completion into the application
+  header. Keep the download button separate from the file's drag surface and
+  require deliberate pointer movement before starting a native file drag.
+- Show each account once while restoring saved conversations. Display the
+  automatic connection attempt and retain an explicit retry after failure.
+- Request and check macOS microphone, camera, screen and notification permission
+  in the running application. Keep callback admission bounded across cancellation
+  and never interpret an opened System Settings page as permission.
+- Show outgoing files and images immediately in the chat, with subtle upload
+  progress below the file. Clear the admitted caption and allow further text
+  while uploading. Reconcile missing share acknowledgements using exact message
+  references; keep the local preview until the server thumbnail arrives.
+- Require a persistent macOS signing identity for publication. Support an internal
+  alpha certificate pinned to the app identifier as well as Developer ID with
+  team verification. Sign bundled code consistently and remove temporary CI
+  keychains after building. Internal signatures provide no Apple publisher trust
+  or notarization; switching from an older ad-hoc app can require new OS approval.
+- Keep the light/dark badge inside the selected appearance swatch's ring.
 
-[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.10/docs/install.md)
-· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.10/docs/limitations.md)
+[Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.11/docs/install.md)
+· [Known limitations](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.11/docs/limitations.md)

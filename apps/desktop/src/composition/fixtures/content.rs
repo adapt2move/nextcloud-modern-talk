@@ -188,12 +188,20 @@ pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
                 name: text("Konfiguration.json"),
                 bytes: Some(2048),
                 state: UploadState::Selected,
+                submitted: false,
+                transferred: 0,
+                uploaded: false,
+                server_message: None,
             },
             UploadView {
                 id: 2,
                 name: text("Meetingecke.png"),
                 bytes: Some(190313),
                 state: UploadState::Selected,
+                submitted: false,
+                transferred: 0,
+                uploaded: false,
+                server_message: None,
             },
         ]);
     }
@@ -284,6 +292,8 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
         Some(
             "chat-content"
                 | "chat-attachments"
+                | "chat-upload"
+                | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
                 | "chat-content-failed"
@@ -315,6 +325,7 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
     })
     .map(|(key, bytes)| super::super::accounts::content::ImageJob {
         cached: false,
+        local: None,
         attachment: None,
         preview_generation: None,
         account: scope(),
@@ -332,4 +343,52 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
             .expect("bounded authored fixture"),
     })
     .collect()
+}
+
+pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: bool) {
+    use talk_core::ui::messaging::{UploadState, UploadView};
+    let context = snapshot.selected.unwrap();
+    let file = UploadView {
+        id: 1,
+        name: text("Meetingecke.png"),
+        bytes: Some(190313),
+        state: if uncertain {
+            UploadState::Uncertain
+        } else {
+            UploadState::Uploading
+        },
+        submitted: true,
+        transferred: 78000,
+        uploaded: uncertain,
+        server_message: None,
+    };
+    let mut row = snapshot.messages.as_slice()[0].clone();
+    row.local_id = file.message_id();
+    row.author = text("Fictional author");
+    row.initials = text("FA");
+    row.own = true;
+    row.body = text("My favourite");
+    row.attachments = Page::empty();
+    row.metadata = Default::default();
+    row.delivery = talk_core::ui::presentation::DeliveryState::Pending;
+    snapshot.messages = page([row]);
+    snapshot
+        .content_panel
+        .assets
+        .try_push(AssetView {
+            target: AssetTarget::Thumbnail(AttachmentRef {
+                context,
+                message: file.message_id(),
+                placeholder: text("upload"),
+            }),
+            state: AssetState::Ready { key: 2 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        })
+        .unwrap();
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.uploads = page([file]);
+        panel.uploads_running = !uncertain;
+    }
 }

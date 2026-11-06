@@ -379,7 +379,15 @@ impl Accounts {
                 .map(|scope| {
                     let mut row = account(&a.summary, scope);
                     if self.cache.is_local(scope) {
-                        row.connection = AccountConnectionState::Disconnected;
+                        row.connection = if (self.startup.connecting(a) || self.pending.iter().any(|p| {
+                            matches!(p.purpose, Purpose::RestoreAutomatic(id) | Purpose::Restore(id) if id == a.summary.account)
+                        }))
+                            && !self.failures.iter().any(|(id, _)| *id == a.summary.account)
+                        {
+                            AccountConnectionState::Connecting
+                        } else {
+                            AccountConnectionState::Disconnected
+                        };
                     }
                     row
                 })

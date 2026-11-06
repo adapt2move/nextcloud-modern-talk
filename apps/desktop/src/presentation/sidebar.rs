@@ -65,6 +65,17 @@ impl Section {
 }
 
 impl Desktop {
+    fn active_account_connected(&self) -> bool {
+        self.snapshot.accounts.as_slice().iter().any(|a| {
+            Some(a.scope) == self.snapshot.active_account
+                && matches!(
+                    a.connection,
+                    talk_core::ui::presentation::AccountConnectionState::Connected
+                        | talk_core::ui::presentation::AccountConnectionState::Guest
+                )
+        })
+    }
+
     pub(super) fn admitted_account_count(&self) -> usize {
         self.snapshot
             .accounts
@@ -560,6 +571,7 @@ impl Desktop {
         }
         if self.snapshot.conversation_list.content == ContentState::Ready
             && !self.snapshot.conversation_list.complete
+            && self.active_account_connected()
         {
             list = list
                 .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
@@ -836,6 +848,7 @@ impl Desktop {
         }
         if self.snapshot.conversation_list.content == ContentState::Ready
             && !self.snapshot.conversation_list.complete
+            && self.active_account_connected()
         {
             rows = rows
                 .child(self.hint(self.l("Die Gesprächsliste ist noch nicht vollständig geladen.")));
