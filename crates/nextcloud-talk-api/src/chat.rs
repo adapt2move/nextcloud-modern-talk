@@ -11,6 +11,8 @@ use serde_json::Value;
 #[derive(Clone, Debug, Default)]
 pub struct ComposeOptions {
     pub reply_to: Option<u64>,
+    /// Source room for an explicitly authorized cross-conversation reply.
+    pub reply_to_token: Option<RoomToken>,
     pub thread: Option<u64>,
     pub thread_title: Option<String>,
     pub silent: bool,
@@ -333,6 +335,7 @@ fn schedule(v: &Value) -> Result<ScheduledMessage, ErrorKind> {
         send_at: number(v, "sendAt")?,
         options: ComposeOptions {
             reply_to: integer(v.get("parent").and_then(|p| p.get("id"))).filter(|n| *n > 0),
+            reply_to_token: None,
             thread: integer(v.get("threadId")).filter(|n| *n > 0),
             thread_title: string(v.get("threadTitle"), 256)?.filter(|s| !s.is_empty()),
             silent: v
@@ -487,15 +490,23 @@ fn text(value: &str, max: usize) -> Result<(), ErrorKind> {
         Ok(())
     }
 }
-fn options(o: &ComposeOptions, f: &mut Vec<(&'static str, String)>) -> Result<(), ErrorKind> {
+fn options(
+    o: &ComposeOptions,
+    f: &mut Vec<(&'static str, String)>,
+    private_reply: bool,
+) -> Result<(), ErrorKind> {
     if o.reply_to.is_some() && o.thread.is_some()
         || o.thread_title.is_some() && (o.reply_to.is_some() || o.thread.is_some())
+        || o.reply_to_token.is_some() && (!private_reply || o.reply_to.is_none())
     {
         return Err(ErrorKind::Malformed);
     }
     if let Some(id) = o.reply_to {
         positive(id)?;
         f.push(("replyTo", id.to_string()))
+    }
+    if let Some(token) = &o.reply_to_token {
+        f.push(("replyToToken", token.as_str().to_owned()));
     }
     if let Some(id) = o.thread {
         positive(id)?;
@@ -564,7 +575,10 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("message", message.clone()),
                 ("referenceId", reference.clone()),
             ]);
-            options(o, &mut f)?;
+            if o.reply_to_token.as_ref() == Some(room) {
+                return Err(ErrorKind::Malformed);
+            }
+            options(o, &mut f, true)?;
             kind = Kind::Message
         }
         C::Edit {
@@ -703,7 +717,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("message", message.clone()),
                 ("sendAt", send_at.to_string()),
             ]);
-            options(o, &mut f)?;
+            options(o, &mut f, false)?;
             kind = Kind::Chat(K::Schedule)
         }
         C::EditScheduled {
@@ -892,6 +906,32 @@ mod thread_tests {
         assert!(matches!(
             decode(ResponseKind::Threads, &overflow),
             Err(ErrorKind::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn private_reply_requires_a_distinct_source_and_parent() {
+        let destination = RoomToken::parse("direct123").unwrap();
+        let source = RoomToken::parse("group1234").unwrap();
+        let command = |reply_to, reply_to_token| Command::Send {
+            message: "Reply".into(),
+            reference: "fixture-ref".into(),
+            options: ComposeOptions {
+                reply_to,
+                reply_to_token,
+                ..Default::default()
+            },
+        };
+        let (_, _, _, form, _, _) = plan(&destination, &command(Some(42), Some(source))).unwrap();
+        assert!(form.contains(&("replyTo", "42".into())));
+        assert!(form.contains(&("replyToToken", "group1234".into())));
+        assert!(matches!(
+            plan(&destination, &command(None, Some(destination.clone()))),
+            Err(ErrorKind::Malformed)
+        ));
+        assert!(matches!(
+            plan(&destination, &command(Some(42), Some(destination.clone()))),
+            Err(ErrorKind::Malformed)
         ));
     }
 }

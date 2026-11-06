@@ -513,6 +513,7 @@ impl NextcloudClient {
         }
         Ok(api::chat::ComposeOptions {
             reply_to: o.reply_to.map(|m| m.sequence),
+            reply_to_token: None,
             thread: o.thread.map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),
             silent: o.silent,
