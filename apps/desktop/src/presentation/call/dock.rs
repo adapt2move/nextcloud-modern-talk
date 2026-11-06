@@ -41,7 +41,17 @@ impl Desktop {
         };
         let mut avatars = div().flex().items_center().gap_1();
         for participant in call.participants.as_slice().iter().take(3) {
-            avatars = avatars.child(self.person_avatar(participant.initials.as_str(), 22.));
+            avatars = avatars.child(
+                div()
+                    .rounded_full()
+                    .border_2()
+                    .border_color(if participant.speaking {
+                        t.success
+                    } else {
+                        t.subtle
+                    })
+                    .child(self.person_avatar(participant.initials.as_str(), 22.)),
+            );
         }
         let media = |state: MediaState| {
             matches!(

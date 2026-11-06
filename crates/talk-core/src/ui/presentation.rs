@@ -411,6 +411,8 @@ pub struct ParticipantView {
     pub presence: Presence,
     pub self_user: bool,
     pub raised_hand: bool,
+    /// Recent decoded audio exceeds the local indication threshold.
+    pub speaking: bool,
     /// Last observed call flags, absent outside the call projection.
     pub call_microphone: Option<bool>,
     pub call_camera: Option<bool>,

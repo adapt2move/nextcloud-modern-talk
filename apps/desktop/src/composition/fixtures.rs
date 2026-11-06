@@ -163,6 +163,7 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         presence: Presence::Available,
         self_user: me,
         raised_hand: false,
+        speaking: false,
         call_microphone: None,
         call_camera: None,
     }
@@ -876,6 +877,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     people[0].call_microphone = Some(false);
                     people[0].call_camera = Some(false);
                     people[1].call_microphone = Some(true);
+                    people[1].speaking = true;
                     people[1].call_camera = Some(false);
                     people[3].raised_hand = true;
                     people.extend([

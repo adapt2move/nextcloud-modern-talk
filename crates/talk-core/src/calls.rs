@@ -469,6 +469,7 @@ pub struct Participant {
     pub microphone: bool,
     pub camera: bool,
     pub raised_hand: bool,
+    pub speaking: bool,
 }
 
 #[cfg(test)]

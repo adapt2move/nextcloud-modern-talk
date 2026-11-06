@@ -1,6 +1,7 @@
 //! Autonomous normal-call owner. Signaling polling, policy/HTTP writes and media
 //! have separate bounded lanes; none is driven by GPUI rendering or chat polling.
 mod activity;
+mod speaking;
 mod status;
 
 use super::{
@@ -73,6 +74,7 @@ struct Peer {
     local: u128,
     status: StatusSnapshot,
     raised_hand: activity::RaisedHand,
+    speaking: speaking::Speaking,
     session: PeerSession,
     negotiation: Option<Negotiation>,
     engine: NativePeer,
@@ -485,6 +487,7 @@ async fn reconcile(
             local: 0,
             status: StatusSnapshot::default(),
             raised_hand: activity::RaisedHand::default(),
+            speaking: speaking::Speaking::default(),
             session: own.clone(),
             negotiation: Some(negotiation),
             engine,
@@ -551,6 +554,7 @@ async fn reconcile(
             local: u128::from_le_bytes(identity),
             status: StatusSnapshot::default(),
             raised_hand: activity::RaisedHand::default(),
+            speaking: speaking::Speaking::default(),
             session: incoming.session.clone(),
             negotiation,
             engine,
@@ -796,6 +800,7 @@ async fn media_loop(
                 }
                 if receives {
                     if let Some(frame) = peer.engine.take_audio() && frame.data.len() == 480 {
+                        peer.speaking.observe(&frame.data, Instant::now());
                         for (output, input) in mix.iter_mut().zip(frame.data.iter()) { *output += i32::from(*input); }
                         mixed = true;
                     }
@@ -816,7 +821,7 @@ async fn media_loop(
             for peer in peers.iter().filter(|p| p.role != Role::Publisher) {
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
                     participants.try_push(calls::Participant {
-                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: peer.raised_hand.raised(),
+                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: peer.raised_hand.raised(), speaking: peer.speaking.active(Instant::now()),
                     }).map_err(|_| ())?;
                 }
             }

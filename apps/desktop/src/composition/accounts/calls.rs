@@ -787,6 +787,7 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     presence: Presence::Unknown,
                     self_user: false,
                     raised_hand: p.raised_hand,
+                    speaking: p.speaking,
                     call_microphone: Some(p.microphone),
                     call_camera: Some(p.camera),
                 }),

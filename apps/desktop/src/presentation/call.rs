@@ -476,6 +476,13 @@ impl Desktop {
                     210.
                 }))
                 .rounded(px(12.))
+                .border_2()
+                .border_color(if participant.speaking {
+                    t.success
+                } else {
+                    t.stage_panel
+                })
+                .group("call-tile")
                 .bg(t.stage_panel)
                 .flex()
                 .flex_col()
@@ -520,28 +527,40 @@ impl Desktop {
                                     }
                                 )),
                         )
-                        .child(self.button(
-                            gpui::SharedString::from(format!(
-                                "focus-call-{}",
-                                participant.local_id
-                            )),
-                            if focused == Some(participant.local_id) {
-                                "Raster"
+                        .child(
+                            self.icon_button(
+                                gpui::SharedString::from(format!(
+                                    "focus-call-{}",
+                                    participant.local_id
+                                )),
+                                (
+                                    "pin",
+                                    if focused == Some(participant.local_id) {
+                                        "Raster"
+                                    } else {
+                                        "Person hervorheben"
+                                    },
+                                ),
+                                ButtonStyle::Stage,
+                                Availability::available().hinted(),
+                                LocalAction::FocusCallParticipant(
+                                    call.scope,
+                                    if focused == Some(participant.local_id) {
+                                        None
+                                    } else {
+                                        Some(participant.local_id)
+                                    },
+                                ),
+                                cx,
+                            )
+                            .opacity(if focused == Some(participant.local_id) {
+                                1.
                             } else {
-                                "Person hervorheben"
-                            },
-                            ButtonStyle::Stage,
-                            true,
-                            LocalAction::FocusCallParticipant(
-                                call.scope,
-                                if focused == Some(participant.local_id) {
-                                    None
-                                } else {
-                                    Some(participant.local_id)
-                                },
-                            ),
-                            cx,
-                        )),
+                                0.
+                            })
+                            .group_hover("call-tile", |style| style.opacity(1.))
+                            .focus(|style| style.opacity(1.)),
+                        ),
                 );
             if focused == Some(participant.local_id) {
                 feature = Some(tile);
