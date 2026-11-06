@@ -1024,9 +1024,10 @@ impl Desktop {
         participant: Option<u128>,
     ) -> Option<gpui::AnyElement> {
         let (current, reaction, at) = self.recent_call_reaction.as_ref()?;
+        let fixture = self.fixture_call_reaction == Some((scope, reaction.sequence));
         if *current != scope
             || reaction.participant != participant
-            || at.elapsed() >= std::time::Duration::from_millis(1800)
+            || (!fixture && at.elapsed() >= std::time::Duration::from_millis(1800))
         {
             return None;
         }
@@ -1037,7 +1038,11 @@ impl Desktop {
             .bottom(px(20.))
             .text_size(self.sp(34.))
             .child(reaction.emoji.as_str().to_owned());
-        Some(self.call_reaction_motion(id.into(), element))
+        Some(if fixture {
+            element.into_any_element()
+        } else {
+            self.call_reaction_motion(id.into(), element)
+        })
     }
     fn call_outcome(&self, failed: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;

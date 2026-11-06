@@ -309,6 +309,7 @@ pub struct Desktop {
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
+    fixture_call_reaction: Option<(CallScope, u64)>,
     recent_call_reaction: Option<(
         CallScope,
         talk_core::ui::presentation::CallReactionView,
@@ -502,6 +503,13 @@ impl Desktop {
                 .clone()
                 .map(|reaction| (call.scope, reaction, Instant::now()))
         });
+        let fixture_call_reaction = if development {
+            recent_call_reaction
+                .as_ref()
+                .map(|(scope, reaction, _)| (*scope, reaction.sequence))
+        } else {
+            None
+        };
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
@@ -582,6 +590,7 @@ impl Desktop {
             call_minimized,
             call_started,
             recent_call_reaction,
+            fixture_call_reaction,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,

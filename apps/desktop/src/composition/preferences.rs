@@ -235,6 +235,7 @@ pub struct Bridge {
     pub services: Rc<Services>,
     pub cursor: u64,
     pub device_cursor: u64,
+    pub fixture_call_devices: bool,
     pub permission_cursor: u64,
     pub notification_request: Option<RequestId>,
     pub notification_result: NotificationState,
@@ -399,6 +400,9 @@ impl ComputerSettingsPort for Bridge {
                 .any(|s| matches!(s, talk_core::preferences::devices::SelectionState::Unknown))
     }
     fn device_snapshot(&self) -> Result<DeviceSnapshot, DeviceError> {
+        if self.fixture_call_devices {
+            return Ok(super::fixtures::call_devices());
+        }
         self.services
             .devices
             .as_ref()
@@ -406,6 +410,9 @@ impl ComputerSettingsPort for Bridge {
             .map_err(|e| *e)
     }
     fn take_device_snapshot(&mut self) -> Option<Result<DeviceSnapshot, DeviceError>> {
+        if self.fixture_call_devices {
+            return None;
+        }
         match &self.services.devices {
             Ok(devices) => {
                 let (cursor, snapshot) = devices.poll(self.device_cursor)?;

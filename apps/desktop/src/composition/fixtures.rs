@@ -13,6 +13,51 @@ use talk_core::ui::{
     RuntimeGeneration, SubmitError, Text, UnavailableReason, UserIntent,
 };
 
+/// A deterministic device inventory for the call-device scenario. It contains
+/// no physical device labels or capture handles.
+pub(super) fn call_devices() -> talk_core::preferences::devices::DeviceSnapshot {
+    use talk_core::preferences::{Revision, RuntimeState, devices::*};
+    let mut devices = Page::empty();
+    for (id, label, kind) in [
+        (
+            "fixture-mic-studio",
+            "Studio microphone",
+            DeviceKind::Microphone,
+        ),
+        (
+            "fixture-mic-laptop",
+            "Laptop microphone",
+            DeviceKind::Microphone,
+        ),
+        ("fixture-camera", "Laptop camera", DeviceKind::Camera),
+    ] {
+        if let Ok(id) = DeviceId::new(id) {
+            let _ = devices.try_push(DeviceInfo {
+                id,
+                label: text(label),
+                kind,
+                is_default: false,
+            });
+        }
+    }
+    DeviceSnapshot {
+        runtime: RuntimeState::Running,
+        session: None,
+        inventory_revision: Revision(1),
+        devices,
+        microphone_permission: PermissionState::Unknown,
+        camera_permission: PermissionState::Unknown,
+        microphone: SelectionState::Unknown,
+        speaker: SelectionState::Unknown,
+        camera: SelectionState::Unknown,
+        microphone_level: None,
+        speaker_level: None,
+        microphone_preview: PreviewState::Stopped,
+        camera_preview: PreviewState::Stopped,
+        speaker_test: PreviewState::Stopped,
+    }
+}
+
 pub const SCENARIOS: &[&str] = &[
     "server",
     "validating",
