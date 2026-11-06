@@ -23,9 +23,12 @@ fn scope() -> AccountScope {
     }
 }
 fn context(r: &NetworkRuntime) -> OperationContext {
+    context_for(r, scope())
+}
+fn context_for(r: &NetworkRuntime, scope: AccountScope) -> OperationContext {
     let now = r.now();
     OperationContext {
-        scope: scope(),
+        scope,
         cancellation: Cancellation::default(),
         deadline: Moment {
             epoch: now.epoch,
@@ -136,29 +139,45 @@ async fn released_server_messaging_and_room_controls() {
         .await
         .unwrap();
     let id = client.fixture_conversation().unwrap();
+    let bob_scope = AccountScope {
+        account: AccountId::from_local(701),
+        runtime: RuntimeGeneration::from_local(1),
+    };
     let mut bob = test_support::from_private_fixture(
         &root.join("bob.json"),
-        scope(),
-        HostId::from_local(700),
+        bob_scope,
+        HostId::from_local(701),
         runtime.clone(),
     )
     .expect("second private synthetic fixture");
-    bob.request(context(&runtime), ProtocolRequest::InspectAccount)
-        .await
-        .unwrap();
-    let bob_room = bob.fixture_conversation().unwrap();
-    let bob_message = m(
-        &mut bob,
-        &runtime,
-        bob_room,
-        201,
-        "private-reply-source",
-        M::Send {
-            text: text("A group message from Bob"),
-            options: ComposeOptions::default(),
-        },
+    bob.request(
+        context_for(&runtime, bob_scope),
+        ProtocolRequest::InspectAccount,
     )
-    .await;
+    .await
+    .unwrap();
+    let bob_room = bob.fixture_conversation().unwrap();
+    let ProtocolReply::Messaging {
+        result: bob_message,
+        ..
+    } = bob
+        .request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::Messaging {
+                conversation: bob_room,
+                operation: OperationId::from_local(201),
+                command: M::Send {
+                    text: text("A group message from Bob"),
+                    options: ComposeOptions::default(),
+                },
+            },
+        )
+        .await
+        .expect("send the second user's source message")
+    else {
+        panic!("second user's message")
+    };
+    println!("alpha-backend private-reply-source: pass");
     let source = MessageId {
         conversation: id,
         sequence: canonical_accepted_id(bob_message, OperationId::from_local(201)).sequence,
