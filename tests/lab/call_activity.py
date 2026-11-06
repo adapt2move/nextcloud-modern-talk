@@ -92,6 +92,7 @@ def exercise(lab, record):
         # to a room, as the ordinary account owner does during inspection.
         user = lab.request("lab_bob", "GET", "/ocs/v2.php/cloud/user", name="call-activity-inspect-member")
         lab.require("call-activity-member-identity", user.get("id") == "lab_bob")
+        lab.request("lab_bob", "GET", API + "v4/room", name="call-activity-member-rooms")
         before = {cookie.name: cookie.value for handler in lab.clients["lab_bob"].handlers
                   if isinstance(handler, urllib.request.HTTPCookieProcessor) for cookie in handler.cookiejar}
         result = lab.request("lab_bob", "POST", room_path + "/participants/active",
