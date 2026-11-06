@@ -15,6 +15,16 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   conference-scale qualification remain outside the supported profile.
   A remote screen offer ends the unsupported call. Permission guidance is not
   a sharing engine.
+- The call view has adaptive gallery, local focus and a speaking-level-based
+  speaker view. The level is a short-lived indicator from received audio, not
+  speech recognition or a connection-quality measurement. The dock is inside
+  the main window; it is not a separate always-on-top window.
+- The screen stage has camera/screen tile identities and a fictional fixture,
+  but no screen stream is connected. Call reactions and outgoing raised hands
+  are unavailable; received hands are limited to currently projected peers.
+  In-call moderator actions, recording controls, live device switching and
+  automatic speaker and layout behavior require further integration and
+  interoperability validation.
 
 ## Messages and background activity
 
