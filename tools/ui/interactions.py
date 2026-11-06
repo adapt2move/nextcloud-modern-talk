@@ -6,6 +6,7 @@ assertions concern observable transitions and retained input, not pixel goldens.
 import csv
 import io
 import re
+import subprocess
 import time
 import unicodedata
 from pathlib import Path
@@ -130,6 +131,16 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
         expect('denied draft copy did not replace platform clipboard',['CLIPMARK'])
+    elif scenario == 'chat-content':
+        click('Nachricht', xmin=200, ymin=600)
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
+                       input='file:///tmp/Fictional-paste.txt\r\n', text=True, env=env,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
+        data = run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-o'], env).stdout
+        if data.strip() != 'file:///tmp/Fictional-paste.txt':
+            raise AssertionError('the X11 clipboard did not retain the native file-list fixture')
+        key('ctrl+v')
+        expect('native file-list paste stages a file chip', ['Fictional-paste.txt', 'Bereit zum Senden'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

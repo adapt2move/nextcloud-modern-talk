@@ -324,6 +324,7 @@ pub struct Desktop {
     last_incoming_scope: Option<CallScope>,
     _appearance_observer: Subscription,
     _input_observers: [Subscription; 3],
+    _composer_paste_subscription: Subscription,
     _composer_focus_observers: [Subscription; 2],
     _dialog_observers: Vec<Subscription>,
     pending_ack: Option<talk_core::ui::presentation::SubmissionResult>,
@@ -397,6 +398,10 @@ impl Desktop {
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
         ];
+        let composer_paste_subscription =
+            cx.subscribe(&composer, |this, _, content: &input::PastedContent, cx| {
+                this.paste_clipboard_attachment(content, cx);
+            });
         let composer_focus = cx.focus_handle().tab_stop(false);
         let composer_focus_observers = [
             cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
@@ -553,6 +558,7 @@ impl Desktop {
             last_incoming_scope: None,
             _appearance_observer: observer,
             _input_observers: input_observers,
+            _composer_paste_subscription: composer_paste_subscription,
             _composer_focus_observers: composer_focus_observers,
             _dialog_observers: dialog_observers,
             pending_ack: None,
@@ -2313,11 +2319,6 @@ impl Render for Desktop {
             .tab_group()
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let composing = this.input_composing(cx);
-                if !composing && this.paste_clipboard_image(event, window, cx) {
-                    cx.stop_propagation();
-                    cx.notify();
-                    return;
-                }
                 if event.keystroke.key != "f7" {
                     this.hover_hints.cancel();
                     if !composing {

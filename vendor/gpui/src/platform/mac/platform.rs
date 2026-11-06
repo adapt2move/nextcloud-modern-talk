@@ -1038,6 +1038,8 @@ impl Platform for MacPlatform {
                         ClipboardEntry::Image(image) => {
                             self.write_image_to_clipboard(image);
                         }
+                        // This extension reads native file lists; it does not export them.
+                        ClipboardEntry::Files(_) => {}
                     },
                     None => {
                         // Writing an empty list of entries just clears the clipboard.
@@ -1106,6 +1108,35 @@ impl Platform for MacPlatform {
         // First, see if it's a string.
         unsafe {
             let types: id = pasteboard.types();
+            let file_type: id = ns_string("public.file-url");
+            if msg_send![types, containsObject: file_type] {
+                let items: id = msg_send![pasteboard, pasteboardItems];
+                let count: NSUInteger = if items == nil {
+                    0
+                } else {
+                    msg_send![items, count]
+                };
+                let mut paths = Vec::new();
+                for index in 0..count.min(9) {
+                    let item: id = msg_send![items, objectAtIndex: index];
+                    let value: id = msg_send![item, stringForType: file_type];
+                    if value == nil {
+                        return Some(ClipboardItem::new_files(Vec::new()));
+                    }
+                    let url: id = msg_send![class!(NSURL), URLWithString: value];
+                    if url == nil || url.isFileURL() != YES {
+                        return Some(ClipboardItem::new_files(Vec::new()));
+                    }
+                    let Ok(path) = ns_url_to_path(url) else {
+                        return Some(ClipboardItem::new_files(Vec::new()));
+                    };
+                    if !path.is_absolute() || path.to_str().is_none_or(|p| p.len() > 16_384) {
+                        return Some(ClipboardItem::new_files(Vec::new()));
+                    }
+                    paths.push(path);
+                }
+                return Some(ClipboardItem::new_files(paths));
+            }
             let string_type: id = ns_string("public.utf8-plain-text");
 
             if msg_send![types, containsObject: string_type] {

@@ -56,60 +56,65 @@ pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
     }
 }
 impl Desktop {
-    pub(super) fn paste_clipboard_image(
+    pub(super) fn paste_clipboard_attachment(
         &mut self,
-        event: &gpui::KeyDownEvent,
-        window: &Window,
+        pasted: &super::input::PastedContent,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        let primary = if cfg!(target_os = "macos") {
-            modifiers.platform
-        } else {
-            modifiers.control
-        };
-        let paste = (key == "v" && primary && !modifiers.alt && !modifiers.shift)
-            || (key == "insert"
-                && modifiers.shift
-                && !modifiers.control
-                && !modifiers.alt
-                && !modifiers.platform);
-        if !paste
-            || self.overlay.is_some()
+    ) {
+        if self.overlay.is_some()
             || self.background_inert
-            || !self.composer.focus_handle(cx).is_focused(window)
-            || self.input_composing(cx)
             || !self.composer_available()
+            || self.snapshot.content != talk_core::ui::presentation::ContentState::Ready
+            || !self
+                .selected()
+                .is_some_and(|room| room.send == talk_core::ui::Decision::Allowed)
             || !self.message_feature_enabled(MessageFeature::Files)
         {
-            return false;
+            return;
         }
         let Some(context) = self.snapshot.selected else {
-            return false;
+            return;
         };
-        let (extension, image) = match super::input::read_pasted_image(cx) {
-            super::input::PastedImage::None => return false,
-            super::input::PastedImage::Unsupported => {
+        let (extension, image) = match pasted {
+            super::input::PastedContent::None => return,
+            super::input::PastedContent::Unsupported => {
                 self.feedback = Some(
-                    Feedback::error("Dieses Bildformat wird nicht unterstützt.")
+                    Feedback::error("Diese Dateiauswahl wird nicht unterstützt.")
                         .in_conversation(context),
                 );
-                return true;
+                cx.notify();
+                return;
             }
-            super::input::PastedImage::TooLarge => {
+            super::input::PastedContent::TooLarge => {
                 self.feedback = Some(
                     Feedback::error("Das Bild aus der Zwischenablage ist zu groß.")
                         .in_conversation(context),
                 );
-                return true;
+                cx.notify();
+                return;
             }
-            super::input::PastedImage::Image(extension, image) => (extension, image),
+            super::input::PastedContent::TooMany => {
+                self.feedback = Some(
+                    Feedback::error("Du kannst höchstens 8 Dateien auf einmal anhängen.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Files(paths) => {
+                self.submit_message(MessageAction::StageFiles(paths.clone()));
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Image(extension, image) => (extension, image),
         };
         if let Ok(name) = Text::new(&format!("clipboard.{extension}")) {
-            self.submit_message(MessageAction::StageClipboardImage { name, image });
+            self.submit_message(MessageAction::StageClipboardImage {
+                name,
+                image: image.clone(),
+            });
         }
-        true
+        cx.notify();
     }
     pub(super) fn stage_dropped_files(
         &mut self,

@@ -460,8 +460,42 @@ impl Desktop {
             .child(timeline.tab_group().tab_index(0))
             .child(composer.tab_group().tab_index(1));
         let drop_context = row.context;
-        let drop_enabled =
-            self.overlay.is_none() && self.message_feature_enabled(MessageFeature::Files);
+        let drop_enabled = self.composer_available()
+            && !self.background_inert
+            && self.snapshot.content == ContentState::Ready
+            && row.send == Decision::Allowed
+            && self.message_feature_enabled(MessageFeature::Files);
+        let drop_hint = (drop_enabled && cx.has_active_drag()).then(|| {
+            div()
+                .absolute()
+                .inset_2()
+                .rounded(px(CONTENT_RADIUS))
+                .border_2()
+                .border_color(t.accent)
+                .bg(t.surface.opacity(0.94))
+                .flex()
+                .items_center()
+                .justify_center()
+                .opacity(0.)
+                .group_drag_over::<gpui::ExternalPaths>("chat-file-drop", |style| style.opacity(1.))
+                .child(
+                    self.reveal(
+                        "chat-file-drop-reveal",
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_2()
+                            .child(self.scaled_icon("paperclip", 32., t.accent))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(t.text)
+                                    .child(self.l("Dateien hier ablegen")),
+                            ),
+                    ),
+                )
+        });
         self.content_card(
             div().child(
                 self.scroll_area(super::navigation::Region::Conversation)
@@ -473,9 +507,10 @@ impl Desktop {
                     }),
             ),
         )
+        .group("chat-file-drop")
+        .children(drop_hint)
         .when(drop_enabled, |card| {
             card.can_drop(|value, _, _| value.is::<gpui::ExternalPaths>())
-                .drag_over::<gpui::ExternalPaths>(move |style, _, _, _| style.bg(t.selected))
                 .on_drop(
                     cx.listener(move |this, paths: &gpui::ExternalPaths, window, cx| {
                         this.stage_dropped_files(drop_context, paths, window, cx);

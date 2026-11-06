@@ -19,6 +19,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Datei gespeichert.", "File saved.", "Archivo guardado."),
     (
+        "Dateien hier ablegen",
+        "Drop files here",
+        "Suelta los archivos aquí",
+    ),
+    (
         "Dateien konnten nicht geladen werden.",
         "Files could not be loaded.",
         "No se pudieron cargar los archivos.",

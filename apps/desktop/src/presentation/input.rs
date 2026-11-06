@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
-    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, SharedString, Style, Subscription, Task, TextRun, UTF16Selection, Window,
-    WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable,
+    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PaintQuad, Pixels, Point, SharedString, Style, Subscription, Task, TextRun,
+    UTF16Selection, Window, WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -19,34 +19,57 @@ mod edit;
 mod markdown;
 mod rich;
 
-/// Read only an image during an explicit paste. GPUI exposes files as text on
-/// some platforms, so ordinary text stays with the editor's normal paste path.
-pub(super) enum PastedImage {
+/// Read typed native clipboard content during an explicit paste. Ordinary text
+/// stays with the editor's normal paste path, including pasted file-like text.
+pub(super) enum PastedContent {
     None,
     Unsupported,
     TooLarge,
+    TooMany,
     Image(&'static str, talk_core::ui::ClipboardImage),
+    Files(talk_core::ui::Page<talk_core::ui::Text<16384>, 8>),
 }
-pub(super) fn read_pasted_image(cx: &App) -> PastedImage {
-    let Some(item) = cx.read_from_clipboard() else {
-        return PastedImage::None;
-    };
+fn pasted_content(item: ClipboardItem) -> PastedContent {
     if item.text().is_some() {
-        return PastedImage::None;
+        return PastedContent::None;
     }
-    let Some(gpui::ClipboardEntry::Image(image)) = item.entries().first() else {
-        return PastedImage::None;
+    let image = match item.entries().first() {
+        Some(gpui::ClipboardEntry::Files(paths)) => {
+            if paths.len() > 8 {
+                return PastedContent::TooMany;
+            }
+            if paths.is_empty() {
+                return PastedContent::Unsupported;
+            }
+            let mut result = talk_core::ui::Page::empty();
+            for path in paths {
+                let Some(path) = path
+                    .is_absolute()
+                    .then(|| path.to_str())
+                    .flatten()
+                    .and_then(|path| talk_core::ui::Text::new(path).ok())
+                else {
+                    return PastedContent::Unsupported;
+                };
+                if result.try_push(path).is_err() {
+                    return PastedContent::TooMany;
+                }
+            }
+            return PastedContent::Files(result);
+        }
+        Some(gpui::ClipboardEntry::Image(image)) => image,
+        _ => return PastedContent::None,
     };
     let extension = match image.format {
         gpui::ImageFormat::Png => "png",
         gpui::ImageFormat::Jpeg => "jpg",
         gpui::ImageFormat::Webp => "webp",
         gpui::ImageFormat::Gif => "gif",
-        _ => return PastedImage::Unsupported,
+        _ => return PastedContent::Unsupported,
     };
     match talk_core::ui::ClipboardImage::new(&image.bytes) {
-        Some(image) => PastedImage::Image(extension, image),
-        None => PastedImage::TooLarge,
+        Some(image) => PastedContent::Image(extension, image),
+        None => PastedContent::TooLarge,
     }
 }
 use super::input::edit::{
@@ -252,6 +275,7 @@ pub struct TextInput {
     caret_subscriptions: Vec<Subscription>,
     caret_reduced_motion: bool,
 }
+impl EventEmitter<PastedContent> for TextInput {}
 
 impl TextInput {
     /// Canonical Markdown for rich composers, plain text for ordinary fields.
@@ -915,7 +939,10 @@ impl TextInput {
         // The outbound privacy decision still gates Copy and Cut below.
         // GPUI materializes the platform clipboard before this finite admission check.
         // This transient native allocation cannot be bounded through the 0.2.2 API.
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        if let Some(text) = item.text() {
             if text.len() > self.editing_limit() {
                 self.rejected = true;
                 self.rejection =
@@ -929,6 +956,11 @@ impl TextInput {
                 text.replace(['\n', '\r'], " ")
             };
             self.apply_replacement(None, Insertion::Paste(&text), cx);
+        } else {
+            let content = pasted_content(item);
+            if !matches!(content, PastedContent::None) {
+                cx.emit(content);
+            }
         }
     }
 
@@ -2116,6 +2148,42 @@ mod tests {
         previous_grapheme, replacement_fits, to_utf16, visual_row,
     };
     use unicode_segmentation::UnicodeSegmentation;
+
+    #[test]
+    fn clipboard_file_admission_preserves_text_and_rejects_partial_batches() {
+        use super::{PastedContent, pasted_content};
+        use gpui::ClipboardItem;
+
+        assert!(matches!(
+            pasted_content(ClipboardItem::new_string("/tmp/plain text".into())),
+            PastedContent::None
+        ));
+        let path = if cfg!(target_os = "windows") {
+            r"C:\synthetic attachment.txt"
+        } else {
+            "/synthetic attachment.txt"
+        };
+        match pasted_content(ClipboardItem::new_files(vec![path.into()])) {
+            PastedContent::Files(files) => {
+                assert_eq!(files.as_slice()[0].as_str(), path)
+            }
+            _ => panic!("native file-list was not admitted"),
+        }
+        assert!(matches!(
+            pasted_content(ClipboardItem::new_files(vec!["relative.txt".into()])),
+            PastedContent::Unsupported
+        ));
+        assert!(matches!(
+            pasted_content(ClipboardItem::new_files(
+                (0..9).map(|_| path.into()).collect()
+            )),
+            PastedContent::TooMany
+        ));
+        assert!(matches!(
+            pasted_content(ClipboardItem::new_files(Vec::new())),
+            PastedContent::Unsupported
+        ));
+    }
     #[test]
     fn programmatic_load_clear_and_plain_modes_share_transactional_admission() {
         let (visible, rich) = super::imported_value("**Ä🧭**", 4096, true, false).unwrap();
