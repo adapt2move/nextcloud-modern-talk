@@ -144,6 +144,14 @@ pub struct VoiceSnapshot {
     pub elapsed_ms: u64,
     pub level: u16,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceReviewPlayback {
+    pub context: ConversationRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackView {
     pub attachment: AttachmentRef,

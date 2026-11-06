@@ -63,6 +63,30 @@ pub(super) fn update_error_label(
 }
 
 pub trait ComputerSettingsPort {
+    fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
+        None
+    }
+    fn voice_review_play(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _play: bool,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_review_seek(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _position_ms: u64,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_review_speed(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _speed: u8,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
     fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
         None
     }

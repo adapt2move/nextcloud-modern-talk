@@ -47,6 +47,12 @@ impl std::fmt::Debug for VideoBytes {
     }
 }
 impl VideoBytes {
+    pub fn from_shared(bytes: Arc<[u8]>) -> Result<Self, LimitExceeded> {
+        if bytes.len() > MAX_VIDEO_BYTES {
+            return Err(LimitExceeded);
+        }
+        Ok(Self(bytes))
+    }
     pub fn new(bytes: Vec<u8>) -> Result<Self, LimitExceeded> {
         if bytes.len() > MAX_VIDEO_BYTES {
             return Err(LimitExceeded);

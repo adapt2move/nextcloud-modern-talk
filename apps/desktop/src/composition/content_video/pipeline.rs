@@ -18,6 +18,8 @@ const CHUNK: usize = 64 * 1024;
 pub(super) enum Container {
     Mp4,
     Webm,
+    Wav,
+    Ogg,
 }
 impl Container {
     pub(super) fn detect(bytes: &[u8]) -> Result<Self, Error> {
@@ -28,6 +30,15 @@ impl Container {
             return Ok(Self::Mp4);
         }
         Err(Error::Unsupported)
+    }
+    pub(super) fn detect_audio(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.get(..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+            Ok(Self::Wav)
+        } else if bytes.starts_with(b"OggS") {
+            Ok(Self::Ogg)
+        } else {
+            Self::detect(bytes)
+        }
     }
 }
 
@@ -84,6 +95,7 @@ impl Pipeline {
         bytes: VideoBytes,
         container: Container,
         shared: Arc<Shared>,
+        audio_only: bool,
     ) -> Result<Self, Error> {
         gst::init().map_err(|_| Error::Unsupported)?;
         let pipeline = gst::Pipeline::new();
@@ -94,6 +106,8 @@ impl Pipeline {
         let demux = element(match container {
             Container::Mp4 => "qtdemux",
             Container::Webm => "matroskademux",
+            Container::Wav => "wavparse",
+            Container::Ogg => "oggdemux",
         })?;
         pipeline
             .add_many([source.upcast_ref(), &demux])
@@ -113,14 +127,27 @@ impl Pipeline {
             let Some(pipeline) = weak.upgrade() else {
                 return;
             };
-            let result = add_track(&pipeline, pad, container, &events, &output);
+            let result = if audio_only
+                && pad
+                    .current_caps()
+                    .and_then(|c| c.structure(0).map(|s| s.name().starts_with("video/")))
+                    .unwrap_or(false)
+            {
+                Err(Error::Unsupported)
+            } else {
+                add_track(&pipeline, pad, container, &events, &output)
+            };
             if let Err(error) = result {
                 events.fail(error);
             }
         });
         let events = signals.clone();
         demux.connect_no_more_pads(move |_| {
-            if !events.video.load(Ordering::Acquire) {
+            if !(if audio_only {
+                events.audio.load(Ordering::Acquire)
+            } else {
+                events.video.load(Ordering::Acquire)
+            }) {
                 events.fail(Error::Unsupported);
             }
             events.discovered.store(true, Ordering::Release);
@@ -190,11 +217,15 @@ impl Pipeline {
             .map(|_| ())
             .map_err(|_| Error::ControlFailed)
     }
-    pub(super) fn seek(&self, position_ms: u64) -> Result<(), Error> {
+    pub(super) fn seek(&self, position_ms: u64, rate: f64) -> Result<(), Error> {
         self.pipeline
-            .seek_simple(
+            .seek(
+                rate,
                 gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+                gst::SeekType::Set,
                 gst::ClockTime::from_mseconds(position_ms),
+                gst::SeekType::None,
+                gst::ClockTime::NONE,
             )
             .map_err(|_| Error::ControlFailed)?;
         self.signals.eos.store(false, Ordering::Release);
@@ -457,7 +488,9 @@ fn add_track(
         if let Some(parser) = parser {
             chain.push(element(parser)?);
         }
-        chain.push(element(decoder)?);
+        if let Some(decoder) = decoder {
+            chain.push(element(decoder)?);
+        }
         chain.push(element("audioconvert")?);
         chain.push(element("audioresample")?);
         let caps = gst::Caps::builder("audio/x-raw")
@@ -503,12 +536,14 @@ fn video_codec(
 fn audio_codec(
     container: Container,
     structure: &gst::StructureRef,
-) -> Result<(Option<&'static str>, &'static str), Error> {
+) -> Result<(Option<&'static str>, Option<&'static str>), Error> {
     match (container, structure.name().as_str()) {
-        (Container::Webm, "audio/x-opus") => Ok((None, "opusdec")),
+        (Container::Webm | Container::Ogg, "audio/x-opus") => Ok((None, Some("opusdec"))),
+        (Container::Ogg, "audio/x-vorbis") => Ok((None, Some("vorbisdec"))),
+        (Container::Wav, "audio/x-raw") => Ok((None, None)),
         #[cfg(target_os = "macos")]
         (Container::Mp4, "audio/mpeg") if structure.get::<i32>("mpegversion") == Ok(4) => {
-            Ok((Some("aacparse"), "atdec"))
+            Ok((Some("aacparse"), Some("atdec")))
         }
         _ => Err(Error::Unsupported),
     }
@@ -626,7 +661,7 @@ mod tests {
 
     fn spawn(pipeline: Pipeline, shared: Arc<Shared>) -> Player {
         let state = shared.clone();
-        let worker = thread::spawn(move || run_pipeline(pipeline, &state, Instant::now()));
+        let worker = thread::spawn(move || run_pipeline(pipeline, &state, Instant::now(), false));
         Player {
             shared,
             worker: Some(worker),
@@ -636,7 +671,8 @@ mod tests {
     #[test]
     fn pending_track_preroll_defers_play_and_latency_messages_remain_bounded() {
         let shared = Arc::new(Shared::new());
-        let pipeline = Pipeline::new(synthetic_webm(), Container::Webm, shared.clone()).unwrap();
+        let pipeline =
+            Pipeline::new(synthetic_webm(), Container::Webm, shared.clone(), false).unwrap();
         pipeline.set_playing(false).unwrap();
         let deadline = Instant::now() + Duration::from_secs(8);
         while pipeline.observation().settled_state != Some(gst::State::Paused) {
@@ -719,7 +755,8 @@ mod tests {
     #[test]
     fn lost_clock_cannot_leave_a_playing_owner_frozen() {
         let shared = Arc::new(Shared::new());
-        let pipeline = Pipeline::new(synthetic_webm(), Container::Webm, shared.clone()).unwrap();
+        let pipeline =
+            Pipeline::new(synthetic_webm(), Container::Webm, shared.clone(), false).unwrap();
         let native = pipeline.pipeline.clone();
         // A dedicated clock models a retired device clock. Never modify the
         // process-wide system clock or depend on a physical output route change.

@@ -19,6 +19,13 @@ pub struct Services {
     pub(super) install: std::cell::RefCell<super::updates::Install>,
     notification_sequence: std::cell::Cell<u64>,
     voice_sequence: std::cell::Cell<u64>,
+    voice_player: std::cell::RefCell<
+        Option<(
+            talk_core::ui::presentation::ConversationRef,
+            super::content_video::Player,
+            u8,
+        )>,
+    >,
     notification_sources:
         std::cell::RefCell<Vec<talk_core::preferences::notifications::NotificationSources>>,
     pub updates:
@@ -56,6 +63,7 @@ impl Services {
             install: std::cell::RefCell::default(),
             notification_sequence: std::cell::Cell::new(0),
             voice_sequence: std::cell::Cell::new(0),
+            voice_player: std::cell::RefCell::new(None),
             notification_sources: std::cell::RefCell::new(Vec::new()),
             updates: if connect_accounts {
                 talk_adapters::updates::UpdateRuntime::start(env!("CARGO_PKG_VERSION"))
@@ -178,6 +186,9 @@ impl Services {
     }
     pub(super) fn request_application_shutdown(&self) {
         self.preferences.request_shutdown();
+        if let Some((_, player, _)) = self.voice_player.borrow().as_ref() {
+            player.stop();
+        }
         if let Some(accounts) = &self.accounts {
             accounts.borrow_mut().shutdown();
         }
@@ -242,6 +253,108 @@ pub struct Bridge {
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
+    fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
+        use super::content_video::Phase;
+        use talk_core::ui::content::{PlaybackState, VoiceReviewPlayback};
+        let slot = self.services.voice_player.borrow();
+        let (context, player, speed) = slot.as_ref()?;
+        if !self
+            .services
+            .devices
+            .as_ref()
+            .ok()
+            .and_then(|d| d.voice_snapshot())
+            .is_some_and(|v| {
+                v.context == *context && v.phase == talk_core::ui::content::VoicePhase::Review
+            })
+        {
+            player.stop();
+            return None;
+        }
+        let snapshot = player.snapshot();
+        Some(VoiceReviewPlayback {
+            context: *context,
+            speed_half_steps: *speed,
+            state: match snapshot.phase {
+                Phase::Starting => PlaybackState::Loading,
+                Phase::Playing => PlaybackState::Playing,
+                Phase::Paused => PlaybackState::Paused,
+                Phase::Ended => PlaybackState::Ended,
+                Phase::Stopping | Phase::Stopped => PlaybackState::Stopping,
+                Phase::Failed(_) => {
+                    PlaybackState::Failed(talk_core::ui::UnavailableReason::Unsupported)
+                }
+            },
+            position_ms: snapshot.position_ms,
+            duration_ms: snapshot.duration_ms,
+        })
+    }
+    fn voice_review_play(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        play: bool,
+    ) -> Result<(), DeviceError> {
+        let devices = self.services.devices.as_ref().map_err(|e| *e)?;
+        let bytes = devices.voice_audio(context).ok_or(DeviceError::Stale)?;
+        let mut slot = self.services.voice_player.borrow_mut();
+        if let Some((old, player, _)) = slot.as_mut() {
+            if *old == context && !player.reap() {
+                return player
+                    .set_playing(play)
+                    .map_err(|_| DeviceError::Unavailable);
+            }
+            player.stop();
+            if !player.reap() {
+                return Err(DeviceError::Busy);
+            }
+            *slot = None;
+        }
+        if !play {
+            return Ok(());
+        }
+        if let Some(accounts) = &self.services.accounts {
+            accounts.borrow_mut().stop_video();
+        }
+        let bytes = talk_core::protocol::content::VideoBytes::from_shared(bytes.shared())
+            .map_err(|_| DeviceError::CaptureFailed)?;
+        let player = super::content_video::Player::start_audio(bytes)
+            .map_err(|_| DeviceError::Unavailable)?;
+        player
+            .set_playing(true)
+            .map_err(|_| DeviceError::Unavailable)?;
+        *slot = Some((context, player, 2));
+        Ok(())
+    }
+    fn voice_review_seek(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        position_ms: u64,
+    ) -> Result<(), DeviceError> {
+        let slot = self.services.voice_player.borrow();
+        let (_, player, _) = slot
+            .as_ref()
+            .filter(|(scope, _, _)| *scope == context)
+            .ok_or(DeviceError::Stale)?;
+        player
+            .seek_ms(position_ms)
+            .map_err(|_| DeviceError::Unavailable)
+    }
+    fn voice_review_speed(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        speed: u8,
+    ) -> Result<(), DeviceError> {
+        let mut slot = self.services.voice_player.borrow_mut();
+        let (_, player, current) = slot
+            .as_mut()
+            .filter(|(scope, _, _)| *scope == context)
+            .ok_or(DeviceError::Stale)?;
+        player
+            .set_rate(speed)
+            .map_err(|_| DeviceError::Unavailable)?;
+        *current = speed;
+        Ok(())
+    }
     fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
         self.services.devices.as_ref().ok()?.voice_snapshot()
     }
@@ -268,6 +381,16 @@ impl ComputerSettingsPort for Bridge {
         context: talk_core::ui::presentation::ConversationRef,
         cancel: bool,
     ) -> Result<(), DeviceError> {
+        if cancel
+            && let Some((_, player, _)) = self
+                .services
+                .voice_player
+                .borrow()
+                .as_ref()
+                .filter(|(scope, _, _)| *scope == context)
+        {
+            player.stop();
+        }
         self.services
             .devices
             .as_ref()
@@ -300,6 +423,15 @@ impl ComputerSettingsPort for Bridge {
             .borrow_mut()
             .send_voice_bytes(request, context, bytes)
             .map_err(|_| DeviceError::Unavailable)?;
+        if let Some((_, player, _)) = self
+            .services
+            .voice_player
+            .borrow()
+            .as_ref()
+            .filter(|(scope, _, _)| *scope == context)
+        {
+            player.stop();
+        }
         self.services.voice_sequence.set(sequence);
         devices.stop_voice(context, true)?;
         Ok(())

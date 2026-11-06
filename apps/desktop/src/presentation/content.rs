@@ -32,17 +32,28 @@ pub(crate) enum Action {
     CreatePoll,
     AddOption,
     RemoveOption(usize),
-    MoveOption { index: usize, up: bool },
+    MoveOption {
+        index: usize,
+        up: bool,
+    },
     Multiple,
-    VoteLimit { increase: bool },
+    VoteLimit {
+        increase: bool,
+    },
     HiddenResults,
     SubmitPoll,
     SaveDraft,
     ToggleDrafts,
-    LoadDraft { id: u64, edit: bool },
+    LoadDraft {
+        id: u64,
+        edit: bool,
+    },
     ConfirmDeleteDraft(u64),
     DeleteDraft(u64),
-    SelectPollOption { poll: u64, option: u16 },
+    SelectPollOption {
+        poll: u64,
+        option: u16,
+    },
     SubmitVote(u64),
     ConfirmClosePoll(u64),
     CancelClosePoll,
@@ -52,8 +63,23 @@ pub(crate) enum Action {
     VoiceStop(ConversationRef),
     VoiceCancel(ConversationRef),
     VoiceSend(ConversationRef),
+    VoiceReviewPlay {
+        context: ConversationRef,
+        play: bool,
+    },
+    VoiceReviewSeek {
+        context: ConversationRef,
+        position_ms: u64,
+    },
+    VoiceReviewSpeed {
+        context: ConversationRef,
+        speed: u8,
+    },
     Preview(AttachmentRef),
-    GalleryMove { from: AttachmentRef, offset: i8 },
+    GalleryMove {
+        from: AttachmentRef,
+        offset: i8,
+    },
     Download(AttachmentRef),
     Command(ContentAction),
 }
@@ -92,6 +118,7 @@ pub(super) struct ContentUi {
     pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub(super) voice_levels: Vec<u16>,
     pub(super) voice_error: Option<&'static str>,
+    voice_playback: Option<talk_core::ui::content::VoiceReviewPlayback>,
 }
 impl ContentUi {
     pub fn new(
@@ -136,6 +163,7 @@ impl ContentUi {
             voice: None,
             voice_levels: Vec::new(),
             voice_error: None,
+            voice_playback: None,
         }
     }
     pub fn inputs(&self) -> impl Iterator<Item = &Entity<TextInput>> {
@@ -282,6 +310,14 @@ impl Desktop {
                 self.content_ui.voice_levels.clear();
             }
             self.content_ui.voice = voice;
+            cx.notify();
+        }
+        let playback = self
+            .settings_port
+            .voice_review_playback()
+            .filter(|p| Some(p.context) == self.snapshot.selected);
+        if self.content_ui.voice_playback != playback {
+            self.content_ui.voice_playback = playback;
             cx.notify();
         }
         let account = self.snapshot.active_account;
@@ -677,6 +713,68 @@ impl Desktop {
             )),
             VoicePhase::Stopping | VoicePhase::Failed(_) => body,
         };
+        let mut review = div().flex().items_center().gap_2();
+        if voice.phase == VoicePhase::Review {
+            let playback = self
+                .content_ui
+                .voice_playback
+                .filter(|p| p.context == context);
+            let playing =
+                playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
+            let speed = playback.map_or(2, |p| p.speed_half_steps);
+            review = review
+                .child(self.icon_button(
+                    "voice-review-play",
+                    (
+                        if playing { "pause" } else { "play" },
+                        if playing {
+                            "Pausieren"
+                        } else {
+                            "Aufnahme abspielen"
+                        },
+                    ),
+                    ButtonStyle::Quiet,
+                    true.into(),
+                    LocalAction::Content(Action::VoiceReviewPlay {
+                        context,
+                        play: !playing,
+                    }),
+                    cx,
+                ))
+                .child(self.button(
+                    "voice-review-speed",
+                    format!("{}x", f32::from(speed) / 2.0),
+                    ButtonStyle::Quiet,
+                    playback.is_some(),
+                    LocalAction::Content(Action::VoiceReviewSpeed {
+                        context,
+                        speed: if speed >= 4 { 2 } else { speed + 1 },
+                    }),
+                    cx,
+                ));
+            if let Some(playback) = playback
+                && let Some(duration) = playback.duration_ms
+            {
+                review = review.child(self.hint(&format!(
+                    "{:02}:{:02} / {time}",
+                    playback.position_ms / 60_000,
+                    playback.position_ms / 1_000 % 60
+                )));
+                for step in 0..=4usize {
+                    review = review.child(self.button(
+                        ("voice-review-seek", step),
+                        format!("{}%", step * 25),
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Content(Action::VoiceReviewSeek {
+                            context,
+                            position_ms: duration.saturating_mul(step as u64) / 4,
+                        }),
+                        cx,
+                    ));
+                }
+            }
+        }
         div()
             .flex_none()
             .px(if compact { px(12.) } else { px(24.) })
@@ -692,6 +790,7 @@ impl Desktop {
                     .flex_col()
                     .gap_2()
                     .child(body)
+                    .child(review)
                     .when_some(
                         match voice.phase {
                             VoicePhase::Failed(error) => Some(voice_error(error)),
@@ -1059,6 +1158,26 @@ impl Desktop {
                     self.content_ui.voice_error = Some(voice_error(error));
                 } else {
                     self.content_ui.voice_error = None;
+                }
+            }
+            Action::VoiceReviewPlay { context, play } => {
+                if let Err(error) = self.settings_port.voice_review_play(context, play) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                } else {
+                    self.content_ui.voice_error = None;
+                }
+            }
+            Action::VoiceReviewSeek {
+                context,
+                position_ms,
+            } => {
+                if let Err(error) = self.settings_port.voice_review_seek(context, position_ms) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                }
+            }
+            Action::VoiceReviewSpeed { context, speed } => {
+                if let Err(error) = self.settings_port.voice_review_speed(context, speed) {
+                    self.content_ui.voice_error = Some(voice_error(error));
                 }
             }
             Action::Preview(reference) => self.open_media_preview(reference, window, cx),

@@ -7,6 +7,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anonym", "Anonymous", "Anónima"),
     (
+        "Aufnahme abspielen",
+        "Play recording",
+        "Reproducir grabación",
+    ),
+    (
         "Aufnahme bereit zum Senden",
         "Recording ready to send",
         "Grabación lista para enviar",
