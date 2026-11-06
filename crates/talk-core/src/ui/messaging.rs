@@ -1,7 +1,7 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
-use super::{Decision, Page, Text, UnavailableReason};
+use super::{ClipboardImage, Decision, Page, Text, UnavailableReason};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
@@ -328,7 +328,7 @@ pub enum MessageAction {
     StageFiles(Page<Text<16384>, 8>),
     StageClipboardImage {
         name: Text<255>,
-        image: super::content::ClipboardImage,
+        image: ClipboardImage,
     },
     SendFiles {
         caption: Text<4096>,

@@ -21,7 +21,7 @@ from vendor import verify_gpui
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
     "talk-core": ("crates/talk-core", {"pulldown-cmark", "url"}),
-    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs"}),
+    "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs", "percent-encoding", "roxmltree", "time"}),
     "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
@@ -161,7 +161,7 @@ def allow_native_export_waiter(source: str) -> str:
 # The markup module is a bounded pure user-text parser, separately inspected by
 # the core I/O guard. Its public records use Text/Page, without transport authority.
 UI_EXPORTS = {
-    *(('crate', 'bounded', name) for name in ('LimitExceeded', 'Page', 'Text')),
+    *(('crate', 'bounded', name) for name in ('ClipboardImage', 'LimitExceeded', 'Page', 'Text')),
     ('crate', 'identity', 'PersistenceState'),
     ('crate', 'markup'),
     *(('crate', 'ids', name) for name in (
@@ -293,6 +293,9 @@ def check() -> None:
         "rustls": {"default-features": False, "features": ["std", "aws_lc_rs", "tls12"]},
         "rustls-native-certs": {"default-features": False},
         "reqwest": {"default-features": False, "features": ["rustls", "form", "stream"]},
+        "percent-encoding": {},
+        "roxmltree": {},
+        "time": {"default-features": False, "features": ["parsing"]},
         "tokio": {"default-features": False, "features": ["rt", "time", "sync", "macros", "net", "io-util", "fs"]},
         "serde": {"default-features": False, "features": ["std"]},
         "serde_json": {"default-features": False, "features": ["std"]},
@@ -483,7 +486,7 @@ def check() -> None:
             require(paths is not None, "boundary imports need explicit paths without aliases/globs")
             for imported in paths or []:
                 allowed = len(imported) == 2 and imported[0] == "super" and imported[1] in {
-                    "AccountId", "AccountScope", "CallScope", "ConversationId", "Decision", "MediaIntent", "Page", "SubmitError", "Text", "UnavailableReason", "UserIntent", "AddressInputError", "ServerInput"
+                    "AccountId", "AccountScope", "CallScope", "ClipboardImage", "ConversationId", "Decision", "MediaIntent", "Page", "SubmitError", "Text", "UnavailableReason", "UserIntent", "AddressInputError", "ServerInput"
                 }
                 allowed |= imported in {
                     ("crate", "preferences", "navigation", "NavigationAccountKey"),

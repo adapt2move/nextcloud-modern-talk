@@ -2,27 +2,6 @@
 use super::conversation::{AccountPersonRef, Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{AccountScope, Page, Text, UnavailableReason};
-use std::sync::Arc;
-
-/// Ephemeral clipboard bytes; never part of a snapshot or durable chat record.
-#[derive(Clone, Eq, PartialEq)]
-pub struct ClipboardImage(Arc<[u8]>);
-impl std::fmt::Debug for ClipboardImage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ClipboardImage")
-            .field(&self.0.len())
-            .finish()
-    }
-}
-impl ClipboardImage {
-    pub fn new(bytes: Vec<u8>) -> Option<Self> {
-        (!bytes.is_empty() && bytes.len() <= 4 * 1024 * 1024).then(|| Self(bytes.into()))
-    }
-    pub fn as_slice(&self) -> &[u8] {
-        &self.0
-    }
-}
-
 /// One native file promise's bounded observation, retained until acknowledged.
 /// This correlation grants no authority to read the former account or room.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -3,6 +3,25 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LimitExceeded;
 
+/// Finite, immutable encoded clipboard image; this is transient intent data.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ClipboardImage(std::sync::Arc<[u8]>);
+impl std::fmt::Debug for ClipboardImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ClipboardImage")
+            .field(&self.0.len())
+            .finish()
+    }
+}
+impl ClipboardImage {
+    pub fn new(bytes: &[u8]) -> Option<Self> {
+        (!bytes.is_empty() && bytes.len() <= 4 * 1024 * 1024).then(|| Self(bytes.into()))
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Text<const BYTES: usize>(String);
 

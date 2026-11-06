@@ -85,40 +85,26 @@ impl Desktop {
         {
             return false;
         }
-        let Some(item) = cx.read_from_clipboard() else {
-            return false;
-        };
-        if item.text().is_some() {
-            return false;
-        }
-        let Some(gpui::ClipboardEntry::Image(image)) = item.entries().first() else {
-            return false;
-        };
         let Some(context) = self.snapshot.selected else {
             return false;
         };
-        let extension = match image.format {
-            gpui::ImageFormat::Png => "png",
-            gpui::ImageFormat::Jpeg => "jpg",
-            gpui::ImageFormat::Webp => "webp",
-            gpui::ImageFormat::Gif => "gif",
-            _ => {
+        let (extension, image) = match super::input::read_pasted_image(cx) {
+            super::input::PastedImage::None => return false,
+            super::input::PastedImage::Unsupported => {
                 self.feedback = Some(
                     Feedback::error("Dieses Bildformat wird nicht unterstützt.")
                         .in_conversation(context),
                 );
                 return true;
             }
-        };
-        if image.bytes.is_empty() || image.bytes.len() > 4 * 1024 * 1024 {
-            self.feedback = Some(
-                Feedback::error("Das Bild aus der Zwischenablage ist zu groß.")
-                    .in_conversation(context),
-            );
-            return true;
-        }
-        let Some(image) = talk_core::ui::content::ClipboardImage::new(image.bytes.clone()) else {
-            return true;
+            super::input::PastedImage::TooLarge => {
+                self.feedback = Some(
+                    Feedback::error("Das Bild aus der Zwischenablage ist zu groß.")
+                        .in_conversation(context),
+                );
+                return true;
+            }
+            super::input::PastedImage::Image(extension, image) => (extension, image),
         };
         if let Ok(name) = Text::new(&format!("clipboard.{extension}")) {
             self.submit_message(MessageAction::StageClipboardImage { name, image });

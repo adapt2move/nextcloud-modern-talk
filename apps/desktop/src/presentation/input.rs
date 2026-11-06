@@ -18,6 +18,37 @@ use unicode_segmentation::UnicodeSegmentation;
 mod edit;
 mod markdown;
 mod rich;
+
+/// Read only an image during an explicit paste. GPUI exposes files as text on
+/// some platforms, so ordinary text stays with the editor's normal paste path.
+pub(super) enum PastedImage {
+    None,
+    Unsupported,
+    TooLarge,
+    Image(&'static str, talk_core::ui::ClipboardImage),
+}
+pub(super) fn read_pasted_image(cx: &App) -> PastedImage {
+    let Some(item) = cx.read_from_clipboard() else {
+        return PastedImage::None;
+    };
+    if item.text().is_some() {
+        return PastedImage::None;
+    }
+    let Some(gpui::ClipboardEntry::Image(image)) = item.entries().first() else {
+        return PastedImage::None;
+    };
+    let extension = match image.format {
+        gpui::ImageFormat::Png => "png",
+        gpui::ImageFormat::Jpeg => "jpg",
+        gpui::ImageFormat::Webp => "webp",
+        gpui::ImageFormat::Gif => "gif",
+        _ => return PastedImage::Unsupported,
+    };
+    match talk_core::ui::ClipboardImage::new(&image.bytes) {
+        Some(image) => PastedImage::Image(extension, image),
+        None => PastedImage::TooLarge,
+    }
+}
 use super::input::edit::{
     ConcealedText, EditGeneration, EditHistory, EditSnapshot, Insertion, range_from_utf16,
     replacement, submitted_text, to_utf16, word_boundary,

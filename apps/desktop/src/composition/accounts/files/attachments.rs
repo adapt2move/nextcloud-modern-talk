@@ -405,7 +405,7 @@ impl Accounts {
         &mut self,
         context: ConversationRef,
         name: Text<255>,
-        image: talk_core::ui::content::ClipboardImage,
+        image: talk_core::ui::ClipboardImage,
     ) -> Result<(), SubmitError> {
         if !allowed(&self.snapshot, context) {
             return Err(SubmitError::Unavailable(

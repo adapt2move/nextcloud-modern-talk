@@ -109,11 +109,11 @@ fn attachment_metadata_is_preserved_for_each_queued_share() {
 }
 #[test]
 fn clipboard_image_stays_bounded_and_uses_byte_upload() {
-    use talk_core::ui::content::ClipboardImage;
-    assert!(ClipboardImage::new(Vec::new()).is_none());
-    assert!(ClipboardImage::new(vec![0; 4 * 1024 * 1024 + 1]).is_none());
+    use talk_core::ui::ClipboardImage;
+    assert!(ClipboardImage::new(&[]).is_none());
+    assert!(ClipboardImage::new(&vec![0; 4 * 1024 * 1024 + 1]).is_none());
     let (mut model, context) = model();
-    let image = ClipboardImage::new(vec![1, 2, 3]).unwrap();
+    let image = ClipboardImage::new(&[1, 2, 3]).unwrap();
     model
         .stage_clipboard_image(context, text("clipboard.png"), image)
         .unwrap();

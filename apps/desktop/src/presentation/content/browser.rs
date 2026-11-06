@@ -20,6 +20,20 @@ fn size_label(size: Option<u64>) -> String {
     }
 }
 impl Desktop {
+    fn cloud_can_stage(&self, browser: &talk_core::ui::content::FileBrowserView) -> bool {
+        !browser.offline
+            && !self.update_restart_pending
+            && !self.projection_blocked
+            && self.snapshot.content == ContentState::Ready
+            && self
+                .snapshot
+                .selected
+                .is_some_and(|context| context.account == browser.account)
+            && self
+                .selected()
+                .is_some_and(|room| room.send == talk_core::ui::Decision::Allowed)
+            && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Files)
+    }
     pub(in crate::presentation) fn cloud_browser_key(
         &mut self,
         event: &KeyDownEvent,
@@ -74,9 +88,7 @@ impl Desktop {
                 if entry.directory {
                     self.content_action(Action::BrowseDirectory(entry.path), window, cx);
                 } else if !self.content_ui.browser_folder_picker
-                    && !browser.offline
-                    && self.composer_available()
-                    && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Files)
+                    && self.cloud_can_stage(browser)
                     && let Some(context) = self
                         .snapshot
                         .selected
@@ -133,7 +145,7 @@ impl Desktop {
         true
     }
     pub(super) fn clear_cloud_search(&mut self, cx: &mut Context<Self>) {
-        self.content_ui.browser_search_task = None;
+        self.content_ui.browser_search_since = None;
         self.content_ui.browser_search_value.clear();
         self.content_ui
             .browser_search
@@ -473,9 +485,7 @@ impl Desktop {
                     id,
                     "Zur Auswahl hinzufügen",
                     ButtonStyle::Quiet,
-                    self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Files)
-                        && self.composer_available()
-                        && !browser.offline,
+                    self.cloud_can_stage(browser),
                     LocalAction::Content(Action::Command(ContentAction::StageCloudFile {
                         context,
                         path: entry.path.clone(),

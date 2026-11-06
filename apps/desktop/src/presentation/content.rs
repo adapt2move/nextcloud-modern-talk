@@ -12,8 +12,7 @@ use super::{
     messaging::composer_menu,
 };
 use gpui::{
-    Context, Div, Entity, Focusable, ImageSource, ObjectFit, Subscription, Task, Window, div, img,
-    prelude::*, px,
+    Context, Div, Entity, Focusable, ImageSource, ObjectFit, Window, div, img, prelude::*, px,
 };
 use talk_core::ui::content::{
     AssetState, AssetTarget, AssetView, AttachmentRef, ContentAction, DownloadState, PollDraft,
@@ -66,8 +65,7 @@ pub(super) struct ContentUi {
     browser_typeahead_at: Option<std::time::Instant>,
     pub(super) browser_search: Entity<TextInput>,
     browser_search_value: String,
-    browser_search_task: Option<Task<()>>,
-    _browser_search_observer: Subscription,
+    browser_search_since: Option<std::time::Instant>,
     pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
     gallery: Vec<AttachmentRef>,
@@ -92,41 +90,6 @@ impl ContentUi {
         cx: &mut Context<Desktop>,
     ) -> Self {
         let browser_search = cx.new(|cx| TextInput::new("Dateien suchen …", 256, theme, cx));
-        let search_observer = cx.observe(&browser_search, |this, input, cx| {
-            let value = input.read(cx).content.to_string();
-            if this.content_ui.browser_search_value == value {
-                return;
-            }
-            this.content_ui.browser_search_value = value.clone();
-            this.content_ui.browser_search_task = None;
-            if this.overlay != Some(Overlay::CloudFiles) {
-                return;
-            }
-            let account = this.snapshot.active_account;
-            this.content_ui.browser_search_task = Some(cx.spawn(async move |desktop, cx| {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(250))
-                    .await;
-                let _ = desktop.update(cx, |desktop, cx| {
-                    if desktop.overlay != Some(Overlay::CloudFiles)
-                        || desktop.snapshot.active_account != account
-                        || desktop.content_ui.browser_search_value != value
-                    {
-                        return;
-                    }
-                    desktop.content_ui.browser_page = 0;
-                    desktop.content_ui.browser_cursor = None;
-                    if value.trim().is_empty() {
-                        desktop.submit_content(ContentAction::ListFiles(
-                            Text::new("/").expect("constant"),
-                        ));
-                    } else if let Ok(query) = Text::new(value.trim()) {
-                        desktop.submit_content(ContentAction::SearchFiles(query));
-                    }
-                    cx.notify();
-                });
-            }));
-        });
         Self {
             account,
             context,
@@ -141,8 +104,7 @@ impl ContentUi {
             browser_typeahead_at: None,
             browser_search,
             browser_search_value: String::new(),
-            browser_search_task: None,
-            _browser_search_observer: search_observer,
+            browser_search_since: None,
             composer_menu: composer_menu::Menu::new(cx),
             preview: None,
             gallery: Vec::new(),
@@ -286,6 +248,31 @@ impl Desktop {
     /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
         self.refresh_attachment_send(cx);
+        if self.overlay == Some(Overlay::CloudFiles) {
+            let value = self.content_ui.browser_search.read(cx).content.to_string();
+            if value != self.content_ui.browser_search_value {
+                self.content_ui.browser_search_value = value;
+                self.content_ui.browser_search_since = Some(std::time::Instant::now());
+            }
+            if self
+                .content_ui
+                .browser_search_since
+                .is_some_and(|since| since.elapsed() >= std::time::Duration::from_millis(250))
+            {
+                self.content_ui.browser_search_since = None;
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                let value = self.content_ui.browser_search_value.trim();
+                let action = if value.is_empty() {
+                    Some(ContentAction::ListFiles(Text::new("/").expect("constant")))
+                } else {
+                    Text::new(value).ok().map(ContentAction::SearchFiles)
+                };
+                if let Some(action) = action {
+                    self.submit_content(action);
+                }
+            }
+        }
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
             self.content_ui.requested.clear();
@@ -869,7 +856,7 @@ impl Desktop {
             self.content_ui.preview = None;
         }
         if self.overlay == Some(Overlay::CloudFiles) {
-            self.content_ui.browser_search_task = None;
+            self.content_ui.browser_search_since = None;
             self.submit_content(ContentAction::CloseFileBrowser);
         }
         self.overlay = self.content_ui.return_overlay.take();
