@@ -93,6 +93,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-error-unknown",
     "call-controls",
     "call-gallery",
+    "call-speaker",
     "call-screen-stage",
     "call-active",
     "call-requested",
@@ -768,6 +769,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error-unknown"
             | "call-controls"
             | "call-gallery"
+            | "call-speaker"
             | "call-screen-stage"
             | "sharing"
             | "call-denied"
@@ -845,7 +847,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 None
             },
-            participants: page(if scenario == "call-gallery" || scenario == "call-screen-stage" {
+            participants: page(if matches!(scenario, "call-gallery" | "call-screen-stage" | "call-speaker") {
                 let mut people = participants().to_vec();
                 people[0].raised_hand = true;
                 people[3].raised_hand = true;

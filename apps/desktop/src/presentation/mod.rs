@@ -197,6 +197,7 @@ pub struct InitialView {
     pub appearance: Appearance,
     pub overlay: Option<Overlay>,
     pub prejoin: bool,
+    pub focus_first_call_participant: bool,
     pub onboarding: bool,
     pub scale: u16,
 }
@@ -345,6 +346,7 @@ impl Desktop {
             appearance,
             overlay: initial_overlay,
             prejoin,
+            focus_first_call_participant,
             onboarding,
             scale,
         } = initial;
@@ -442,6 +444,9 @@ impl Desktop {
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
+        let call_focus = if development && focus_first_call_participant {
+            snapshot.call.as_ref().and_then(|call| call.participants.as_slice().first().map(|p| (call.scope, p.local_id)))
+        } else { None };
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
@@ -516,7 +521,7 @@ impl Desktop {
             navigation_open: false,
             sidebar_hidden: false,
             call_chat_open: true,
-            call_focus: None,
+            call_focus,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
