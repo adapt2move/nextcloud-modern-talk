@@ -626,6 +626,25 @@ async fn released_server_messaging_and_room_controls() {
     .await;
     let thread = canonical_accepted_id(sent, OperationId::from_local(123));
     assert_eq!(thread.conversation, id);
+    let ProtocolReply::Conversations(_) = client
+        .request(context(&runtime), ProtocolRequest::ListConversations)
+        .await
+        .expect("bind account conversations before reading subscribed threads")
+    else {
+        panic!("conversation list")
+    };
+    let ProtocolReply::SubscribedThreads(subscribed) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SubscribedThreads { offset: 0 },
+        )
+        .await
+        .expect("subscribed threads")
+    else {
+        panic!("subscribed thread list")
+    };
+    assert!(subscribed.as_slice().iter().any(|item| item.root == thread));
+    println!("alpha-backend subscribed-threads: pass");
     m(&mut client, &runtime, id, 124, "thread-list", M::Threads).await;
     m(
         &mut client,
@@ -682,6 +701,15 @@ async fn released_server_messaging_and_room_controls() {
         129,
         "mark-read",
         M::MarkRead(second),
+    )
+    .await;
+    m(
+        &mut client,
+        &runtime,
+        id,
+        132,
+        "mark-unread-from",
+        M::MarkUnreadFrom(first),
     )
     .await;
     m(&mut client, &runtime, id, 130, "mark-unread", M::MarkUnread).await;
