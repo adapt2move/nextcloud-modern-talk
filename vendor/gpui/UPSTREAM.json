@@ -45,12 +45,12 @@
     {
       "original_sha256": null,
       "path": "src/platform/mac/permission_probe.rs",
-      "sha256": "42123afd118d3180353e1a5a9d051ab3d0bacbc0939d9e0aec1df245accabaf2"
+      "sha256": "06fa2afc2768fbce268451bda8223667e1eaa2948cfef7500cbe440d5e376f65"
     },
     {
       "original_sha256": null,
       "path": "src/platform/mac/permissions.rs",
-      "sha256": "8d2c2917bb4e1825970d29c8a51d506a4314ea5fab65f9f3b9764b0f634c9b5d"
+      "sha256": "ab37b6527dbe9ad4bbc7168ad250266cd412649b2fd8fd3cafe73b916762d421"
     },
     {
       "original_sha256": "0061a0eccdb8467e89eaeacedc7d5d010be956a5c778fff0ad7d3b30bb736334",
