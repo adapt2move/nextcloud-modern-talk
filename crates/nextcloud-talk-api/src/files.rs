@@ -28,6 +28,50 @@ impl FilePath {
     }
 }
 impl Client {
+    /// Share an existing file into a room. Policy and capability checks belong to
+    /// the caller; an interrupted mutation must be reconciled, never replayed.
+    pub async fn share_existing_file(
+        &mut self,
+        c: &OperationContext,
+        room: &crate::models::RoomToken,
+        path: &FilePath,
+        caption: &str,
+    ) -> Result<String, Error> {
+        self.validate(c)?;
+        if caption.len() > 4096 || caption.contains('\0') {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        let mut form = vec![
+            ("shareType", "10".to_owned()),
+            ("shareWith", room.as_str().to_owned()),
+            ("path", path.as_str().to_owned()),
+        ];
+        if !caption.is_empty() {
+            form.push((
+                "talkMetaData",
+                serde_json::json!({"caption": caption}).to_string(),
+            ));
+        }
+        let response = self
+            .transport
+            .ocs(
+                c,
+                reqwest::Method::POST,
+                "ocs/v2.php/apps/files_sharing/api/v1/shares",
+                &[],
+                &form,
+                false,
+            )
+            .await
+            .map_err(|error| self.mutation_error(error))?;
+        let id = &response.data["id"];
+        let id = id
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| id.as_u64().map(|v| v.to_string()));
+        id.filter(|v| !v.is_empty() && v.len() <= 128 && v.bytes().all(|b| b.is_ascii_digit()))
+            .ok_or_else(|| self.mutation_error(self.error(ErrorKind::Malformed)))
+    }
     /// Create only. The stream is not rewindable and an uncertain PUT is never replayed.
     pub async fn upload_file<R: AsyncRead + Unpin + Send + 'static>(
         &mut self,

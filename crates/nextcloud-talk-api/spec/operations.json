@@ -472,6 +472,14 @@
       "scope": "Create-only filename probing; no replace-existing mode."
     },
     {
+      "operation_id": "files-sharing-share-to-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/files_sharing/api/v1/shares",
+      "status": "partial",
+      "api": "Client::share_existing_file",
+      "scope": "Existing-file room share with optional caption; caller owns capability and permission checks. Source: https://github.com/nextcloud/spreed/blob/main/docs/chat.md#share-a-file-to-the-chat"
+    },
+    {
       "operation_id": "chat-post-attachment-to-room",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment",
