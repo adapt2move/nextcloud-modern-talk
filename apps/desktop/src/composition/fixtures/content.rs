@@ -378,6 +378,67 @@ pub(super) fn action(
             snapshot.content_panel.preview = None;
             Ok(())
         }
+        ContentAction::SeekVoice {
+            attachment,
+            position_ms,
+        } => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.position_ms = position_ms.min(voice.duration_ms.unwrap_or(0));
+            println!(
+                "UI_VOICE_FIXTURE seek_ms={} no_backend=true",
+                voice.position_ms
+            );
+            Ok(())
+        }
+        ContentAction::SpeedVoice {
+            attachment,
+            speed_half_steps,
+        } => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            if !(2..=4).contains(&speed_half_steps) {
+                return Err(SubmitError::StaleScope);
+            }
+            voice.speed_half_steps = speed_half_steps;
+            Ok(())
+        }
+        ContentAction::PlayVoice(attachment) => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.state = PlaybackState::Playing;
+            Ok(())
+        }
+        ContentAction::PauseVoice(attachment) => {
+            let voice = snapshot
+                .content_panel
+                .voice_playback
+                .as_mut()
+                .filter(|voice| {
+                    snapshot.selected == Some(attachment.context) && voice.attachment == attachment
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            voice.state = PlaybackState::Paused;
+            Ok(())
+        }
         ContentAction::Acknowledge => {
             snapshot.content_panel.result = None;
             Ok(())

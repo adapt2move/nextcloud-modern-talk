@@ -96,6 +96,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Gespeicherter Stand", "Saved state", "Estado guardado"),
     (
+        "Gib eine Frage ein.",
+        "Enter a question.",
+        "Introduce una pregunta.",
+    ),
+    (
         "Höchstens {n} Stimmen",
         "At most {n} votes",
         "Hasta {n} votos",

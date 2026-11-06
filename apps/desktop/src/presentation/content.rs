@@ -797,6 +797,9 @@ impl Desktop {
                 |d| d.child(self.recording_dot()),
             )
             .child(self.hint(&time))
+            .when(voice.phase == VoicePhase::Review, |d| {
+                d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
+            })
             .child(
                 div()
                     .flex_1()
@@ -992,10 +995,11 @@ impl Desktop {
             format!("{:02}:{:02}", position / 60_000, position / 1_000 % 60)
         };
         let failed = playback.is_some_and(|p| matches!(p.state, PlaybackState::Failed(_)));
+        let fallback_id = format!("{}:{}", reference.message, reference.placeholder.as_str());
         let source = object
             .id
             .as_ref()
-            .map_or(reference.placeholder.as_str(), |id| id.as_str());
+            .map_or(fallback_id.as_str(), |id| id.as_str());
         let group: gpui::SharedString = scoped_id(
             "voice-card",
             reference.context,
@@ -1771,6 +1775,14 @@ impl Desktop {
         let available = self.content_scope_current()
             && online
             && self.snapshot.content_panel.poll_create.enabled();
+        let options: Vec<_> = self
+            .content_ui
+            .options
+            .iter()
+            .take(self.content_ui.option_count)
+            .map(|input| input.read(cx).content.clone())
+            .collect();
+        let options_interacted = options.iter().any(|value| !value.trim().is_empty());
         let mut body = div()
             .flex()
             .flex_col()
@@ -1780,6 +1792,9 @@ impl Desktop {
                 self.input_surface(&self.content_ui.question, cx)
                     .child(self.content_ui.question.clone()),
             );
+        if options_interacted && self.content_ui.question.read(cx).content.trim().is_empty() {
+            body = body.child(self.hint(self.l("Gib eine Frage ein.")));
+        }
         if self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled()
         {
             if self.content_ui.drafts_open {
@@ -1923,6 +1938,18 @@ impl Desktop {
                     )),
             );
         }
+        if options_interacted
+            && (options.iter().any(|value| value.trim().is_empty())
+                || options.iter().enumerate().any(|(index, value)| {
+                    options[..index]
+                        .iter()
+                        .any(|previous| previous.trim() == value.trim())
+                }))
+        {
+            body = body.child(
+                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")),
+            );
+        }
         body = body
             .child(div().flex().flex_wrap().gap_2().child(self.button(
                 "poll-add-option",
@@ -1990,18 +2017,6 @@ impl Desktop {
                     cx,
                 ),
             ));
-        let interacted = !self.content_ui.question.read(cx).content.is_empty()
-            || self
-                .content_ui
-                .options
-                .iter()
-                .take(self.content_ui.option_count)
-                .any(|input| !input.read(cx).content.is_empty());
-        if interacted && self.poll_draft(cx).is_none() {
-            body = body.child(
-                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")),
-            );
-        }
         if !available {
             body = body.child(self.hint(self.l(if !online {
                 "Die Verbindung ist derzeit nicht bereit."
