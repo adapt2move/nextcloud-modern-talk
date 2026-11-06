@@ -305,6 +305,21 @@ impl Client {
         }
         result
     }
+    /// Delete a draft. The caller must establish moderator authority and draft status.
+    pub async fn delete_poll_draft(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        poll: u64,
+    ) -> Result<(), Error> {
+        self.validate(c)?;
+        let poll = id(poll).map_err(|kind| self.error(kind))?;
+        let route = format!("ocs/v2.php/apps/spreed/api/v1/poll/{}/{poll}", room.as_str());
+        self.transport.ocs(c, Method::DELETE, &route, &[], &[], false).await
+            .map_err(|error| self.mutation_error(error))?;
+        self.validate(c)?;
+        Ok(())
+    }
     /// Fetch a bounded moderator draft list for this room.
     pub async fn poll_drafts(
         &mut self,
@@ -380,6 +395,31 @@ mod tests {
     use serde_json::json;
     fn value() -> Value {
         json!({"id":3,"question":"Where?","options":["A","B"],"votes":[],"votedSelf":[],"status":0,"resultMode":1,"maxVotes":0,"numVoters":0,"actorType":"users","actorId":"author"})
+    }
+    #[test]
+    fn draft_response_has_no_vote_fields() {
+        let draft = json!({"id": 3, "question": "Where?", "options": ["A", "B"],
+            "status": 2, "resultMode": 0, "maxVotes": 1,
+            "actorType": "users", "actorId": "author"});
+        let decoded = Draft::decode(&draft).unwrap();
+        assert_eq!(decoded.id, 3);
+        assert_eq!(decoded.options, vec!["A", "B"]);
+        let mut invalid = draft;
+        invalid["status"] = json!(0);
+        assert!(Draft::decode(&invalid).is_err());
+    }
+    #[test]
+    fn draft_mutations_use_distinct_routes() {
+        let room = RoomToken::parse("abcd").unwrap();
+        let create = Command::CreateDraft { question: "Where?".into(),
+            options: vec!["A".into(), "B".into()], hidden_results: false, max_votes: 1 };
+        let (_, route, form) = plan(&room, &create).unwrap();
+        assert_eq!(route, "ocs/v2.php/apps/spreed/api/v1/poll/abcd");
+        assert!(form.contains(&("draft", "true".into())));
+        let edit = Command::UpdateDraft { poll: 3, question: "Where?".into(),
+            options: vec!["A".into(), "B".into()], hidden_results: false, max_votes: 1 };
+        assert_eq!(plan(&room, &edit).unwrap().1,
+            "ocs/v2.php/apps/spreed/api/v1/poll/abcd/draft/3");
     }
     #[test]
     fn hidden_summary_is_absent_until_closed() {
