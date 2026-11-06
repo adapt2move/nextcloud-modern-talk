@@ -126,7 +126,7 @@ impl Desktop {
         vec![
             message(
                 Choice::File,
-                "Datei anhängen",
+                "Vom Computer hochladen",
                 "paperclip",
                 MessageFeature::Files,
             ),

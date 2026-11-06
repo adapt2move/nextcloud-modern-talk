@@ -464,6 +464,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ha cambiado la cuenta seleccionada. Vuelve a cargarla.",
     ),
     ("Datei anhängen", "Attach file", "Adjuntar archivo"),
+    (
+        "Vom Computer hochladen",
+        "Upload from computer",
+        "Subir desde el ordenador",
+    ),
     ("Datei herunterladen", "Download file", "Descargar archivo"),
     ("Dateien", "Files", "Archivos"),
     (
