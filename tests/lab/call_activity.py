@@ -101,6 +101,10 @@ def check(state):
             lab.require("call-activity-end-all-empty", remaining == [])
             print(json.dumps({"profile": record["development"]["profile"], "result": "pass",
                               "scope": "internal signaling and call control; no media"}))
+        except LabError:
+            failed = [row for row in lab.current["assertions"] if row["result"] == "fail"]
+            print(json.dumps({"failed_assertions": failed}), flush=True)
+            raise
         finally:
             lab.request("lab_alice", "DELETE", room_path, expected=(200, 404),
                         name="call-activity-cleanup")
