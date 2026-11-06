@@ -451,6 +451,38 @@ impl MeetingWriter {
         guard.1 = true;
         Ok(AcceptedForProcessing)
     }
+    /// Send one transient activity to a reconciled direct-call peer. The caller
+    /// owns fan-out and rate limiting; no negotiation identifier is required.
+    /// External signaling is deliberately unsupported until its routing is wired.
+    pub async fn send_activity(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        activity: &crate::signaling::activity::Activity,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if self.binding.hpb.is_some() {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        if !self.selected.iter().any(|selected| &selected.peer == peer) {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let (kind, payload) = activity.encode().map_err(|e| self.binding.error(e))?;
+        let inner = json!({"to":peer.0.as_str(),"roomType":"video","type":kind,"payload":payload});
+        let messages = json!([{"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()}]).to_string();
+        let mut guard = ReadGuard(self.binding.lifetime.clone(), false);
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+            self.binding.room.as_str()
+        );
+        self.transport
+            .ocs(&context, Method::POST, &route, &[], &[("messages", messages)], false)
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        guard.1 = true;
+        Ok(AcceptedForProcessing)
+    }
     /// Local closure is first. This leaves only the call, preserving chat and
     /// conversation membership. An uncertain response is never replayed here.
     pub async fn leave(&mut self, context: &OperationContext) -> Result<(), Error> {
