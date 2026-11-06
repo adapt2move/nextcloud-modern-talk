@@ -366,7 +366,9 @@ mod thread_tests {
 
     #[test]
     fn rejects_zero_thread_id_before_exposing_it_to_callers() {
-        let value = json!({"thread": {"id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1}});
+        let value = json!({"thread": {
+            "id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1
+        }});
         assert!(matches!(thread(&value), Err(ErrorKind::Malformed)));
         let mut valid = value;
         valid["thread"]["id"] = json!(42);

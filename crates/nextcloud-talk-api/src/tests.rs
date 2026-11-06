@@ -9,6 +9,22 @@ use tokio::{
     net::TcpListener,
 };
 
+#[test]
+fn subscribed_threads_are_account_scoped_and_paged() {
+    let (method, route, query, _, _, mutation) =
+        plan(&Request::SubscribedThreads { offset: 50 }).unwrap();
+    assert_eq!(method, Method::GET);
+    assert_eq!(
+        route,
+        "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads"
+    );
+    assert_eq!(
+        query,
+        vec![("limit", "50".into()), ("offset", "50".into())]
+    );
+    assert!(!mutation);
+}
+
 #[tokio::test]
 async fn notification_204_is_scoped_unsupported_and_empty_lists_remain_successful() {
     let account = || reply(json!({"id":"synthetic-user","display-name":"Fixture"}));

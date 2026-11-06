@@ -1219,9 +1219,9 @@
       "operation_id": "thread-get-subscribed-threads",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/subscribed-threads",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::SubscribedThreads",
+      "scope": "Account-wide read; limit 50 and explicit offset. Caller checks the threads capability and maps each validated room token to its account scope. Source: spreed stable35 lib/Controller/ThreadController.php getSubscribedThreads."
     },
     {
       "operation_id": "thread-get-thread",

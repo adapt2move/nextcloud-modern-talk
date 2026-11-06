@@ -65,6 +65,8 @@ impl AppCredential {
 /// Semantic operations only. There is no authenticated URL, method, header or form API.
 /// Readback/reconciliation policy and application permission decisions belong to the caller.
 pub enum Request {
+    /// Account-wide subscribed threads, paged independently of any room.
+    SubscribedThreads { offset: u32 },
     Chat {
         room: RoomToken,
         command: chat::Command,
@@ -746,6 +748,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::SubscribedThreads { offset } => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads".into(),
+            vec![("limit", "50".into()), ("offset", offset.to_string())],
+            vec![],
+            Kind::Chat(chat::ResponseKind::Threads),
+        ),
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
         Request::Account => (
