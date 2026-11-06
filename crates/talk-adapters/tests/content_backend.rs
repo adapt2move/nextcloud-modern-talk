@@ -318,6 +318,8 @@ async fn released_server_file_listing_and_existing_share() {
     .unwrap();
     let share_operation = OperationId::from_local(sequence);
     assert!(matches!(shared, MR::Changed));
+    // The shared-items index can omit the reply context; the room history is
+    // the authoritative source for the caption's parent.
     let MR::Messages { messages, .. } = message(
         &mut client,
         &runtime,
@@ -337,24 +339,37 @@ async fn released_server_file_listing_and_existing_share() {
             .iter()
             .any(|item| item.kind.as_str() == "file")
     }));
-    for message in messages.as_slice() {
-        println!(
-            "fixture shared item: text={:?}, operation={:?}, parent={:?}",
-            message.message.text,
-            message.message.own_operation,
-            message.parent.as_ref().map(|parent| parent.id)
-        );
-    }
     assert!(
         messages.as_slice().iter().any(|message| {
             message.message.own_operation == Some(share_operation)
                 && message.message.text.as_str().contains("Fixture caption")
+        }),
+        "the shared file must reconcile its reference and caption"
+    );
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::History {
+            before: None,
+            thread: None,
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("chat history reply");
+    };
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(share_operation)
                 && message
                     .parent
                     .as_ref()
                     .is_some_and(|reply| reply.id == parent)
         }),
-        "the shared file must reconcile its reference, caption and reply"
+        "history must retain the share's reply target"
     );
     println!("files-backend directory-and-existing-share: pass");
 }
