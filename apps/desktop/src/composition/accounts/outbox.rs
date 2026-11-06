@@ -1517,7 +1517,7 @@ fn overlay(
                 .metadata
                 .parent
                 .as_mut()
-                .filter(|p| p.id == u128::from(*message))
+                .filter(|p| !p.external && p.id == u128::from(*message))
         {
             parent.unavailable = true;
             parent.author = text("");
@@ -1583,20 +1583,39 @@ fn overlay(
             row.metadata.local_operation = Some(entry.record.operation.as_local());
             row.metadata.thread = options.thread.map(u128::from);
             row.metadata.parent = options
-                .reply_to
-                .and_then(|id| {
-                    messages
-                        .as_slice()
-                        .iter()
-                        .find(|m| m.local_id == u128::from(id))
+                .private_reply
+                .as_ref()
+                .map(|private| view::Reply {
+                    id: u128::from(private.message),
+                    external: true,
+                    author: text(private.author.as_str()),
+                    text: text(private.body.as_str()),
+                    unavailable: false,
                 })
-                .map(|m| view::Reply {
-                    id: m.local_id,
-                    author: text(m.author.as_str()),
-                    text: m.body.clone(),
-                    unavailable: m.metadata.deleted,
+                .or_else(|| {
+                    options
+                        .reply_to
+                        .and_then(|id| {
+                            messages
+                                .as_slice()
+                                .iter()
+                                .chain(panel.thread_root_message.iter())
+                                .chain(panel.thread_messages.as_slice())
+                                .find(|m| m.local_id == u128::from(id))
+                        })
+                        .map(|m| view::Reply {
+                            id: m.local_id,
+                            external: false,
+                            author: text(m.author.as_str()),
+                            text: m.body.clone(),
+                            unavailable: m.metadata.deleted,
+                        })
                 });
             if options.thread.is_some() && panel.thread_root == options.thread.map(u128::from) {
+                if panel.thread_messages.as_slice().len() == 50 {
+                    panel.thread_messages =
+                        page(panel.thread_messages.as_slice().iter().skip(1).cloned());
+                }
                 let _ = panel.thread_messages.try_push(row);
             } else {
                 if messages.as_slice().len() == 100 {

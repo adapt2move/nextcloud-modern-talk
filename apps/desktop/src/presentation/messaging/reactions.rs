@@ -51,6 +51,21 @@ fn reaction_command(
 }
 
 impl Desktop {
+    pub(super) fn reaction_message(&self, message: u128) -> Option<&MessageView> {
+        self.snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| Some(panel.context) == self.snapshot.selected)
+            .into_iter()
+            .flat_map(|panel| {
+                panel
+                    .thread_root_message
+                    .iter()
+                    .chain(panel.thread_messages.as_slice())
+            })
+            .chain(self.snapshot.messages.as_slice())
+            .find(|row| row.local_id == message && message_actions_allowed(row))
+    }
     pub(super) fn reaction_picker_button(
         &self,
         message: &MessageView,
@@ -93,6 +108,7 @@ impl Desktop {
         &self,
         message: &MessageView,
         index: usize,
+        thread: bool,
         cx: &Context<Self>,
     ) -> gpui::Stateful<Div> {
         let context = self.snapshot.selected.expect("message context");
@@ -109,7 +125,13 @@ impl Desktop {
             gpui::ElementId::Name(
                 format!(
                     "{}:{}",
-                    scoped_id("message-quick-reaction", context, message.local_id, 0),
+                    super::row::surface_id(
+                        "message-quick-reaction",
+                        context,
+                        message.local_id,
+                        0,
+                        thread
+                    ),
                     emoji.as_str()
                 )
                 .into(),
@@ -133,14 +155,7 @@ impl Desktop {
 
     pub(super) fn reaction_available(&self, message: u128) -> Availability {
         let available = self.message_available(MessageFeature::React);
-        if available.is_enabled()
-            && !self
-                .snapshot
-                .messages
-                .as_slice()
-                .iter()
-                .any(|row| row.local_id == message && message_actions_allowed(row))
-        {
+        if available.is_enabled() && self.reaction_message(message).is_none() {
             Availability::when(false, "Reaktionen sind derzeit nicht verfügbar.")
         } else {
             available
@@ -151,11 +166,7 @@ impl Desktop {
         let recent = emoji.clone();
         let allowed = self.reaction_available(message).is_enabled();
         let command = self
-            .snapshot
-            .messages
-            .as_slice()
-            .iter()
-            .find(|row| row.local_id == message)
+            .reaction_message(message)
             .and_then(|row| reaction_command(row, emoji, allowed));
         let Some(command) = command else {
             return false;

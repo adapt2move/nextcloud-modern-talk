@@ -355,6 +355,7 @@ fn expiry_and_deletion_remove_text_reactions_quotes_and_pins() {
     let mut reply = message(3);
     reply.parent = Some(CachedReply {
         id: 1,
+        external: false,
         author: text("Fixture"),
         text: text("expired canary"),
         unavailable: false,

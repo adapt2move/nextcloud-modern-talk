@@ -2246,6 +2246,7 @@ fn expired_content_and_parent_excerpts_are_removed_before_restoring_history() {
     let mut child = message(key, 2, "Reply");
     child.parent = Some(ReplyContext {
         id: parent.message.id,
+        external: false,
         author: text("User"),
         text: text("Expiring secret"),
         unavailable: false,

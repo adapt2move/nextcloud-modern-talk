@@ -25,6 +25,8 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplyContext {
     pub id: MessageId,
+    /// An external private quote is display-only; its ID is not a local jump target.
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,

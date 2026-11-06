@@ -1873,6 +1873,7 @@ fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
         }
         let mut message = message.clone();
         if let Some(parent) = message.metadata.parent.as_mut()
+            && !parent.external
             && expired.contains(&parent.id)
         {
             parent.unavailable = true;
@@ -1939,7 +1940,7 @@ fn reconcile_related(
             && canonical
                 .as_slice()
                 .iter()
-                .any(|m| m.local_id == parent.id && m.metadata.deleted)
+                .any(|m| !parent.external && m.local_id == parent.id && m.metadata.deleted)
         {
             parent.unavailable = true;
             parent.text = text("");
@@ -2059,6 +2060,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             replyable: m.replyable == Some(true) && !deleted,
             parent: m.parent.as_ref().map(|p| view::Reply {
                 id: u128::from(p.id.sequence),
+                external: p.external,
                 author: p.author.clone(),
                 text: if p.unavailable {
                     text("")
@@ -2163,6 +2165,7 @@ pub(super) fn merge(
         .collect();
     for message in &mut messages {
         if let Some(parent) = message.metadata.parent.as_mut()
+            && !parent.external
             && unavailable.contains(&parent.id)
         {
             parent.unavailable = true;
@@ -2597,6 +2600,7 @@ mod tests {
         let mut child = row(2, "reply");
         child.metadata.parent = Some(view::Reply {
             id: 1,
+            external: false,
             author: text("A"),
             text: text("secret"),
             unavailable: false,

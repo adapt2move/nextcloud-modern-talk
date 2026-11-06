@@ -112,6 +112,9 @@ pub enum Command {
 pub struct Parent {
     pub id: u64,
     pub token: Option<String>,
+    /// Server-identified private quote from another conversation.
+    pub external: bool,
+    pub source_id: Option<u64>,
     pub author: String,
     pub message: String,
     pub unavailable: bool,
@@ -130,6 +133,8 @@ impl Parent {
         Ok(Some(Self {
             id: number(v, "id")?,
             token: string(v.get("token"), 30)?,
+            external: false,
+            source_id: None,
             author: if unavailable {
                 String::new()
             } else {

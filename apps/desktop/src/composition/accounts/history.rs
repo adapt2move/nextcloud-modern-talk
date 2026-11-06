@@ -375,6 +375,7 @@ impl History {
             }
             let mut message = message.clone();
             if let Some(parent) = message.metadata.parent.as_mut()
+                && !parent.external
                 && expired.contains(&parent.id)
             {
                 parent.unavailable = true;
@@ -1041,6 +1042,7 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
         parent: message.metadata.parent.as_ref().and_then(|p| {
             Some(CachedReply {
                 id: u64::try_from(p.id).ok()?,
+                external: p.external,
                 author: p.author.clone(),
                 text: p.text.clone(),
                 unavailable: p.unavailable,
@@ -1108,6 +1110,7 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                 .as_ref()
                 .map(|p| talk_core::ui::messaging::Reply {
                     id: u128::from(p.id),
+                    external: p.external,
                     author: p.author.clone(),
                     text: p.text.clone(),
                     unavailable: p.unavailable,

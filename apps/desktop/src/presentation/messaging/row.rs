@@ -12,6 +12,21 @@ use talk_core::ui::{
     presentation::{ContentState, DeliveryState, MessageView},
 };
 
+pub(super) fn surface_id(
+    name: &'static str,
+    context: talk_core::ui::presentation::ConversationRef,
+    message: u128,
+    extra: u128,
+    thread: bool,
+) -> ElementId {
+    let id = scoped_id(name, context, message, extra);
+    if thread {
+        ElementId::Name(format!("{id}:thread").into())
+    } else {
+        id
+    }
+}
+
 impl Desktop {
     pub(in crate::presentation) fn attachment_actions(
         &self,
@@ -38,13 +53,42 @@ impl Desktop {
         continuation: bool,
         cx: &Context<Self>,
     ) -> Div {
+        self.message_row_surface(m, continuation, false, cx)
+    }
+    pub(in crate::presentation) fn thread_message(
+        &self,
+        m: &MessageView,
+        continuation: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        self.message_row_surface(m, continuation, true, cx)
+    }
+    pub(in crate::presentation) fn thread_messages_grouped(
+        &self,
+        previous: &MessageView,
+        current: &MessageView,
+    ) -> bool {
+        grouped_message_surface(
+            previous,
+            current,
+            self.settings_port
+                .same_local_day(previous.metadata.timestamp, current.metadata.timestamp),
+            true,
+        )
+    }
+    fn message_row_surface(
+        &self,
+        m: &MessageView,
+        continuation: bool,
+        thread: bool,
+        cx: &Context<Self>,
+    ) -> Div {
         let t = self.theme;
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
-        let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
-            .to_string()
-            .into();
+        let row_id = |name, extra| surface_id(name, context, m.local_id, extra, thread);
+        let action_group: gpui::SharedString = row_id("message-actions", 0).to_string().into();
         if compact_system_message(m) {
             let status = call_status(m);
             let color = if status.is_some_and(|(_, failed)| failed) {
@@ -54,7 +98,7 @@ impl Desktop {
             };
             return div().child(
                 div()
-                    .id(scoped_id("message", context, m.local_id, 0))
+                    .id(row_id("message", 0))
                     .px_6()
                     .py_2()
                     .flex()
@@ -66,7 +110,7 @@ impl Desktop {
                     .when_some(status, |row, (symbol, _)| {
                         row.child(self.scaled_icon(symbol, 14., color))
                     })
-                    .child(self.message_text(m, cx))
+                    .child(self.message_text(m, thread, cx))
                     .child(self.hint(m.time_label.as_str())),
             );
         }
@@ -140,12 +184,12 @@ impl Desktop {
                         },
                         (!parent.unavailable).then_some(parent.text.as_str()),
                     );
-                    if parent.unavailable {
+                    if parent.unavailable || parent.external {
                         d.child(quote)
                     } else {
                         d.child(
                             self.control(
-                                scoped_id("message-parent", context, m.local_id, 0),
+                                row_id("message-parent", 0),
                                 ButtonStyle::Quiet,
                                 Availability::available().hinted(),
                                 LocalAction::MessageIn(context, Action::Locate(parent.id)),
@@ -156,7 +200,7 @@ impl Desktop {
                             .p_0()
                             .child(quote)
                             .child(self.reason_tip(
-                                scoped_id("message-parent", context, m.local_id, 0),
+                                row_id("message-parent", 0),
                                 Availability::available().hinted(),
                                 Some("Zur ursprünglichen Nachricht springen"),
                                 cx,
@@ -176,7 +220,7 @@ impl Desktop {
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .child(self.message_text(m, cx))
+                        .child(self.message_text(m, thread, cx))
                         .when(continuation && m.metadata.edited, |d| {
                             d.child(self.hint(self.l("Bearbeitet")))
                         }),
@@ -243,22 +287,13 @@ impl Desktop {
                         // The emoji is the server reaction key. Its control identity
                         // survives count changes and other emoji being inserted.
                         let id = gpui::ElementId::Name(
-                            format!(
-                                "{}:{}",
-                                scoped_id("reaction", context, m.local_id, 0),
-                                r.emoji.as_str()
-                            )
-                            .into(),
+                            format!("{}:{}", row_id("reaction", 0), r.emoji.as_str()).into(),
                         );
                         let emoji = r.emoji.clone();
                         let hover_emoji = emoji.clone();
                         let message = m.local_id;
-                        let group: gpui::SharedString = format!(
-                            "{}:{}",
-                            scoped_id("reaction-authors", context, message, 0),
-                            emoji.as_str()
-                        )
-                        .into();
+                        let group: gpui::SharedString =
+                            format!("{}:{}", row_id("reaction-authors", 0), emoji.as_str()).into();
                         let info_id = gpui::ElementId::Name(group.clone());
                         let wrapper_id =
                             gpui::ElementId::Name(format!("reaction-wrap:{group}").into());
@@ -341,7 +376,15 @@ impl Desktop {
                                 .focus(|d| d.opacity(1.)),
                             )
                     }))
-                    .child(self.reaction_picker_button(m, menu::Source::Badges, cx)),
+                    .child(self.reaction_picker_button(
+                        m,
+                        if thread {
+                            menu::Source::ThreadBadges
+                        } else {
+                            menu::Source::Badges
+                        },
+                        cx,
+                    )),
             );
             if let Some((active_context, message, emoji, _)) =
                 &self.message_ui.reaction_authors_visible
@@ -380,7 +423,7 @@ impl Desktop {
                 content = content.child(self.hint(&label));
             }
         }
-        if m.reply_count > 0 {
+        if !thread && m.reply_count > 0 {
             let count = self.count(
                 crate::presentation::localization::Count::Replies,
                 m.reply_count.into(),
@@ -450,7 +493,7 @@ impl Desktop {
             ));
         }
         div()
-        .when(self.message_ui.first_unread == Some((context, m.local_id)), |row| {
+        .when(!thread && self.message_ui.first_unread == Some((context, m.local_id)), |row| {
             row.child(
                 div().px_6().py_2().flex().items_center().gap_2()
                     .child(div().flex_1().h(px(1.)).bg(t.accent))
@@ -460,7 +503,7 @@ impl Desktop {
         })
         .child(
             div()
-                .id(scoped_id("message", context, m.local_id, 0))
+                .id(row_id("message", 0))
                 .group(action_group.clone())
                 .relative()
                 .px_6()
@@ -515,7 +558,7 @@ impl Desktop {
                     .into_any_element()
                 })
                 .child(content)
-                .child(self.pin_source_anchor(context, m.local_id))
+                .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
                 .when(!m.metadata.deleted && (pinned || delivery.is_some()), |d| {
                     let status = div().flex_none().flex().items_center().gap(px(4.))
                         .when(pinned, |d| {
@@ -526,7 +569,7 @@ impl Desktop {
                                     && (!panel.state.pending() || self.local_message_intents())
                             });
                             d.child(self.icon_button(
-                                scoped_id("row-unpin-message", context, m.local_id, 0),
+                                row_id("row-unpin-message", 0),
                                 ("pin", "Angeheftete Nachricht lösen"),
                                 ButtonStyle::Quiet,
                                 Availability::when(allowed, "Anheften ist derzeit nicht verfügbar."),
@@ -535,7 +578,7 @@ impl Desktop {
                             ).min_w(px(24.)).min_h(self.sp(20.)).h(self.sp(20.)).p_0())
                         })
                         .when_some(delivery, |d, indicator| {
-                            d.child(self.delivery_indicator(indicator, scoped_id("message-delivery", context, m.local_id, 0), cx))
+                            d.child(self.delivery_indicator(indicator, row_id("message-delivery", 0), cx))
                         });
                     let mut status = status;
                     status.style().align_self = Some(gpui::AlignSelf::FlexEnd);
@@ -569,13 +612,13 @@ impl Desktop {
                             .when(message_actions_allowed(m), |d| {
                                 let picker_open = self.message_ui.menu.is_for(context, m.local_id);
                                 d.children((0..3).map(|index| {
-                                    self.quick_reaction_button(m, index, cx)
+                                    self.quick_reaction_button(m, index, thread, cx)
                                         .opacity(0.)
                                         .group_hover(action_group.clone(), |s| s.opacity(1.))
                                         .focus(|s| s.opacity(1.))
                                 }))
                                 .child(
-                                    self.reaction_picker_button(m, menu::Source::Reactions, cx)
+                                    self.reaction_picker_button(m, if thread { menu::Source::ThreadReactions } else { menu::Source::Reactions }, cx)
                                         .opacity(if picker_open { 1. } else { 0. })
                                         .group_hover(action_group.clone(), |s| s.opacity(1.))
                                         .focus(|s| s.opacity(1.)),
@@ -584,14 +627,14 @@ impl Desktop {
                             .when(!m.own, |d| {
                                 d.child(
                                     self.icon_button(
-                                        scoped_id("message-reply", context, m.local_id, 0),
+                                        row_id("message-reply", 0),
                                         ("reply", "Antworten"),
                                         ButtonStyle::Quiet,
                                         Availability::when(
-                                            self.can_reply_to(m),
+                                            if thread { self.thread_can_reply(context, m) } else { self.can_reply_to(m) },
                                             "Auf diese Nachricht kann nicht geantwortet werden.",
                                         ),
-                                        LocalAction::MessageIn(context, Action::Reply(m.local_id)),
+                                        LocalAction::MessageIn(context, if thread { Action::ThreadReply(m.local_id) } else { Action::Reply(m.local_id) }),
                                         cx,
                                     )
                                     .opacity(0.)
@@ -600,7 +643,7 @@ impl Desktop {
                                 )
                             })
                             .when(
-                                self.message_feature_enabled(MessageFeature::Threads)
+                                !thread && self.message_feature_enabled(MessageFeature::Threads)
                                     && (m.metadata.thread.is_some() || m.reply_count > 0),
                                 |d| {
                                     d.child(
@@ -623,7 +666,7 @@ impl Desktop {
                             )
                             .child(
                                 self.icon_button(
-                                    scoped_id("message-menu", context, m.local_id, 0),
+                                    scoped_id(if thread { "thread-message-menu" } else { "message-menu" }, context, m.local_id, 0),
                                     ("more", "Nachrichtenaktionen"),
                                     ButtonStyle::Quiet,
                                     {
@@ -637,13 +680,13 @@ impl Desktop {
                                             available
                                         }
                                     },
-                                    LocalAction::MessageIn(context, Action::Menu(m.local_id)),
+                                    LocalAction::MessageIn(context, if thread { Action::ThreadMenu(m.local_id) } else { Action::Menu(m.local_id) }),
                                     cx,
                                 )
                                 .child(self.message_menu_anchor(
                                     context,
                                     m.local_id,
-                                    menu::Source::Actions,
+                                    if thread { menu::Source::ThreadActions } else { menu::Source::Actions },
                                 ))
                                 .opacity(if self.message_ui.menu.is_for(context, m.local_id) {
                                     1.
@@ -741,16 +784,27 @@ pub(super) fn grouped_message(
     current: &MessageView,
     same_local_day: bool,
 ) -> bool {
+    grouped_message_surface(previous, current, same_local_day, false)
+}
+fn grouped_message_surface(
+    previous: &MessageView,
+    current: &MessageView,
+    same_local_day: bool,
+    thread: bool,
+) -> bool {
     let eligible = |message: &MessageView| {
         !message.metadata.system
             && !message.metadata.deleted
             && message.metadata.parent.is_none()
-            && message.metadata.thread.is_none()
+            && (thread || message.metadata.thread.is_none())
             && message.reply_count == 0
             && message.metadata.timestamp != 0
     };
     eligible(previous)
         && eligible(current)
+        && (!thread
+            || previous.metadata.thread.is_some()
+                && previous.metadata.thread == current.metadata.thread)
         && previous.own == current.own
         && previous
             .metadata
@@ -920,6 +974,7 @@ mod tests {
                 3 => {
                     changed.metadata.parent = Some(talk_core::ui::messaging::Reply {
                         id: 5,
+                        external: false,
                         author: Text::new("Fixture").unwrap(),
                         text: Text::new("Parent").unwrap(),
                         unavailable: false,
@@ -935,6 +990,18 @@ mod tests {
                 "both sides preserve a semantic boundary"
             );
         }
+    }
+
+    #[test]
+    fn thread_replies_group_only_with_the_same_thread_and_author() {
+        let mut first = authored_message(1, Some("users:one"), 32_400);
+        let mut second = authored_message(2, Some("users:one"), 32_460);
+        first.metadata.thread = Some(7);
+        second.metadata.thread = Some(7);
+        assert!(grouped_message_surface(&first, &second, true, true));
+        assert!(!grouped_message(&first, &second, true));
+        second.metadata.thread = Some(8);
+        assert!(!grouped_message_surface(&first, &second, true, true));
     }
 
     #[test]

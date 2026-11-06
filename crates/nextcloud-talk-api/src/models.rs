@@ -258,7 +258,7 @@ impl Message {
         if !v.is_object() {
             return Err(ErrorKind::Malformed);
         }
-        let result = Self {
+        let mut result = Self {
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             id: integer(v.get("id")).ok_or(ErrorKind::Malformed)?,
             kind: string(v.get("messageType"), 128)?,
@@ -320,12 +320,23 @@ impl Message {
             },
         };
         RoomToken::parse(&result.token)?;
-        if result
-            .parent
-            .as_ref()
-            .is_some_and(|p| p.token.as_deref().is_some_and(|t| t != result.token))
+        if let Some(parent) = result.parent.as_mut()
+            && let Some(token) = parent
+                .token
+                .as_deref()
+                .filter(|token| *token != result.token)
         {
-            return Err(ErrorKind::WrongScope);
+            // Talk 24/25 expands a private-reply parent to the original room.
+            // Only accept the explicit matching private-reply metadata; the
+            // foreign token remains protocol-private and conveys no navigation authority.
+            RoomToken::parse(token)?;
+            let metadata = &v["parent"]["metaData"];
+            let source_id = integer(metadata.get("replyToMessageId")).filter(|id| *id > 0);
+            if metadata["replyToConversationToken"].as_str() != Some(token) || source_id.is_none() {
+                return Err(ErrorKind::WrongScope);
+            }
+            parent.external = true;
+            parent.source_id = source_id;
         }
         if result.id == 0 {
             return Err(ErrorKind::Malformed);

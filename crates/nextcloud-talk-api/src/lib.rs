@@ -575,6 +575,19 @@ impl Client {
                 {
                     return Err(self.error(ErrorKind::Uncertain));
                 }
+                if let Request::Chat {
+                    command: chat::Command::Send { options, .. },
+                    ..
+                } = &request
+                    && let Some(source) = options.reply_to_token.as_ref()
+                    && !message.parent.as_ref().is_some_and(|parent| {
+                        parent.external
+                            && parent.token.as_deref() == Some(source.as_str())
+                            && parent.source_id == options.reply_to
+                    })
+                {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
             }
             (
                 Request::Chat {

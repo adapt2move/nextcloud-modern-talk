@@ -10,6 +10,7 @@ mod private_reply;
 mod reactions;
 mod recovery;
 mod row;
+mod thread_actions;
 
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
@@ -34,6 +35,7 @@ pub(crate) enum Action {
     Silent,
     Pins,
     Menu(u128),
+    ThreadMenu(u128),
     ReactionPalette(u128, menu::Source),
     React(u128, Text<64>),
     ReactionAuthors(u128, Text<64>),
@@ -44,6 +46,9 @@ pub(crate) enum Action {
     RetryContext { request: RequestId, target: u128 },
     Reply(u128),
     PrivateReply(u128),
+    ThreadReply(u128),
+    ThreadEdit(u128),
+    ThreadCancel,
     Edit(u128),
     CancelCompose,
     Command(MessageAction),
@@ -59,6 +64,7 @@ pub(crate) enum Action {
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
     ChooseTime(talk_core::preferences::time::DeadlineChoice),
     InsertMention(String),
+    InsertThreadMention(String),
 }
 pub(super) struct MessageUi {
     pub thread_load: Option<ThreadLoad>,
@@ -66,6 +72,8 @@ pub(super) struct MessageUi {
     thread_root_retry: Option<(ConversationRef, u128, Instant)>,
     private_reply_pending: Option<private_reply::Pending>,
     pub(super) private_reply_focus: Option<ConversationRef>,
+    thread_edit: Option<thread_actions::Edit>,
+    thread_edit_generation: u64,
     pub list: ListState,
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
@@ -99,9 +107,9 @@ pub(super) struct MessageUi {
     search_return_focus: Option<FocusHandle>,
     search_pending_focus: bool,
     show_pins: bool,
-    mention_candidate: Option<(ConversationRef, String, Instant)>,
-    mention_request: Option<(RequestId, String)>,
-    mention_ready: Option<String>,
+    mention_candidate: Option<(ConversationRef, bool, String, Instant)>,
+    mention_request: Option<(RequestId, bool, String)>,
+    mention_ready: Option<(bool, String)>,
 }
 
 pub(super) struct ThreadLoad {
@@ -250,6 +258,8 @@ impl MessageUi {
             thread_root_retry: None,
             private_reply_pending: None,
             private_reply_focus: None,
+            thread_edit: None,
+            thread_edit_generation: 0,
             list,
             arrival,
             geometry: Rc::new(RefCell::new(MessageGeometry::default())),
@@ -333,12 +343,22 @@ impl Desktop {
         }
     }
     pub(super) fn save_thread_draft(&mut self, cx: &gpui::App) -> bool {
-        let Some((context, _)) = self.thread_parent else {
+        let Some((context, root)) = self.thread_parent else {
             return true;
         };
         let input = self.thread_composer.read(cx);
         if input.composing() {
             return false;
+        }
+        if let Some(edit) = self.message_ui.thread_edit.as_mut()
+            && edit.context == context
+            && edit.root == root
+        {
+            let Ok(body) = Text::new(input.committed_value()) else {
+                return false;
+            };
+            edit.body = body;
+            return true;
         }
         self.thread_drafts
             .save(context, input.committed_value())
@@ -365,7 +385,15 @@ impl Desktop {
         {
             return false;
         }
-        let text = self.thread_drafts.text(context).to_owned();
+        let text = self
+            .message_ui
+            .thread_edit
+            .as_ref()
+            .filter(|edit| edit.context == context && edit.root == root)
+            .map_or_else(
+                || self.thread_drafts.text(context).to_owned(),
+                |edit| edit.body.as_str().to_owned(),
+            );
         self.thread_composer.update(cx, |input, cx| {
             let loaded = input.set_context_value(&text);
             cx.notify();
@@ -377,6 +405,10 @@ impl Desktop {
         let Some((context, root)) = self.thread_parent else {
             return;
         };
+        if self.thread_edit_active(context, root) {
+            self.submit_thread_edit(context, root, cx);
+            return;
+        }
         if Some(context) != self.snapshot.selected
             || self.overlay != Some(Overlay::Thread)
             || self.thread_drafts.target(context).thread != Some(root)
@@ -405,6 +437,9 @@ impl Desktop {
         let Some((context, root)) = self.thread_parent else {
             return false;
         };
+        if self.thread_edit_active(context, root) {
+            return self.thread_edit_available(context, root, cx);
+        }
         self.overlay == Some(Overlay::Thread)
             && Some(context) == self.snapshot.selected
             && self.thread_drafts.target(context).thread == Some(root)
@@ -425,28 +460,37 @@ impl Desktop {
             .snapshot
             .selected
             .filter(|_| {
-                self.composer_active
+                (self.composer_active || self.thread_composer_active)
                     && self.composer_available()
                     && self.message_feature_enabled(MessageFeature::Mentions)
             })
             .and_then(|context| {
-                self.composer
+                let thread = self.thread_composer_active;
+                let editor = if thread {
+                    &self.thread_composer
+                } else {
+                    &self.composer
+                };
+                editor
                     .read(cx)
                     .mention_query()
-                    .map(|q| (context, q.to_owned()))
+                    .map(|q| (context, thread, q.to_owned()))
             });
         let changed = self
             .message_ui
             .mention_candidate
             .as_ref()
-            .map(|(c, q, _)| (*c, q.as_str()))
-            != current.as_ref().map(|(c, q)| (*c, q.as_str()));
+            .map(|(c, thread, q, _)| (*c, *thread, q.as_str()))
+            != current
+                .as_ref()
+                .map(|(c, thread, q)| (*c, *thread, q.as_str()));
         if changed {
-            self.message_ui.mention_candidate = current.map(|(c, q)| (c, q, Instant::now()));
+            self.message_ui.mention_candidate =
+                current.map(|(c, thread, q)| (c, thread, q, Instant::now()));
             self.message_ui.mention_request = None;
             self.message_ui.mention_ready = None;
         }
-        let Some((_, query, since)) = &self.message_ui.mention_candidate else {
+        let Some((_, thread, query, since)) = &self.message_ui.mention_candidate else {
             return;
         };
         if since.elapsed() < std::time::Duration::from_millis(200)
@@ -460,10 +504,11 @@ impl Desktop {
             return;
         }
         let query = query.clone();
+        let thread = *thread;
         if let Ok(bounded) = Text::new(&query)
             && let Some(request) = self.submit_message(MessageAction::Mentions(bounded))
         {
-            self.message_ui.mention_request = Some((request, query));
+            self.message_ui.mention_request = Some((request, thread, query));
         }
     }
     fn timeline_at_bottom(&self) -> bool {
@@ -856,12 +901,13 @@ impl Desktop {
                     self.feedback = Some(notice.in_conversation(context));
                 }
             }
-            if let Some((pending, query)) = &self.message_ui.mention_request
+            if let Some((pending, thread, query)) = &self.message_ui.mention_request
                 && *pending == request
                 && completion == Completion::ServerAccepted
             {
-                self.message_ui.mention_ready = Some(query.clone());
+                self.message_ui.mention_ready = Some((*thread, query.clone()));
             }
+            self.complete_thread_edit(request, completion, cx);
             if let Some(restore) = super::state::PendingEdit::complete(
                 &mut self.message_ui.pending_edit,
                 request,
@@ -1197,14 +1243,12 @@ impl Desktop {
     ) {
         if Some(context) != self.snapshot.selected
             || !self.reaction_available(message).is_enabled()
-            || !self.snapshot.messages.as_slice().iter().any(|row| {
-                row.local_id == message
-                    && row
-                        .metadata
-                        .reactions
-                        .as_slice()
-                        .iter()
-                        .any(|reaction| reaction.emoji == emoji)
+            || !self.reaction_message(message).is_some_and(|row| {
+                row.metadata
+                    .reactions
+                    .as_slice()
+                    .iter()
+                    .any(|reaction| reaction.emoji == emoji)
             })
         {
             return;
@@ -1306,6 +1350,7 @@ impl Desktop {
                 }
             }
             Action::Menu(id) => self.toggle_message_menu(context, id, window, cx),
+            Action::ThreadMenu(id) => self.toggle_thread_message_menu(context, id, window, cx),
             Action::ReactionPalette(id, source) => {
                 self.toggle_reaction_palette(context, id, source, window, cx)
             }
@@ -1376,6 +1421,9 @@ impl Desktop {
                 }
             }
             Action::PrivateReply(id) => self.begin_private_reply(context, id, cx),
+            Action::ThreadReply(id) => self.reply_in_thread(context, id, window, cx),
+            Action::ThreadEdit(id) => self.edit_in_thread(context, id, window, cx),
+            Action::ThreadCancel => self.cancel_thread_compose(context, window, cx),
             Action::Edit(id) => {
                 if self.save_draft(cx)
                     && let Some(message) = self.snapshot.messages.as_slice().iter().find(|m| {
@@ -1478,6 +1526,11 @@ impl Desktop {
                 self.composer
                     .update(cx, |i, cx| i.insert_mention(&identifier, cx));
                 self.composer.focus_handle(cx).focus(window);
+            }
+            Action::InsertThreadMention(identifier) => {
+                self.thread_composer
+                    .update(cx, |input, cx| input.insert_mention(&identifier, cx));
+                self.thread_composer.focus_handle(cx).focus(window);
             }
         }
         if let Some(id) = self.compose_motion_id(context)
@@ -2301,6 +2354,7 @@ impl Desktop {
     fn message_text(
         &self,
         message: &MessageView,
+        thread: bool,
         cx: &Context<Self>,
     ) -> super::selectable::SelectableText {
         let context = self.snapshot.selected.expect("message context");
@@ -2315,7 +2369,7 @@ impl Desktop {
                 .is_some_and(|room| room.draft_clipboard == Decision::Allowed)
             && !message.metadata.deleted;
         let text = super::selectable::SelectableText::new(
-            scoped_id("message-text", context, message.local_id, 0),
+            row::surface_id("message-text", context, message.local_id, 0, thread),
             message.body.as_str(),
             self.text_selection.clone(),
             self.theme,
@@ -2332,12 +2386,13 @@ impl Desktop {
                     .map(|ordinal| {
                         // A timeline row and a rendered thread copy must never
                         // share focus ownership, even for the same message.
-                        let id =
-                            scoped_id("message-link", context, message.local_id, ordinal as u128);
-                        let id = gpui::ElementId::Name(match &self.message_ui.thread_load {
-                            Some(thread) => format!("{id}:thread:{:032x}", thread.root).into(),
-                            None => format!("{id}:timeline").into(),
-                        });
+                        let id = row::surface_id(
+                            "message-link",
+                            context,
+                            message.local_id,
+                            ordinal as u128,
+                            thread,
+                        );
                         self.control_focus.get(id, cx)
                     })
                     .collect()
@@ -2443,8 +2498,10 @@ impl Desktop {
                 && self
                     .message_ui
                     .mention_ready
-                    .as_deref()
-                    .is_some_and(|q| self.composer.read(cx).mention_query() == Some(q));
+                    .as_ref()
+                    .is_some_and(|(thread, q)| {
+                        !thread && self.composer.read(cx).mention_query() == Some(q.as_str())
+                    });
             for (index, mention) in panel
                 .mentions
                 .as_slice()
@@ -2537,7 +2594,7 @@ impl Desktop {
             .rounded_full()
             .bg(self.theme.accent)
     }
-    fn quote_preview(&self, author: &str, body: Option<&str>) -> Div {
+    pub(super) fn quote_preview(&self, author: &str, body: Option<&str>) -> Div {
         div()
             .relative()
             .min_w_0()

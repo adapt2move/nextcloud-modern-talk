@@ -5,6 +5,14 @@ use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
 
+#[derive(Clone)]
+struct ThreadResize;
+impl gpui::Render for ThreadResize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size(px(1.)).opacity(0.)
+    }
+}
+
 impl Desktop {
     pub(super) fn thread_is_docked(&self, window: &Window) -> bool {
         self.overlay == Some(Overlay::Thread)
@@ -25,99 +33,146 @@ impl Desktop {
         let t = self.theme;
         let available = (f32::from(window.viewport_size().width) - 600.).max(288.);
         let width = self.thread_width.min(available);
-        div().flex_none().w(px(width)).h_full().py_3().pr_3().child(
-            self.dialog_panel(
-                DialogSurface::Overlay(Overlay::Thread),
-                div()
-                    .size_full()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .rounded(px(13.))
-                    .border_1()
-                    .border_color(t.border)
-                    .bg(t.surface)
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .px_4()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(t.border)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(self.l("Antworten")),
-                            )
-                            .when(self.current_thread_details().is_some(), |header| {
-                                header.child(
+        let resize_focus = self
+            .control_focus
+            .get("thread-resize-handle".into(), cx)
+            .tab_stop(true);
+        let keyboard_focus = resize_focus.clone();
+        div()
+            .relative()
+            .flex_none()
+            .w(px(width))
+            .h_full()
+            .py_3()
+            .pr_3()
+            .child(
+                self.dialog_panel(
+                    DialogSurface::Overlay(Overlay::Thread),
+                    div()
+                        .size_full()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .rounded(px(13.))
+                        .border_1()
+                        .border_color(t.border)
+                        .bg(t.surface)
+                        .track_focus(&self.modal_focus)
+                        .tab_group()
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .px_4()
+                                .py_3()
+                                .border_b_1()
+                                .border_color(t.border)
+                                .child(self.thread_heading(cx))
+                                .child(
                                     self.icon_button(
-                                        "thread-options",
-                                        ("more", "Thread-Optionen"),
+                                        "close-overlay",
+                                        ("x", "Schließen"),
                                         ButtonStyle::Quiet,
                                         Availability::available(),
-                                        LocalAction::ToggleThreadOptions,
+                                        LocalAction::Close,
                                         cx,
                                     )
                                     .size(px(32.)),
-                                )
-                            })
-                            .child(
-                                self.icon_button(
-                                    "thread-narrower",
-                                    ("minus", "Thread schmaler"),
-                                    ButtonStyle::Quiet,
-                                    Availability::when(self.thread_width > 288., ""),
-                                    LocalAction::ResizeThread(false),
-                                    cx,
-                                )
-                                .size(px(32.)),
-                            )
-                            .child(
-                                self.icon_button(
-                                    "thread-wider",
-                                    ("plus", "Thread breiter"),
-                                    ButtonStyle::Quiet,
-                                    Availability::when(
-                                        self.thread_width < 608. && self.thread_width < available,
-                                        "",
-                                    ),
-                                    LocalAction::ResizeThread(true),
-                                    cx,
-                                )
-                                .size(px(32.)),
-                            )
-                            .child(
-                                self.icon_button(
-                                    "close-overlay",
-                                    ("x", "Schließen"),
-                                    ButtonStyle::Quiet,
-                                    Availability::available(),
-                                    LocalAction::Close,
-                                    cx,
-                                )
-                                .size(px(32.)),
-                            ),
-                    )
-                    .when(self.thread_options_open, |pane| {
-                        pane.child(self.thread_options(cx))
+                                ),
+                        )
+                        .when(self.thread_options_open, |pane| {
+                            pane.child(self.thread_options(cx))
+                        })
+                        .child(
+                            self.scroll_area(super::navigation::Region::Overlay)
+                                .flex_1()
+                                .min_h_0()
+                                .child(self.thread_body(cx)),
+                        )
+                        .child(self.thread_composer_view(cx)),
+                ),
+            )
+            .child(
+                div()
+                    .id("thread-resize-handle")
+                    .absolute()
+                    .left_0()
+                    .top_3()
+                    .bottom_3()
+                    .w(px(8.))
+                    .track_focus(&resize_focus)
+                    .cursor(gpui::CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
+                        resize_focus.focus(window)
                     })
-                    .child(
-                        self.scroll_area(super::navigation::Region::Overlay)
-                            .flex_1()
-                            .min_h_0()
-                            .p_4()
-                            .child(self.thread_body(cx)),
-                    )
-                    .child(self.thread_composer_view(cx)),
-            ),
-        )
+                    .on_key_down(cx.listener(
+                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                            if !keyboard_focus.is_focused(window) {
+                                return;
+                            }
+                            let change = match event.keystroke.key.as_str() {
+                                "left" => 32.,
+                                "right" => -32.,
+                                _ => return,
+                            };
+                            let maximum =
+                                (f32::from(window.viewport_size().width) - 600.).clamp(288., 608.);
+                            this.thread_width = (this.thread_width + change).clamp(288., maximum);
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ))
+                    .on_drag(ThreadResize, |_, _, _, cx| cx.new(|_| ThreadResize))
+                    .on_drag_move::<ThreadResize>(cx.listener(
+                        |this, event: &gpui::DragMoveEvent<ThreadResize>, window, cx| {
+                            let max = (f32::from(window.viewport_size().width) - 600.)
+                                .max(288.)
+                                .min(608.);
+                            this.thread_width = (f32::from(window.viewport_size().width)
+                                - f32::from(event.event.position.x))
+                            .clamp(288., max);
+                            cx.notify();
+                        },
+                    )),
+            )
+    }
+
+    fn thread_heading(&self, cx: &Context<Self>) -> Div {
+        let heading = self
+            .current_thread_details()
+            .map(|details| details.title.as_str())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or(self.l("Thread"));
+        let room = self.selected().map_or("", |room| room.title.as_str());
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(if self.current_thread_details().is_some() {
+                self.control(
+                    "thread-options",
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::ToggleThreadOptions,
+                    cx,
+                )
+                .justify_start()
+                .p_0()
+                .min_h(px(24.))
+                .font_weight(FontWeight::BOLD)
+                .child(heading.to_owned())
+                .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
+                .into_any_element()
+            } else {
+                div()
+                    .font_weight(FontWeight::BOLD)
+                    .child(heading.to_owned())
+                    .into_any_element()
+            })
+            .child(self.hint(room))
     }
 
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
@@ -190,7 +245,7 @@ impl Desktop {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
                 .flex_1()
-                .p_6()
+                .when(overlay != Overlay::Thread, |d| d.p_6())
                 .child(body)
                 .into_any_element()
         };
@@ -244,27 +299,18 @@ impl Desktop {
                                 .py_4()
                                 .border_b_1()
                                 .border_color(t.border)
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .text_size(self.sp(if side { 18. } else { 24. }))
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(self.l(title)),
-                                )
-                                .when(
-                                    overlay == Overlay::Thread
-                                        && self.current_thread_details().is_some(),
-                                    |header| {
-                                        header.child(self.icon_button(
-                                            "thread-options",
-                                            ("more", "Thread-Optionen"),
-                                            ButtonStyle::Quiet,
-                                            Availability::available(),
-                                            LocalAction::ToggleThreadOptions,
-                                            cx,
-                                        ))
-                                    },
-                                )
+                                .when(overlay == Overlay::Thread, |header| {
+                                    header.child(self.thread_heading(cx))
+                                })
+                                .when(overlay != Overlay::Thread, |header| {
+                                    header.child(
+                                        div()
+                                            .min_w_0()
+                                            .text_size(self.sp(if side { 18. } else { 24. }))
+                                            .font_weight(FontWeight::BOLD)
+                                            .child(self.l(title)),
+                                    )
+                                })
                                 .child(self.icon_button(
                                     "close-overlay",
                                     ("x", "Schließen"),
@@ -516,7 +562,7 @@ impl Desktop {
             .child(self.hint(self.l(detail)))
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_4();
+        let mut body = div().flex().flex_col();
         let Some((context, root)) = self
             .thread_parent
             .filter(|(context, _)| Some(*context) == self.snapshot.selected)
@@ -570,7 +616,7 @@ impl Desktop {
                 })
             });
         if let Some(message) = root_message {
-            body = body.child(self.thread_message(message));
+            body = body.child(self.thread_message(message, false, cx));
         } else if panel.is_some_and(|panel| {
             matches!(
                 panel.thread_root_state,
@@ -609,23 +655,35 @@ impl Desktop {
         if let Some(panel) =
             panel.filter(|_| collection.shows_content() || collection.confirmed_empty())
         {
+            let loaded = panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .filter(|m| m.local_id != root)
+                .count() as u64;
+            let count =
+                root_message.map_or(loaded, |message| loaded.max(u64::from(message.reply_count)));
             body = body.child(
-                self.hint(
-                    &self.count(
-                        super::localization::Count::Replies,
-                        panel
-                            .thread_messages
-                            .as_slice()
-                            .iter()
-                            .filter(|m| m.local_id != root)
-                            .count() as u64,
-                    ),
-                ),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_6()
+                    .py_3()
+                    .child(self.hint(&self.count(super::localization::Count::Replies, count)))
+                    .child(div().h(px(1.)).flex_1().bg(self.theme.border)),
             );
-            for message in panel.thread_messages.as_slice() {
-                if message.local_id != root {
-                    body = body.child(self.thread_message(message));
-                }
+            let mut previous = None;
+            for message in panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .filter(|message| message.local_id != root)
+            {
+                let continuation = previous
+                    .is_some_and(|previous| self.thread_messages_grouped(previous, message));
+                body = body.child(self.thread_message(message, continuation, cx));
+                previous = Some(message);
             }
         }
         body
@@ -709,7 +767,12 @@ impl Desktop {
                     .message_panel
                     .as_ref()
                     .into_iter()
-                    .flat_map(|panel| panel.thread_messages.as_slice()),
+                    .flat_map(|panel| {
+                        panel
+                            .thread_root_message
+                            .iter()
+                            .chain(panel.thread_messages.as_slice())
+                    }),
             )
             .any(|message| {
                 message.local_id == root
@@ -744,45 +807,6 @@ impl Desktop {
             };
         }
         body
-    }
-    fn thread_composer_view(&self, cx: &Context<Self>) -> Div {
-        div()
-            .flex_none()
-            .border_t_1()
-            .border_color(self.theme.border)
-            .p_4()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                self.input_surface(&self.thread_composer, cx)
-                    .items_start()
-                    .child(div().flex_1().min_w_0().child(self.thread_composer.clone())),
-            )
-            .child(div().flex().justify_end().child(self.button(
-                "thread-send",
-                "Senden",
-                ButtonStyle::Primary,
-                Availability::when(self.thread_send_available(cx), ""),
-                LocalAction::SendThread,
-                cx,
-            )))
-    }
-    fn thread_message(&self, message: &talk_core::ui::presentation::MessageView) -> Div {
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(message.author.as_str().to_owned()),
-            )
-            .child(if message.metadata.deleted {
-                self.l("Nachricht gelöscht.").to_owned()
-            } else {
-                message.body.as_str().to_owned()
-            })
     }
     fn search_body(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;

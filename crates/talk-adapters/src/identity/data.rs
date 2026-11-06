@@ -134,6 +134,8 @@ pub struct CachedReaction {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CachedReply {
     pub id: u64,
+    #[serde(default)]
+    pub external: bool,
     #[serde(with = "codec::text")]
     pub author: Text<256>,
     #[serde(with = "codec::text")]
@@ -987,7 +989,7 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
             message.attachments = Page::empty();
         }
         if let Some(parent) = message.parent.as_mut()
-            && (parent.unavailable || unavailable.contains(&parent.id))
+            && (parent.unavailable || !parent.external && unavailable.contains(&parent.id))
         {
             parent.unavailable = true;
             parent.text = Text::new("").map_err(|_| DataError::InvalidInput)?;

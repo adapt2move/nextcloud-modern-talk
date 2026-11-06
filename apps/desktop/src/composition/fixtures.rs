@@ -383,6 +383,19 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 title: text("Design review"),
                 notification_level: Some(0),
             });
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::React,
+                talk_core::ui::messaging::MessageFeature::Mentions,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: talk_core::ui::presentation::FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
             let mut reply = message(
                 40,
                 "Mara Fischer",
@@ -392,17 +405,30 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 false,
             );
             reply.metadata.thread = Some(root);
-            reply.metadata.author_key = Some(text("users:mara"));
+            reply.metadata.author_key = Some(text("5:users:mara"));
+            reply.metadata.replyable = true;
+            reply.metadata.timestamp = 1_770_000_000;
+            let _ = reply
+                .metadata
+                .reactions
+                .try_push(talk_core::ui::messaging::Reaction {
+                    emoji: text("👍"),
+                    count: 2,
+                    own: true,
+                });
             let mut second = message(
                 41,
                 "Alex Sommer",
                 "AS",
                 "10:02",
                 "I'll update the final details.",
-                false,
+                true,
             );
             second.metadata.thread = Some(root);
-            second.metadata.author_key = Some(text("users:alex"));
+            second.metadata.author_key = Some(text("5:users:alex"));
+            second.metadata.replyable = true;
+            second.metadata.edit = Decision::Allowed;
+            second.metadata.timestamp = 1_770_000_120;
             panel.thread_messages = page([reply, second]);
         }
         return state;

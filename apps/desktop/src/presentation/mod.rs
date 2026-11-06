@@ -94,6 +94,7 @@ pub enum LocalAction {
     Message(messaging::Action),
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
+    ThreadEmojiPicker(ConversationRef),
     Open(Overlay),
     Close,
     DismissFeedback,
@@ -104,7 +105,6 @@ pub enum LocalAction {
     ToggleCallChat,
     Navigate(ConversationRef),
     OpenSubscribedThread(ConversationRef, u128),
-    ResizeThread(bool),
     SendThread,
     ToggleThreadOptions,
     BeginThreadRename,
@@ -308,7 +308,9 @@ pub struct Desktop {
     thread_composer: Entity<TextInput>,
     thread_title: Entity<TextInput>,
     composer_focus: FocusHandle,
+    thread_composer_focus: FocusHandle,
     composer_active: bool,
+    thread_composer_active: bool,
     file_send: Option<attachments::PendingSend>,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
@@ -339,8 +341,8 @@ pub struct Desktop {
     incoming_return_focus: Option<FocusHandle>,
     last_incoming_scope: Option<CallScope>,
     _appearance_observer: Subscription,
-    _input_observers: [Subscription; 3],
-    _composer_focus_observers: [Subscription; 2],
+    _input_observers: [Subscription; 4],
+    _composer_focus_observers: [Subscription; 4],
     _dialog_observers: Vec<Subscription>,
     pending_ack: Option<talk_core::ui::presentation::SubmissionResult>,
     pub theme: Theme,
@@ -420,11 +422,15 @@ impl Desktop {
             cx.observe(&search, |_, _, cx| cx.notify()),
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
+            cx.observe(&thread_composer, |_, _, cx| cx.notify()),
         ];
         let composer_focus = cx.focus_handle().tab_stop(false);
+        let thread_composer_focus = cx.focus_handle().tab_stop(false);
         let composer_focus_observers = [
             cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
             cx.on_focus_out(&composer_focus, window, |_, _, _, cx| cx.notify()),
+            cx.on_focus_in(&thread_composer_focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus_out(&thread_composer_focus, window, |_, _, _, cx| cx.notify()),
         ];
         let prejoin = if prejoin {
             snapshot
@@ -562,7 +568,9 @@ impl Desktop {
             thread_composer,
             thread_title,
             composer_focus,
+            thread_composer_focus,
             composer_active: false,
+            thread_composer_active: false,
             file_send: None,
             conversation_name,
             group_name,
@@ -818,6 +826,7 @@ impl Desktop {
         }
         self.refresh_account_removal(&next);
         self.snapshot = next;
+        self.retain_thread_edit();
         let limit = self.composer_message_limit();
         self.composer
             .update(cx, |input, _| input.configure_message_limit(limit));
@@ -1157,6 +1166,7 @@ impl Desktop {
                         || self.thread_drafts.has_unsent()
                         || !self.composer.read(cx).content.is_empty()
                         || self.message_ui.pending_edit.is_some()
+                        || self.has_thread_edit(None)
                         || self.input_composing(cx)
                     {
                         self.feedback = Some(Feedback::info(
@@ -1185,7 +1195,12 @@ impl Desktop {
             }
             LocalAction::EmojiPicker(context) => {
                 if Some(context) == self.snapshot.selected {
-                    self.show_composer_emoji(window, cx);
+                    self.show_composer_emoji(false, window, cx);
+                }
+            }
+            LocalAction::ThreadEmojiPicker(context) => {
+                if Some(context) == self.snapshot.selected {
+                    self.show_composer_emoji(true, window, cx);
                 }
             }
             LocalAction::Open(overlay) => {
@@ -1448,10 +1463,6 @@ impl Desktop {
                 }
             }
             LocalAction::Destination(destination) => self.destination = destination,
-            LocalAction::ResizeThread(wider) => {
-                self.thread_width =
-                    (self.thread_width + if wider { 64. } else { -64. }).clamp(288., 608.);
-            }
             LocalAction::SendThread => self.send_thread_draft(cx),
             LocalAction::ToggleThreadOptions => {
                 self.thread_options_open = !self.thread_options_open
@@ -2212,6 +2223,9 @@ impl Render for Desktop {
         // Only entry/exit notifications rebuild the optional composer details.
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
+        self.thread_composer_active = window.is_window_active()
+            && self.overlay == Some(Overlay::Thread)
+            && self.thread_composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
@@ -2406,7 +2420,7 @@ impl Render for Desktop {
                     .is_some_and(|(context, _)| Some(context) == self.snapshot.selected);
             input.configure_message_limit(self.composer_message_limit());
             input.clipboard_export_allowed = clipboard_export;
-            input.max_visible_rows = max_rows.clamp(1, 4);
+            input.max_visible_rows = max_rows.clamp(1, 5);
         });
         self.thread_title.update(cx, |input, _| {
             input.set_placeholder(self.l("Thread-Titel"));

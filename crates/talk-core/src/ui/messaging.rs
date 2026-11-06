@@ -62,6 +62,7 @@ pub struct RichObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reply {
     pub id: u128,
+    pub external: bool,
     pub author: Text<256>,
     pub text: Text<4096>,
     pub unavailable: bool,

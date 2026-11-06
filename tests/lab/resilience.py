@@ -91,12 +91,16 @@ class RecoveryLab(Lab):
                                      "replyToToken": room["token"], "referenceId": "synthetic-private-reply"},
                                expected=(201,), name="recovery.private-reply")
         parent = private.get("parent") or {}
+        metadata = parent.get("metaData") or {}
         self.current["private_reply_shape"] = {
             "keys": sorted(private.keys()), "parent_keys": sorted(parent.keys()),
             "parent_token_matches_destination": parent.get("token") == direct["token"],
             "parent_token_matches_source": parent.get("token") == room["token"],
             "parent_has_nested_parent": "parent" in parent,
             "parent_id_positive": isinstance(parent.get("id"), int) and parent["id"] > 0,
+            "metadata_keys": sorted(metadata.keys()),
+            "metadata_source_matches": metadata.get("replyToConversationToken") == room["token"],
+            "metadata_id_matches_parent": str(metadata.get("replyToMessageId")) == str(parent.get("id")),
         }
         directory = self.runtime / f"{key}-recovery"
         directory.mkdir(mode=0o700)

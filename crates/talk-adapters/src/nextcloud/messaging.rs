@@ -396,6 +396,7 @@ impl NextcloudClient {
                     conversation: id,
                     sequence: p.id,
                 },
+                external: p.external,
                 author: if unavailable {
                     snippet("")
                 } else {

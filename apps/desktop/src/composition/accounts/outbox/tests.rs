@@ -909,6 +909,7 @@ fn optimistic_deletion_redacts_parent_aliases_in_every_projected_message_collect
             conversation: context.conversation,
             sequence: 7,
         },
+        external: false,
         author: text("Synthetic actor"),
         text: text("deleted body"),
         unavailable: false,

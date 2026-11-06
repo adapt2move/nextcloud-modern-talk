@@ -2,11 +2,17 @@
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Alle Antworten", "All replies", "Todas las respuestas"),
     (
+        "Anhänge in Threads sind noch nicht verfügbar.",
+        "Attachments in threads are not available yet.",
+        "Los archivos adjuntos en hilos aún no están disponibles.",
+    ),
+    (
         "Keine abonnierten Threads.",
         "No followed threads.",
         "No hay hilos seguidos.",
     ),
     ("Nur Erwähnungen", "Mentions only", "Solo menciones"),
+    ("Thread", "Thread", "Hilo"),
     ("Thread folgen", "Follow thread", "Seguir hilo"),
     (
         "Thread nicht mehr folgen",
