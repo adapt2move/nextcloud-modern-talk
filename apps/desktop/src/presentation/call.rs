@@ -1138,7 +1138,7 @@ impl Desktop {
         if let Some(row) = row {
             body = body
                 .child(self.conversation_search(cx))
-                .child(self.message_timeline(false, cx))
+                .child(self.call_message_timeline(cx))
                 .child(self.composer_view(row, true, cx));
         } else {
             body = body.child(self.state_note(
