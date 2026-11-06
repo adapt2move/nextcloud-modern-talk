@@ -332,6 +332,14 @@ mod directory_tests {
     }
 
     #[test]
+    fn listing_rejects_duplicate_entries() {
+        let base = url::Url::parse("https://example.test/remote.php/dav/files/user").unwrap();
+        let response = r#"<d:response><d:href>/remote.php/dav/files/user/a</d:href><d:propstat><d:prop><d:displayname>a</d:displayname></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"#;
+        let xml = format!("<d:multistatus xmlns:d=\"DAV:\">{response}{response}</d:multistatus>");
+        assert!(parse_listing(xml.as_bytes(), &base).is_err());
+    }
+
+    #[test]
     fn directory_navigation_stays_within_root() {
         let nested = DirectoryPath::parse("/Documents/Plans").unwrap();
         let parent = nested.parent().unwrap();

@@ -29,6 +29,44 @@ async fn directory_listing_uses_depth_one_and_encoded_account_path() {
 }
 
 #[tokio::test]
+async fn client_lists_root_and_projects_only_direct_children() {
+    let body = r#"<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+        <d:response><d:href>/remote.php/dav/files/synthetic-user/</d:href></d:response>
+        <d:response><d:href>/remote.php/dav/files/synthetic-user/Notes/</d:href>
+          <d:propstat><d:prop><d:displayname>Notes</d:displayname>
+          <d:resourcetype><d:collection/></d:resourcetype><oc:fileid>42</oc:fileid>
+          </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+        </d:response></d:multistatus>"#;
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let entries = owner
+        .list_directory(
+            &context(&runtime),
+            &crate::files::DirectoryPath::parse("/").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "Notes");
+    assert!(entries[0].is_directory);
+    assert_eq!(entries[0].file_id.as_deref(), Some("42"));
+}
+
+#[tokio::test]
+async fn directory_listing_rejects_non_multistatus_success() {
+    let server = Server::start(vec![(200, "not a listing".into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let error = owner
+        .list_directory(
+            &context(&runtime),
+            &crate::files::DirectoryPath::parse("/").unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::ServerUnavailable);
+}
+
+#[tokio::test]
 async fn existing_file_share_sends_room_path_and_caption() {
     let server = Server::start(vec![reply(json!({"id": "42"}))]).await;
     let (mut owner, runtime) = client(&server);
