@@ -7,6 +7,7 @@ Ubuntu packages installed by tools/ui/prepare-linux.sh instead.
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import http.client
 import os
 from pathlib import Path
 import platform
@@ -27,24 +28,61 @@ PACKAGES = {
          ("gstreamer-1.0-devel-msvc-x86_64-1.26.11.msi", "af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587")]),
 }
 
+MAX_RANGE_BYTES = 16 * 1024 * 1024
+
+
+class IncompleteDownload(ValueError):
+    """A correctly identified response ended before all expected bytes arrived."""
+
+
+def retry_transfer(operation, deadline):
+    """Three attempts within the original deadline; never retry invalid content."""
+    for attempt in range(3):
+        if time.monotonic() >= deadline:
+            raise ValueError("SDK download exceeded its time limit")
+        delay = 2 ** attempt
+        try:
+            return operation()
+        except urllib.error.HTTPError as error:
+            retry_after = (error.headers or {}).get("Retry-After")
+            error.close()
+            # Rate limits and permanent errors remain explicit failures. A date
+            # Retry-After also fails rather than retrying before an unknown wait.
+            if error.code not in (408, 500, 502, 503, 504):
+                raise
+            if retry_after is not None:
+                if not retry_after.strip().isascii() or not retry_after.strip().isdigit():
+                    raise
+                delay = max(delay, int(retry_after))
+            if attempt == 2 or time.monotonic() + delay >= deadline:
+                raise
+        except (IncompleteDownload, http.client.IncompleteRead, urllib.error.URLError,
+                TimeoutError, ConnectionError):
+            if attempt == 2 or time.monotonic() + delay >= deadline:
+                raise
+        time.sleep(delay)
+
 
 def download(url, destination, expected):
-    """Fetch at most four bounded ranges, then verify the complete pinned SDK.
+    """Fetch at most four concurrent 16 MiB ranges, then verify the pinned SDK.
 
     The upstream server advertises byte ranges; its large single responses can
     stall long enough to consume a native build's lifetime. Smaller servers and
     endpoints without range support retain a single streaming download.
     """
     limit, deadline = 1024 * 1024 * 1024, time.monotonic() + 1200
-    size, ranges = None, False
-    try:
+    def probe():
         with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=60) as response:
             headers = getattr(response, "headers", {})
             try:
                 size = int(headers.get("Content-Length", ""))
             except ValueError:
-                pass
+                size = None
             ranges = headers.get("Accept-Ranges", "").strip().lower() == "bytes"
+            return size, ranges
+    size, ranges = None, False
+    try:
+        size, ranges = retry_transfer(probe, deadline)
     except urllib.error.HTTPError as error:
         if error.code not in (405, 501):
             raise
@@ -68,31 +106,52 @@ def download(url, destination, expected):
     try:
         if parallel:
             with tempfile.TemporaryDirectory(prefix="gstreamer-ranges-", dir=destination.parent) as temporary:
-                parts = [Path(temporary) / str(index) for index in range(4)]
-                width = (size + 3) // 4
+                width = min(MAX_RANGE_BYTES, (size + 3) // 4)
+                # The 1 GiB ceiling bounds this list and the executor's queue to
+                # at most 64 parts. Each part owns one file and at most 3 attempts.
+                parts = [Path(temporary) / str(index) for index in range((size + width - 1) // width)]
                 def fetch(index):
                     start, end = index * width, min((index + 1) * width, size) - 1
                     request = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}"})
-                    with urllib.request.urlopen(request, timeout=60) as response:
-                        if response.status != 206 or response.headers.get("Content-Range", "").strip() != f"bytes {start}-{end}/{size}":
-                            raise ValueError("SDK server returned an unexpected byte range")
-                        with parts[index].open("xb") as output:
-                            received = copy(response, output, end - start + 1)
-                        if received != end - start + 1:
-                            raise ValueError("SDK server returned an incomplete byte range")
+                    def transfer():
+                        part_created = False
+                        try:
+                            with urllib.request.urlopen(request, timeout=60) as response:
+                                if response.status != 206 or response.headers.get("Content-Range", "").strip() != f"bytes {start}-{end}/{size}":
+                                    raise ValueError("SDK server returned an unexpected byte range")
+                                with parts[index].open("xb") as output:
+                                    part_created = True
+                                    received = copy(response, output, end - start + 1)
+                                if received != end - start + 1:
+                                    raise IncompleteDownload("SDK server returned an incomplete byte range")
+                        except BaseException:
+                            if part_created:
+                                parts[index].unlink(missing_ok=True)
+                            raise
+                    retry_transfer(transfer, deadline)
                 with ThreadPoolExecutor(max_workers=4) as pool:
-                    list(pool.map(fetch, range(4)))
+                    list(pool.map(fetch, range(len(parts))))
                 with destination.open("xb") as output:
                     created = True
                     for index, part in enumerate(parts):
                         with part.open("rb") as source:
                             copy(source, output, min(width, size - index * width), digest)
         else:
-            with urllib.request.urlopen(url, timeout=60) as response, destination.open("xb") as output:
-                created = True
-                received = copy(response, output, limit, digest)
-                if size is not None and size > 0 and received != size:
-                    raise ValueError("SDK server returned an incomplete download")
+            def stream():
+                nonlocal created, digest
+                digest = hashlib.sha256()
+                try:
+                    with urllib.request.urlopen(url, timeout=60) as response, destination.open("xb") as output:
+                        created = True
+                        received = copy(response, output, limit, digest)
+                        if size is not None and size > 0 and received != size:
+                            raise IncompleteDownload("SDK server returned an incomplete download")
+                except BaseException:
+                    if created:
+                        destination.unlink(missing_ok=True)
+                        created = False
+                    raise
+            retry_transfer(stream, deadline)
         actual = digest.hexdigest()
         if actual != expected:
             raise ValueError(f"GStreamer SDK checksum mismatch for {destination.name}: expected {expected}, received {actual}")

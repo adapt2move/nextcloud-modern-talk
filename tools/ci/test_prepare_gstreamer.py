@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Synthetic MSI layout checks; these do not execute Windows Installer."""
+"""SDK transport and MSI layout fixtures; these do not run native installers."""
 import hashlib
 import io
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -111,6 +112,10 @@ class SdkRanges(unittest.TestCase):
         self.expected = hashlib.sha256(self.payload).hexdigest()
         self.seen = []
         self.corrupt = self.incomplete = self.wrong_range = False
+        self.short_reads = 0
+        sleep = mock.patch.object(prepare_gstreamer.time, "sleep")
+        self.sleep = sleep.start()
+        self.addCleanup(sleep.stop)
 
     def response(self, request, timeout):
         self.assertEqual(timeout, 60)
@@ -124,6 +129,9 @@ class SdkRanges(unittest.TestCase):
         if self.corrupt and start == 0:
             body = b"!" + body[1:]
         if self.incomplete and start == 0:
+            body = body[:-1]
+        elif self.short_reads and start == 0:
+            self.short_reads -= 1
             body = body[:-1]
         actual_range = f"bytes {start}-{end}/{len(self.payload)}"
         if self.wrong_range and start == 0:
@@ -153,6 +161,59 @@ class SdkRanges(unittest.TestCase):
                     self.download()
                 setattr(self, kind, False)
                 self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_short_range_retries_only_its_part_without_appending_partial_bytes(self):
+        self.short_reads = 1
+        self.download()
+        self.assertEqual(self.destination.read_bytes(), self.payload)
+        self.assertEqual(len(self.seen), 5)
+        self.assertEqual(sum(start == 0 for start, _ in self.seen), 2)
+        self.sleep.assert_called_once_with(1)
+        self.assertEqual(list(self.root.iterdir()), [self.destination])
+
+    def test_larger_archives_keep_each_range_bounded(self):
+        maximum = 1024 * 1024
+        with mock.patch.object(prepare_gstreamer, "MAX_RANGE_BYTES", maximum):
+            self.download()
+        self.assertGreater(len(self.seen), 4)
+        self.assertTrue(all(end - start + 1 <= maximum for start, end in self.seen))
+        self.assertEqual(self.destination.read_bytes(), self.payload)
+        self.sleep.assert_not_called()
+
+    def test_repeated_truncation_stops_after_three_attempts_and_removes_parts(self):
+        self.incomplete = True
+        with self.assertRaisesRegex(ValueError, "incomplete byte range"):
+            self.download()
+        self.assertEqual(sum(start == 0 for start, _ in self.seen), 3)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(1), mock.call(2)])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_transient_metadata_503_retries_before_downloading_verified_parts(self):
+        calls = []
+        def response(request, timeout):
+            calls.append(request.get_method())
+            if len(calls) == 1:
+                raise prepare_gstreamer.urllib.error.HTTPError(
+                    request.full_url, 503, "Unavailable", {"Retry-After": "2"}, None)
+            return self.response(request, timeout)
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=response):
+            prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(calls.count("HEAD"), 2)
+        self.assertEqual(calls.count("GET"), 4)
+        self.sleep.assert_called_once_with(2)
+        self.assertEqual(self.destination.read_bytes(), self.payload)
+
+    def test_stream_retry_replaces_partial_output_and_starts_a_fresh_digest(self):
+        bodies = iter([self.payload[:-1], self.payload])
+        def response(request, timeout):
+            if not isinstance(request, str):
+                return self.Response(b"", headers={"Content-Length": str(len(self.payload))})
+            return self.Response(next(bodies))
+        with mock.patch.object(prepare_gstreamer.urllib.request, "urlopen", side_effect=response) as opened:
+            prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
+        self.assertEqual(opened.call_count, 3)
+        self.sleep.assert_called_once_with(1)
+        self.assertEqual(self.destination.read_bytes(), self.payload)
 
     def test_missing_range_support_uses_one_verified_stream(self):
         def response(request, timeout):
@@ -198,6 +259,36 @@ class SdkRanges(unittest.TestCase):
                 prepare_gstreamer.download("https://sdk.example.test/sdk.pkg", self.destination, self.expected)
         self.assertEqual(opened.call_count, 1)
         self.assertEqual(list(self.root.iterdir()), [])
+
+
+class TransferRetries(unittest.TestCase):
+    def test_three_transient_failures_stop_without_extending_the_deadline(self):
+        error = prepare_gstreamer.urllib.error.HTTPError("https://sdk.example.test/", 503, "Unavailable", {}, None)
+        operation = mock.Mock(side_effect=error)
+        with mock.patch.object(prepare_gstreamer.time, "sleep") as sleep:
+            with self.assertRaises(prepare_gstreamer.urllib.error.HTTPError):
+                prepare_gstreamer.retry_transfer(operation, time.monotonic() + 10)
+        self.assertEqual(operation.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [mock.call(1), mock.call(2)])
+
+    def test_rate_limits_permanent_errors_and_unbounded_retry_after_are_not_retried(self):
+        for code, headers in [(429, {}), (403, {}), (404, {}),
+                              (503, {"Retry-After": "1200"}),
+                              (503, {"Retry-After": "Fri, 06 Nov 2026 12:00:00 GMT"})]:
+            with self.subTest(code=code, headers=headers):
+                error = prepare_gstreamer.urllib.error.HTTPError("https://sdk.example.test/", code, "Unavailable", headers, None)
+                operation = mock.Mock(side_effect=error)
+                with mock.patch.object(prepare_gstreamer.time, "sleep") as sleep:
+                    with self.assertRaises(prepare_gstreamer.urllib.error.HTTPError):
+                        prepare_gstreamer.retry_transfer(operation, time.monotonic() + 10)
+                operation.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_expired_deadline_never_starts_a_request(self):
+        operation = mock.Mock()
+        with self.assertRaisesRegex(ValueError, "time limit"):
+            prepare_gstreamer.retry_transfer(operation, time.monotonic() - 1)
+        operation.assert_not_called()
 
 
 if __name__ == "__main__":
