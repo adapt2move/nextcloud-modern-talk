@@ -4365,6 +4365,7 @@ dependencies = [
  "futures-lite 2.6.1",
  "futures-util",
  "reqwest",
+ "roxmltree",
  "rustls",
  "rustls-native-certs",
  "serde",

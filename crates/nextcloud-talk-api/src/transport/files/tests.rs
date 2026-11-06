@@ -13,7 +13,7 @@ async fn directory_listing_uses_depth_one_and_encoded_account_path() {
     let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
     let (mut owner, runtime) = client(&server);
     let path = crate::files::DirectoryPath::parse("/Plans & notes").unwrap();
-    let bytes = owner
+    let (_, bytes) = owner
         .transport
         .directory_listing(&context(&runtime), &path)
         .await

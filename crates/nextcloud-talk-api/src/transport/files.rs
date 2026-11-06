@@ -33,18 +33,17 @@ impl Transport {
         }
         Ok(url)
     }
-    #[allow(dead_code, reason = "directory response parser is integrated separately")]
     pub(crate) async fn directory_listing(
         &mut self,
         c: &OperationContext,
         path: &crate::files::DirectoryPath,
-    ) -> Result<Vec<u8>, PortError> {
+    ) -> Result<(url::Url, Vec<u8>), PortError> {
         self.request_dispatched = false;
         let url = self.dav_endpoint(path.as_str())?;
         let mut sink = Vec::new();
-        self.stream(c, url, None, &mut sink, StreamRead::Listing)
+        self.stream(c, url.clone(), None, &mut sink, StreamRead::Listing)
             .await?;
-        Ok(sink)
+        Ok((url, sink))
     }
     pub(crate) async fn file<W: AsyncWrite + Unpin + Send>(
         &mut self,
