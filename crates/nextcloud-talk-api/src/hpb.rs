@@ -144,6 +144,14 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    Activity {
+        generation: u64,
+        peer: PeerSession,
+        activity: crate::signaling::activity::Activity,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Send {
         generation: u64,
         peer: PeerSession,
@@ -157,7 +165,7 @@ enum Command {
 impl Command {
     fn reject(self, error: ErrorKind) {
         match self {
-            Self::Join { reply, .. } | Self::Send { reply, .. } => {
+            Self::Join { reply, .. } | Self::Send { reply, .. } | Self::Activity { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
         }
@@ -496,6 +504,46 @@ impl Route {
             return Err(ErrorKind::Cancelled);
         }
         drop(guard.disarm());
+        Ok(())
+    }
+    /// Activity is ephemeral and never grants media authority. An abandoned
+    /// command is dropped by the socket owner instead of retiring the call.
+    pub(crate) async fn send_activity(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        activity: crate::signaling::activity::Activity,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        activity.encode()?;
+        self.with_room(|room, _| {
+            if peer == &room.own || !room.members.iter().any(|member| &member.talk == peer) {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Activity {
+                generation: self.generation,
+                peer: peer.clone(),
+                activity,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
         Ok(())
     }
     pub(crate) async fn poll(&self, context: &OperationContext) -> Result<SignalBatch, ErrorKind> {
