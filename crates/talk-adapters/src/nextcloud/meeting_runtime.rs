@@ -672,6 +672,8 @@ async fn media_loop(
                             call.set_wishes(scope, wishes).map_err(|_| ())?;
                             refresh_needed = true;
                         }
+                        // Activity is presentation-only; until projected it cannot alter media authority.
+                        SignalEvent::Activity { .. } => {}
                         SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_needed = true; }
                     }
                 }

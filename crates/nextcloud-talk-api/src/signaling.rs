@@ -175,6 +175,11 @@ pub enum Event {
         signal: Signal,
     },
     Membership(Vec<Member>),
+    /// Transient peer activity, scoped to this signaling session.
+    Activity {
+        from: PeerSession,
+        activity: activity::Activity,
+    },
     /// Scoped hints are represented explicitly and never become media commands.
     Hint {
         from: PeerSession,
@@ -407,7 +412,14 @@ pub(crate) fn parse_batch(
                 let from = PeerSession::parse(text(data.get("from"), 512)?)?;
                 retained += from.0.len();
                 let kind = text(data.get("type"), 32)?;
-                if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
+                if matches!(kind, "raiseHand" | "reaction") {
+                    hints += 1;
+                    if hints > 16 {
+                        return Err(ErrorKind::TooLarge);
+                    }
+                    let activity = activity::Activity::decode(kind, &data["payload"])?;
+                    events.push(Event::Activity { from, activity });
+                } else if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
                     hints += 1;
                     if hints > 16 {
                         return Err(ErrorKind::TooLarge);

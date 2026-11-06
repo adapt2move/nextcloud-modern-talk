@@ -66,3 +66,24 @@ mod tests {
         assert!(Activity::decode("reaction", &json!({"reaction": "\n"})).is_err());
     }
 }
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use crate::signaling::{Event, parse_batch};
+    use serde_json::json;
+
+    #[test]
+    fn activity_is_scoped_and_bounded_in_batch() {
+        let row = |to: &str| json!({"type":"message", "data": json!({
+            "from":"peer", "to":to, "roomType":"video", "type":"raiseHand",
+            "payload":{"state":true,"timestamp":42}
+        }).to_string()});
+        let batch = parse_batch(&json!([row("local")]), "local", 1).unwrap();
+        assert!(matches!(&batch.events()[0], Event::Activity {
+            activity: Activity::RaisedHand { state: true, timestamp: 42 }, ..
+        }));
+        assert!(parse_batch(&json!([row("other")]), "local", 1).is_err());
+        assert!(parse_batch(&json!(vec![row("local"); 17]), "local", 1).is_err());
+    }
+}
