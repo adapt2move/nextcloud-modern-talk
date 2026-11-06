@@ -33,6 +33,16 @@ tasks:
     cmds:
       - '{{.PYTHON | shellQuote}} tools/cargo.py check --locked --workspace --all-targets {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
 
+  verify:
+    desc: Run the same documentation, architecture, formatting, lint and test checks as CI
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/check.py {{range .CLI_ARGS | splitArgs}}{{. | shellQuote}} {{end}}'
+
+  verify:full:
+    desc: Also run tooling, backend-feature and architecture regression suites locally
+    cmds:
+      - '{{.PYTHON | shellQuote}} tools/check.py --full'
+
   test:
     desc: Run workspace tests
     cmds:

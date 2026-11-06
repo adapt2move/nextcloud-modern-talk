@@ -19,14 +19,16 @@ or a mocked response as proof of real-server or native-platform support.
 ## Checks
 
 Run the checks appropriate to the change; the [development guide](docs/development.md#bootstrap-checks)
-lists scoped commands. Typical commands are `task fmt:check`, `task lint`, `task test`,
-`task docs` and `python3 tools/check_architecture.py`. Use the pinned Rust toolchain and
+lists scoped commands. `task verify` runs the same standard checks as automatic CI;
+`task verify:full` adds tooling and contract regressions. Individual commands such as
+`task lint` and `task test` remain available. Use the pinned Rust toolchain and
 `--locked`. Dependency updates must update the lockfile and preserve explicit feature
 selection, source provenance and third-party notices.
 
 Describe what changed, checks run and any untested platforms or remaining limitations
-in the PR. Runtime, mock and compile-only results are different evidence. PRs run Linux
-tests and native smoke checks; `main` adds Windows/macOS builds. See [CI policy](docs/ci.md).
+in the PR. Runtime, mock and compile-only results are different evidence. Automatic CI
+runs one Linux check; native platform/package checks are manual and required before
+tagging a release. See [CI policy](docs/ci.md).
 
 ## Documentation and licensing
 

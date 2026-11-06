@@ -18,6 +18,9 @@ The script supplies compiler, pkg-config/Clang, X11/XCB/xkbcommon, font, SSL, Vu
 
 The script uses Ubuntu's compiler packages. GStreamer's base/good plugins
 provide the Opus and VP8 codecs used by the Rust WebRTC engine.
+For workspace checks without UI captures, use
+`sudo bash tools/ui/prepare-linux.sh --build-only`; it also supplies libdbus and
+GLib headers while omitting the OCR, capture and desktop-portal tools.
 
 Linux browser login uses the session's `org.freedesktop.portal.OpenURI` service and a registered default HTTPS browser. Minimal desktop sessions need a portal backend (GTK in the command above), `xdg-mime` from `xdg-utils`, and `update-desktop-database` from `desktop-file-utils` when registering a browser's desktop entry. Xvfb alone does not supply this browser handoff.
 
@@ -87,6 +90,8 @@ without requiring Task on the runners.
 | `task build:debug` | Build `target/debug/talk-desktop` without starting it |
 | `task build` | Build the optimized desktop in `target/release` using Cargo's release profile |
 | `task check` | Check the workspace and all targets |
+| `task verify` | Run the same documentation, architecture, formatting, Clippy and workspace tests as CI |
+| `task verify:full` | Also run tooling, package, backend-feature and architecture regressions |
 | `task test` | Run workspace tests |
 | `task lint` | Run workspace Clippy with warnings denied |
 | `task fmt` / `task fmt:check` | Apply / check Rust formatting |
@@ -163,6 +168,17 @@ Update development builds are not treated as installable packages. For installat
 Run the relevant checks from the repository root:
 
 ```sh
+task verify
+# Extended tooling/contract suite on a prepared Linux development host:
+task verify:full
+```
+
+Without Task, use `python3 tools/check.py` or `python3 tools/check.py --full`.
+Both stop at the first failed command and return its failure status. No GitHub
+runner variables or production accounts are needed. Individual checks remain
+available for a smaller change:
+
+```sh
 python3 tools/check_architecture.py
 python3 tests/contracts/run_boundary_fixtures.py --candidate "$PWD" --output /absolute/new/boundary-results.json
 cargo fmt --all -- --check
@@ -175,7 +191,10 @@ python3 -m unittest discover -s tools/identity -p 'test_*.py'
 
 Select the smallest relevant package scope for a change. Negative boundary fixtures must fail for their intended diagnostic; see [contract fixtures](../tests/contracts/README.md). A compile or synthetic fixture result does not qualify authentication, native media, accessibility or performance.
 
-[CI](ci.md) runs only Linux checks on PRs. On `main`, it also compiles on Windows/macOS. The [release tooling guide](../tools/release/README.md) describes standalone workflow/package checks and their limits.
+[CI](ci.md) runs the standard check in one Linux job. Windows/macOS compilation
+and macOS package validation are manual checks required before tagging a release.
+The [release tooling guide](../tools/release/README.md) describes standalone
+workflow/package checks and their limits.
 
 ## Documentation check
 
