@@ -719,6 +719,8 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         hand_raised: false,
         reactions: talk_core::bounded::Page::empty(),
         latest_reaction: None,
+        invitees_loaded: false,
+        invitees: talk_core::bounded::Page::empty(),
         counters: MediaCounters::default(),
         revision: 0,
     }

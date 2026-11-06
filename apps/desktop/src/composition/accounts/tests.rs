@@ -707,6 +707,8 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             hand_raised: false,
             reactions: Page::empty(),
             latest_reaction: None,
+            invitees_loaded: false,
+            invitees: Page::empty(),
             participants: Page::empty(),
         });
         assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));

@@ -45,6 +45,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Start video call",
         "Iniciar videollamada",
     ),
+    ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),
     (
         "Person hervorheben",
         "Focus participant",

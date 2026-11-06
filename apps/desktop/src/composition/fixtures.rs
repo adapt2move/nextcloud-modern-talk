@@ -888,6 +888,23 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 None
             },
+            invitees_loaded: scenario == "call-participants-raised",
+            invitees: if scenario == "call-participants-raised" {
+                page([
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1001,
+                        name: text("Robin Winter"),
+                        initials: text("RW"),
+                    },
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1002,
+                        name: text("Mina Roth"),
+                        initials: text("MR"),
+                    },
+                ])
+            } else {
+                Page::empty()
+            },
             participants: page(
                 if matches!(
                     scenario,
@@ -1898,6 +1915,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     hand_raised: false,
                     reactions: Page::empty(),
                     latest_reaction: None,
+                    invitees_loaded: false,
+                    invitees: Page::empty(),
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

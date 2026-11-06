@@ -487,6 +487,13 @@ pub struct CallReactionView {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallInviteeView {
+    pub local_id: u128,
+    pub name: Text<128>,
+    pub initials: Text<16>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
     pub title: Text<256>,
@@ -503,6 +510,8 @@ pub struct CallView {
     pub hand_raised: bool,
     pub reactions: Page<Text<64>, 32>,
     pub latest_reaction: Option<CallReactionView>,
+    pub invitees_loaded: bool,
+    pub invitees: Page<CallInviteeView, 100>,
     pub participants: Page<ParticipantView, 16>,
 }
 

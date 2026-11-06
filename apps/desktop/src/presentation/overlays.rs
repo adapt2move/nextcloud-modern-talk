@@ -53,6 +53,7 @@ impl Desktop {
                 let mut body = div().flex().flex_col().gap_3();
                 if let Some(call) = &self.snapshot.call {
                     body = body.child(self.hint(call.title.as_str()));
+                    body = body.child(self.hint(self.l("Im Anruf")));
                     for raised in [true, false] {
                         for p in call
                             .participants
@@ -61,6 +62,25 @@ impl Desktop {
                             .filter(|p| p.raised_hand == raised)
                         {
                             body = body.child(self.call_participant_row(p));
+                        }
+                    }
+                    if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
+                        body = body.child(self.hint(self.l("Nicht im Anruf")));
+                        for person in call.invitees.as_slice() {
+                            body = body.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .py_3()
+                                    .child(self.person_avatar(person.initials.as_str(), 36.))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .text_ellipsis()
+                                            .child(person.name.as_str().to_owned()),
+                                    ),
+                            );
                         }
                     }
                 }

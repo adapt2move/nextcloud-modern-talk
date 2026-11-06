@@ -178,6 +178,8 @@ impl LiveCall {
             hand_raised: false,
             reactions: talk_core::bounded::Page::empty(),
             latest_reaction: None,
+            invitees_loaded: false,
+            invitees: talk_core::bounded::Page::empty(),
             counters: MediaCounters::default(),
             revision: 0,
         };
@@ -611,6 +613,9 @@ async fn media_loop(
     let started = Instant::now();
     let mut peers: Vec<Peer> = Vec::with_capacity(17);
     let mut sfu_members = Vec::with_capacity(100);
+    // Opaque identities live only for this call generation and are retired as
+    // soon as the authoritative attendee leaves the bounded projection.
+    let mut invitee_ids: Vec<(u64, u128)> = Vec::with_capacity(100);
     let mut transport_ready = true;
     let mut required_policy = 0u64;
     let mut received_policy = 0u64;
@@ -893,6 +898,26 @@ async fn media_loop(
                     }).map_err(|_| ())?;
                 }
             }
+            let mut invitees = talk_core::bounded::Page::empty();
+            if policy_ready {
+                invitee_ids.retain(|(id, _)| bundle.invitees.iter().any(|person| person.attendee == *id));
+                for person in &bundle.invitees {
+                    let local = if let Some((_, local)) = invitee_ids.iter().find(|(id, _)| *id == person.attendee) {
+                        *local
+                    } else {
+                        let mut bytes = [0u8; 16];
+                        if getrandom::fill(&mut bytes).is_err() { continue; }
+                        let local = u128::from_le_bytes(bytes);
+                        if local == 0 || invitee_ids.iter().any(|(_, existing)| *existing == local)
+                            || peers.iter().any(|peer| peer.local == local) { continue; }
+                        invitee_ids.push((person.attendee, local));
+                        local
+                    };
+                    let _ = invitees.try_push(calls::CallInvitee { local, name: person.name.clone() });
+                }
+            } else {
+                invitee_ids.clear();
+            }
             session.retain_video(&peers.iter().filter(|p| p.role != Role::Publisher).take(video_limit).map(|p| p.local).collect::<Vec<_>>());
             if mixed {
                 let mut output = [0i16; 480];
@@ -916,6 +941,8 @@ async fn media_loop(
                 snapshot.hand_raised = hand_raised;
                 snapshot.reactions = if policy_ready && call.phase() == Phase::Active { bundle.reactions.clone() } else { talk_core::bounded::Page::empty() };
                 snapshot.latest_reaction = latest_reaction.clone();
+                snapshot.invitees_loaded = policy_ready;
+                snapshot.invitees = invitees;
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
                 snapshot.revision = snapshot.revision.saturating_add(1);

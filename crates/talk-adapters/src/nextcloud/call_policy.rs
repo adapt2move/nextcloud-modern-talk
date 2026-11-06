@@ -16,8 +16,13 @@ pub(crate) struct Bundle {
     pub exists: Observed<bool>,
     pub settings: SignalingSettings,
     pub peers: Vec<Peer>,
+    pub invitees: Vec<Invitee>,
     pub hand_supported: bool,
     pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
+}
+pub(crate) struct Invitee {
+    pub attendee: u64,
+    pub name: talk_core::bounded::Text<256>,
 }
 pub(crate) struct Peer {
     pub session: PeerSession,
@@ -205,6 +210,33 @@ impl Sources {
             SignalingMode::External => SignalingProfile::External,
             _ => return Err(unknown),
         };
+        let mut invitees = Vec::with_capacity(people.len().min(100));
+        for person in &people {
+            if person.in_call != Some(0) {
+                continue;
+            }
+            let (Some(attendee), Some(name)) = (
+                person.attendee_id.filter(|id| *id > 0),
+                person.display_name.as_deref(),
+            ) else {
+                continue;
+            };
+            if person.actor_type.as_deref() == Some("users")
+                && person.actor_id.as_deref() == Some(a.id.as_str())
+            {
+                continue;
+            }
+            if invitees
+                .iter()
+                .any(|existing: &Invitee| existing.attendee == attendee)
+            {
+                continue;
+            }
+            let Ok(name) = talk_core::bounded::Text::new(name) else {
+                continue;
+            };
+            invitees.push(Invitee { attendee, name });
+        }
         let mut peers = Vec::with_capacity(16);
         let mut connected = own_connected;
         if let Some(value) = self.peers {
@@ -292,6 +324,7 @@ impl Sources {
             },
             settings,
             peers,
+            invitees,
             hand_supported,
             reactions,
         })

@@ -473,6 +473,8 @@ pub struct Snapshot {
     pub hand_raised: bool,
     pub reactions: crate::bounded::Page<crate::bounded::Text<64>, 32>,
     pub latest_reaction: Option<CallReaction>,
+    pub invitees_loaded: bool,
+    pub invitees: crate::bounded::Page<CallInvitee, 100>,
     pub counters: MediaCounters,
     pub revision: u64,
 }
@@ -483,6 +485,12 @@ pub struct CallReaction {
     /// None identifies the local sender; other IDs are call-scoped peers.
     pub participant: Option<u128>,
     pub emoji: crate::bounded::Text<64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallInvitee {
+    pub local: u128,
+    pub name: crate::bounded::Text<256>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

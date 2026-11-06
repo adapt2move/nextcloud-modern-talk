@@ -646,6 +646,8 @@ impl Accounts {
             hand_raised: false,
             reactions: Page::empty(),
             latest_reaction: None,
+            invitees_loaded: false,
+            invitees: Page::empty(),
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -840,6 +842,14 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                 emoji: reaction.emoji.clone(),
             }
         }),
+        invitees_loaded: value.invitees_loaded,
+        invitees: page(value.invitees.as_slice().iter().map(|person| {
+            talk_core::ui::presentation::CallInviteeView {
+                local_id: person.local,
+                name: text(person.name.as_str()),
+                initials: initials(person.name.as_str()),
+            }
+        })),
         participants: page(
             value
                 .participants
@@ -899,6 +909,8 @@ mod action_tests {
                 hand_raised: false,
                 reactions: Page::empty(),
                 latest_reaction: None,
+                invitees_loaded: false,
+                invitees: Page::empty(),
                 counters: Default::default(),
                 revision: 1,
             }),
