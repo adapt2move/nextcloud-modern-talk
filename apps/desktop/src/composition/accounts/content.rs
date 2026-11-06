@@ -308,6 +308,7 @@ impl Accounts {
                     },
                 )
             }
+            A::RefreshPollDrafts => self.start_poll(request, wire::PollCommand::ListDrafts),
             A::RefreshPoll(poll) => self.start_poll(request, wire::PollCommand::Read(poll)),
             A::CreatePoll(draft) => self.start_poll(
                 request,
@@ -868,6 +869,20 @@ impl Accounts {
                 self.content_owner.link = Some((job.account, link));
                 self.snapshot.content_panel.result =
                     Some((job.request, Completion::ServerAccepted));
+            }
+            Ok(wire::ContentResult::PollDrafts(drafts)) => {
+                let entries = drafts.as_slice().iter().map(|entry| view::PollDraftEntry {
+                    id: entry.id,
+                    draft: view::PollDraft {
+                        question: entry.draft.question.clone(),
+                        options: entry.draft.options.clone(),
+                        multiple: entry.draft.multiple,
+                        hidden_results: entry.draft.hidden_results,
+                    },
+                    max_votes: entry.max_votes,
+                }).collect::<Vec<_>>();
+                self.snapshot.content_panel.poll_drafts = page(entries);
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
             }
             Ok(wire::ContentResult::PollCapabilities(availability)) => {
                 self.snapshot.content_panel.poll_create = availability_view(availability);

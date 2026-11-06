@@ -64,6 +64,12 @@ pub struct AssetView {
     pub document_pages: Option<u32>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PollDraftEntry {
+    pub id: u64,
+    pub draft: PollDraft,
+    pub max_votes: u16,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {
     pub id: u16,
     pub label: Text<1000>,
@@ -143,6 +149,7 @@ pub struct ContentPanel {
     /// These keys retain renderer resources; they authorize no visible target.
     pub retained_avatar_keys: Page<u64, 128>,
     pub polls: Page<PollView, 20>,
+    pub poll_drafts: Page<PollDraftEntry, 100>,
     pub poll_create: Availability,
     pub poll_state: RemoteState,
     pub preview: Option<AttachmentRef>,
@@ -160,6 +167,7 @@ impl Default for ContentPanel {
             assets: Page::empty(),
             retained_avatar_keys: Page::empty(),
             polls: Page::empty(),
+            poll_drafts: Page::empty(),
             poll_create: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,
             preview: None,
@@ -189,6 +197,7 @@ pub enum ContentAction {
         position_ms: u64,
     },
     OpenCloud(AttachmentRef),
+    RefreshPollDrafts,
     RefreshPoll(u64),
     CreatePoll(PollDraft),
     Vote {
