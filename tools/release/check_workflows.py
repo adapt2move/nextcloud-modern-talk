@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Small source policy plus upstream actionlint; not a YAML parser or sandbox.
 
-Tests belong on Linux. Windows/macOS jobs compile/package only. Helper behavior
+Application tests belong on Linux. Windows/macOS jobs compile/package only;
+an explicit manual job checks disposable code-signing fixtures. Helper behavior
 is ordinary reviewed source, rather than a second hash-manifest build system.
 """
 import argparse
@@ -22,7 +23,9 @@ ACTIONLINT_SHA256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b34
 ACTIONLINT_URL = "https://github.com/rhysd/actionlint/releases/download/v" + ACTIONLINT_VERSION + "/actionlint_" + ACTIONLINT_VERSION + "_linux_amd64.tar.gz"
 LINUX = {"ubuntu-26.04"}
 COMPILE = {"windows-2025", "macos-26"}
-MAIN_ONLY = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
+MAIN_ONLY = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && inputs.signing_probe != true"
+SIGNING_PROBE = "github.event_name == 'workflow_dispatch' && inputs.signing_probe"
+LINUX_NORMAL = "inputs.signing_probe != true"
 TEST = re.compile(r"cargo(?:\.py)?\s+(?:test|bench|run|nextest)\b|tests?\.py\b|capture\.py|--ui-scenario|--licenses|xvfb-run|pytest")
 
 
@@ -55,8 +58,17 @@ def check(root, actionlint=False, placement=True):
             if "contents: write" in job and (file.name, name) != ("release.yml", "publish"):
                 raise ValueError("Only release publication may write contents")
             conditions = re.findall(r"(?m)^    if: (.*)$", job)
+            signing_probe = file.name == "ci.yml" and name == "macos-signing"
+            if signing_probe:
+                if (runner[1] != "macos-26" or conditions != [SIGNING_PROBE]
+                        or "python3 tools/native/check-macos-signing.py" not in job
+                        or TEST.search(job) or "secrets." in job
+                        or "github.token" in job or "GITHUB_TOKEN" in job
+                        or re.search(r"(?m)^        if:", job)):
+                    raise ValueError("Signing probe must be explicit, disposable and credential-free")
+                continue
             if file.name == "ci.yml":
-                expected = [MAIN_ONLY] if runner[1] in COMPILE else []
+                expected = [MAIN_ONLY] if runner[1] in COMPILE else [LINUX_NORMAL]
                 if conditions != expected:
                     raise ValueError("CI must run Linux on PRs and all platforms only on main: " + name)
             if runner[1] in COMPILE:
@@ -74,7 +86,7 @@ def check(root, actionlint=False, placement=True):
     for folder in ("tools/release", "tools/ci"):
         for source in (root / folder).glob("*.py"):
             ast.parse(source.read_text(), filename=str(source))
-    print(f"Workflow policy: {len(workflows)} workflows; tests only on Linux", flush=True)
+    print(f"Workflow policy: {len(workflows)} workflows; application tests only on Linux", flush=True)
     if actionlint:
         if (platform.system(), platform.machine()) != ("Linux", "x86_64"):
             raise ValueError("Pinned actionlint binary is Linux x86_64 only")
