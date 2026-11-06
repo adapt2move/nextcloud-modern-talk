@@ -372,7 +372,8 @@ impl Purpose {
             Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
             | Self::Mutation(_, c)
-            | Self::Send(_, c, _) => Some(c),
+            | Self::Send(_, c, _)
+            | Self::Typing(c, _) => Some(c),
             Self::Call(c) => Some(ConversationRef {
                 account: c.account,
                 conversation: c.conversation,

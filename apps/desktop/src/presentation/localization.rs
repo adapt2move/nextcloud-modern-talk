@@ -9,6 +9,7 @@ mod own_status;
 mod people;
 mod recovery;
 mod resources;
+mod typing;
 mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
@@ -28,6 +29,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         onboarding::MESSAGES,
         own_status::MESSAGES,
         people::MESSAGES,
+        typing::MESSAGES,
     ] {
         if let Ok(index) = catalog.binary_search_by_key(&key, |row| row.0) {
             return if locale == Locale::Spanish {
@@ -91,6 +93,7 @@ mod tests {
             onboarding::MESSAGES,
             own_status::MESSAGES,
             people::MESSAGES,
+            typing::MESSAGES,
         ] {
             let mut last = "";
             for &(key, en, es) in catalog {

@@ -14,6 +14,7 @@ mod preview;
 mod reads;
 mod removal;
 mod startup;
+mod typing;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -62,6 +63,7 @@ enum Purpose {
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
     LiveEvents(AccountScope),
+    Typing(ConversationRef, typing::Work),
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
@@ -151,6 +153,7 @@ pub struct Accounts {
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
     background: background::Background,
+    typing: typing::Typing,
     history: history::Cache,
     cache: cache::Cache,
     picker: Option<files::Picker>,
@@ -199,6 +202,7 @@ impl Accounts {
             message_search: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
+            typing: typing::Typing::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
             picker: None,
@@ -555,6 +559,7 @@ impl Accounts {
         self.tick_content();
         self.tick_file_work();
         self.tick_background();
+        self.tick_typing();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -679,6 +684,7 @@ impl Accounts {
                 self.cache_history(context);
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
+            Purpose::Typing(context, work) => self.complete_typing(context, work, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
             Purpose::LiveEvents(scope) => {
@@ -1062,6 +1068,7 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::Typing { context, active } => self.typing_activity(context, active)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }

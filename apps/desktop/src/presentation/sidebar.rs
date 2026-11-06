@@ -796,6 +796,15 @@ impl Desktop {
                     .text_ellipsis()
                     .child(row.title.as_str().to_owned()),
             )
+            .when(selected && !self.typing_people(context).is_empty(), |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_size(self.sp(13.))
+                        .text_color(t.muted)
+                        .child("…"),
+                )
+            })
             .when(
                 row.kind == ConversationKind::Direct && row.organization.classified == Some(true),
                 |d| d.child(self.scaled_icon("lock", 12., t.muted)),

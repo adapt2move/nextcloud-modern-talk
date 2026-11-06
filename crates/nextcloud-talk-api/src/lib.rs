@@ -21,6 +21,7 @@ pub mod presence;
 pub mod scope;
 pub mod signaling;
 mod transport;
+pub mod typing;
 pub use error::{ErrorKind, PortError as Error, Retry};
 use models::*;
 use reqwest::Method;
@@ -195,6 +196,7 @@ pub struct Client {
     hpb_route: Option<hpb::Route>,
     live_settings_at: Option<scope::Moment>,
     live_internal: bool,
+    typing_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 struct SendAttempt {
     room: RoomToken,
@@ -247,6 +249,7 @@ impl Client {
             hpb_route: None,
             live_settings_at: None,
             live_internal: false,
+            typing_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
     pub fn validate(&self, context: &OperationContext) -> Result<(), Error> {

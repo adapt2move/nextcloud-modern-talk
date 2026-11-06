@@ -752,6 +752,7 @@ pub(super) fn model() -> Accounts {
         message_search: None,
         notices: notifications::Notices::default(),
         background: background::Background::default(),
+        typing: typing::Typing::default(),
         history: history::Cache::default(),
         cache: cache::Cache::default(),
         picker: None,

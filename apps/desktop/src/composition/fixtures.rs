@@ -49,6 +49,9 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux",
     "chat-presence",
     "people-card",
+    "chat-typing",
+    "chat-typing-two",
+    "chat-typing-many",
     "status-picker",
     "status-message",
     "chat-ux-call",
@@ -200,6 +203,33 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(
+        scenario,
+        Some("chat-typing" | "chat-typing-two" | "chat-typing-many")
+    ) {
+        let mut state = snapshot(Some("chat-grouped"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let count = match scenario {
+                Some("chat-typing") => 1,
+                Some("chat-typing-two") => 2,
+                _ => 3,
+            };
+            panel.typing = page(
+                [
+                    ("Mara", "fixture-mara"),
+                    ("Jonas", "fixture-jonas"),
+                    ("Lea", "fixture-lea"),
+                ]
+                .into_iter()
+                .take(count)
+                .map(|(name, key)| talk_core::ui::messaging::TypingPerson {
+                    name: text(name),
+                    author_key: text(key),
+                }),
+            );
+        }
+        return state;
+    }
     if scenario == Some("people-card") {
         let mut state = snapshot(Some("chat-grouped"));
         dialog::configure(&mut state);

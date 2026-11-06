@@ -569,6 +569,7 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_2()
+            .child(self.typing_slot(row.context))
             .children(self.composer_context(cx))
             .child(
                 div()

@@ -206,6 +206,37 @@ impl Desktop {
         }
     }
 
+    /// Only mounted for visible typing activity; reduced motion keeps static dots.
+    pub(super) fn typing_dots(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> AnyElement {
+        let dots = (0..3).map(|index| {
+            let dot = div().size(gpui::px(3.)).rounded_full().bg(self.theme.muted);
+            if self.reduced_motion {
+                dot.into_any_element()
+            } else {
+                dot.with_animation(
+                    super::controls::scoped_id("typing-dot", context, index as u128, 0),
+                    Animation::new(Duration::from_millis(1200)).repeat(),
+                    move |dot, phase| {
+                        let offset = (phase + index as f32 / 3.).fract();
+                        let pulse = (1. - (offset * 2. - 1.).abs()).max(0.);
+                        dot.opacity(0.35 + pulse * 0.65)
+                    },
+                )
+                .into_any_element()
+            }
+        });
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(gpui::px(2.))
+            .children(dots)
+            .into_any_element()
+    }
+
     pub(super) fn switch_thumb(
         &self,
         id: &ElementId,

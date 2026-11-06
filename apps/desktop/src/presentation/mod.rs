@@ -33,6 +33,7 @@ mod sidebar;
 mod state;
 pub mod theme;
 mod toast;
+mod typing;
 mod window_chrome;
 
 use gpui::{
@@ -310,6 +311,7 @@ pub struct Desktop {
     pub composer: Entity<TextInput>,
     composer_focus: FocusHandle,
     composer_active: bool,
+    typing_input: typing::Input,
     file_send: Option<attachments::PendingSend>,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
@@ -567,6 +569,7 @@ impl Desktop {
             composer,
             composer_focus,
             composer_active: false,
+            typing_input: typing::Input::default(),
             file_send: None,
             conversation_name,
             group_name,
@@ -1060,6 +1063,9 @@ impl Desktop {
         let invoker = window.focused(cx);
         let mut server_input_rejected = false;
         let mut sent_in = None;
+        if matches!(action, LocalAction::Send) {
+            self.stop_local_typing();
+        }
         match action {
             LocalAction::RemoveAccount(account, scope) => {
                 self.request_account_removal(account, scope, window, cx)
@@ -2067,6 +2073,7 @@ impl Render for Desktop {
         // Only entry/exit notifications rebuild the optional composer details.
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
+        self.prepare_typing(window, cx);
         self.prepare_message_motion(window);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);

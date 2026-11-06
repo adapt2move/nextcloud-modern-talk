@@ -260,7 +260,6 @@ impl Handle {
     ) -> Result<Route, ErrorKind> {
         self.join_for(context, token, own, RoomPurpose::Call).await
     }
-    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
     pub(crate) async fn join_chat(
         &self,
         context: &OperationContext,
@@ -423,7 +422,6 @@ impl Route {
         });
     }
     /// Snapshot of remote Talk sessions that typed recently in this chat route.
-    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
     pub(crate) fn typing_sessions(&self) -> Result<Vec<PeerSession>, ErrorKind> {
         self.with_room(|room, _| {
             if room.purpose != RoomPurpose::Chat {
@@ -441,7 +439,6 @@ impl Route {
     }
     /// Send only to currently observed room sessions. A late command cannot
     /// act after the route has been retired or replaced.
-    #[allow(dead_code, reason = "Chat signaling owner is integrated separately")]
     pub(crate) async fn send_typing(
         &self,
         context: &OperationContext,

@@ -45,6 +45,19 @@ pub struct AccountProbe {
     pub channel_semantics: bool,
 }
 
+/// Bounded, ephemeral room-scoped typing observation from signaling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingPerson {
+    pub name: Text<256>,
+    pub author_key: Text<256>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingObservation {
+    pub conversation: ConversationId,
+    pub running: bool,
+    pub people: Page<TypingPerson, 16>,
+}
+
 /// Server-observed status; unknown values must not imply availability.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserPresence {

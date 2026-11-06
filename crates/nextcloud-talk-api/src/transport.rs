@@ -259,6 +259,37 @@ impl DiagnosticCallAdmission {
 }
 
 impl Transport {
+    /// An account-owned chat signaling session has its own cookie jar, so
+    /// opening or replacing it cannot move an existing call's HTTP room session.
+    pub(crate) fn typing_runtime(&self) -> NetworkRuntime {
+        self.runtime.clone()
+    }
+    pub(crate) fn typing_fork(&self) -> Transport {
+        Transport {
+            request_dispatched: false,
+            binding: AuthenticatedBinding {
+                scope: self.binding.scope,
+                host: self.binding.host,
+                origin: ServerOrigin(self.binding.origin.0.clone()),
+                login_name: self.binding.login_name.clone(),
+                user: self.binding.user.clone(),
+                password: self.binding.password.clone(),
+                cancellation: self.binding.cancellation.clone(),
+            },
+            client: self.client.clone(),
+            runtime: self.runtime.clone(),
+            _account_charge: self._account_charge.clone(),
+            #[cfg(any(test, feature = "backend-test"))]
+            diagnostic_loop: std::sync::Weak::new(),
+            #[cfg(any(test, feature = "backend-test"))]
+            diagnostic_cookies: duplex::CookieOrder::default(),
+            cookies: Vec::new(),
+            shared_cookies: None,
+            cancel_account_on_drop: false,
+            meeting_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            meeting_lifetime: std::sync::Weak::new(),
+        }
+    }
     pub(crate) fn hpb_binding(&self) -> Result<crate::hpb::AccountBinding, PortError> {
         let backend = self
             .binding

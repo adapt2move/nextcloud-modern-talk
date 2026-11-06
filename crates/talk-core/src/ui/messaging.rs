@@ -122,6 +122,12 @@ pub struct SearchResult {
     pub title: Text<256>,
     pub excerpt: Text<4096>,
 }
+/// Ephemeral signaling observation, scoped by the containing message panel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingPerson {
+    pub name: Text<256>,
+    pub author_key: Text<256>,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mention {
     pub identifier: Text<512>,
@@ -257,6 +263,7 @@ pub struct MessagePanel {
     /// One message-navigation request, independent of mutation and history state.
     pub context_load: Option<ContextLoad>,
     pub mentions: Page<Mention, 100>,
+    pub typing: Page<TypingPerson, 16>,
     pub reminders: Page<Reminder, 100>,
     pub scheduled: Page<Scheduled, 100>,
     pub result: Option<(RequestId, Completion)>,
@@ -300,6 +307,7 @@ impl MessagePanel {
             located: None,
             context_load: None,
             mentions: Page::empty(),
+            typing: Page::empty(),
             reminders: Page::empty(),
             scheduled: Page::empty(),
             result: None,

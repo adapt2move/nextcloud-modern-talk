@@ -303,3 +303,152 @@ async fn direct_room_list_exposes_server_status() {
             .all(|room| room.user_status.is_none())
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires the disposable presence lab fixture"]
+async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
+    use std::time::{Duration, Instant};
+    let root = std::env::var_os("NMT_FIXTURE_DIR").expect("private fixture directory");
+    let runtime = NetworkRuntime::new(ClockEpoch::from_local(911));
+    let scope = |account| AccountScope {
+        account: AccountId::from_local(account),
+        runtime: RuntimeGeneration::from_local(1),
+    };
+    let alice_scope = scope(911);
+    let bob_scope = scope(912);
+    let mut alice = test_support::from_private_fixture(
+        &Path::new(&root).join("alice.json"),
+        alice_scope,
+        HostId::from_local(911),
+        runtime.clone(),
+    )
+    .unwrap();
+    let mut bob = test_support::from_private_fixture(
+        &Path::new(&root).join("bob.json"),
+        bob_scope,
+        HostId::from_local(912),
+        runtime.clone(),
+    )
+    .unwrap();
+    let context = |scope| {
+        let mut deadline = runtime.now();
+        deadline.millis += 20_000;
+        OperationContext {
+            scope,
+            deadline,
+            cancellation: Cancellation::default(),
+        }
+    };
+    let ProtocolReply::Conversations(rooms) = alice
+        .request(context(alice_scope), ProtocolRequest::ListConversations)
+        .await
+        .unwrap()
+    else {
+        panic!("rooms")
+    };
+    let alice_room = rooms
+        .rooms
+        .as_slice()
+        .iter()
+        .find(|r| r.name.as_str() == "Presence group")
+        .unwrap()
+        .id;
+    let bob_room = bob.fixture_conversation().unwrap();
+    for (client, account, room) in [
+        (&mut alice, alice_scope, alice_room),
+        (&mut bob, bob_scope, bob_room),
+    ] {
+        client
+            .request(context(account), ProtocolRequest::WatchTyping(room))
+            .await
+            .unwrap();
+    }
+    let end = Instant::now() + Duration::from_secs(45);
+    let mut observed = false;
+    while Instant::now() < end {
+        let _ = bob
+            .request(
+                context(bob_scope),
+                ProtocolRequest::TypingActivity {
+                    conversation: bob_room,
+                    active: true,
+                },
+            )
+            .await;
+        if let ProtocolReply::Typing(observation) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            .unwrap()
+            && observation
+                .people
+                .as_slice()
+                .iter()
+                .any(|person| person.name.as_str() == "lab_bob")
+        {
+            observed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+    assert!(
+        observed,
+        "remote typing should arrive from the joined participant"
+    );
+    bob.request(
+        context(bob_scope),
+        ProtocolRequest::TypingActivity {
+            conversation: bob_room,
+            active: false,
+        },
+    )
+    .await
+    .unwrap();
+    let end = Instant::now() + Duration::from_secs(12);
+    let mut cleared = false;
+    while Instant::now() < end {
+        if let ProtocolReply::Typing(observation) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            .unwrap()
+            && observation.people.as_slice().is_empty()
+        {
+            cleared = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(cleared, "stop or expiry clears the indicator");
+    bob.request(
+        context(bob_scope),
+        ProtocolRequest::SetPreference {
+            request: RequestId(999),
+            change: AccountPreferenceChange::ShareTypingStatus(false),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        bob.request(
+            context(bob_scope),
+            ProtocolRequest::TypingActivity {
+                conversation: bob_room,
+                active: true
+            }
+        )
+        .await
+        .is_err()
+    );
+    alice
+        .request(context(alice_scope), ProtocolRequest::StopTyping)
+        .await
+        .unwrap();
+    bob.request(context(bob_scope), ProtocolRequest::StopTyping)
+        .await
+        .unwrap();
+}

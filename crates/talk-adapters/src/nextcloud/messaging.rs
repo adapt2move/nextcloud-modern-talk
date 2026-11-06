@@ -130,7 +130,7 @@ fn availability(
         room.actions.read_messages
     };
     ActionAvailability {
-        implemented: !matches!(f, F::Typing | F::Translation | F::Summary),
+        implemented: !matches!(f, F::Translation | F::Summary),
         server: caps.feature(support(f)),
         allowed,
     }

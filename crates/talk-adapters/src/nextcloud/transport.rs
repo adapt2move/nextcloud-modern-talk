@@ -445,6 +445,39 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) fn watch_typing(
+        &self,
+        c: &OperationContext,
+        room: RoomToken,
+    ) -> Result<api::typing::Watch, PortError> {
+        self.api.watch_typing(&context(c), room).map_err(error)
+    }
+    pub(super) fn typing_activity(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        active: bool,
+    ) -> Result<(), PortError> {
+        watch
+            .activity(&context(c), active)
+            .map_err(|value| self.error(kind(value)))
+    }
+    pub(super) fn typing_people(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> Vec<api::typing::Person> {
+        watch.people(scope(c.scope), room)
+    }
+    pub(super) fn typing_matches(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> bool {
+        watch.matches(scope(c.scope), room)
+    }
     pub(super) async fn poll_live_events(
         &mut self,
         c: &OperationContext,

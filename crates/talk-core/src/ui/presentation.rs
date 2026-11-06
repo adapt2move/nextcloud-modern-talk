@@ -589,6 +589,11 @@ pub enum UiIntent {
         context: ConversationRef,
         action: super::messaging::MessageAction,
     },
+    /// Recent local composing activity; the account signaling owner throttles it.
+    Typing {
+        context: ConversationRef,
+        active: bool,
+    },
     AcknowledgeRoom {
         request: RequestId,
         context: ConversationRef,

@@ -34,6 +34,9 @@ class PresenceLab(Lab):
                              body={"roomType": 2, "roomName": "Presence group"}, expected=(200, 201), name="presence.group")
         self.request("lab_alice", "POST", f"/ocs/v2.php/apps/spreed/api/v4/room/{group['token']}/participants",
                      body={"newParticipant": "lab_bob", "source": "users"}, name="presence.group-invite")
+        for actor in ("lab_alice", "lab_bob"):
+            self.request(actor, "POST", "/ocs/v2.php/apps/spreed/api/v1/settings/user",
+                         body={"key": "typing_privacy", "value": "0"}, name="presence.typing-public")
         self.request("lab_bob", "PUT", "/ocs/v2.php/apps/user_status/api/v1/user_status/status",
                      body={"statusType": "away"}, name="presence.set-away")
         self.request("lab_bob", "PUT", "/ocs/v2.php/apps/user_status/api/v1/user_status/message/custom",
@@ -42,6 +45,8 @@ class PresenceLab(Lab):
         directory.mkdir(mode=0o700)
         save(directory / "alice.json", {"origin": f"http://127.0.0.1:{port}", "user": "lab_alice",
                                       "password": self.passwords["lab_alice"], "room": room})
+        save(directory / "bob.json", {"origin": f"http://127.0.0.1:{port}", "user": "lab_bob",
+                                    "password": self.passwords["lab_bob"], "room": group})
         target = self.output / key
         target.mkdir(mode=0o700)
         result = asyncio.run(self.client(directory, port, target))
@@ -50,7 +55,7 @@ class PresenceLab(Lab):
 
     async def client(self, directory, port, output):
         command = ["cargo", "test", "--locked", "-p", "talk-adapters", "--features", "backend-test",
-                   "--test", "presence_backend", "--", "--ignored", "--nocapture"]
+                   "--test", "presence_backend", "--", "--ignored", "--nocapture", "--test-threads=1"]
         env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), RUST_BACKTRACE="0")
         start = time.monotonic()
         async with Relay(urlsplit(self.base).hostname, port):
