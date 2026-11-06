@@ -442,6 +442,37 @@ impl Accounts {
                         wishes: ui.wishes,
                     }
                 }
+                UiIntent::SetCallHand { call, raised } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if !view.hand_supported || view.stage != CallStage::Active {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    Command::SetHand {
+                        call: *call,
+                        raised: *raised,
+                    }
+                }
+                UiIntent::SendCallReaction { call, emoji } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active || !view.reactions.as_slice().contains(emoji)
+                    {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    Command::React {
+                        call: *call,
+                        emoji: emoji.clone(),
+                    }
+                }
                 UiIntent::ShareScreen(_) => {
                     return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
                 }
@@ -519,6 +550,8 @@ impl Accounts {
                 | UiIntent::DeclineDirect(_)
                 | UiIntent::SetMicrophone { .. }
                 | UiIntent::SetCamera { .. }
+                | UiIntent::SetCallHand { .. }
+                | UiIntent::SendCallReaction { .. }
                 | UiIntent::ShareScreen(_)
                 | UiIntent::StopScreen(_)
                 | UiIntent::ReconnectCall(_)

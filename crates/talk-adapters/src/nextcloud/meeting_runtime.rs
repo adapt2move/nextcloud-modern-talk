@@ -1,6 +1,7 @@
 //! Autonomous normal-call owner. Signaling polling, policy/HTTP writes and media
 //! have separate bounded lanes; none is driven by GPUI rendering or chat polling.
 mod activity;
+mod outgoing;
 mod speaking;
 mod status;
 
@@ -36,7 +37,7 @@ use talk_core::{
     lifecycle::Cancellation,
     policy::{Observed, RecordingState},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 const OBSERVATIONS: [Observation; 6] = [
     Observation::Account,
     Observation::Capabilities,
@@ -127,7 +128,10 @@ impl LiveCall {
         }
         // Close publication synchronously on any change; stale callbacks cannot
         // extend the old grant while the owner rechecks policy/user intent.
-        if !matches!(command, Command::Observe(_)) {
+        if matches!(
+            command,
+            Command::Change { .. } | Command::Consent(_) | Command::Reconnect(_)
+        ) {
             self.session.suspend();
         }
         self.control
@@ -143,7 +147,7 @@ impl LiveCall {
         mut call: CallSession,
         initial: Bundle,
         reader: MeetingReader,
-        writer: MeetingWriter,
+        mut writer: MeetingWriter,
         stop: MeetingStop,
         network: NetworkRuntime,
         cancel: Cancellation,
@@ -185,6 +189,19 @@ impl LiveCall {
         let (signals_tx, signals) = mpsc::channel(2);
         let (write_tx, write_rx) = mpsc::channel(64);
         let (policy_tx, policy) = mpsc::channel(2);
+        let (hand_tx, hands) = watch::channel(None);
+        let (reaction_tx, reactions) = mpsc::channel(4);
+        let activity_writer = writer
+            .take_activity_writer()
+            .ok_or(api::ErrorKind::Uncertain)?;
+        tokio::spawn(outgoing::run(
+            activity_writer,
+            hands,
+            reactions,
+            session.clone(),
+            network.clone(),
+            cancel.clone(),
+        ));
         let own = writer.own_session()?;
         let topology = writer.topology();
         tokio::spawn(read_loop(
@@ -211,6 +228,8 @@ impl LiveCall {
             signals,
             write_tx,
             policy,
+            hand_tx,
+            reaction_tx,
             session.clone(),
             network,
             cancel,
@@ -580,6 +599,8 @@ async fn media_loop(
     mut signals: mpsc::Receiver<SignalBatch>,
     writes: mpsc::Sender<Write>,
     mut policies: mpsc::Receiver<PolicyUpdate>,
+    hand_tx: watch::Sender<Option<outgoing::Message>>,
+    reaction_tx: mpsc::Sender<outgoing::Message>,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
@@ -596,6 +617,12 @@ async fn media_loop(
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_flags = call.wishes();
+    let mut hand_raised = false;
+    let mut hand_timestamp = 0u64;
+    let mut announced_refresh = 0u64;
+    let mut reaction_sequence = 0u64;
+    let mut latest_reaction: Option<calls::CallReaction> = None;
+    let mut last_reaction: Option<Instant> = None;
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
@@ -608,6 +635,30 @@ async fn media_loop(
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
                     }
                     Command::Consent(_) => { call.consent(scope).map_err(|_| ())?; }
+                    Command::SetHand { raised, .. } if transport_ready && received_policy >= required_policy && bundle.hand_supported && call.phase() == Phase::Active => {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |time| u64::try_from(time.as_millis()).unwrap_or(u64::MAX));
+                        if let Some(next) = hand_timestamp.checked_add(1) {
+                            hand_timestamp = now.max(next);
+                            hand_raised = raised;
+                            let message = outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
+                                activity: api::signaling::activity::Activity::RaisedHand { state: raised, timestamp: hand_timestamp }, created: Instant::now() };
+                            let _ = hand_tx.send(Some(message));
+                        }
+                    }
+                    Command::React { emoji, .. } if transport_ready && received_policy >= required_policy && call.phase() == Phase::Active
+                        && bundle.reactions.as_slice().contains(&emoji)
+                        && last_reaction.is_none_or(|at| at.elapsed() >= Duration::from_secs(2)) => {
+                        let message = outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
+                            activity: api::signaling::activity::Activity::Reaction(emoji.as_str().to_owned()), created: Instant::now() };
+                        if reaction_tx.try_send(message).is_ok() {
+                            last_reaction = Some(Instant::now());
+                            if let Some(next) = reaction_sequence.checked_add(1) {
+                                reaction_sequence = next;
+                                latest_reaction = Some(calls::CallReaction { sequence: next, participant: None, emoji });
+                            }
+                        }
+                    }
                     Command::Reconnect(_) => {
                         // A new explicit call generation owns a replacement
                         // publisher/subscriber set. Never reuse retired SIDs.
@@ -688,8 +739,14 @@ async fn media_loop(
                         // cannot create a peer or change media authority.
                         SignalEvent::Activity { from, activity } => {
                             if let Some(peer) = peers.iter_mut().find(|peer| peer.session == from && peer.role != Role::Publisher) {
-                                if let api::signaling::activity::Activity::RaisedHand { state, timestamp } = activity {
-                                    peer.raised_hand.update(state, timestamp);
+                                match activity {
+                                    api::signaling::activity::Activity::RaisedHand { state, timestamp } => peer.raised_hand.update(state, timestamp),
+                                    api::signaling::activity::Activity::Reaction(value) => {
+                                        if let (Ok(emoji), Some(next)) = (talk_core::bounded::Text::new(&value), reaction_sequence.checked_add(1)) {
+                                            reaction_sequence = next;
+                                            latest_reaction = Some(calls::CallReaction { sequence: next, participant: Some(peer.local), emoji });
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -713,6 +770,13 @@ async fn media_loop(
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            if policy_ready && hand_raised && bundle.hand_supported && announced_refresh != refreshes {
+                announced_refresh = refreshes;
+                let _ = hand_tx.send(Some(outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
+                    activity: api::signaling::activity::Activity::RaisedHand { state: true, timestamp: hand_timestamp }, created: Instant::now() }));
+            }
+            let clear_hand = !policy_ready && { hand_tx.borrow().is_some() };
+            if clear_hand { let _ = hand_tx.send(None); }
             stage = "policy grant";
             let video_limit = if policy_ready {
                 let grant = call.advance(&bundle.inputs, bundle.exists, SUPPORT, DEVICES, network.now()).map_err(|_| ())?;
@@ -848,6 +912,10 @@ async fn media_loop(
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.peers = peers.iter().filter(|p| p.role != Role::Publisher).count() as u16;
                 snapshot.participants = participants;
+                snapshot.hand_supported = policy_ready && bundle.hand_supported && call.phase() == Phase::Active;
+                snapshot.hand_raised = hand_raised;
+                snapshot.reactions = if policy_ready && call.phase() == Phase::Active { bundle.reactions.clone() } else { talk_core::bounded::Page::empty() };
+                snapshot.latest_reaction = latest_reaction.clone();
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
                 snapshot.revision = snapshot.revision.saturating_add(1);

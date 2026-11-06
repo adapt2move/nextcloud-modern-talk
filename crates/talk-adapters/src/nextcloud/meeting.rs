@@ -566,6 +566,10 @@ impl NextcloudClient {
                             }
                             prepare = true;
                         }
+                        Command::SetHand { .. } | Command::React { .. } => {
+                            self.meeting_owner = Some(CallOwner::Pending { call, last });
+                            return Err(self.error(ErrorKind::PermissionDenied));
+                        }
                         Command::Observe(_)
                             if call.accepted() && last.elapsed() >= Duration::from_secs(2) =>
                         {
@@ -636,6 +640,14 @@ impl NextcloudClient {
                     cleanup,
                     mut restart,
                 } => {
+                    if matches!(command, Command::SetHand { .. } | Command::React { .. }) {
+                        self.meeting_owner = Some(CallOwner::Ended {
+                            snapshot,
+                            cleanup,
+                            restart,
+                        });
+                        return Err(self.error(ErrorKind::NotFound));
+                    }
                     if matches!(command, Command::Reconnect(_)) {
                         restart = true;
                         snapshot.phase = Phase::Reconnecting;
