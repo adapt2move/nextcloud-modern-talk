@@ -338,6 +338,29 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         return state;
     }
+    if scenario == Some("thread") {
+        let mut state = snapshot(Some("chat-edit"));
+        let root = state
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| message.reply_count > 0)
+            .map(|message| message.local_id);
+        if let (Some(root), Some(panel)) = (root, state.message_panel.as_mut()) {
+            panel.thread_root = Some(root);
+            let mut reply = message(
+                40,
+                "Mara Fischer",
+                "MF",
+                "10:00",
+                "That works for me.",
+                false,
+            );
+            reply.metadata.thread = Some(root);
+            panel.thread_messages = page([reply]);
+        }
+        return state;
+    }
     if matches!(scenario, Some("chat-edit" | "thread-error")) {
         let mut state = snapshot(Some("chat-ux"));
         if let Some(panel) = state.message_panel.as_mut() {
@@ -1153,7 +1176,7 @@ impl DevelopmentPort {
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit") => Some(false),
+                Some("chat-edit" | "thread") => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },

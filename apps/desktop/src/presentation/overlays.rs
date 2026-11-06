@@ -416,6 +416,26 @@ impl Desktop {
             ))),
         };
         let state = load.unwrap_or(&projected).content_state(panel);
+        // The thread history endpoint can return replies without the root. The
+        // main timeline is already room-scoped and can supply it immediately.
+        let root_message = self
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| message.local_id == root)
+            .or_else(|| {
+                panel.and_then(|panel| {
+                    panel
+                        .thread_messages
+                        .as_slice()
+                        .iter()
+                        .find(|message| message.local_id == root)
+                })
+            });
+        if let Some(message) = root_message {
+            body = body.child(self.thread_message(message));
+        }
         let collection = CollectionState::new(
             state,
             panel.is_some_and(|panel| !panel.thread_messages.as_slice().is_empty()),
@@ -445,22 +465,9 @@ impl Desktop {
                 ),
             );
             for message in panel.thread_messages.as_slice() {
-                body = body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(message.author.as_str().to_owned()),
-                        )
-                        .child(if message.metadata.deleted {
-                            self.l("Nachricht gelöscht.").to_owned()
-                        } else {
-                            message.body.as_str().to_owned()
-                        }),
-                );
+                if message.local_id != root {
+                    body = body.child(self.thread_message(message));
+                }
             }
         }
         let editing = self.message_ui.editing.is_some() || self.message_ui.pending_edit.is_some();
@@ -486,6 +493,22 @@ impl Desktop {
             LocalAction::Message(super::messaging::Action::ThreadReply(root)),
             cx,
         ))
+    }
+    fn thread_message(&self, message: &talk_core::ui::presentation::MessageView) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(message.author.as_str().to_owned()),
+            )
+            .child(if message.metadata.deleted {
+                self.l("Nachricht gelöscht.").to_owned()
+            } else {
+                message.body.as_str().to_owned()
+            })
     }
     fn search_body(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;
