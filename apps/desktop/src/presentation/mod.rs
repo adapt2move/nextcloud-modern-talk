@@ -101,6 +101,7 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    FocusCallParticipant(CallScope, Option<u128>),
     Navigate(ConversationRef),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
@@ -285,6 +286,7 @@ pub struct Desktop {
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_focus: Option<(CallScope, u128)>,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -514,6 +516,7 @@ impl Desktop {
             navigation_open: false,
             sidebar_hidden: false,
             call_chat_open: true,
+            call_focus: None,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -1218,6 +1221,12 @@ impl Desktop {
                         !self.sidebar_hidden
                     };
                     self.pending_navigation_focus = Some(open);
+                }
+            }
+            LocalAction::FocusCallParticipant(scope, participant) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| call.scope == scope
+                    && participant.is_none_or(|id| call.participants.as_slice().iter().any(|p| p.local_id == id))) {
+                    self.call_focus = participant.map(|id| (scope, id));
                 }
             }
             LocalAction::ToggleCallChat => {

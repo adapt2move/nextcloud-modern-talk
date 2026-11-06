@@ -330,6 +330,10 @@ impl Desktop {
             - if show_chat { 300. } else { 0. }
             - 32.;
         let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
+        let focused = self.call_focus.and_then(|(scope, id)| {
+            (scope == call.scope && call.participants.as_slice().iter().any(|p| p.local_id == id)).then_some(id)
+        });
+        let mut feature = None;
         let mut tiles = div()
             .grid()
             .grid_cols(columns)
@@ -374,11 +378,12 @@ impl Desktop {
                             )),
                     )
             };
-            tiles = tiles.child(
-                div()
+            let tile = div()
                     .relative()
                     .min_w_0()
-                    .min_h(px(if call.participants.as_slice().len() <= 2 {
+                    .min_h(px(if focused == Some(participant.local_id) {
+                        360.
+                    } else if call.participants.as_slice().len() <= 2 {
                         330.
                     } else {
                         210.
@@ -418,9 +423,25 @@ impl Desktop {
                                             ""
                                         }
                                     )),
-                            ),
-                    ),
-            );
+                            )
+                            .child(self.button(
+                                format!("focus-call-{}", participant.local_id),
+                                if focused == Some(participant.local_id) { "Raster" } else { "Person hervorheben" },
+                                ButtonStyle::Stage,
+                                true,
+                                LocalAction::FocusCallParticipant(call.scope,
+                                    if focused == Some(participant.local_id) { None } else { Some(participant.local_id) }),
+                                cx,
+                            )),
+                    );
+            if focused == Some(participant.local_id) {
+                feature = Some(tile);
+            } else {
+                tiles = tiles.child(tile);
+            }
+        }
+        if let Some(tile) = feature {
+            stage = stage.child(tile);
         }
         if call.participants.as_slice().is_empty() {
             tiles = tiles.child(
