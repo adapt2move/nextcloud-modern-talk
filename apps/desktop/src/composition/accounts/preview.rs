@@ -54,6 +54,7 @@ impl Accounts {
         attachment: CachedAttachment,
         generation: u64,
     ) {
+        self.stop_voice_player();
         self.stop_video();
         self.content_owner.video.pending = Some(Pending {
             scope: reference.context.account,

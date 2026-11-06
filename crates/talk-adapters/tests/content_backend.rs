@@ -430,6 +430,116 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     )
     .unwrap();
 
+    let MR::Capabilities(capabilities) = message(
+        &mut alice,
+        &runtime,
+        a,
+        &mut sequence,
+        room,
+        M::Capabilities,
+    )
+    .await
+    .unwrap() else {
+        panic!("messaging capabilities");
+    };
+    if capabilities
+        .actions
+        .as_slice()
+        .iter()
+        .any(|(feature, availability)| {
+            *feature == talk_core::protocol::messaging::MessagingFeature::Voice
+                && availability.server == talk_core::protocol::FeatureSupport::Supported
+                && availability.allowed == Decision::Allowed
+        })
+    {
+        let mut wave = Vec::new();
+        wave.extend_from_slice(b"RIFF");
+        wave.extend_from_slice(&38u32.to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&16u32.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&16_000u32.to_le_bytes());
+        wave.extend_from_slice(&32_000u32.to_le_bytes());
+        wave.extend_from_slice(&2u16.to_le_bytes());
+        wave.extend_from_slice(&16u16.to_le_bytes());
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&2u32.to_le_bytes());
+        wave.extend_from_slice(&0i16.to_le_bytes());
+        let MR::Uploaded { path, .. } = message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::UploadVoice {
+                bytes: talk_core::protocol::content::VoiceBytes::new(wave.clone()).unwrap(),
+                name: text("Voice message.wav"),
+                progress: TransferProgress::default(),
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice upload");
+        };
+        message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::ShareFile {
+                path,
+                caption: text(""),
+                voice_message: true,
+            },
+        )
+        .await
+        .unwrap();
+        let MR::Messages { messages, .. } = message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::History {
+                before: None,
+                thread: None,
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice history");
+        };
+        let row = messages
+            .as_slice()
+            .iter()
+            .find(|m| m.message.kind == talk_core::protocol::MessageKind::VoiceMessage)
+            .expect("voice-message classification");
+        let file = row
+            .rich
+            .as_slice()
+            .iter()
+            .find(|o| o.kind.as_str() == "file")
+            .expect("voice file");
+        let R::VoiceAudio(audio) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            C::VoiceAudio {
+                message: row.message.id,
+                placeholder: file.placeholder.clone(),
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice download");
+        };
+        assert_eq!(audio.as_slice(), wave);
+        println!("content-backend voice-upload-share-download: pass");
+    }
+
     // The poll-specific lab run has no file fixtures and deliberately ends
     // here; the complete content run still exercises attachments below.
     if std::env::var_os("NMT_POLL_ONLY").is_some() {

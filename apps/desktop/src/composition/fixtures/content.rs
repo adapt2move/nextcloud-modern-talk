@@ -175,6 +175,34 @@ pub(super) fn polls(snapshot: &mut PresentationSnapshot) {
     }]);
 }
 
+pub(super) fn voice(snapshot: &mut PresentationSnapshot) {
+    let context = snapshot.selected.unwrap();
+    let mut recording = message(109, "Mara Fischer", "MF", "09:48", "", false);
+    recording.metadata.voice_message = true;
+    recording.metadata.rich = page([RichObject {
+        id: Some(text("109")),
+        mime_type: Some(text("audio/ogg")),
+        size: Some(240_000),
+        placeholder: text("file"),
+        kind: text("file"),
+        name: text("Voice message.ogg"),
+        link: None,
+    }]);
+    snapshot.messages = page([recording]);
+    snapshot.content_panel.voice_playback = Some(VoicePlaybackView {
+        attachment: AttachmentRef {
+            context,
+            message: 109,
+            placeholder: text("file"),
+        },
+        state: PlaybackState::Paused,
+        position_ms: 11_000,
+        duration_ms: Some(38_000),
+        speed_half_steps: 2,
+        stop_unconfirmed: false,
+    });
+}
+
 pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
     use talk_core::ui::messaging::{UploadState, UploadView};
     let mut file = snapshot.messages.as_slice()[1].clone();

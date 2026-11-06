@@ -97,6 +97,15 @@ impl Pipeline {
         shared: Arc<Shared>,
         audio_only: bool,
     ) -> Result<Self, Error> {
+        Self::with_audio_output(bytes, container, shared, audio_only, audio_output())
+    }
+    fn with_audio_output(
+        bytes: VideoBytes,
+        container: Container,
+        shared: Arc<Shared>,
+        audio_only: bool,
+        output_factory: &'static str,
+    ) -> Result<Self, Error> {
         gst::init().map_err(|_| Error::Unsupported)?;
         let pipeline = gst::Pipeline::new();
         let signals = Arc::new(Signals::default());
@@ -113,6 +122,12 @@ impl Pipeline {
             .add_many([source.upcast_ref(), &demux])
             .map_err(|_| Error::Decoder)?;
         source.link(&demux).map_err(|_| Error::Decoder)?;
+        if matches!(container, Container::Wav) {
+            let pad = demux.static_pad("src").ok_or(Error::Decoder)?;
+            install_audio(&pipeline, &pad, None, None, output_factory)?;
+            signals.audio.store(true, Ordering::Release);
+            signals.discovered.store(true, Ordering::Release);
+        }
         let weak = pipeline.downgrade();
         let events = signals.clone();
         let output = sink.clone();
@@ -135,7 +150,7 @@ impl Pipeline {
             {
                 Err(Error::Unsupported)
             } else {
-                add_track(&pipeline, pad, container, &events, &output)
+                add_track(&pipeline, pad, container, &events, &output, output_factory)
             };
             if let Err(error) = result {
                 events.fail(error);
@@ -405,6 +420,7 @@ fn add_track(
     container: Container,
     signals: &Arc<Signals>,
     output: &Arc<Mutex<Option<AppSink>>>,
+    output_factory: &'static str,
 ) -> Result<(), Error> {
     let caps = pad.current_caps().ok_or(Error::Malformed)?;
     let structure = caps.structure(0).ok_or(Error::Malformed)?;
@@ -484,38 +500,50 @@ fn add_track(
         {
             return Err(Error::Unsupported);
         }
-        let mut chain = vec![queue(1024 * 1024, 128)?];
-        if let Some(parser) = parser {
-            chain.push(element(parser)?);
-        }
-        if let Some(decoder) = decoder {
-            chain.push(element(decoder)?);
-        }
-        chain.push(element("audioconvert")?);
-        chain.push(element("audioresample")?);
-        let caps = gst::Caps::builder("audio/x-raw")
-            .field("format", "S16LE")
-            .field("rate", 48_000i32)
-            .field("channels", gst::IntRange::new(1, 2))
-            .field("layout", "interleaved")
-            .build();
-        chain.push(
-            gst::ElementFactory::make("capsfilter")
-                .property("caps", &caps)
-                .build()
-                .map_err(|_| Error::Unsupported)?,
-        );
-        let output = gst::ElementFactory::make(audio_output())
-            .name("content-audio-output")
-            .property("sync", true)
-            .property("buffer-time", 100_000i64)
-            .property("latency-time", 20_000i64)
-            .property("enable-last-sample", false)
-            .build()
-            .map_err(|_| Error::AudioUnavailable)?;
-        chain.push(output);
-        install(pipeline, pad, &chain)?;
+        install_audio(pipeline, pad, parser, decoder, output_factory)?;
     }
+    Ok(())
+}
+fn install_audio(
+    pipeline: &gst::Pipeline,
+    pad: &gst::Pad,
+    parser: Option<&str>,
+    decoder: Option<&str>,
+    output_factory: &'static str,
+) -> Result<(), Error> {
+    let mut chain = vec![queue(1024 * 1024, 128)?];
+    if let Some(parser) = parser {
+        chain.push(element(parser)?);
+    }
+    if let Some(decoder) = decoder {
+        chain.push(element(decoder)?);
+    }
+    chain.push(element("audioconvert")?);
+    chain.push(element("audioresample")?);
+    let caps = gst::Caps::builder("audio/x-raw")
+        .field("format", "S16LE")
+        .field("rate", 48_000i32)
+        .field("channels", gst::IntRange::new(1, 2))
+        .field("layout", "interleaved")
+        .build();
+    chain.push(
+        gst::ElementFactory::make("capsfilter")
+            .property("caps", &caps)
+            .build()
+            .map_err(|_| Error::Unsupported)?,
+    );
+    let mut builder = gst::ElementFactory::make(output_factory)
+        .name("content-audio-output")
+        .property("sync", true)
+        .property("enable-last-sample", false);
+    if output_factory != "fakesink" {
+        builder = builder
+            .property("buffer-time", 100_000i64)
+            .property("latency-time", 20_000i64);
+    }
+    let output = builder.build().map_err(|_| Error::AudioUnavailable)?;
+    chain.push(output);
+    install(pipeline, pad, &chain)?;
     Ok(())
 }
 
@@ -651,7 +679,7 @@ fn frame(sample: &gst::Sample) -> Result<Frame, Error> {
 mod tests {
     use super::super::{
         Phase, Player, run_pipeline,
-        tests::{settle, synthetic_webm, until},
+        tests::{settle, synthetic, synthetic_webm, until},
     };
     use super::*;
     use std::{
@@ -846,6 +874,78 @@ mod tests {
             .field("mpegversion", 1i32)
             .build();
         assert_eq!(audio_codec(Container::Mp4, &audio), Err(Error::Unsupported));
+    }
+
+    #[test]
+    fn wav_audio_prerolls_and_seeks_with_one_owned_player() {
+        gst::init().unwrap();
+        let samples = 16_000u32;
+        let data = samples * 2;
+        let mut wave = Vec::new();
+        wave.extend_from_slice(b"RIFF");
+        wave.extend_from_slice(&(36 + data).to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&16u32.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&16_000u32.to_le_bytes());
+        wave.extend_from_slice(&32_000u32.to_le_bytes());
+        wave.extend_from_slice(&2u16.to_le_bytes());
+        wave.extend_from_slice(&16u16.to_le_bytes());
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&data.to_le_bytes());
+        wave.resize(44 + data as usize, 0);
+        let shared = Arc::new(Shared::new());
+        let pipeline = Pipeline::with_audio_output(
+            VideoBytes::new(wave).unwrap(),
+            Container::Wav,
+            shared.clone(),
+            true,
+            "fakesink",
+        )
+        .unwrap();
+        let state = shared.clone();
+        let worker = thread::spawn(move || run_pipeline(pipeline, &state, Instant::now(), true));
+        let mut player = Player {
+            shared,
+            worker: Some(worker),
+        };
+        until(&player, |snapshot| snapshot.phase == Phase::Paused);
+        player.set_rate(3).unwrap();
+        player.seek_ms(500).unwrap();
+        player.set_playing(true).unwrap();
+        until(&player, |snapshot| {
+            snapshot.phase == Phase::Playing || snapshot.phase == Phase::Ended
+        });
+        player.stop();
+        until(&player, |snapshot| snapshot.phase == Phase::Stopped);
+        settle(&mut player);
+    }
+
+    #[test]
+    fn ogg_opus_audio_prerolls_with_bounded_source() {
+        gst::init().unwrap();
+        let bytes = synthetic(
+            "audiotestsrc num-buffers=20 ! audio/x-raw,rate=48000,channels=1 ! opusenc ! oggmux ! filesink name=fixture sync=false",
+        );
+        let shared = Arc::new(Shared::new());
+        let pipeline =
+            Pipeline::with_audio_output(bytes, Container::Ogg, shared.clone(), true, "fakesink")
+                .unwrap();
+        let state = shared.clone();
+        let worker = thread::spawn(move || run_pipeline(pipeline, &state, Instant::now(), true));
+        let mut player = Player {
+            shared,
+            worker: Some(worker),
+        };
+        until(&player, |snapshot| snapshot.phase == Phase::Paused);
+        player.set_playing(true).unwrap();
+        until(&player, |snapshot| {
+            snapshot.phase == Phase::Playing || snapshot.phase == Phase::Ended
+        });
+        player.stop();
+        until(&player, |snapshot| snapshot.phase == Phase::Stopped);
+        settle(&mut player);
     }
 
     #[test]

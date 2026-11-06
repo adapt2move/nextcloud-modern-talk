@@ -92,7 +92,7 @@ pub(super) fn synthetic_webm() -> VideoBytes {
     )
 }
 
-fn synthetic(description: &str) -> VideoBytes {
+pub(super) fn synthetic(description: &str) -> VideoBytes {
     static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     struct Fixture(std::path::PathBuf);
     impl Drop for Fixture {

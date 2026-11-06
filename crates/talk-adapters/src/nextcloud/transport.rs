@@ -363,6 +363,13 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) async fn voice_audio(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api.voice_audio(&context(c), path).await.map_err(error)
+    }
     #[cfg(any(test, target_os = "macos"))]
     pub(super) async fn preview_pdf(
         &mut self,

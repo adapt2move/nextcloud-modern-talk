@@ -1682,6 +1682,9 @@ impl Worker {
                     } | ProtocolRequest::Content {
                         command: talk_core::protocol::content::ContentCommand::Video { .. },
                         ..
+                    } | ProtocolRequest::Content {
+                        command: talk_core::protocol::content::ContentCommand::VoiceAudio { .. },
+                        ..
                     }
                 ) {
                     context.deadline.millis = self.network.now().millis.saturating_add(60_000);

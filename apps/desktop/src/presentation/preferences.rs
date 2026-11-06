@@ -63,6 +63,7 @@ pub(super) fn update_error_label(
 }
 
 pub trait ComputerSettingsPort {
+    fn stop_voice_review_playback(&self) {}
     fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
         None
     }

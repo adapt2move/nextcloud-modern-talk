@@ -248,16 +248,26 @@ pub struct Bridge {
     pub services: Rc<Services>,
     pub cursor: u64,
     pub device_cursor: u64,
+    pub fixture_voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub permission_cursor: u64,
     pub notification_request: Option<RequestId>,
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
+    fn stop_voice_review_playback(&self) {
+        if let Some((_, player, _)) = self.services.voice_player.borrow().as_ref() {
+            player.stop();
+        }
+    }
     fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
         use super::content_video::Phase;
         use talk_core::ui::content::{PlaybackState, VoiceReviewPlayback};
         let slot = self.services.voice_player.borrow();
         let (context, player, speed) = slot.as_ref()?;
+        if self.services.media.capture().is_some() {
+            player.stop();
+            return None;
+        }
         if !self
             .services
             .devices
@@ -294,6 +304,9 @@ impl ComputerSettingsPort for Bridge {
         context: talk_core::ui::presentation::ConversationRef,
         play: bool,
     ) -> Result<(), DeviceError> {
+        if self.services.media.capture().is_some() {
+            return Err(DeviceError::Busy);
+        }
         let devices = self.services.devices.as_ref().map_err(|e| *e)?;
         let bytes = devices.voice_audio(context).ok_or(DeviceError::Stale)?;
         let mut slot = self.services.voice_player.borrow_mut();
@@ -313,7 +326,9 @@ impl ComputerSettingsPort for Bridge {
             return Ok(());
         }
         if let Some(accounts) = &self.services.accounts {
-            accounts.borrow_mut().stop_video();
+            let mut accounts = accounts.borrow_mut();
+            accounts.stop_video();
+            accounts.stop_voice_player();
         }
         let bytes = talk_core::protocol::content::VideoBytes::from_shared(bytes.shared())
             .map_err(|_| DeviceError::CaptureFailed)?;
@@ -356,6 +371,9 @@ impl ComputerSettingsPort for Bridge {
         Ok(())
     }
     fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
+        if self.fixture_voice.is_some() {
+            return self.fixture_voice;
+        }
         self.services.devices.as_ref().ok()?.voice_snapshot()
     }
     fn start_voice(

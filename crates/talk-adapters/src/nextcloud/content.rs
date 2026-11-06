@@ -77,6 +77,50 @@ impl NextcloudClient {
     ) -> Result<ContentResult, PortError> {
         let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
+            ContentCommand::VoiceAudio {
+                message,
+                placeholder,
+            } => {
+                let target = self.target(c, message).await?;
+                if target.kind.as_deref() != Some("voice-message") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                let object = self.attachment(c, message, &placeholder, caps).await?;
+                if !matches!(
+                    object.mime_type.as_deref(),
+                    Some(
+                        "audio/wav"
+                            | "audio/x-wav"
+                            | "audio/ogg"
+                            | "application/ogg"
+                            | "audio/opus"
+                            | "audio/webm"
+                            | "audio/mp4"
+                            | "audio/x-m4a"
+                            | "video/mp4"
+                    )
+                ) {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if object
+                    .size
+                    .is_some_and(|size| size > api::files::MAX_FILE_BYTES)
+                {
+                    return Err(self.error(ErrorKind::TooLarge));
+                }
+                let raw = object
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
+                let path =
+                    api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
+                        .map_err(|kind| self.error(transport::kind(kind)))?;
+                let bytes = self.transport.voice_audio(c, path).await?;
+                self.transport.validate(c)?;
+                Ok(ContentResult::VoiceAudio(
+                    VideoBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
             ContentCommand::Video {
                 message,
                 placeholder,

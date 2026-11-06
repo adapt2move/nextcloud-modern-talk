@@ -53,6 +53,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content",
     "chat-polls",
     "poll-dialog",
+    "chat-voice",
+    "voice-recording",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
@@ -392,6 +394,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             "chat-content"
                 | "chat-polls"
                 | "poll-dialog"
+                | "chat-voice"
+                | "voice-recording"
                 | "chat-attachments"
                 | "chat-upload"
                 | "chat-upload-uncertain"
@@ -404,6 +408,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         content::configure(&mut state);
         if matches!(scenario, Some("chat-polls" | "poll-dialog")) {
             content::polls(&mut state);
+        }
+        if matches!(scenario, Some("chat-voice" | "voice-recording")) {
+            content::voice(&mut state);
         }
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
@@ -1181,6 +1188,8 @@ impl DevelopmentPort {
                     "chat-content"
                         | "chat-polls"
                         | "poll-dialog"
+                        | "chat-voice"
+                        | "voice-recording"
                         | "chat-attachments"
                         | "chat-upload"
                         | "chat-upload-uncertain"

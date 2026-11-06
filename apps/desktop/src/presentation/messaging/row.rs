@@ -181,15 +181,16 @@ impl Desktop {
                 )
         }) {
             content = if object.kind.as_str() == "file" {
-                content.child(self.attachment_card(
-                    talk_core::ui::content::AttachmentRef {
-                        context,
-                        message: m.local_id,
-                        placeholder: object.placeholder.clone(),
-                    },
-                    object,
-                    cx,
-                ))
+                let reference = talk_core::ui::content::AttachmentRef {
+                    context,
+                    message: m.local_id,
+                    placeholder: object.placeholder.clone(),
+                };
+                if m.metadata.voice_message {
+                    content.child(self.voice_message_card(reference, object, cx))
+                } else {
+                    content.child(self.attachment_card(reference, object, cx))
+                }
             } else if matches!(object.kind.as_str(), "poll" | "talk-poll")
                 && let Some(id) = object.id.as_ref().and_then(|id| id.as_str().parse().ok())
             {

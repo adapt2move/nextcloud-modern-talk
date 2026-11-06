@@ -793,7 +793,8 @@ impl Desktop {
                     .child(review)
                     .when_some(
                         match voice.phase {
-                            VoicePhase::Failed(error) => Some(voice_error(error)),
+                        VoicePhase::Failed(talk_core::ui::UnavailableReason::PermissionDenied) => Some("Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen."),
+                        VoicePhase::Failed(_) => Some("Mikrofon nicht verfügbar. Prüfe die Geräteauswahl."),
                             _ => self.content_ui.voice_error,
                         },
                         |d, error| d.child(self.hint(self.l(error))),
@@ -802,6 +803,122 @@ impl Desktop {
     }
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
+    }
+    pub(super) fn voice_message_card(
+        &self,
+        reference: AttachmentRef,
+        object: &talk_core::ui::messaging::RichObject,
+        cx: &Context<Self>,
+    ) -> Div {
+        use talk_core::ui::content::PlaybackState;
+        let playback = self
+            .snapshot
+            .content_panel
+            .voice_playback
+            .as_ref()
+            .filter(|p| p.attachment == reference);
+        let playing = playback.is_some_and(|p| p.state == PlaybackState::Playing);
+        let loading = playback
+            .is_some_and(|p| matches!(p.state, PlaybackState::Loading | PlaybackState::Stopping));
+        let speed = playback.map_or(2, |p| p.speed_half_steps);
+        let play = if playing {
+            ContentAction::PauseVoice(reference.clone())
+        } else {
+            ContentAction::PlayVoice(reference.clone())
+        };
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(self.icon_button(
+                ("voice-play", reference.message as usize),
+                (
+                    if playing { "pause" } else { "play" },
+                    if playing {
+                        "Pausieren"
+                    } else {
+                        "Sprachnachricht abspielen"
+                    },
+                ),
+                ButtonStyle::Quiet,
+                (self.snapshot.content == ContentState::Ready && !loading).into(),
+                LocalAction::Content(Action::Command(play)),
+                cx,
+            ))
+            .child(self.hint(self.l(if loading {
+                "Sprachnachricht wird geladen …"
+            } else {
+                "Sprachnachricht"
+            })))
+            .child(self.button(
+                ("voice-speed", reference.message as usize),
+                format!("{}x", f32::from(speed) / 2.0),
+                ButtonStyle::Quiet,
+                playback.is_some() && !loading,
+                LocalAction::Content(Action::Command(ContentAction::SpeedVoice {
+                    attachment: reference.clone(),
+                    speed_half_steps: if speed >= 4 { 2 } else { speed + 1 },
+                })),
+                cx,
+            ))
+            .child(self.icon_button(
+                ("voice-download", reference.message as usize),
+                ("download", "Herunterladen"),
+                ButtonStyle::Quiet,
+                true.into(),
+                LocalAction::Content(Action::Download(reference.clone())),
+                cx,
+            ));
+        if let Some(playback) = playback {
+            if let Some(duration) = playback.duration_ms {
+                row = row.child(self.hint(&format!(
+                    "{:02}:{:02} / {:02}:{:02}",
+                    playback.position_ms / 60_000,
+                    playback.position_ms / 1000 % 60,
+                    duration / 60_000,
+                    duration / 1000 % 60
+                )));
+            }
+            if matches!(playback.state, PlaybackState::Failed(_)) {
+                row = row.child(
+                    self.hint(self.l("Wiedergabe nicht verfügbar. Lade die Datei herunter.")),
+                );
+            }
+        }
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .rounded(px(8.))
+            .bg(self.theme.subtle)
+            .child(row);
+        if let Some(duration) = playback.and_then(|p| p.duration_ms) {
+            let mut controls = div().flex().items_center().gap_1();
+            for step in 0..=4usize {
+                controls = controls.child(
+                    self.button(
+                        (
+                            "voice-seek",
+                            (reference.message as usize)
+                                .wrapping_mul(5)
+                                .wrapping_add(step),
+                        ),
+                        format!("{}%", step * 25),
+                        ButtonStyle::Quiet,
+                        !loading,
+                        LocalAction::Content(Action::Command(ContentAction::SeekVoice {
+                            attachment: reference.clone(),
+                            position_ms: duration.saturating_mul(step as u64) / 4,
+                        })),
+                        cx,
+                    ),
+                );
+            }
+            card = card.child(controls);
+        }
+        let _ = object;
+        card
     }
     pub(in crate::presentation) fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
         let AssetState::Ready { key } = self.asset(target)?.state else {
@@ -1200,6 +1317,9 @@ impl Desktop {
                 }
             }
             Action::Command(command) => {
+                if matches!(command, ContentAction::PlayVoice(_)) {
+                    self.settings_port.stop_voice_review_playback();
+                }
                 self.submit_content(command);
             }
         }

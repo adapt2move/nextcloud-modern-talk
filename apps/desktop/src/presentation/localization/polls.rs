@@ -94,6 +94,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Nach oben", "Move up", "Subir"),
     ("Nach unten", "Move down", "Bajar"),
+    ("Sprachnachricht", "Voice message", "Mensaje de voz"),
+    (
+        "Sprachnachricht abspielen",
+        "Play voice message",
+        "Reproducir mensaje de voz",
+    ),
     (
         "Sprachnachricht aufnehmen",
         "Record voice message",
@@ -109,6 +115,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Send voice message",
         "Enviar mensaje de voz",
     ),
+    (
+        "Sprachnachricht wird geladen …",
+        "Loading voice message…",
+        "Cargando mensaje de voz…",
+    ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     (
         "Umfrage wirklich beenden?",
@@ -119,6 +130,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Umfrageentwürfe", "Poll drafts", "Borradores de encuestas"),
     ("Unbegrenzte Stimmen", "Unlimited votes", "Votos ilimitados"),
     ("Weniger Stimmen", "Fewer votes", "Menos votos"),
+    (
+        "Wiedergabe nicht verfügbar. Lade die Datei herunter.",
+        "Playback unavailable. Download the file.",
+        "Reproducción no disponible. Descarga el archivo.",
+    ),
     ("Wird gesendet …", "Sending…", "Enviando…"),
     (
         "{n} Teilnehmende abgestimmt",

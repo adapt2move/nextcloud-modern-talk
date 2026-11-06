@@ -135,7 +135,7 @@ pub enum VoicePhase {
     Recording,
     Stopping,
     Review,
-    Failed(crate::preferences::devices::DeviceError),
+    Failed(UnavailableReason),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VoiceSnapshot {
@@ -151,6 +151,15 @@ pub struct VoiceReviewPlayback {
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub speed_half_steps: u8,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoicePlaybackView {
+    pub attachment: AttachmentRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+    pub stop_unconfirmed: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackView {
@@ -179,6 +188,7 @@ pub struct ContentPanel {
     pub poll_state: RemoteState,
     pub preview: Option<AttachmentRef>,
     pub playback: Option<PlaybackView>,
+    pub voice_playback: Option<VoicePlaybackView>,
     pub transfer: Option<DownloadView>,
     pub result: Option<(RequestId, Completion)>,
 }
@@ -199,6 +209,7 @@ impl Default for ContentPanel {
             poll_state: RemoteState::Idle,
             preview: None,
             playback: None,
+            voice_playback: None,
             transfer: None,
             result: None,
         }
@@ -217,6 +228,16 @@ pub enum ContentAction {
     PausePreview {
         attachment: AttachmentRef,
         generation: u64,
+    },
+    PlayVoice(AttachmentRef),
+    PauseVoice(AttachmentRef),
+    SeekVoice {
+        attachment: AttachmentRef,
+        position_ms: u64,
+    },
+    SpeedVoice {
+        attachment: AttachmentRef,
+        speed_half_steps: u8,
     },
     SeekPreview {
         attachment: AttachmentRef,

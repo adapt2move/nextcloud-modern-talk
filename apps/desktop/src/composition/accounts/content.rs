@@ -4,6 +4,7 @@
 mod avatars;
 mod links;
 mod thumbnails;
+mod voice;
 use super::*;
 use talk_core::protocol::content as wire;
 use talk_core::ui::content as view;
@@ -22,6 +23,7 @@ struct Job {
     attachment: Option<talk_adapters::identity::CachedAttachment>,
     preview_generation: Option<u64>,
     avatar_actor: Option<Text<256>>,
+    voice: Option<(view::AttachmentRef, u64)>,
 }
 struct AssetRetry {
     request: RequestId,
@@ -45,6 +47,7 @@ impl ThumbnailRetry {
 #[derive(Default)]
 pub(super) struct ContentOwner {
     pub(super) video: super::preview::Video,
+    voice: voice::Owner,
     pub(super) preview_generation: u64,
     descriptors: Vec<(view::AssetTarget, talk_adapters::identity::CachedAttachment)>,
     jobs: Vec<Job>,
@@ -96,6 +99,7 @@ fn is_avatar(target: &view::AssetTarget) -> bool {
 }
 impl Accounts {
     pub(super) fn clear_content_assets(&mut self) {
+        self.stop_voice_player();
         self.content_owner.preview_generation =
             self.content_owner.preview_generation.saturating_add(1);
         self.stop_video();
@@ -300,6 +304,7 @@ impl Accounts {
                         cloud: true,
                         attachment: None,
                         preview_generation: None,
+                        voice: None,
                         avatar_actor: None,
                     },
                     wire::ContentCommand::OpenCloud {
@@ -309,6 +314,16 @@ impl Accounts {
                 )
             }
             A::RefreshPollDrafts => self.start_poll(request, wire::PollCommand::ListDrafts),
+            A::PlayVoice(attachment) => self.play_voice(request, attachment),
+            A::PauseVoice(attachment) => self.voice_control(attachment, voice::Control::Pause),
+            A::SeekVoice {
+                attachment,
+                position_ms,
+            } => self.voice_control(attachment, voice::Control::Seek(position_ms)),
+            A::SpeedVoice {
+                attachment,
+                speed_half_steps,
+            } => self.voice_control(attachment, voice::Control::Speed(speed_half_steps)),
             A::RefreshPoll(poll) => self.start_poll(request, wire::PollCommand::Read(poll)),
             A::CreatePoll(draft) => self.start_poll(
                 request,
@@ -538,6 +553,7 @@ impl Accounts {
                 attachment,
                 preview_generation: matches!(target, view::AssetTarget::Image(_))
                     .then_some(self.content_owner.preview_generation),
+                voice: None,
                 avatar_actor: self.avatar_actor(&target),
             },
             command,
@@ -739,6 +755,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             },
             wire::ContentCommand::Poll {
@@ -818,6 +835,26 @@ impl Accounts {
                 .is_some_and(|c| Some(c) != self.snapshot.selected)
             || self.current(job.account).is_err()
         {
+            return;
+        }
+        if let Some((reference, generation)) = &job.voice {
+            if !self.voice_job_current(reference, *generation, job.attachment.as_ref()) {
+                return;
+            }
+            let result = match result {
+                Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                    operation: actual,
+                    result: wire::ContentResult::VoiceAudio(bytes),
+                })) if actual == operation => Ok(bytes),
+                Ok(_) => Err(IdentityError::Request(ErrorKind::Malformed)),
+                Err(error) => Err(error),
+            };
+            self.finish_voice_download(
+                reference.clone(),
+                *generation,
+                job.attachment.clone(),
+                result,
+            );
             return;
         }
         if matches!(job.target, Some(view::AssetTarget::Image(_)))
@@ -1703,6 +1740,7 @@ impl Accounts {
         }
     }
     pub(super) fn tick_content(&mut self) {
+        self.tick_voice_player();
         self.hydrate_thumbnails();
         self.tick_video();
         self.reconcile_content_assets();
@@ -1753,6 +1791,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             };
             let command = if self.content_owner.profile == Some(account) {
@@ -2036,6 +2075,7 @@ mod tests {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             };
             model.content_failure(&job, IdentityError::Request(error));
@@ -2133,6 +2173,7 @@ mod tests {
                     cloud: false,
                     attachment: None,
                     preview_generation: None,
+                    voice: None,
                     avatar_actor: None,
                 };
                 model.snapshot.content_panel.result = None;
@@ -2185,6 +2226,7 @@ mod tests {
                     cloud,
                     attachment: None,
                     preview_generation: None,
+                    voice: None,
                     avatar_actor: None,
                 };
                 model.content_failure(&job, IdentityError::Request(kind));
@@ -2573,6 +2615,7 @@ mod tests {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             });
         }

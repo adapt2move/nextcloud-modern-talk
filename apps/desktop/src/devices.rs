@@ -438,7 +438,11 @@ impl DeviceRuntime {
     pub fn request_shutdown(&self) {
         let mut state = self.shared.lock();
         if state.snapshot.runtime == RuntimeState::Running {
-            if let Some(voice) = state.voice.as_mut() {
+            if let Some(voice) = state
+                .voice
+                .as_mut()
+                .filter(|voice| !matches!(voice.phase, VoicePhase::Review | VoicePhase::Failed(_)))
+            {
                 voice.cancel = true;
                 voice.signal.revoke();
                 voice.phase = VoicePhase::Stopping;
@@ -673,7 +677,15 @@ fn run(shared: &Shared) {
                 voice.phase = if voice.wave.is_some() {
                     VoicePhase::Review
                 } else {
-                    VoicePhase::Failed(failure.unwrap_or(DeviceError::CaptureFailed))
+                    VoicePhase::Failed(match failure.unwrap_or(DeviceError::CaptureFailed) {
+                        DeviceError::PermissionDenied => {
+                            talk_core::ui::UnavailableReason::PermissionDenied
+                        }
+                        DeviceError::Removed
+                        | DeviceError::InvalidSelection
+                        | DeviceError::Unavailable => talk_core::ui::UnavailableReason::Unsupported,
+                        _ => talk_core::ui::UnavailableReason::Unconfigured,
+                    })
                 };
             }
             state.changed();

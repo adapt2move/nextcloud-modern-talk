@@ -196,6 +196,10 @@ pub enum ContentCommand {
         message: MessageId,
         placeholder: Text<128>,
     },
+    VoiceAudio {
+        message: MessageId,
+        placeholder: Text<128>,
+    },
     OpenCloud {
         message: MessageId,
         placeholder: Text<128>,
@@ -214,6 +218,7 @@ pub enum ContentResult {
     },
     Image(ImageBytes),
     Video(VideoBytes),
+    VoiceAudio(VideoBytes),
     Emoji {
         text: Text<64>,
         color: Option<Text<16>>,
