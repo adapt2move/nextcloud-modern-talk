@@ -93,6 +93,10 @@ impl Account {
 #[derive(Clone, Debug)]
 pub struct Room {
     pub avatar_version: Option<String>,
+    /// User status returned for one-to-one conversations when available.
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
     pub custom_avatar: Option<bool>,
     pub token: String,
     pub server_id: Option<u64>,
@@ -148,6 +152,9 @@ impl Room {
         let v = &v;
         let result = Self {
             avatar_version: string(v.get("avatarVersion"), 128)?,
+            status: string(v.get("status"), 32)?,
+            status_icon: string(v.get("statusIcon"), 64)?,
+            status_message: string(v.get("statusMessage"), 256)?,
             custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             server_id: v.get("id").and_then(Value::as_u64).filter(|n| *n > 0),
@@ -574,6 +581,24 @@ pub enum Preference {
 mod message_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn room_status_preserves_optional_fields_and_rejects_oversized_input() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        let absent = Room::decode(&room).unwrap();
+        assert!(absent.status.is_none());
+        assert!(absent.status_icon.is_none());
+        assert!(absent.status_message.is_none());
+        room["status"] = json!("away");
+        room["statusIcon"] = json!("☕");
+        room["statusMessage"] = json!("On a break");
+        let present = Room::decode(&room).unwrap();
+        assert_eq!(present.status.as_deref(), Some("away"));
+        assert_eq!(present.status_icon.as_deref(), Some("☕"));
+        assert_eq!(present.status_message.as_deref(), Some("On a break"));
+        room["statusMessage"] = json!("x".repeat(257));
+        assert!(Room::decode(&room).is_err());
+    }
 
     #[test]
     fn room_read_markers_preserve_missing_zero_and_bounded_numeric_values() {
