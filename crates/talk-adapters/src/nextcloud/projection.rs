@@ -13,6 +13,9 @@ impl Project for Account {
 impl Project for Room {
     fn project(self) -> Value {
         let mut value = json!({"avatarVersion":self.avatar_version,"isCustomAvatar":self.custom_avatar,"token":self.token,"id":self.server_id,"displayName":self.name,"type":self.kind,"participantType":self.participant_type,"attributes":self.attributes,"permissions":self.permissions,"readOnly":self.read_only,"lobbyState":self.lobby_state,"objectType":self.object_type,"canLeaveConversation":self.can_leave,"isFavorite":self.favorite,"isArchived":self.archived,"unreadMessages":self.unread,"lastActivity":self.last_activity,"hasCall":self.has_call,"isSensitive":self.sensitive,"remoteServer":if self.remote{"remote"}else{""},"tagIds":self.tag_ids,"description":self.description,"defaultPermissions":self.default_permissions,"callPermissions":self.call_permissions,"lobbyTimer":self.lobby_timer,"recordingConsent":self.recording_consent,"sipEnabled":self.sip_enabled,"objectId":self.object_id,"notificationLevel":self.notification_level,"notificationCalls":self.notification_calls,"isImportant":self.important,"messageExpiration":self.message_expiration,"listable":self.listable,"mentionPermissions":self.mention_permissions,"hasPassword":self.has_password,"canDeleteConversation":self.can_delete,"canStartCall":self.can_start_call,"callFlag":self.call_flag,"callRecording":self.recording_status,"lastPinnedId":self.last_pinned,"hiddenPinnedId":self.hidden_pinned});
+        value["status"] = json!(self.status);
+        value["statusIcon"] = json!(self.status_icon);
+        value["statusMessage"] = json!(self.status_message);
         value["lastReadMessage"] = json!(self.last_read);
         value["lastCommonReadMessage"] = json!(self.common_read);
         value
