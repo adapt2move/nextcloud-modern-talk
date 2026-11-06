@@ -28,6 +28,16 @@ Normal sign-in persists the account. Native credential storage is preferred. If 
 
 A credential read retains one provider operation for up to 60 seconds, allowing an OS permission sheet to complete without discarding its approved result. Cancellation is observed within 50 ms; an unfinished blocking read keeps its existing worker permit until it returns. Timeout is a temporary storage failure, not a server timeout or loss of saved authorization. Network validation starts after the read and keeps its separate deadline. Maintenance and uncertain-write settlement retain their existing three-second observation slices.
 
+Linux credential operations use one encrypted `dbus-secret-service` session per
+operation on the existing provider worker. Collection/item checks refuse locked
+storage and never dispatch Unlock or Prompt. Typed D-Bus error identifiers keep an
+absent bus distinct from missing credentials and access denial. The old zbus
+keyring provider is a test-only compatibility fixture for existing records.
+Credential access, ordinary content persistence, browser handoff and PackageKit
+transactions retain their own owners and failure scopes. The asynchronous Linux
+adapters use zbus 6 on their existing Tokio executor with explicit client features;
+service-side features are enabled only for isolated tests.
+
 Production uses normal system trust and installation-relative HTTPS validation. Test-only loopback fixtures remain behind the default-off `backend-test` feature. They do not replace ordinary browser, certificate or storage verification.
 
 ## Cancellation, storage and logout

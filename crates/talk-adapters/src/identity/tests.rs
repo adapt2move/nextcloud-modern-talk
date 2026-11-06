@@ -1292,6 +1292,51 @@ async fn later_explicit_save_uses_private_memory_and_removal_requires_exact_clea
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "explicit isolated absent-bus address; never use a desktop session bus"]
+fn absent_native_bus_is_unavailable_without_changing_storage_or_using_file_fallback() {
+    assert_eq!(
+        std::env::var("NMT_PRIVATE_MISSING_SECRET_SERVICE_TEST").as_deref(),
+        Ok("1")
+    );
+    let address = std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap();
+    let path = address.strip_prefix("unix:path=").unwrap();
+    assert!(path.starts_with("/run/nmt-private-absent-"));
+    assert!(!std::path::Path::new(path).exists());
+    let fixture = Fixture::new();
+    let mut ledger = fixture.ledger();
+    let account = ledger.reserve("https://example.invalid/".into()).unwrap();
+    let op = ledger
+        .stage(
+            account.id,
+            LoginAttemptId::from_local(random().unwrap()),
+            StorageBackend::LinuxSecretService,
+            "synthetic-native-account",
+        )
+        .unwrap();
+    let before = ledger.account(account.id).unwrap();
+    let p = providers(&ledger);
+    assert!(matches!(
+        p.read(op.item),
+        Err(IdentityError::Storage {
+            failure: StorageFailure::Unavailable,
+            ..
+        })
+    ));
+    assert!(matches!(
+        p.write(op.item, "synthetic-credential"),
+        WriteResult::NotWritten(IdentityError::Storage {
+            failure: StorageFailure::Unavailable,
+            ..
+        })
+    ));
+    let after = ledger.account(account.id).unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.disposition, before.disposition);
+    assert!(!fixture.0.join(super::provider::filename(op.item)).exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 #[ignore = "native_service.py owns a private Secret Service bus/collection and tears it down"]
 fn real_secret_service_roundtrip_and_locked_store_are_distinct() {
     assert_eq!(
