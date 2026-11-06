@@ -2313,6 +2313,11 @@ impl Render for Desktop {
             .tab_group()
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let composing = this.input_composing(cx);
+                if !composing && this.paste_clipboard_image(event, window, cx) {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if event.keystroke.key != "f7" {
                     this.hover_hints.cancel();
                     if !composing {
@@ -2322,7 +2327,8 @@ impl Render for Desktop {
                     }
                 }
                 if !composing
-                    && (this.member_dialog_key(event, window, cx)
+                    && (this.cloud_browser_key(event, window, cx)
+                        || this.member_dialog_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)

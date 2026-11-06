@@ -12,6 +12,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Compartir desde NextCloud",
     ),
     (
+        "Das Bild aus der Zwischenablage ist zu groß.",
+        "The clipboard image is too large.",
+        "La imagen del portapapeles es demasiado grande.",
+    ),
+    ("Datei gespeichert.", "File saved.", "Archivo guardado."),
+    (
         "Dateien konnten nicht geladen werden.",
         "Files could not be loaded.",
         "No se pudieron cargar los archivos.",
@@ -28,11 +34,32 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Cargando archivos…",
     ),
     (
+        "Diese Dateioption ist derzeit nicht verfügbar.",
+        "This file option is currently unavailable.",
+        "Esta opción de archivo no está disponible ahora.",
+    ),
+    (
+        "Diesen Ordner auswählen",
+        "Choose this folder",
+        "Elegir esta carpeta",
+    ),
+    (
         "Dieser Ordner ist leer.",
         "This folder is empty.",
         "Esta carpeta está vacía.",
     ),
+    (
+        "Dieses Bildformat wird nicht unterstützt.",
+        "This image format is not supported.",
+        "Este formato de imagen no es compatible.",
+    ),
     ("Eine Ebene nach oben", "Up one level", "Subir un nivel"),
+    ("Größe", "Size", "Tamaño"),
+    (
+        "In NextCloud öffnen",
+        "Open in NextCloud",
+        "Abrir en NextCloud",
+    ),
     (
         "NextCloud-Dateien",
         "NextCloud files",
@@ -43,10 +70,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Offline · saved files",
         "Sin conexión · archivos guardados",
     ),
+    ("Ordner auswählen", "Choose folder", "Elegir carpeta"),
+    ("Sortieren nach", "Sort by", "Ordenar por"),
     ("Zuletzt", "Recent", "Recientes"),
     (
         "Zur Auswahl hinzufügen",
         "Add to selection",
         "Añadir a la selección",
     ),
+    ("Änderungsdatum", "Modified", "Modificación"),
 ];

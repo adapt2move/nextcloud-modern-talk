@@ -354,6 +354,10 @@ async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post()
             .as_array_mut()
             .unwrap()
             .push(json!("rich-object-sharing"));
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("media-caption"));
         capabilities["capabilities"]["spreed"]["config"]["attachments"] =
             json!({"allowed": true, "conversation-subfolders":true});
         let mut dropped = Reply::data(json!({"renames":[{"one.png":"one.png"}]}));
@@ -391,6 +395,7 @@ async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post()
                     command: M::ShareFile {
                         path: Text::new("/draft/one").unwrap(),
                         caption: Text::new("caption").unwrap(),
+                        options: Default::default(),
                     },
                 },
             )

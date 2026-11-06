@@ -145,6 +145,9 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         }]),
         ..Default::default()
     };
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.media_caption = true;
+    }
 }
 
 pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
@@ -248,6 +251,12 @@ pub(super) fn action(
         }
         ContentAction::CloseFileBrowser => {
             snapshot.content_panel.file_browser = None;
+            Ok(())
+        }
+        ContentAction::SortFiles(sort) => {
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.sort = sort;
+            }
             Ok(())
         }
         ContentAction::StageCloudFile { context, path } => {
@@ -374,6 +383,7 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
         account,
         path: text(path),
         section: talk_core::ui::content::FileSection::All,
+        sort: talk_core::ui::content::FileSort::Name,
         loading: false,
         offline: false,
         error: None,
@@ -388,6 +398,7 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
             directory: *directory,
             size: *size,
             modified: Some(text("04 Nov 2026")),
+            modified_unix: Some(1793750400),
             mime: None,
             file_id: None,
         })),

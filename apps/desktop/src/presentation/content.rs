@@ -30,11 +30,14 @@ const MAX_POLL_OPTIONS: usize = 8;
 #[derive(Clone)]
 pub(crate) enum Action {
     OpenCloudBrowser,
+    OpenFolderPicker,
+    ChooseFolder,
     BrowseDirectory(Text<16384>),
     BrowserPage(i8),
     BrowserRecent,
     BrowserFavorites,
     BrowserRetry,
+    BrowserSort(talk_core::ui::content::FileSort),
     Menu,
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
@@ -57,6 +60,10 @@ pub(super) struct ContentUi {
     request: u64,
     pub menu: bool,
     browser_page: usize,
+    browser_folder_picker: bool,
+    browser_cursor: Option<Text<16384>>,
+    browser_typeahead: String,
+    browser_typeahead_at: Option<std::time::Instant>,
     pub(super) browser_search: Entity<TextInput>,
     browser_search_value: String,
     browser_search_task: Option<Task<()>>,
@@ -108,6 +115,7 @@ impl ContentUi {
                         return;
                     }
                     desktop.content_ui.browser_page = 0;
+                    desktop.content_ui.browser_cursor = None;
                     if value.trim().is_empty() {
                         desktop.submit_content(ContentAction::ListFiles(
                             Text::new("/").expect("constant"),
@@ -127,6 +135,10 @@ impl ContentUi {
             request: 0,
             menu: false,
             browser_page: 0,
+            browser_folder_picker: false,
+            browser_cursor: None,
+            browser_typeahead: String::new(),
+            browser_typeahead_at: None,
             browser_search,
             browser_search_value: String::new(),
             browser_search_task: None,
@@ -482,6 +494,44 @@ impl Desktop {
                 }
             }
         }
+        if self.overlay == Some(Overlay::CloudFiles)
+            && !self.media_offline()
+            && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+        {
+            for entry in browser
+                .entries
+                .as_slice()
+                .iter()
+                .skip(
+                    self.content_ui
+                        .browser_page
+                        .saturating_mul(browser::PAGE_SIZE),
+                )
+                .take(browser::PAGE_SIZE)
+                .filter(|entry| {
+                    !entry.directory
+                        && entry.mime.as_ref().is_some_and(|mime| {
+                            mime.as_str().starts_with("image/")
+                                || mime.as_str() == "application/pdf"
+                        })
+                })
+                .take(8)
+            {
+                if let Some(file) = entry
+                    .file_id
+                    .as_ref()
+                    .and_then(|id| id.as_str().parse::<u64>().ok())
+                    .filter(|id| *id > 0)
+                    && targets.len() < MAX_IMAGES
+                {
+                    targets.push(AssetTarget::CloudFile {
+                        account,
+                        path: entry.path.clone(),
+                        file,
+                    });
+                }
+            }
+        }
         // Scrolling retires UI dedup keys. The backend owns the actual byte and
         // request limits and can return a terminal unavailable observation.
         self.content_ui.requested.retain(|t| {
@@ -652,13 +702,49 @@ impl Desktop {
         match action {
             Action::OpenCloudBrowser => {
                 self.content_ui.return_overlay = self.overlay;
+                self.content_ui.browser_folder_picker = false;
                 self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
                 self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
             }
+            Action::OpenFolderPicker => {
+                self.content_ui.return_overlay = self.overlay;
+                self.content_ui.browser_folder_picker = true;
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.clear_cloud_search(cx);
+                let path = self.upload_folder.read(cx).content.to_string();
+                let path = if talk_core::preferences::account::NextcloudFolder::new(&path).is_ok() {
+                    path
+                } else {
+                    "/".to_owned()
+                };
+                if let Ok(path) = Text::new(&path) {
+                    self.submit_content(ContentAction::ListFiles(path));
+                }
+                self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
+            }
+            Action::ChooseFolder => {
+                if self.content_ui.browser_folder_picker
+                    && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && browser.section == talk_core::ui::content::FileSection::All
+                    && Some(browser.account) == self.snapshot.active_account
+                    && talk_core::preferences::account::NextcloudFolder::new(browser.path.as_str())
+                        .is_ok()
+                {
+                    let path = browser.path.as_str().to_owned();
+                    self.upload_folder.update(cx, |input, cx| {
+                        input.set_context_value(&path);
+                        cx.notify();
+                    });
+                    self.close_content_overlay();
+                }
+            }
             Action::BrowseDirectory(path) => {
                 self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(path));
             }
@@ -678,6 +764,7 @@ impl Desktop {
             }
             Action::BrowserRecent | Action::BrowserFavorites => {
                 self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(if matches!(action, Action::BrowserRecent) {
                     ContentAction::RecentFiles
@@ -702,6 +789,11 @@ impl Desktop {
                         self.submit_content(retry);
                     }
                 }
+            }
+            Action::BrowserSort(sort) => {
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.submit_content(ContentAction::SortFiles(sort));
             }
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {

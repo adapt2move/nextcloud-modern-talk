@@ -67,7 +67,7 @@ impl Dialogs {
                     finished.set(true);
                 })
             }
-            Kind::Download { name, .. } => {
+            Kind::Download { name, .. } | Kind::CloudDownload { name, .. } => {
                 let response = cx.prompt_for_new_path(Path::new(""), Some(name.as_str()));
                 cx.spawn(async move |_| {
                     let path = response

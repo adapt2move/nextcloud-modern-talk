@@ -2,6 +2,26 @@
 use super::conversation::{AccountPersonRef, Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{AccountScope, Page, Text, UnavailableReason};
+use std::sync::Arc;
+
+/// Ephemeral clipboard bytes; never part of a snapshot or durable chat record.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ClipboardImage(Arc<[u8]>);
+impl std::fmt::Debug for ClipboardImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ClipboardImage")
+            .field(&self.0.len())
+            .finish()
+    }
+}
+impl ClipboardImage {
+    pub fn new(bytes: Vec<u8>) -> Option<Self> {
+        (!bytes.is_empty() && bytes.len() <= 4 * 1024 * 1024).then(|| Self(bytes.into()))
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// One native file promise's bounded observation, retained until acknowledged.
 /// This correlation grants no authority to read the former account or room.
@@ -31,6 +51,11 @@ pub enum AssetTarget {
         participant: u128,
     },
     PersonAvatar(AccountPersonRef),
+    CloudFile {
+        account: AccountScope,
+        path: Text<16384>,
+        file: u64,
+    },
     Thumbnail(AttachmentRef),
     Image(AttachmentRef),
 }
@@ -41,7 +66,7 @@ impl AssetTarget {
             | Self::MessageAvatar { context: c, .. }
             | Self::ParticipantAvatar { context: c, .. } => Some(*c),
             Self::Thumbnail(a) | Self::Image(a) => Some(a.context),
-            Self::SelfAvatar | Self::PersonAvatar(_) => None,
+            Self::SelfAvatar | Self::PersonAvatar(_) | Self::CloudFile { .. } => None,
         }
     }
 }
@@ -139,6 +164,7 @@ pub struct CloudFileView {
     pub directory: bool,
     pub size: Option<u64>,
     pub modified: Option<Text<256>>,
+    pub modified_unix: Option<i64>,
     pub mime: Option<Text<256>>,
     pub file_id: Option<Text<256>>,
 }
@@ -147,10 +173,19 @@ pub struct FileBrowserView {
     pub account: AccountScope,
     pub path: Text<16384>,
     pub section: FileSection,
+    pub sort: FileSort,
     pub entries: Page<CloudFileView, 1000>,
     pub loading: bool,
     pub offline: bool,
     pub error: Option<UnavailableReason>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserDownloadView {
+    pub request: RequestId,
+    pub name: Text<255>,
+    pub received: u64,
+    pub total: Option<u64>,
+    pub state: DownloadState,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileSection {
@@ -159,9 +194,16 @@ pub enum FileSection {
     Favorites,
     Search,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSort {
+    Name,
+    Modified,
+    Size,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
     pub file_browser: Option<FileBrowserView>,
+    pub browser_download: Option<BrowserDownloadView>,
     pub self_name: Option<Text<256>>,
     pub organization: Option<Text<256>>,
     pub account: Option<AccountScope>,
@@ -182,6 +224,7 @@ impl Default for ContentPanel {
     fn default() -> Self {
         Self {
             file_browser: None,
+            browser_download: None,
             self_name: None,
             organization: None,
             account: None,
@@ -204,6 +247,11 @@ pub enum ContentAction {
     RecentFiles,
     FavoriteFiles,
     SearchFiles(Text<256>),
+    SortFiles(FileSort),
+    OpenBrowserFile(Text<16384>),
+    DownloadBrowserFile(Text<16384>),
+    CancelBrowserDownload,
+    DismissBrowserDownload,
     CloseFileBrowser,
     StageCloudFile {
         context: ConversationRef,

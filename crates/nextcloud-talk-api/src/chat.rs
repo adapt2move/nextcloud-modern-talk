@@ -104,6 +104,7 @@ pub enum Command {
         file_name: String,
         reference: String,
         caption: String,
+        options: ComposeOptions,
     },
 }
 #[derive(Clone, Debug)]
@@ -809,6 +810,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             file_name,
             reference,
             caption,
+            options,
         } => {
             text(path, 16384)?;
             text(file_name, 255)?;
@@ -825,10 +827,28 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("referenceId", reference.clone()),
                 ("allowUpdate", "false".into()),
             ]);
+            let mut metadata = serde_json::Map::new();
             if !caption.is_empty() {
+                metadata.insert("caption".into(), caption.clone().into());
+            }
+            if let Some(reply) = options.reply_to {
+                positive(reply)?;
+                metadata.insert("replyTo".into(), reply.into());
+            }
+            if let Some(thread) = options.thread {
+                positive(thread)?;
+                metadata.insert("threadId".into(), thread.into());
+            }
+            if options.silent {
+                metadata.insert("silent".into(), true.into());
+            }
+            if options.thread_title.is_some() {
+                return Err(ErrorKind::Unsupported);
+            }
+            if !metadata.is_empty() {
                 f.push((
                     "talkMetaData",
-                    serde_json::json!({"caption":caption}).to_string(),
+                    serde_json::Value::Object(metadata).to_string(),
                 ))
             }
             kind = Kind::Chat(K::AttachmentShared)

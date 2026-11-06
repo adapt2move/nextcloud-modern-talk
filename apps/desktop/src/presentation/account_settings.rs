@@ -197,7 +197,11 @@ impl Desktop {
         } else {
             section=section.child(self.hint(self.l("Ordner in NextCloud für geteilte Dokumente. Kein Downloadordner auf diesem Computer.")))
                 .child(self.input_surface(&self.upload_folder, cx).child(self.upload_folder.clone()))
-                .child(self.dialog_actions().child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),LocalAction::SaveUploadFolder,cx)));
+                .child(self.dialog_actions()
+                    .child(self.button("browse-upload-folder", "Ordner auswählen", ButtonStyle::Secondary,
+                        availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),
+                        LocalAction::Content(super::content::Action::OpenFolderPicker), cx))
+                    .child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),LocalAction::SaveUploadFolder,cx)));
             if values.is_some_and(|v| v.conversation_subfolders == Some(true)) {
                 section = section.child(
                     self.hint(self.l("Der Server legt darunter Unterordner für Gespräche an.")),

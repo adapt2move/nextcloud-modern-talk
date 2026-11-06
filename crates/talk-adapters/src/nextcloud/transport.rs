@@ -340,11 +340,11 @@ impl Transport {
             .await
             .map_err(error)
     }
-    pub(super) async fn upload_file(
+    pub(super) async fn upload_file<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
         &mut self,
         c: &OperationContext,
         path: api::files::FilePath,
-        file: tokio::fs::File,
+        file: R,
         size: u64,
         progress: talk_core::protocol::content::TransferProgress,
     ) -> Result<(), PortError> {

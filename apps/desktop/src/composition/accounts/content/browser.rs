@@ -37,6 +37,23 @@ impl Query {
         }
     }
 }
+fn sort_entries(entries: &mut [view::CloudFileView], sort: view::FileSort) {
+    entries.sort_by(|a, b| {
+        b.directory
+            .cmp(&a.directory)
+            .then_with(|| match sort {
+                view::FileSort::Name => std::cmp::Ordering::Equal,
+                view::FileSort::Size => b.size.cmp(&a.size),
+                view::FileSort::Modified => b.modified_unix.cmp(&a.modified_unix),
+            })
+            .then_with(|| {
+                a.name
+                    .as_str()
+                    .to_lowercase()
+                    .cmp(&b.name.as_str().to_lowercase())
+            })
+    });
+}
 
 struct Cached {
     account: AccountScope,
@@ -44,31 +61,261 @@ struct Cached {
     entries: Page<view::CloudFileView, 1000>,
     saved: Instant,
 }
+struct Retry {
+    account: AccountScope,
+    request: RequestId,
+    query: Query,
+    attempts: u8,
+    next: Instant,
+    expires: Instant,
+}
 
 #[derive(Default)]
 pub(super) struct Owner {
     cache: Vec<Cached>,
-    jobs: Vec<(OperationId, Query)>,
+    jobs: Vec<(OperationId, Query, u8)>,
     current: Option<(AccountScope, RequestId, Query)>,
+    retry: Option<Retry>,
+    download: Option<(OperationId, AccountScope, RequestId, wire::TransferProgress)>,
 }
 impl Owner {
     pub(super) fn close(&mut self) {
         self.current = None;
+        self.retry = None;
     }
     pub(super) fn retire_jobs(&mut self) {
         self.jobs.clear();
         self.current = None;
+        self.retry = None;
+        self.download = None;
     }
     pub(super) fn retain_account(&mut self, account: Option<AccountScope>) {
         self.cache.retain(|item| Some(item.account) == account);
     }
-    pub(super) fn take_job(&mut self, operation: OperationId) -> Option<Query> {
-        let index = self.jobs.iter().position(|(id, _)| *id == operation)?;
-        Some(self.jobs.remove(index).1)
+    pub(super) fn take_job(&mut self, operation: OperationId) -> Option<(Query, u8)> {
+        let index = self.jobs.iter().position(|(id, _, _)| *id == operation)?;
+        let (_, query, attempts) = self.jobs.remove(index);
+        Some((query, attempts))
+    }
+    pub(super) fn is_download(&self, operation: OperationId) -> bool {
+        self.download
+            .as_ref()
+            .is_some_and(|(id, ..)| *id == operation)
     }
 }
 
 impl Accounts {
+    pub(super) fn queue_browser_download(
+        &mut self,
+        request: RequestId,
+        account: AccountScope,
+        path: Text<16384>,
+    ) -> Result<(), SubmitError> {
+        let context = self
+            .snapshot
+            .selected
+            .filter(|context| context.account == account)
+            .ok_or(SubmitError::StaleScope)?;
+        let entry = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == account && !browser.offline)
+            .and_then(|browser| {
+                browser
+                    .entries
+                    .as_slice()
+                    .iter()
+                    .find(|entry| entry.path == path && !entry.directory)
+            })
+            .ok_or(SubmitError::StaleScope)?;
+        let name = entry.name.clone();
+        self.queue_picker(
+            request,
+            context,
+            super::super::files::Kind::CloudDownload { path, name },
+        )
+    }
+    pub(in crate::composition::accounts) fn start_browser_download(
+        &mut self,
+        request: RequestId,
+        account: AccountScope,
+        path: Text<16384>,
+        name: Text<255>,
+        destination: Text<16384>,
+    ) -> Result<(), SubmitError> {
+        if !std::path::Path::new(destination.as_str()).is_absolute()
+            || self.content_owner.transfer.is_some()
+            || self.content_owner.browser.download.is_some()
+            || !self
+                .snapshot
+                .content_panel
+                .file_browser
+                .as_ref()
+                .is_some_and(|browser| {
+                    browser.account == account
+                        && !browser.offline
+                        && browser.entries.as_slice().iter().any(|entry| {
+                            entry.path == path && entry.name == name && !entry.directory
+                        })
+                })
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        let progress = wire::TransferProgress::default();
+        self.start_content(
+            Job {
+                request,
+                account,
+                context: None,
+                operation: OperationId::from_local(0),
+                target: None,
+                poll: None,
+                mutation: false,
+                cloud: false,
+                attachment: None,
+                preview_generation: None,
+                avatar_actor: None,
+            },
+            wire::ContentCommand::DownloadCloudFile {
+                path,
+                destination,
+                progress: progress.clone(),
+            },
+        )?;
+        let Some(job) = self.content_owner.jobs.last() else {
+            return Err(SubmitError::Busy);
+        };
+        self.content_owner.browser.download =
+            Some((job.operation, account, request, progress.clone()));
+        self.content_owner.transfer = Some(progress);
+        self.snapshot.content_panel.browser_download = Some(view::BrowserDownloadView {
+            request,
+            name,
+            received: 0,
+            total: None,
+            state: view::DownloadState::Transferring,
+        });
+        self.touch();
+        Ok(())
+    }
+    pub(super) fn cancel_browser_download(&mut self) {
+        let Some((operation, _, request, progress)) = &self.content_owner.browser.download else {
+            return;
+        };
+        progress.cancel();
+        if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                if matches!(pending.purpose, Purpose::Content(id) if id == *operation) {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
+        if let Some(view) = self
+            .snapshot
+            .content_panel
+            .browser_download
+            .as_mut()
+            .filter(|view| view.request == *request)
+        {
+            view.state = if progress.is_published() {
+                view::DownloadState::Saved
+            } else {
+                view::DownloadState::Cancelled
+            };
+        }
+        self.touch();
+    }
+    pub(super) fn complete_browser_download(
+        &mut self,
+        account: AccountScope,
+        request: RequestId,
+        operation: OperationId,
+        result: Result<RuntimeReply, IdentityError>,
+    ) {
+        let Some((actual, scope, expected, progress)) = self.content_owner.browser.download.take()
+        else {
+            return;
+        };
+        if actual != operation || scope != account || expected != request {
+            return;
+        }
+        self.content_owner.transfer = None;
+        if self.snapshot.active_account != Some(account) {
+            return;
+        }
+        if let Some(view) = self
+            .snapshot
+            .content_panel
+            .browser_download
+            .as_mut()
+            .filter(|view| view.request == request)
+        {
+            let (received, total, _) = progress.snapshot();
+            view.received = received;
+            view.total = total;
+            view.state = if progress.is_published() {
+                view::DownloadState::Saved
+            } else if matches!(view.state, view::DownloadState::Cancelled) {
+                view::DownloadState::Cancelled
+            } else {
+                match result {
+                    Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                        operation: returned,
+                        result: wire::ContentResult::CloudFileSaved(_),
+                    })) if returned == operation => view::DownloadState::Saved,
+                    Err(error) => view::DownloadState::Failed(error_reason(error)),
+                    _ => view::DownloadState::Failed(UnavailableReason::PolicyStale),
+                }
+            };
+        }
+        self.touch();
+    }
+    pub(super) fn open_browser_file(
+        &mut self,
+        request: RequestId,
+        account: AccountScope,
+        path: Text<16384>,
+    ) -> Result<(), SubmitError> {
+        let file = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == account)
+            .and_then(|browser| {
+                browser
+                    .entries
+                    .as_slice()
+                    .iter()
+                    .find(|entry| entry.path == path)
+            })
+            .and_then(|entry| entry.file_id.as_ref())
+            .and_then(|id| id.as_str().parse::<u64>().ok())
+            .filter(|id| *id > 0)
+            .ok_or(SubmitError::StaleScope)?;
+        self.start_content(
+            Job {
+                request,
+                account,
+                context: None,
+                operation: OperationId::from_local(0),
+                target: Some(view::AssetTarget::CloudFile {
+                    account,
+                    path,
+                    file,
+                }),
+                poll: None,
+                mutation: false,
+                cloud: true,
+                attachment: None,
+                preview_generation: None,
+                avatar_actor: None,
+            },
+            wire::ContentCommand::OpenCloudFile(file),
+        )
+    }
     pub(super) fn list_cloud_files(
         &mut self,
         request: RequestId,
@@ -83,22 +330,42 @@ impl Accounts {
         account: AccountScope,
         query: Query,
     ) -> Result<(), SubmitError> {
+        self.content_owner.browser.retry = None;
+        self.start_cloud_query(request, account, query, 0)
+    }
+    fn start_cloud_query(
+        &mut self,
+        request: RequestId,
+        account: AccountScope,
+        query: Query,
+        attempts: u8,
+    ) -> Result<(), SubmitError> {
         let now = Instant::now();
         self.content_owner.browser.cache.retain(|item| {
             item.account == account && now.saturating_duration_since(item.saved) < CACHE_LIFETIME
         });
+        let sort = if query == Query::Recent {
+            view::FileSort::Modified
+        } else {
+            view::FileSort::Name
+        };
         let cached = self
             .content_owner
             .browser
             .cache
             .iter()
             .find(|item| item.query == query)
-            .map(|item| item.entries.clone());
+            .map(|item| {
+                let mut entries = item.entries.as_slice().to_vec();
+                sort_entries(&mut entries, sort);
+                page(entries)
+            });
         self.content_owner.browser.current = Some((account, request, query.clone()));
         self.snapshot.content_panel.file_browser = Some(view::FileBrowserView {
             account,
             path: query.path(),
             section: query.section(),
+            sort,
             entries: cached.clone().unwrap_or_else(Page::empty),
             loading: true,
             offline: false,
@@ -120,10 +387,26 @@ impl Accounts {
         match self.start_content(job, query.command()) {
             Ok(()) => {
                 if let Some(job) = self.content_owner.jobs.last() {
-                    self.content_owner.browser.jobs.push((job.operation, query));
+                    self.content_owner
+                        .browser
+                        .jobs
+                        .push((job.operation, query, attempts));
                 }
             }
             Err(error) => {
+                if matches!(error, SubmitError::Busy) && attempts < 3 {
+                    self.content_owner.browser.current = None;
+                    self.content_owner.browser.retry = Some(Retry {
+                        account,
+                        request,
+                        query,
+                        attempts: attempts + 1,
+                        next: Instant::now() + Duration::from_secs(1),
+                        expires: Instant::now() + Duration::from_secs(60),
+                    });
+                    self.touch();
+                    return Ok(());
+                }
                 if let Some(browser) = &mut self.snapshot.content_panel.file_browser {
                     browser.loading = false;
                     browser.offline = cached.is_some();
@@ -148,6 +431,7 @@ impl Accounts {
         request: RequestId,
         operation: OperationId,
         query: Query,
+        attempts: u8,
         result: Result<RuntimeReply, IdentityError>,
     ) {
         if self.content_owner.browser.current.as_ref() != Some(&(account, request, query.clone()))
@@ -191,20 +475,12 @@ impl Accounts {
                         directory: file.directory,
                         size: file.size,
                         modified: file.modified.clone(),
+                        modified_unix: file.modified_unix,
                         mime: file.mime.clone(),
                         file_id: file.file_id.clone(),
                     })
                     .collect();
-                if query != Query::Recent {
-                    entries.sort_by(|a, b| {
-                        b.directory.cmp(&a.directory).then_with(|| {
-                            a.name
-                                .as_str()
-                                .to_lowercase()
-                                .cmp(&b.name.as_str().to_lowercase())
-                        })
-                    });
-                }
+                sort_entries(&mut entries, browser.sort);
                 browser.entries = page(entries);
                 browser.offline = false;
                 browser.error = None;
@@ -237,6 +513,20 @@ impl Accounts {
                             | ErrorKind::Busy
                     )
                 );
+                if transient && attempts < 3 {
+                    browser.loading = true;
+                    browser.offline = has_cache;
+                    self.content_owner.browser.retry = Some(Retry {
+                        account,
+                        request,
+                        query,
+                        attempts: attempts + 1,
+                        next: Instant::now() + Duration::from_secs(1u64 << attempts),
+                        expires: Instant::now() + Duration::from_secs(60),
+                    });
+                    self.touch();
+                    return;
+                }
                 if transient && has_cache {
                     browser.offline = true;
                 } else {
@@ -252,5 +542,119 @@ impl Accounts {
             }
         }
         self.touch();
+    }
+    pub(super) fn retry_cloud_files(&mut self) {
+        let now = Instant::now();
+        if !self
+            .content_owner
+            .browser
+            .retry
+            .as_ref()
+            .is_some_and(|retry| retry.next <= now)
+        {
+            return;
+        }
+        let Some(retry) = self.content_owner.browser.retry.take() else {
+            return;
+        };
+        if now >= retry.expires
+            || self.snapshot.active_account != Some(retry.account)
+            || self
+                .snapshot
+                .content_panel
+                .file_browser
+                .as_ref()
+                .is_none_or(|browser| {
+                    browser.account != retry.account
+                        || browser.section != retry.query.section()
+                        || browser.path != retry.query.path()
+                })
+        {
+            return;
+        }
+        let _ = self.start_cloud_query(retry.request, retry.account, retry.query, retry.attempts);
+    }
+    pub(super) fn sort_cloud_files(&mut self, account: AccountScope, sort: view::FileSort) {
+        let Some(browser) = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_mut()
+            .filter(|browser| browser.account == account)
+        else {
+            return;
+        };
+        if browser.sort == sort {
+            return;
+        }
+        let mut entries = browser.entries.as_slice().to_vec();
+        sort_entries(&mut entries, sort);
+        browser.entries = page(entries);
+        browser.sort = sort;
+        self.touch();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn entry(
+        name: &str,
+        directory: bool,
+        size: Option<u64>,
+        modified_unix: Option<i64>,
+    ) -> view::CloudFileView {
+        view::CloudFileView {
+            name: text(name),
+            path: text(&format!("/{name}")),
+            directory,
+            size,
+            modified: None,
+            modified_unix,
+            mime: None,
+            file_id: None,
+        }
+    }
+    #[test]
+    fn sorting_keeps_directories_first_and_unknown_values_last() {
+        let mut entries = vec![
+            entry("small", false, Some(2), Some(3)),
+            entry("folder", true, None, None),
+            entry("unknown", false, None, None),
+            entry("large", false, Some(9), Some(7)),
+        ];
+        sort_entries(&mut entries, view::FileSort::Size);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["folder", "large", "small", "unknown"]
+        );
+        sort_entries(&mut entries, view::FileSort::Modified);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["folder", "large", "small", "unknown"]
+        );
+        sort_entries(&mut entries, view::FileSort::Name);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["folder", "large", "small", "unknown"]
+        );
+    }
+    #[test]
+    fn closing_retires_query_authority_without_reusing_an_old_completion() {
+        let mut owner = Owner::default();
+        let operation = OperationId::from_local(7);
+        owner.jobs.push((operation, Query::Folder(text("/old")), 0));
+        owner.current = Some((
+            crate::composition::fixtures::scope(),
+            RequestId(2),
+            Query::Folder(text("/old")),
+        ));
+        owner.close();
+        assert!(owner.current.is_none());
+        assert_eq!(
+            owner.take_job(operation),
+            Some((Query::Folder(text("/old")), 0))
+        );
+        assert!(owner.take_job(operation).is_none());
     }
 }

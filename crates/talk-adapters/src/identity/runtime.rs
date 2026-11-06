@@ -1675,12 +1675,14 @@ impl Worker {
                     request,
                     ProtocolRequest::Messaging {
                         command: talk_core::protocol::messaging::MessagingCommand::UploadFile { .. }
+                            | talk_core::protocol::messaging::MessagingCommand::UploadImage { .. }
                             | talk_core::protocol::messaging::MessagingCommand::ShareFile { .. }
                             | talk_core::protocol::messaging::MessagingCommand::ShareExistingFile { .. }
                             | talk_core::protocol::messaging::MessagingCommand::DownloadFile { .. },
                         ..
                     } | ProtocolRequest::Content {
-                        command: talk_core::protocol::content::ContentCommand::Video { .. },
+                        command: talk_core::protocol::content::ContentCommand::Video { .. }
+                            | talk_core::protocol::content::ContentCommand::DownloadCloudFile { .. },
                         ..
                     }
                 ) {

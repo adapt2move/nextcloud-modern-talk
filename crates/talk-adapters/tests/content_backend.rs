@@ -156,6 +156,12 @@ async fn released_server_file_listing_and_existing_share() {
         panic!("directory reply");
     };
     assert!(files.as_slice().len() <= 1000);
+    assert!(
+        files
+            .as_slice()
+            .iter()
+            .any(|entry| entry.path.as_str() == "/nmt-files-fixture.txt")
+    );
     assert!(matches!(
         content(
             &mut client,
@@ -180,50 +186,43 @@ async fn released_server_file_listing_and_existing_share() {
         .unwrap(),
         R::Files(_)
     ));
-    let local = root.join("file-browser-fixture.txt");
-    std::fs::write(&local, b"Fictional browser attachment\n").unwrap();
-    let MR::Uploaded { path, .. } = message(
+    let path = text("/nmt-files-fixture.txt");
+    let destination = root.join("downloaded-fixture.txt");
+    let download = C::DownloadCloudFile {
+        path: path.clone(),
+        destination: text(destination.to_str().unwrap()),
+        progress: TransferProgress::default(),
+    };
+    let R::CloudFileSaved(bytes) = content(
         &mut client,
         &runtime,
         account,
         &mut sequence,
-        room,
-        M::UploadFile {
-            local_path: text(local.to_str().unwrap()),
-            name: text("file-browser-fixture.txt"),
-            progress: TransferProgress::default(),
-        },
+        download.clone(),
     )
     .await
     .unwrap() else {
-        panic!("upload reply");
+        panic!("download reply");
     };
-    let parent = path.as_str().rsplit_once('/').unwrap().0;
-    let R::Files(folder) = content(
-        &mut client,
-        &runtime,
-        account,
-        &mut sequence,
-        C::ListFiles { path: text(parent) },
-    )
-    .await
-    .unwrap() else {
-        panic!("uploaded directory reply");
-    };
-    assert!(
-        folder
-            .as_slice()
-            .iter()
-            .any(|entry| path.as_str().ends_with(entry.name.as_str()))
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"Fictional file browser fixture\n"
     );
-    let basename = path.as_str().rsplit('/').next().unwrap();
+    assert_eq!(bytes, 31);
+    assert_eq!(
+        content(&mut client, &runtime, account, &mut sequence, download)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Conflict
+    );
     let R::Files(search) = content(
         &mut client,
         &runtime,
         account,
         &mut sequence,
         C::SearchFiles {
-            query: Some(text(basename)),
+            query: Some(text("nmt-files-fixture")),
         },
     )
     .await
@@ -509,6 +508,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
             M::ShareFile {
                 path,
                 caption: text(""),
+                options: Default::default(),
             },
         )
         .await

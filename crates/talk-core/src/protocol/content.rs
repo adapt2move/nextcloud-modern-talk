@@ -89,6 +89,7 @@ impl ImageBytes {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AssetRequest {
+    CloudFile(u64),
     SelfAvatar,
     ConversationAvatar(ConversationId),
     MessageAvatar(MessageId),
@@ -115,6 +116,7 @@ pub struct CloudFile {
     pub directory: bool,
     pub size: Option<u64>,
     pub modified: Option<Text<256>>,
+    pub modified_unix: Option<i64>,
     pub mime: Option<Text<256>>,
     pub file_id: Option<Text<256>>,
 }
@@ -161,6 +163,12 @@ pub enum ContentCommand {
         query: Option<Text<256>>,
     },
     FavoriteFiles,
+    OpenCloudFile(u64),
+    DownloadCloudFile {
+        path: Text<16384>,
+        destination: Text<16384>,
+        progress: TransferProgress,
+    },
     SelfProfile,
     RevalidateProfile,
     Asset(AssetRequest),
@@ -183,6 +191,7 @@ pub enum ContentCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentResult {
     Files(Page<CloudFile, 1000>),
+    CloudFileSaved(u64),
     SelfProfile {
         name: Option<Text<256>>,
         organization: Option<Text<256>>,

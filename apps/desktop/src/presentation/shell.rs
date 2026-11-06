@@ -504,13 +504,10 @@ impl Desktop {
                 ready
                     && !pending
                     && !unloaded
-                    && (!attached || self.can_send_attachments())
+                    && (!attached || self.can_send_attachments(cx))
                     && self.composer.read(cx).submitted_value().is_some(),
-                if attached
-                    && self.drafts.target(row.context)
-                        != talk_core::ui::messaging::ComposeTarget::default()
-                {
-                    "Zum Senden von Dateien zuerst den Antwort- oder Spezialmodus schließen."
+                if attached && !self.can_send_attachments(cx) {
+                    "Diese Dateioption ist derzeit nicht verfügbar."
                 } else if self.drafts.uncertain(row.context) {
                     "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
                 } else {

@@ -14,6 +14,7 @@ pub struct DirectoryEntry {
     pub is_directory: bool,
     pub size: Option<u64>,
     pub modified: Option<String>,
+    pub modified_unix: Option<i64>,
     pub content_type: Option<String>,
     pub file_id: Option<String>,
 }
@@ -125,6 +126,15 @@ fn parse_listing(
             is_directory,
             size,
             modified: bounded(value("DAV:", "getlastmodified")),
+            modified_unix: value("DAV:", "getlastmodified")
+                .and_then(|value| {
+                    time::OffsetDateTime::parse(
+                        value,
+                        &time::format_description::well_known::Rfc2822,
+                    )
+                    .ok()
+                })
+                .map(|date| date.unix_timestamp()),
             content_type: bounded(value("DAV:", "getcontenttype")),
             file_id: bounded(value("http://owncloud.org/ns", "fileid")),
         });
@@ -447,6 +457,17 @@ mod directory_tests {
         assert!(parse_listing(xml.as_bytes(), &base, false).is_err());
         let invalid = listing("/remote.php/dav/files/user/Plans%2Fsecret", "Plans/secret");
         assert!(parse_listing(invalid.as_bytes(), &base, true).is_err());
+    }
+
+    #[test]
+    fn http_modified_date_is_available_for_chronological_sorting() {
+        let base = url::Url::parse("https://example.test/remote.php/dav/files/user").unwrap();
+        let xml = listing("/remote.php/dav/files/user/a", "a").replace(
+            "<d:resourcetype/>",
+            "<d:resourcetype/><d:getlastmodified>Sun, 06 Nov 1994 08:49:37 GMT</d:getlastmodified>",
+        );
+        let entries = parse_listing(xml.as_bytes(), &base, false).unwrap();
+        assert_eq!(entries[0].modified_unix, Some(784111777));
     }
 
     #[test]

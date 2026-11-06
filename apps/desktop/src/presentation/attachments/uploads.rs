@@ -9,9 +9,7 @@ use gpui::{Context, Div, ImageSource, ObjectFit, div, img, prelude::*, px};
 use talk_core::ui::{
     Text,
     content::{AssetTarget, AttachmentRef},
-    messaging::{
-        ComposeTarget, MessageAction, MessageFeature, UploadFailure, UploadState, UploadView,
-    },
+    messaging::{MessageAction, MessageFeature, UploadFailure, UploadState, UploadView},
     presentation::{ConversationRef, RequestId},
 };
 pub(in crate::presentation) struct PendingSend {
@@ -51,7 +49,7 @@ impl Desktop {
                 && panel.uploads.as_slice().iter().any(|file| !file.submitted)
         })
     }
-    pub(in crate::presentation) fn can_send_attachments(&self) -> bool {
+    pub(in crate::presentation) fn can_send_attachments(&self, cx: &Context<Self>) -> bool {
         self.snapshot.message_panel.as_ref().is_some_and(|panel| {
             Some(panel.context) == self.snapshot.selected
                 && !panel.uploads_running
@@ -69,15 +67,23 @@ impl Desktop {
             && !self.media_offline()
             && self.message_ui.editing.is_none()
             && self.snapshot.selected.is_some_and(|context| {
+                let target = self.drafts.target(context);
                 !self.drafts.pending(context)
-                    && self.drafts.target(context) == ComposeTarget::default()
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        ((!target.silent && self.composer.read(cx).content.is_empty())
+                            || panel.media_caption)
+                            && (target.reply_to.is_none()
+                                || self.message_feature_enabled(MessageFeature::Reply))
+                            && (target.thread.is_none()
+                                || self.message_feature_enabled(MessageFeature::Threads))
+                    })
             })
     }
     pub(in crate::presentation) fn send_attachments(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.has_staged_attachments() {
             return false;
         }
-        if !self.can_send_attachments() {
+        if !self.can_send_attachments(cx) {
             return true;
         }
         let Some(body) = self.composer_submission(cx) else {

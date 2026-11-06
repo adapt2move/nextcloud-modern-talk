@@ -16,12 +16,14 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
         account: context.account,
         path: text("/Plans"),
         section: talk_core::ui::content::FileSection::All,
+        sort: talk_core::ui::content::FileSort::Name,
         entries: page([talk_core::ui::content::CloudFileView {
             name: text("plan.pdf"),
             path: text("/Plans/plan.pdf"),
             directory: false,
             size: Some(42),
             modified: None,
+            modified_unix: None,
             mime: None,
             file_id: None,
         }]),
@@ -62,6 +64,76 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
         matches!(model.attachment_owner.batch.as_ref().unwrap().next(),
         Some((_, Step::Share, Command::ShareExistingFile { path, caption, .. }))
         if path.as_str() == "/Plans/plan.pdf" && caption.as_str() == "hello")
+    );
+}
+#[test]
+fn attachment_metadata_is_preserved_for_each_queued_share() {
+    let (mut model, context) = model();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.media_caption = true;
+    let allowed = talk_core::ui::conversation::Availability {
+        implemented: true,
+        server: talk_core::ui::presentation::FeatureSupport::Supported,
+        allowed: Decision::Allowed,
+    };
+    let mut features = panel.features.as_slice().to_vec();
+    features
+        .retain(|(feature, _)| !matches!(feature, MessageFeature::Reply | MessageFeature::Threads));
+    features.push((MessageFeature::Reply, allowed));
+    features.push((MessageFeature::Threads, allowed));
+    panel.features = page(features);
+    model.stage_files(context, paths(&["one.png"])).unwrap();
+    let target = ComposeTarget {
+        reply_to: Some(7),
+        thread: Some(8),
+        silent: true,
+    };
+    model
+        .send_files(RequestId(31), context, text("caption"), target)
+        .unwrap();
+    result(
+        &mut model,
+        1,
+        Step::Upload,
+        Ok(Reply::Uploaded {
+            path: text("/draft/one"),
+            bytes: 4,
+        }),
+    );
+    assert!(
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((1, Step::Share, Command::ShareFile { options, .. }))
+        if options.reply_to.is_some_and(|message| message.sequence == 7)
+        && options.thread.is_some_and(|message| message.sequence == 8) && options.silent)
+    );
+}
+#[test]
+fn clipboard_image_stays_bounded_and_uses_byte_upload() {
+    use talk_core::ui::content::ClipboardImage;
+    assert!(ClipboardImage::new(Vec::new()).is_none());
+    assert!(ClipboardImage::new(vec![0; 4 * 1024 * 1024 + 1]).is_none());
+    let (mut model, context) = model();
+    let image = ClipboardImage::new(vec![1, 2, 3]).unwrap();
+    model
+        .stage_clipboard_image(context, text("clipboard.png"), image)
+        .unwrap();
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()[0]
+            .bytes,
+        Some(3)
+    );
+    model
+        .send_files(RequestId(32), context, text(""), ComposeTarget::default())
+        .unwrap();
+    assert!(
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((_, Step::Upload, Command::UploadImage { image, .. })) if image.as_slice() == [1, 2, 3])
     );
 }
 fn result(model: &mut Accounts, id: u64, step: Step, result: Result<Reply, ErrorKind>) -> Work {
@@ -157,6 +229,18 @@ fn read_only_or_obsolete_selection_cannot_stage_or_start_files() {
     assert!(model.attachment_owner.batch.is_none());
     model.snapshot.content = ContentState::Ready;
     model.stage_files(context, paths(&["one.png"])).unwrap();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.media_caption = false;
+    panel.features = page(
+        panel
+            .features
+            .as_slice()
+            .iter()
+            .filter(|(feature, _)| {
+                !matches!(feature, MessageFeature::Reply | MessageFeature::Threads)
+            })
+            .copied(),
+    );
     for target in [
         ComposeTarget {
             reply_to: Some(1),
@@ -227,7 +311,7 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
         }),
     );
     assert!(
-        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((1, Step::Share, Command::ShareFile { path, caption })) if path.as_str()=="/draft/one" && caption.as_str()=="caption")
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((1, Step::Share, Command::ShareFile { path, caption, .. })) if path.as_str()=="/draft/one" && caption.as_str()=="caption")
     );
     result(&mut model, 1, Step::Share, Ok(Reply::Changed));
     assert_eq!(
@@ -257,7 +341,7 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
     );
     model.retry_file(context, 2).unwrap();
     assert!(
-        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((2, Step::Share, Command::ShareFile { path, caption })) if path.as_str()=="/draft/two" && caption.as_str().is_empty())
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((2, Step::Share, Command::ShareFile { path, caption, .. })) if path.as_str()=="/draft/two" && caption.as_str().is_empty())
     );
     result(&mut model, 2, Step::Share, Ok(Reply::Changed));
     let panel = model.snapshot.message_panel.as_ref().unwrap();

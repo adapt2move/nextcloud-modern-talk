@@ -36,11 +36,16 @@ impl Accounts {
         let target = preview_target(batch.context, file.view.id);
         let job = content::ImageJob {
             cached: false,
-            local: Some((file.local.clone(), file.progress.clone())),
+            local: file
+                .image
+                .is_none()
+                .then(|| (file.local.clone(), file.progress.clone())),
             account: batch.context.account,
             target: target.clone(),
             key,
-            bytes: protocol::content::ImageBytes::new(Vec::new()).expect("empty bounded input"),
+            bytes: file.image.clone().unwrap_or_else(|| {
+                protocol::content::ImageBytes::new(Vec::new()).expect("empty bounded input")
+            }),
             attachment: None,
             preview_generation: None,
         };

@@ -93,7 +93,9 @@ fn local_context(target: &view::AssetTarget) -> Option<ConversationRef> {
 fn is_avatar(target: &view::AssetTarget) -> bool {
     !matches!(
         target,
-        view::AssetTarget::Thumbnail(_) | view::AssetTarget::Image(_)
+        view::AssetTarget::Thumbnail(_)
+            | view::AssetTarget::Image(_)
+            | view::AssetTarget::CloudFile { .. }
     )
 }
 impl Accounts {
@@ -189,7 +191,13 @@ impl Accounts {
         }
         use view::ContentAction as A;
         // Dismissing a terminal local receipt needs no network authority.
-        if !matches!(action, A::DismissDownload) {
+        if !matches!(
+            action,
+            A::DismissDownload
+                | A::CancelBrowserDownload
+                | A::DismissBrowserDownload
+                | A::CloseFileBrowser
+        ) {
             self.current(account)?;
         }
         match action {
@@ -198,6 +206,34 @@ impl Accounts {
             A::FavoriteFiles => self.query_cloud_files(request, account, browser::Query::Favorites),
             A::SearchFiles(query) => {
                 self.query_cloud_files(request, account, browser::Query::Search(query))
+            }
+            A::SortFiles(sort) => {
+                self.sort_cloud_files(account, sort);
+                Ok(())
+            }
+            A::OpenBrowserFile(path) => self.open_browser_file(request, account, path),
+            A::DownloadBrowserFile(path) => self.queue_browser_download(request, account, path),
+            A::CancelBrowserDownload => {
+                self.cancel_browser_download();
+                Ok(())
+            }
+            A::DismissBrowserDownload => {
+                if self
+                    .snapshot
+                    .content_panel
+                    .browser_download
+                    .as_ref()
+                    .is_some_and(|view| {
+                        !matches!(
+                            view.state,
+                            view::DownloadState::Transferring | view::DownloadState::Committing
+                        )
+                    })
+                {
+                    self.snapshot.content_panel.browser_download = None;
+                    self.touch();
+                }
+                Ok(())
             }
             A::StageCloudFile { context, path } => self.stage_cloud_file(context, path),
             A::CloseFileBrowser => {
@@ -396,6 +432,10 @@ impl Accounts {
         account: AccountScope,
         target: view::AssetTarget,
     ) -> Result<(), SubmitError> {
+        if matches!(target, view::AssetTarget::CloudFile { .. }) && !self.asset_is_current(&target)
+        {
+            return Err(SubmitError::StaleScope);
+        }
         if target.context().is_some_and(|c| {
             c.account != account
                 || c.account.runtime.as_local() == 0
@@ -778,8 +818,12 @@ impl Accounts {
             return;
         };
         let job = self.content_owner.jobs.remove(index);
-        if let Some(path) = self.content_owner.browser.take_job(operation) {
-            self.complete_cloud_files(job.account, job.request, operation, path, result);
+        if self.content_owner.browser.is_download(operation) {
+            self.complete_browser_download(job.account, job.request, operation, result);
+            return;
+        }
+        if let Some((query, attempts)) = self.content_owner.browser.take_job(operation) {
+            self.complete_cloud_files(job.account, job.request, operation, query, attempts, result);
             return;
         }
         if job
@@ -996,6 +1040,10 @@ impl Accounts {
         }
     }
     fn content_failure(&mut self, job: &Job, error: IdentityError) {
+        if job.cloud {
+            self.snapshot.content_panel.result = Some((job.request, completion_error(error)));
+            return;
+        }
         if job.context.is_none() && job.target.is_none() && !job.cloud {
             self.content_owner.profile_retry_at =
                 Some(Instant::now() + Duration::from_secs(15 * 60));
@@ -1141,6 +1189,18 @@ impl Accounts {
     pub(super) fn set_asset(&mut self, asset: view::AssetView) {
         let mut assets = self.snapshot.content_panel.assets.as_slice().to_vec();
         assets.retain(|a| a.target != asset.target);
+        if matches!(asset.target, view::AssetTarget::CloudFile { .. })
+            && assets
+                .iter()
+                .filter(|a| matches!(a.target, view::AssetTarget::CloudFile { .. }))
+                .count()
+                >= 16
+            && let Some(index) = assets
+                .iter()
+                .position(|a| matches!(a.target, view::AssetTarget::CloudFile { .. }))
+        {
+            assets.remove(index);
+        }
         if assets.len() >= 128 {
             // Message/preview churn must not repeatedly evict the persistent
             // footer and sidebar pictures merely because they loaded first.
@@ -1389,6 +1449,30 @@ impl Accounts {
         (self.snapshot.active_account == Some(scope) && self.current(scope).is_ok()).then_some(link)
     }
     pub(super) fn asset_is_current(&self, target: &view::AssetTarget) -> bool {
+        if let view::AssetTarget::CloudFile {
+            account,
+            path,
+            file,
+        } = target
+        {
+            return self.snapshot.active_account == Some(*account)
+                && self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_some_and(|browser| {
+                        browser.account == *account
+                            && browser.entries.as_slice().iter().any(|entry| {
+                                entry.path == *path
+                                    && entry
+                                        .file_id
+                                        .as_ref()
+                                        .and_then(|id| id.as_str().parse::<u64>().ok())
+                                        == Some(*file)
+                            })
+                    });
+        }
         if matches!(target, view::AssetTarget::Thumbnail(reference) if talk_core::ui::messaging::UploadView::is_message_id(reference.message))
         {
             return self.upload_preview_current(target, None);
@@ -1626,6 +1710,7 @@ impl Accounts {
         }
     }
     pub(super) fn tick_content(&mut self) {
+        self.retry_cloud_files();
         self.hydrate_thumbnails();
         self.tick_video();
         self.reconcile_content_assets();
@@ -1733,6 +1818,27 @@ impl Accounts {
                     self.touch();
                 }
             }
+            if let Some(transfer) = self.snapshot.content_panel.browser_download.as_mut()
+                && matches!(
+                    transfer.state,
+                    view::DownloadState::Transferring | view::DownloadState::Committing
+                )
+            {
+                let state = if committing {
+                    view::DownloadState::Committing
+                } else {
+                    view::DownloadState::Transferring
+                };
+                if transfer.received != received
+                    || transfer.total != total
+                    || transfer.state != state
+                {
+                    transfer.received = received;
+                    transfer.total = total;
+                    transfer.state = state;
+                    self.touch();
+                }
+            }
         }
         if let Some((context, poll)) = self.content_owner.refresh_poll
             && (self.snapshot.selected != Some(context)
@@ -1755,6 +1861,7 @@ fn asset_request(target: &view::AssetTarget) -> Result<wire::AssetRequest, Submi
     use wire::AssetRequest as W;
     Ok(match target {
         V::SelfAvatar => W::SelfAvatar,
+        V::CloudFile { file, .. } => W::CloudFile(*file),
         V::ConversationAvatar(c) => W::ConversationAvatar(c.conversation),
         V::MessageAvatar { context, message } => W::MessageAvatar(protocol::MessageId {
             conversation: context.conversation,

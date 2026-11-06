@@ -116,6 +116,7 @@ pub struct MessagingCapabilities {
     pub pin_change: Decision,
     pub message_limit: Option<u32>,
     pub file_limit: u64,
+    pub media_caption: bool,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
 }
@@ -219,6 +220,11 @@ pub enum MessagingCommand {
         name: Text<255>,
         progress: super::content::TransferProgress,
     },
+    UploadImage {
+        name: Text<255>,
+        image: super::content::ImageBytes,
+        progress: super::content::TransferProgress,
+    },
     DownloadFile {
         message: MessageId,
         placeholder: Text<128>,
@@ -228,6 +234,7 @@ pub enum MessagingCommand {
     ShareFile {
         path: Text<16384>,
         caption: Text<4096>,
+        options: ComposeOptions,
     },
     /// Share an already existing account file; result reconciles by reference.
     ShareExistingFile {

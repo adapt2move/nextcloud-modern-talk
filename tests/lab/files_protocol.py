@@ -2,6 +2,7 @@
 """Exercise the account file protocol against an owned development lab."""
 import argparse
 import asyncio
+import base64
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import shutil
 import sys
 import tempfile
 import urllib.parse
+import urllib.request
 
 sys.dont_write_bytecode = True
 from alpha_protocol import Relay
@@ -33,6 +35,12 @@ async def run(state, output):
         host = urllib.parse.urlsplit(record["development"]["vm_url"]).hostname
         env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), RUST_BACKTRACE="0")
         env["PATH"] = "/root/.cargo/bin:" + env.get("PATH", "")
+        file_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-fixture.txt"
+        auth = base64.b64encode(("lab_alice:" + lab.passwords["lab_alice"]).encode()).decode()
+        headers = {"Authorization": "Basic " + auth, "Host": lab.http_host, "If-None-Match": "*"}
+        with lab.clients["lab_alice"].open(urllib.request.Request(file_url, data=b"Fictional file browser fixture\n", headers=headers, method="PUT"), timeout=20) as response:
+            if response.status != 201:
+                raise RuntimeError("Could not create the disposable DAV fixture")
         target = Path(output)
         target.mkdir(mode=0o700, parents=True, exist_ok=False)
         try:
@@ -53,6 +61,9 @@ async def run(state, output):
             return code
         finally:
             shutil.rmtree(directory)
+            with lab.clients["lab_alice"].open(urllib.request.Request(file_url, headers={"Authorization": "Basic " + auth, "Host": lab.http_host}, method="DELETE"), timeout=20) as response:
+                if response.status not in (200, 204):
+                    raise RuntimeError("Could not delete the disposable DAV fixture")
             lab.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"],
                         expected=(200, 404), name="files-cleanup-room")
 
