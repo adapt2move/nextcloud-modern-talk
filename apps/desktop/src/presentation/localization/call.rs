@@ -11,12 +11,12 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anruf läuft", "Call in progress", "Llamada en curso"),
     ("Anruf minimieren", "Minimize call", "Minimizar llamada"),
-    ("Anruf öffnen", "Open call", "Abrir llamada"),
     (
         "Anruf wird für alle beendet …",
         "Ending the call for everyone…",
         "Finalizando la llamada para todas las personas…",
     ),
+    ("Anruf öffnen", "Open call", "Abrir llamada"),
     (
         "Aufzeichnung fehlgeschlagen",
         "Recording failed",
