@@ -61,12 +61,7 @@ fn parse_listing(bytes: &[u8], base: &url::Url) -> Result<Vec<DirectoryEntry>, E
                 .and_then(|n| n.text())
         };
         let name = value("DAV:", "displayname").ok_or(ErrorKind::Malformed)?;
-        if name.is_empty()
-            || name.len() > 255
-            || name.contains(['/', '\\', '\0'])
-            || name.chars().any(char::is_control)
-            || matches!(name, "." | "..")
-        {
+        if !valid_child_name(name) {
             return Err(ErrorKind::Malformed);
         }
         let mut expected = base.clone();
@@ -106,6 +101,14 @@ fn parse_listing(bytes: &[u8], base: &url::Url) -> Result<Vec<DirectoryEntry>, E
     }
     Ok(entries)
 }
+
+fn valid_child_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && !name.contains(['/', '\\', '\0'])
+        && !name.chars().any(char::is_control)
+        && !matches!(name, "." | "..")
+}
 /// A DAV directory relative to the authenticated user's files root.
 /// Root is represented by `/`; other paths have no trailing slash.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +123,19 @@ impl DirectoryPath {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Construct a direct child from a validated directory entry name.
+    pub fn child(&self, name: &str) -> Result<Self, ErrorKind> {
+        if !valid_child_name(name) {
+            return Err(ErrorKind::Malformed);
+        }
+        let path = if self.0 == "/" {
+            format!("/{name}")
+        } else {
+            format!("{}/{name}", self.0)
+        };
+        Self::parse(&path)
     }
 
     /// Return the parent without allowing navigation above the user's root.
@@ -347,6 +363,10 @@ mod directory_tests {
         let root = parent.parent().unwrap();
         assert_eq!(root.as_str(), "/");
         assert!(root.parent().is_none());
+        assert_eq!(root.child("Plans").unwrap().as_str(), "/Plans");
+        assert_eq!(parent.child("Plans").unwrap(), nested);
+        assert!(root.child("../escape").is_err());
+        assert!(root.child(".").is_err());
     }
 
     #[test]
