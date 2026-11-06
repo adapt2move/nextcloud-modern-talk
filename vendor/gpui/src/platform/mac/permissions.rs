@@ -11,11 +11,16 @@ use objc::{
 };
 use std::{ffi::c_void, sync::Arc};
 
+/// The macOS capability whose authorization belongs to the running application.
 #[derive(Clone, Copy)]
 pub enum MacPermissionKind {
+    /// Recording audio from an input device.
     Microphone,
+    /// Capturing video from a camera.
     Camera,
+    /// Recording screen contents.
     Screen,
+    /// Posting system notifications.
     Notifications,
 }
 #[path = "permission_probe.rs"]
@@ -30,6 +35,21 @@ extern "C" fn run_main(raw: *mut c_void) {
     let job = unsafe { Box::from_raw(raw.cast::<MainJob>()) };
     job();
 }
+/// Schedule a permission observation or explicit request on the app's main queue.
+///
+/// With `request` set to `false`, this only observes authorization. With `true`,
+/// it may display an OS prompt; callers must obtain the user's intent first.
+/// The returned operation is polled without blocking or starting capture.
+/// Native availability and request failures are reported through
+/// [`MacPermissionOperation::poll`].
+///
+/// At most one callback per permission kind remains admitted. Dropping the
+/// operation suppresses late results while a retained native callback keeps its
+/// slot until it is released.
+///
+/// # Errors
+/// Returns [`MacPermissionError::Busy`] while that kind already has an admitted
+/// callback, including one whose waiter has been dropped.
 pub fn macos_permission(
     kind: MacPermissionKind,
     request: bool,
