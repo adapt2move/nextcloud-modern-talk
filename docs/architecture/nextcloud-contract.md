@@ -48,6 +48,36 @@ One local video owner consumes finite in-memory bytes through explicit GStreamer
 
 The existing private account-data owner stores only reencoded, descriptor-bound thumbnails under [AUTH-009](../product/accounts.md#auth-009). Reads are length/dimension checked before decode and retirement fences late completions. Both owner hydration and an earlier UI load prefer the exact eligible local raster over a network fetch; the two-slot decode queue uses existing admission backpressure. Confirmed in-memory thumbnails follow their current descriptor/scope and capacity limits instead of a periodic one-minute lease. Failed required removals collapse to one retained account clear, retried on the existing owner tick with a five-second cooldown. Disposable previews yield to required history and outgoing work within the database ceiling. Cached presentation never grants network or attachment authority.
 
+## Notifications
+
+Account observation uses the authenticated, origin-bound NextCloud Notifications
+API v2 list, with Spreed's structured notification identities. Advertised list
+and user-status support, the intended user, `shouldNotify`, Do Not Disturb, current
+room policy and bounded message/call context all gate delivery. Translated subjects
+and notification action URLs cannot grant authority. History/context reads never
+advance read markers or dismiss notifications. See the pinned
+[notification sources](source-evidence.md#a-src-07--notifications).
+
+An empty HTTP 200 list confirms an available source. HTTP 204 means no registered
+notification provider: clear source freshness and wait one hour before probing
+again, as the official API requires. Transient failures clear freshness and back
+off from five seconds to two minutes; explicit Retry-After is retained up to the
+transport's five-minute ceiling. Admitted push hints coalesce into the existing
+account schedule and cannot reset failures or bypass these cooldowns. A new runtime has a
+fresh schedule; an older runtime cannot update it. Message and call channels remain
+independent from room discovery and other accounts.
+
+The desktop notification owner retains one worker, three priority slots and at
+most 16 correlated completions. Queued ordinary alerts expire after five seconds;
+incoming calls after 45 seconds. Foreground entry cancels queued/running ordinary
+message alerts without dismissing a current call or an explicit local test. One
+separate authorization slot uses the same worker. Checks have a three-second
+deadline; an explicit first request has a two-minute deadline and retires queued
+alerts before showing a sheet. Work waiting over five seconds cannot start a late
+sheet. Stopped or superseded completions cannot change observed authorization.
+Native helper cancellation kills and reaps its process; no extra idle timer is
+introduced. These bounds do not establish native macOS delivery or permission UX.
+
 ## Calls
 
 Calls use typed join/leave and participant observation, with internal signaling or the qualified external-signaling route for SDP/ICE. The separate [meeting owner](../../crates/talk-adapters/src/nextcloud/meeting.rs) refreshes the applicable policy, enforces lobby/consent/publication decisions and owns the call lifetime. The [media owner](../../crates/talk-adapters/src/media/service.rs) integrates the Rust `webrtc` engine, GStreamer VP8/Opus codecs and bounded application audio/video handoffs; device resources belong to the desktop device owner.

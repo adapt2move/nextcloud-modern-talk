@@ -115,7 +115,7 @@ fn perform(
             bit(call.is_some()),
             bit(actions.accept),
             bit(actions.decline),
-            bit(matches!(event.kind, NotificationKind::Test { .. })),
+            "0", // Authorization belongs to the explicit settings operation.
             locale,
         ])
         .stdin(Stdio::piped())
@@ -153,7 +153,7 @@ fn perform(
             return Err(NotificationError::Unavailable);
         }
     };
-    let deadline = Instant::now() + Duration::from_secs(if call.is_some() { 45 } else { 125 });
+    let deadline = Instant::now() + Duration::from_secs(if call.is_some() { 45 } else { 10 });
     let mut submitted = None;
     let mut exited = None;
     let result = loop {

@@ -59,6 +59,10 @@ impl Accounts {
         scope: AccountScope,
         result: Result<RuntimeReply, IdentityError>,
     ) {
+        let failure = match &result {
+            Err(IdentityError::Request(kind)) => Some(*kind),
+            _ => None,
+        };
         let observed = match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::MessageNotifications(value)))
                 if value.scope == scope && self.current(scope).is_ok() =>
@@ -67,9 +71,17 @@ impl Accounts {
             }
             _ => None,
         };
-        self.background
-            .observed(scope, background::Observation::Messages, observed.is_some());
         if let Some(value) = observed {
+            self.background.notification_source(
+                scope,
+                background::Observation::Messages,
+                value.source,
+                Instant::now(),
+            );
+            if value.source != protocol::NotificationSourceState::Available {
+                self.notices.remove_account(scope);
+                return;
+            }
             if value.changed {
                 self.background
                     .invalidate(scope, background::Observation::Rooms, Instant::now());
@@ -78,6 +90,25 @@ impl Accounts {
                 self.notices.push(scope, notice.clone(), Instant::now());
             }
         } else {
+            if let Some(kind) = failure {
+                let source = if kind == ErrorKind::Unsupported {
+                    protocol::NotificationSourceState::Unsupported
+                } else {
+                    protocol::NotificationSourceState::Paused {
+                        reason: kind,
+                        retry_after_millis: None,
+                    }
+                };
+                self.background.notification_source(
+                    scope,
+                    background::Observation::Messages,
+                    source,
+                    Instant::now(),
+                );
+            } else {
+                self.background
+                    .observed(scope, background::Observation::Messages, false);
+            }
             self.notices.remove_account(scope);
         }
     }
@@ -225,6 +256,7 @@ mod tests {
         model.clear_content();
         assert_eq!(model.notices.messages.len(), 1);
         let result = protocol::MessageNotifications {
+            source: protocol::NotificationSourceState::Available,
             scope: context.account,
             notices: page([notice(context, 43)]),
             changed: true,

@@ -27,7 +27,10 @@ fn dbus_name(name: Option<&str>) -> StorageFailure {
         ) => StorageFailure::AccessDenied,
         Some(
             "org.freedesktop.DBus.Error.ServiceUnknown"
-            | "org.freedesktop.DBus.Error.NameHasNoOwner",
+            | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            | "org.freedesktop.DBus.Error.FileNotFound"
+            | "org.freedesktop.DBus.Error.NoServer"
+            | "org.freedesktop.DBus.Error.BadAddress",
         ) => StorageFailure::Unavailable,
         Some(
             "org.freedesktop.DBus.Error.NoReply"
@@ -45,31 +48,19 @@ fn connect(providers: &Providers, item: QualifiedItem) -> Result<SecretService> 
             StorageFailure::Unsupported,
         ));
     }
-    // Keep the previously qualified typed connection/absence categories. This
-    // check is advisory: all subsequent operations independently forbid prompts.
-    let map = |e| {
-        native_error(
-            StorageBackend::LinuxSecretService,
-            keyring_core::Error::PlatformFailure(Box::new(e)),
-        )
-    };
-    let native =
-        secret_service::blocking::SecretService::connect(secret_service::EncryptionType::Dh)
-            .map_err(map)?;
-    let collection = native.get_default_collection().map_err(|e| match e {
-        secret_service::Error::NoResult => failure(StorageFailure::Unavailable),
-        other => map(other),
-    })?;
-    if collection.is_locked().map_err(map)? {
-        return Err(failure(StorageFailure::Locked));
-    }
+    // One encrypted session per operation. The legacy zbus provider remains only
+    // in compatibility tests; a second advisory connection cannot grant access.
+    // Zero refuses prompts before dispatch; never call ensure_unlocked/unlock.
+    let service =
+        SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 0).map_err(mapped)?;
+    collection(&service)?;
     #[cfg(test)]
     let _barrier = providers.faults.after_preflight();
     #[cfg(not(test))]
     let _ = providers;
-    // Zero means the maintained crate returns BEFORE calling Prompt. Do not use
-    // ensure_unlocked/unlock/unlock_all, even with this setting.
-    SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 0).map_err(mapped)
+    // Re-check the collection in the operation after this race boundary. Neither
+    // this observation nor its success grants lasting permission to an item.
+    Ok(service)
 }
 fn collection(service: &SecretService) -> Result<Collection<'_>> {
     let collection = service.get_default_collection().map_err(|e| match e {
@@ -160,6 +151,13 @@ mod tests {
     use super::*;
     #[test]
     fn prompt_refusal_and_protocol_categories_never_infer_unavailability_from_denial() {
+        for name in [
+            "org.freedesktop.DBus.Error.FileNotFound",
+            "org.freedesktop.DBus.Error.NoServer",
+            "org.freedesktop.DBus.Error.BadAddress",
+        ] {
+            assert_eq!(dbus_name(Some(name)), StorageFailure::Unavailable);
+        }
         assert_eq!(
             mapped(dbus_secret_service::Error::Prompt),
             failure(StorageFailure::Locked)

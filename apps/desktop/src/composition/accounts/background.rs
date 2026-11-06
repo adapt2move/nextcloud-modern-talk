@@ -6,6 +6,8 @@ const ACCOUNTS: usize = 8;
 const IN_FLIGHT: usize = 4;
 const MIN_INTERVAL: Duration = Duration::from_secs(2);
 const LIVE_FALLBACK_INTERVAL: Duration = Duration::from_secs(30);
+// Notifications API v2 asks clients to poll at most hourly after HTTP 204.
+const UNAVAILABLE_NOTIFICATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 pub(super) const SOURCE_LIFETIME: Duration = Duration::from_secs(12);
 const MEMBER_COUNT_LIFETIME: Duration = Duration::from_secs(10 * 60);
 const MEMBER_COUNT_RETRY: Duration = Duration::from_secs(60);
@@ -64,6 +66,8 @@ pub(super) struct Account {
     due: [Instant; 4],
     last: [Option<Instant>; 4],
     sources: [Option<Instant>; 2],
+    notification_failures: [u8; 2],
+    retry_not_before: [Option<Instant>; 2],
     prefetch: Vec<ConversationRef>,
     prefetch_planned: bool,
     prefetch_deadline: Option<Instant>,
@@ -88,6 +92,8 @@ impl Background {
                     due: [now; 4],
                     last: [None; 4],
                     sources: [None; 2],
+                    notification_failures: [0; 2],
+                    retry_not_before: [None; 2],
                     prefetch: Vec::new(),
                     prefetch_planned: false,
                     prefetch_deadline: None,
@@ -210,7 +216,12 @@ impl Background {
     pub(super) fn invalidate(&mut self, scope: AccountScope, kind: Observation, now: Instant) {
         if let Some(a) = self.account_mut(scope) {
             let i = kind.index();
-            let earliest = a.last[i].map_or(now, |at| (at + MIN_INTERVAL).max(now));
+            // Fresh admitted hints permit a probe, never a freshness renewal.
+            let mut earliest = a.last[i].map_or(now, |at| (at + MIN_INTERVAL).max(now));
+            // Hints cannot reset failures or bypass backoff, Retry-After or HTTP 204.
+            if let Some(Some(retry)) = a.retry_not_before.get(i) {
+                earliest = earliest.max(*retry);
+            }
             a.due[i] = a.due[i].min(earliest);
         }
     }
@@ -224,6 +235,52 @@ impl Background {
             && let Some(source) = a.sources.get_mut(kind.index())
         {
             *source = success.then(Instant::now);
+        }
+    }
+    pub(super) fn notification_source(
+        &mut self,
+        scope: AccountScope,
+        kind: Observation,
+        source: protocol::NotificationSourceState,
+        now: Instant,
+    ) {
+        use protocol::NotificationSourceState;
+        let Some(a) = self.account_mut(scope) else {
+            return;
+        };
+        let i = kind.index();
+        let Some(observed) = a.sources.get_mut(i) else {
+            return;
+        };
+        *observed = None;
+        match source {
+            NotificationSourceState::Available => {
+                a.sources[i] = Some(now);
+                a.notification_failures[i] = 0;
+                a.retry_not_before[i] = None;
+            }
+            NotificationSourceState::Unsupported => {
+                a.notification_failures[i] = 0;
+                let retry = a.retry_not_before[i]
+                    .unwrap_or(now)
+                    .max(now + UNAVAILABLE_NOTIFICATION_INTERVAL);
+                a.retry_not_before[i] = Some(retry);
+                a.due[i] = a.due[i].max(retry);
+            }
+            NotificationSourceState::Paused {
+                retry_after_millis, ..
+            } => {
+                a.notification_failures[i] = a.notification_failures[i].saturating_add(1).min(6);
+                let backoff =
+                    Duration::from_secs((5u64 << (a.notification_failures[i] - 1)).min(120));
+                let server_delay =
+                    Duration::from_millis(u64::from(retry_after_millis.unwrap_or(0).min(300_000)));
+                let retry = a.retry_not_before[i]
+                    .unwrap_or(now)
+                    .max(now + backoff.max(server_delay));
+                a.retry_not_before[i] = Some(retry);
+                a.due[i] = a.due[i].max(retry);
+            }
         }
     }
     fn next(
@@ -258,6 +315,9 @@ impl Background {
                     Observation::Rooms => Duration::from_secs(if active { 15 } else { 30 }),
                     Observation::LiveEvents => live_interval(a.live),
                 };
+            if let Some(Some(retry)) = a.retry_not_before.get(i) {
+                a.due[i] = a.due[i].max(*retry);
+            }
         }
     }
 }
@@ -748,6 +808,135 @@ fn valid_rooms(list: &protocol::ConversationList) -> bool {
 mod tests {
     use super::*;
     use talk_core::ids::{HostId, RuntimeGeneration};
+
+    #[test]
+    fn notification_backoff_is_bounded_and_does_not_renew_sources_or_block_other_accounts() {
+        let now = Instant::now();
+        for kind in [Observation::Calls, Observation::Messages] {
+            let mut schedule = Background::default();
+            schedule.sync(&[scope(1), scope(2)], now);
+            schedule.notification_source(
+                scope(2),
+                kind,
+                protocol::NotificationSourceState::Available,
+                now,
+            );
+            schedule.admitted(scope(1), kind, true, now);
+            for seconds in [5, 10, 20, 40, 80, 120, 120] {
+                schedule.notification_source(
+                    scope(1),
+                    kind,
+                    protocol::NotificationSourceState::Paused {
+                        reason: ErrorKind::Transport,
+                        retry_after_millis: None,
+                    },
+                    now,
+                );
+                assert_eq!(
+                    schedule.account(scope(1)).unwrap().due[kind.index()],
+                    now + Duration::from_secs(seconds)
+                );
+                assert!(!schedule.source(scope(1), kind, now));
+                assert!(schedule.source(scope(2), kind, now));
+                schedule.invalidate(scope(1), kind, now + Duration::from_secs(1));
+                assert_eq!(
+                    schedule.account(scope(1)).unwrap().due[kind.index()],
+                    now + Duration::from_secs(seconds),
+                    "a hint cannot bypass backoff or reset consecutive failures"
+                );
+            }
+            assert_eq!(
+                schedule.account(scope(1)).unwrap().notification_failures[kind.index()],
+                6
+            );
+            schedule.notification_source(
+                scope(1),
+                kind,
+                protocol::NotificationSourceState::Available,
+                now,
+            );
+            assert_eq!(
+                schedule.account(scope(1)).unwrap().notification_failures[kind.index()],
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn server_cooldowns_survive_push_hints_and_scope_replacement_retires_them() {
+        let now = Instant::now();
+        for kind in [Observation::Calls, Observation::Messages] {
+            let mut schedule = Background::default();
+            schedule.sync(&[scope(1)], now);
+            schedule.admitted(scope(1), kind, true, now);
+            schedule.notification_source(
+                scope(1),
+                kind,
+                protocol::NotificationSourceState::Paused {
+                    reason: ErrorKind::RateLimited,
+                    retry_after_millis: Some(300_000),
+                },
+                now,
+            );
+            schedule.invalidate(scope(1), kind, now + Duration::from_secs(1));
+            assert_eq!(
+                schedule.account(scope(1)).unwrap().due[kind.index()],
+                now + Duration::from_secs(300)
+            );
+            assert!(!schedule.source(scope(1), kind, now));
+            schedule.notification_source(
+                scope(1),
+                kind,
+                protocol::NotificationSourceState::Unsupported,
+                now,
+            );
+            {
+                let a = schedule.account_mut(scope(1)).unwrap();
+                for other in Observation::ALL {
+                    if other != kind {
+                        a.due[other.index()] = now + Duration::from_secs(7200);
+                    }
+                }
+            }
+            assert!(
+                schedule
+                    .next(Some(scope(1)), &[], true, now + Duration::from_secs(600))
+                    .is_none()
+            );
+            schedule.invalidate(scope(1), kind, now + Duration::from_secs(601));
+            assert_eq!(
+                schedule.next(Some(scope(1)), &[], true, now + Duration::from_secs(601)),
+                None
+            );
+            assert_eq!(
+                schedule.next(
+                    Some(scope(1)),
+                    &[],
+                    true,
+                    now + UNAVAILABLE_NOTIFICATION_INTERVAL
+                ),
+                Some((scope(1), kind))
+            );
+            assert!(
+                !schedule.source(scope(1), kind, now),
+                "a wakeup is not fresh source authority"
+            );
+            let replacement = AccountScope {
+                runtime: RuntimeGeneration::from_local(2),
+                ..scope(1)
+            };
+            schedule.sync(&[replacement], now);
+            assert!(schedule.account(scope(1)).is_none());
+            assert!(
+                schedule
+                    .account(replacement)
+                    .unwrap()
+                    .retry_not_before
+                    .iter()
+                    .all(Option::is_none)
+            );
+        }
+    }
 
     fn scope(n: u128) -> AccountScope {
         AccountScope {

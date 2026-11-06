@@ -12,6 +12,14 @@ Acceptance: the application can complete login, find a conversation, send a perm
 
 **Notifications and privacy (P1 messages; P2 calls).** Request OS notification permission in context. Combine room notification levels, call-notification preferences, server notification state, OS Focus/Do Not Disturb, and local sound choices without claiming control over OS delivery. Default lock-screen content is privacy-preserving; user-enabled previews remain subordinate to sensitive/classified rules. Prevent duplicate banners/sounds from multiple transport paths.
 
+On macOS, opening Notifications settings checks authorization without prompting.
+Show the observed system state separately from saved Banner/Sound choices. Offer
+**Allow notifications** for an undetermined first request; deliberately enabling a
+delivery choice may also start that request after the check. Routine delivery and
+local tests never request permission. After denial, offer System Settings and a
+read-only recheck, including when returning to the open settings page. Opening
+System Settings or successfully saving a choice cannot grant authorization.
+
 Provide four independent local banner/sound groups: normal messages; important notices (another participant entering a conference call the account belongs to, and personal server message reminders); incoming direct calls; optional Calendar notifications. Keep conference participation and message reminders as distinct typed reasons. Room membership changes alone do not mean someone joined a call; suppress the current user's own join and coalesce participation bursts. Calendar defaults off and requires verified authenticated notification-source availability. Incoming calls retain their own lifecycle and delivery capacity under ordinary-message overload. Message, important and Calendar banners apply while minimized; incoming-call banners may also appear in the foreground without taking focus.
 
 Every category, including Important and Incoming calls, uses ordinary OS Focus/Do Not Disturb control for both banners and sound. Do not request critical/time-sensitive bypass or use a separate notification audio player. OS-managed sound depends on notification-daemon support; Linux independent sound-only delivery is explicitly unavailable when no portable Focus-safe route exists. Native macOS UserNotifications actions require a live app-bundled helper and an admitted current-call dispatcher. With unconfigured media, Accept remains unavailable; no stock CallKit call screen is claimed. A category Test checks local policy/helper delivery only and grants no account, Calendar or call authority.

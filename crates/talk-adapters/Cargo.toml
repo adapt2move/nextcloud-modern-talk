@@ -31,7 +31,6 @@ zip.workspace = true
 url.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
-keyring-core.workspace = true
 rusqlite.workspace = true
 dirs.workspace = true
 jiff.workspace = true
@@ -40,17 +39,24 @@ jiff.workspace = true
 rustix.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus-secret-service-keyring-store.workspace = true
 dbus-secret-service.workspace = true
-secret-service.workspace = true
 zbus.workspace = true
 
+# The old provider creates compatibility fixtures; it is not a shipping provider.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+keyring-core.workspace = true
+secret-service.workspace = true
+zbus-secret-service-keyring-store.workspace = true
+zbus = { workspace = true, features = ["service"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring-core.workspace = true
 apple-native-keyring-store.workspace = true
 exacl.workspace = true
 security-framework.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
+keyring-core.workspace = true
 windows-native-keyring-store.workspace = true
 windows-permissions.workspace = true
 winapi-util.workspace = true

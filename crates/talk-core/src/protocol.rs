@@ -152,10 +152,22 @@ pub struct MessageNotice {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageNotifications {
     pub scope: AccountScope,
+    pub source: NotificationSourceState,
     pub notices: Page<MessageNotice, 4>,
     /// New source events also request a full navigation reconciliation, even if
     /// local/server notification policy suppresses every banner.
     pub changed: bool,
+}
+/// A paused read is not a fresh source observation. Preserve the bounded server
+/// retry hint across the identity boundary without exposing transport details.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NotificationSourceState {
+    Available,
+    Unsupported,
+    Paused {
+        reason: crate::ports::ErrorKind,
+        retry_after_millis: Option<u32>,
+    },
 }
 
 /// Coalescible hints from an admitted account transport (including HPB).

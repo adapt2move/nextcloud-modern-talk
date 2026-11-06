@@ -3,7 +3,9 @@ use super::{Desktop, LocalAction};
 use gpui::Context;
 use talk_core::preferences::devices::{DeviceError, DeviceIntent, DeviceSnapshot};
 use talk_core::preferences::notifications::{
-    NotificationCategory, NotificationError, NotificationState, SourceAvailability,
+    NotificationAccessAction, NotificationAccessOperation, NotificationAccessSnapshot,
+    NotificationAuthorization, NotificationCategory, NotificationError, NotificationState,
+    SourceAvailability,
 };
 use talk_core::preferences::{
     DisplayScale, LoadState, LocalPreferences, Locale, LocalePreference, PreferenceCommand,
@@ -150,6 +152,16 @@ pub trait ComputerSettingsPort {
     fn notification_capabilities(
         &self,
     ) -> talk_core::preferences::notifications::NativeNotificationCapabilities;
+    fn notification_access(&self) -> NotificationAccessSnapshot {
+        NotificationAccessSnapshot::unavailable()
+    }
+    fn submit_notification_access(
+        &self,
+        _request: RequestId,
+        _action: NotificationAccessAction,
+    ) -> Result<(), NotificationError> {
+        Err(NotificationError::Unavailable)
+    }
     fn notification_source(
         &self,
         scope: Option<talk_core::ui::AccountScope>,
@@ -282,6 +294,11 @@ impl Desktop {
         self.refresh_permissions(cx);
         self.refresh_devices(cx);
         self.refresh_account_preferences(cx);
+        let access = self.settings_port.notification_access();
+        if self.notification_access != access {
+            self.notification_access = access;
+            cx.notify();
+        }
         let state = self.settings_port.notification_state();
         if self.notification_state != state {
             self.notification_state = state;
@@ -343,6 +360,49 @@ impl Desktop {
             }
         }
         self.commit_preferences(values, cx);
+        if matches!(
+            edit,
+            PreferenceEdit::NotificationBanner(_, true)
+                | PreferenceEdit::NotificationSound(_, true)
+        ) && self.preference_error.is_none()
+            && self.notification_access.authorization == NotificationAuthorization::NotDetermined
+            && !matches!(
+                self.notification_access.operation,
+                NotificationAccessOperation::Pending { .. }
+            )
+        {
+            self.notification_access_action(NotificationAccessAction::Request);
+        }
+    }
+    pub(super) fn notification_tests_authorized(&self) -> bool {
+        !cfg!(target_os = "macos")
+            || self.notification_access.authorization == NotificationAuthorization::Granted
+    }
+    pub(super) fn notification_access_action(&mut self, action: NotificationAccessAction) {
+        let Some(next) = self.settings_request.checked_add(1) else {
+            return;
+        };
+        self.settings_request = next;
+        match self
+            .settings_port
+            .submit_notification_access(RequestId(next), action)
+        {
+            Ok(()) => {
+                self.notification_access_error = None;
+                self.notification_access = self.settings_port.notification_access();
+            }
+            Err(NotificationError::Busy) if action == NotificationAccessAction::Check => {}
+            Err(error) => self.notification_access_error = Some(error),
+        }
+    }
+    pub(crate) fn refresh_notification_access(&mut self, cx: &mut Context<Self>) {
+        if cfg!(target_os = "macos")
+            && self.overlay == Some(super::Overlay::Settings)
+            && self.settings_tab == SettingsTab::Notifications
+        {
+            self.notification_access_action(NotificationAccessAction::Check);
+            cx.notify();
+        }
     }
     pub(super) fn retry_preferences(&mut self, effects: bool, cx: &mut Context<Self>) {
         let Some(request) = self.settings_request.checked_add(1) else {

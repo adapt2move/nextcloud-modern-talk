@@ -21,7 +21,12 @@ func permissionStatus(_ media: AVMediaType) -> String {
     }
 }
 
+@MainActor
 func checkPermission(kind: String, request: Bool) {
+    if kind == "notifications" {
+        checkNotificationPermission(request: request)
+        return
+    }
     if kind == "screen" {
         // Read-only preflight belongs to the desktop process. Only the deliberate
         // request stays here so Rust can kill/reap a cancelled or timed-out prompt.
@@ -47,6 +52,40 @@ func checkPermission(kind: String, request: Bool) {
     } else {
         emit(permissionStatus(media))
     }
+}
+
+func notificationStatus(_ settings: UNNotificationSettings) -> String {
+    switch settings.authorizationStatus {
+    case .notDetermined: return "not-determined"
+    case .authorized, .provisional: return "granted"
+    case .denied: return "denied"
+    default: return "unknown"
+    }
+}
+
+@MainActor
+func checkNotificationPermission(request: Bool) {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let center = UNUserNotificationCenter.current()
+    let finish: (UNNotificationSettings) -> Void = { settings in
+        emit(notificationStatus(settings))
+        exit(0)
+    }
+    center.getNotificationSettings { settings in
+        if request && settings.authorizationStatus == .notDetermined {
+            center.requestAuthorization(options: [.alert, .sound]) { _, error in
+                guard error == nil else { exit(2) }
+                center.getNotificationSettings(completionHandler: finish)
+            }
+        } else {
+            finish(settings)
+        }
+    }
+    // Only an explicit Request may display a sheet. The Rust owner also kills
+    // and reaps this helper on cancellation or its operation-specific deadline.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 115) { exit(3) }
+    app.run()
 }
 
 func decodeHex(_ value: String, maximum: Int) -> String? {
@@ -83,7 +122,6 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     let call: Bool
     let accept: Bool
     let decline: Bool
-    let prompt: Bool
     let language: String
     var live = true
     var submitted = false
@@ -95,7 +133,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
               let title = decodeHex(arguments[3], maximum: 128),
               let body = decodeHex(arguments[4], maximum: 512),
               let sound = NotificationSound(rawValue: arguments[6]),
-              [5, 7, 8, 9, 10].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              [5, 7, 8, 9].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              arguments[10] == "0", // Reserved: delivery never requests permission.
               ["en", "de", "es"].contains(arguments[11]) else { return nil }
         identifier = arguments[2]
         self.title = title
@@ -105,7 +144,6 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         call = arguments[7] == "1"
         accept = call && arguments[8] == "1"
         decline = call && arguments[9] == "1"
-        prompt = !call && arguments[10] == "1"
         language = arguments[11]
         super.init()
         center.delegate = self
@@ -127,15 +165,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             _ = try? FileHandle.standardInput.read(upToCount: 16)
             DispatchQueue.main.async { self?.finish(withdraw: true) }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (call ? 40 : 120)) { [weak self] in self?.finish(withdraw: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (call ? 40 : 8)) { [weak self] in self?.finish(withdraw: true) }
         center.getNotificationSettings { [weak self] settings in
             guard let self = self else { return }
-            if settings.authorizationStatus == .notDetermined && self.prompt {
-                self.center.requestAuthorization(options: [.alert, .sound]) { _, error in
-                    if error != nil { DispatchQueue.main.async { emit("failed"); self.finish(withdraw: true) }; return }
-                    self.center.getNotificationSettings { settings in self.submit(settings) }
-                }
-            } else { self.submit(settings) }
+            self.submit(settings)
         }
     }
 

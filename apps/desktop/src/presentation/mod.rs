@@ -138,6 +138,7 @@ pub enum LocalAction {
     SettingsMenu,
     RetryPreferences(bool),
     TestNotification(talk_core::preferences::notifications::NotificationCategory),
+    NotificationAccess(talk_core::preferences::notifications::NotificationAccessAction),
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
     SaveUploadFolder,
@@ -244,6 +245,8 @@ pub struct Desktop {
     settings_request: u64,
     preference_error: Option<talk_core::preferences::PreferenceError>,
     notification_state: talk_core::preferences::notifications::NotificationState,
+    notification_access: talk_core::preferences::notifications::NotificationAccessSnapshot,
+    notification_access_error: Option<talk_core::preferences::notifications::NotificationError>,
     notification_error: Option<(
         talk_core::preferences::notifications::NotificationCategory,
         talk_core::preferences::notifications::NotificationError,
@@ -478,6 +481,8 @@ impl Desktop {
             preferences,
             permission_ui: permissions::PermissionUi::new(settings_port.permission_snapshot()),
             onboarding_ui: onboarding::OnboardingUi::new(),
+            notification_access: settings_port.notification_access(),
+            notification_access_error: None,
             settings_port,
             preference_error: None,
             notification_state: talk_core::preferences::notifications::NotificationState::Idle,
@@ -1090,6 +1095,13 @@ impl Desktop {
                     self.return_focus = window.focused(cx);
                 }
                 self.overlay = Some(overlay);
+                if overlay == Overlay::Settings
+                    && self.settings_tab == preferences::SettingsTab::Notifications
+                {
+                    self.notification_access_action(
+                        talk_core::preferences::notifications::NotificationAccessAction::Check,
+                    );
+                }
                 if overlay == Overlay::Create {
                     self.open_creation(cx);
                 }
@@ -1532,6 +1544,11 @@ impl Desktop {
                     self.device_picker = None;
                     self.enter_device_page();
                 }
+                if tab == preferences::SettingsTab::Notifications {
+                    self.notification_access_action(
+                        talk_core::preferences::notifications::NotificationAccessAction::Check,
+                    );
+                }
                 if tab == preferences::SettingsTab::Privacy {
                     self.queue_permission_check(
                         talk_core::preferences::permissions::PermissionKind::ScreenSharing,
@@ -1602,7 +1619,11 @@ impl Desktop {
                     Err(error) => self.account_preference_error = Some(error),
                 }
             }
+            LocalAction::NotificationAccess(action) => self.notification_access_action(action),
             LocalAction::TestNotification(category) => {
+                if !self.notification_tests_authorized() {
+                    return;
+                }
                 if let Some(request) = self.settings_request.checked_add(1) {
                     self.settings_request = request;
                     let result = self.settings_port.test_notification(

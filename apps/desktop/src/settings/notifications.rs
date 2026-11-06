@@ -1,5 +1,7 @@
 //! Bounded notification owner: one worker, one slot per priority, 16 correlated completions.
 //! Retains at most 8 current account source observations and 64 accepted event identities;
+//! queued ordinary alerts expire after 5 seconds, calls after 45 seconds.
+//! One separate authorization slot uses this same worker, without an idle timer.
 //! removed sources are retired and old identities evicted in order. Participation bursts coalesce
 //! per call for 5 seconds. Call cancellation stops queued/running helpers, but cannot
 //! withdraw a banner already submitted through these one-shot native helper routes.
@@ -20,13 +22,16 @@ use talk_core::{
         Locale, NotificationPreferences, RequestId,
         notifications::{
             self, BannerBackend, DeliveryOutcome, NativeCallAction, NativeCallActionCompletion,
-            NativeCallActions, NativeNotificationCapabilities, NotificationCategory,
-            NotificationCompletion, NotificationError, NotificationEvent, NotificationKind,
-            NotificationSources, NotificationState, SoundBackend, SourceAvailability,
+            NativeCallActions, NativeNotificationCapabilities, NotificationAccessAction,
+            NotificationAccessOperation, NotificationAccessSnapshot, NotificationAuthorization,
+            NotificationCategory, NotificationCompletion, NotificationError, NotificationEvent,
+            NotificationKind, NotificationSources, NotificationState, SoundBackend,
+            SourceAvailability,
         },
     },
 };
 
+mod access;
 mod macos;
 
 #[cfg(test)]
@@ -46,12 +51,16 @@ struct State {
     actions: VecDeque<NativeCallActionCompletion>,
     capabilities: NativeNotificationCapabilities,
     pending: [Option<NotificationEvent>; 3],
+    pending_at: [Option<Instant>; 3],
     running: Option<Running>,
     sources: Vec<NotificationSources>,
     recent: VecDeque<NotificationKind>,
     joins: VecDeque<(CallScope, Instant)>,
     completions: VecDeque<NotificationCompletion>,
     last_request: RequestId,
+    access: NotificationAccessSnapshot,
+    access_pending: Option<access::Command>,
+    last_access_request: RequestId,
     stopped: bool,
     result: NotificationState,
 }
@@ -68,12 +77,16 @@ impl State {
                 native_call_actions: false,
             },
             pending: [None, None, None],
+            pending_at: [None, None, None],
             running: None,
             sources: Vec::new(),
             recent: VecDeque::new(),
             joins: VecDeque::new(),
             completions: VecDeque::new(),
             last_request: RequestId(0),
+            access: NotificationAccessSnapshot::unknown(),
+            access_pending: None,
+            last_access_request: RequestId(0),
             stopped: false,
             result: NotificationState::Idle,
         }
@@ -125,6 +138,11 @@ impl State {
         banner: DeliveryOutcome,
         sound: DeliveryOutcome,
     ) {
+        for lane in 0..3 {
+            if self.pending[lane].is_none() {
+                self.pending_at[lane] = None;
+            }
+        }
         // Admission reserves one completion for every accepted pending/running event.
         self.completions.push_back(NotificationCompletion {
             request: event.request,
@@ -146,6 +164,17 @@ impl State {
             return Err(NotificationError::Stale);
         }
         self.eligible_source(&event)?;
+        // An explicit first-authorization sheet cannot turn queued old events
+        // into fresh alerts after a long decision. Composition settles rejection.
+        if matches!(
+            self.access.operation,
+            NotificationAccessOperation::Pending {
+                action: NotificationAccessAction::Request,
+                ..
+            }
+        ) {
+            return Err(NotificationError::PermissionDenied);
+        }
         if !matches!(event.kind, NotificationKind::Test { .. }) && self.recent.contains(&event.kind)
         {
             return Err(NotificationError::Duplicate);
@@ -200,15 +229,58 @@ impl State {
         self.last_request = event.request;
         self.result = NotificationState::Pending(event.request);
         self.pending[lane] = Some(event);
+        self.pending_at[lane] = Some(now);
         Ok(())
     }
+    fn enter_foreground(&mut self) -> bool {
+        let mut changed = false;
+        for lane in 0..3 {
+            if self.pending[lane]
+                .as_ref()
+                .is_some_and(|e| matches!(e.kind, NotificationKind::Message { .. }))
+                && let Some(event) = self.pending[lane].take()
+            {
+                self.finish(
+                    &event,
+                    DeliveryOutcome::Cancelled,
+                    DeliveryOutcome::Cancelled,
+                );
+                changed = true;
+            }
+        }
+        if let Some(running) = &mut self.running
+            && !running.cancelled
+            && matches!(running.event.kind, NotificationKind::Message { .. })
+        {
+            running.cancelled = true;
+            changed = true;
+        }
+        changed
+    }
     fn next(&mut self) -> Option<NotificationEvent> {
-        let event = (0..3).rev().find_map(|lane| self.pending[lane].take())?;
-        self.running = Some(Running {
-            event: event.clone(),
-            cancelled: false,
-        });
-        Some(event)
+        for lane in (0..3).rev() {
+            let Some(event) = self.pending[lane].take() else {
+                continue;
+            };
+            let lifetime = Duration::from_secs(if lane == 2 { 45 } else { 5 });
+            if self.pending_at[lane]
+                .take()
+                .is_none_or(|at| at.elapsed() >= lifetime)
+            {
+                self.finish(
+                    &event,
+                    DeliveryOutcome::Cancelled,
+                    DeliveryOutcome::Cancelled,
+                );
+                continue;
+            }
+            self.running = Some(Running {
+                event: event.clone(),
+                cancelled: false,
+            });
+            return Some(event);
+        }
+        None
     }
     fn cancel_obsolete(&mut self) {
         for lane in 0..3 {
@@ -332,6 +404,11 @@ impl NotificationRuntime {
     pub fn update_locale(&self, locale: Locale) {
         self.shared.lock().locale = locale;
     }
+    pub fn update_visibility(&self, background: bool) {
+        if !background && self.shared.lock().enter_foreground() {
+            self.shared.wake.notify_one();
+        }
+    }
     pub fn take_action_completion(&self) -> Option<NativeCallActionCompletion> {
         self.shared.lock().actions.pop_front()
     }
@@ -341,6 +418,18 @@ impl NotificationRuntime {
     }
     pub fn snapshot(&self) -> NotificationState {
         self.shared.lock().result
+    }
+    pub fn access_snapshot(&self) -> NotificationAccessSnapshot {
+        self.shared.lock().access
+    }
+    pub fn submit_access(
+        &self,
+        request: RequestId,
+        action: NotificationAccessAction,
+    ) -> Result<(), NotificationError> {
+        access::admit(&mut self.shared.lock(), request, action, Instant::now())?;
+        self.shared.wake.notify_one();
+        Ok(())
     }
     pub fn take_completion(&self) -> Option<NotificationCompletion> {
         self.shared.lock().completions.pop_front()
@@ -410,6 +499,7 @@ impl NotificationRuntime {
     pub fn request_shutdown(&self) {
         let mut state = self.shared.lock();
         state.stopped = true;
+        access::cancel(&mut state);
         for lane in 0..3 {
             if let Some(event) = state.pending[lane].take() {
                 state.finish(
@@ -454,20 +544,39 @@ fn run(shared: Arc<Shared>, dispatcher: Option<Arc<dyn NotificationCallDispatche
     let mut capabilities = native_capabilities();
     capabilities.native_call_actions &= dispatcher.is_some();
     shared.lock().capabilities = capabilities;
+    enum Work {
+        Event(NotificationEvent),
+        Access(access::Command),
+    }
     loop {
-        let event = {
+        let work = {
             let mut state = shared.lock();
-            while state.pending.iter().all(Option::is_none) && !state.stopped {
+            while state.pending.iter().all(Option::is_none)
+                && state.access_pending.is_none()
+                && !state.stopped
+            {
                 state = shared.wake.wait(state).unwrap_or_else(|e| e.into_inner());
             }
             if state.stopped {
                 state.result = NotificationState::Stopped;
                 return;
             }
-            let Some(event) = state.next() else {
+            if state.pending[2].is_some() {
+                state.next().map(Work::Event)
+            } else if let Some(command) = state.access_pending.take() {
+                Some(Work::Access(command))
+            } else {
+                state.next().map(Work::Event)
+            }
+        };
+        let event = match work {
+            Some(Work::Event(event)) => event,
+            Some(Work::Access(command)) => {
+                let result = access::perform(&shared, command);
+                access::complete(&mut shared.lock(), command, result);
                 continue;
-            };
-            event
+            }
+            None => continue,
         };
         let (banner, sound) = deliver_pair(&shared, &event, dispatcher.as_deref());
         let mut state = shared.lock();

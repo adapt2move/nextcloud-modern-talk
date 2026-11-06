@@ -22,15 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
     "talk-core": ("crates/talk-core", {"pulldown-cmark", "url"}),
     "nextcloud-talk-api": ("crates/nextcloud-talk-api", {"reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "cookie", "futures-lite", "futures-util", "tokio-tungstenite", "rustls", "rustls-native-certs"}),
-    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "keyring-core", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
+    "talk-adapters": ("crates/talk-adapters", {"talk-core", "nextcloud-talk-api", "reqwest", "tokio", "serde", "serde_json", "url", "zeroize", "getrandom", "rusqlite", "dirs", "jiff", "semver", "self_update", "sha2", "tempfile", "flate2", "tar", "zip", "webrtc", "rtc", "async-trait", "gstreamer", "gstreamer-app", "gstreamer-video", "futures-util"}),
     "talk-bootstrap": ("apps/bootstrap", {"talk-core", "talk-adapters"}),
     "talk-desktop": ("apps/desktop", {"talk-core", "talk-adapters", "gpui", "unicode-segmentation", "atomicwrites", "cpal", "gstreamer", "gstreamer-app", "gstreamer-video", "image"}),
 }
 PLATFORM_EDGES = {
     'cfg(unix)': {'rustix'},
-    'cfg(target_os = "linux")': {'zbus-secret-service-keyring-store', 'dbus-secret-service', 'secret-service', 'zbus'},
-    'cfg(target_os = "macos")': {'apple-native-keyring-store', 'exacl', 'security-framework'},
-    'cfg(target_os = "windows")': {'windows-native-keyring-store', 'windows-permissions', 'winapi-util', 'atomicwrites'},
+    'cfg(target_os = "linux")': {'dbus-secret-service', 'zbus'},
+    'cfg(target_os = "macos")': {'keyring-core', 'apple-native-keyring-store', 'exacl', 'security-framework'},
+    'cfg(target_os = "windows")': {'keyring-core', 'windows-native-keyring-store', 'windows-permissions', 'winapi-util', 'atomicwrites'},
 }
 DESKTOP_PLATFORM_EDGES = {
     'cfg(unix)': {'rustix'},
@@ -332,7 +332,7 @@ def check() -> None:
         "zbus-secret-service-keyring-store": {"default-features": False, "features": ["crypto-rust"]},
         "dbus-secret-service": {"default-features": False, "features": ["crypto-rust"]},
         "secret-service": {"default-features": False, "features": ["crypto-rust"]},
-        "zbus": {"default-features": False, "features": ["blocking-api", "async-io"]},
+        "zbus": {"default-features": False, "features": ["proxy", "tokio"]},
         "exacl": {"default-features": False},
         "security-framework": {"default-features": False},
         "windows-permissions": {"default-features": False},
@@ -379,6 +379,14 @@ def check() -> None:
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         platform = {target: {"dependencies": {dep: {"workspace": True} for dep in dependencies}}
                     for target, dependencies in platform_edges.items()}
+        if name == "talk-adapters":
+            # Legacy fixtures must not unify the shipping D-Bus/credential graph.
+            platform['cfg(target_os = "linux")']["dev-dependencies"] = {
+                "keyring-core": {"workspace": True},
+                "secret-service": {"workspace": True},
+                "zbus-secret-service-keyring-store": {"workspace": True},
+                "zbus": {"workspace": True, "features": ["service"]},
+            }
         require(manifest.get("target", {}) == platform,
                 f"{name}: hidden platform/build/test edges need review")
         if name == "talk-adapters":
@@ -413,6 +421,8 @@ def check() -> None:
         require(package.get("version") == workspace["package"]["version"], f"{name}: lockfile version mismatch")
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         expected_edges = GRAPH.get(name, (None, set()))[1] | set().union(*platform_edges.values())
+        if name == "talk-adapters":
+            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store"}
         require({dep.split()[0] for dep in package.get("dependencies", [])} == expected_edges,
                 f"{name}: lockfile dependency mismatch")
     for package in packages:

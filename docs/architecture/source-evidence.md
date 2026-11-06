@@ -80,3 +80,19 @@ attributed upstream references for codecs, transform APIs and Talk framing.
 It is research provenance, not the shipping engine identity or an SBOM. Application
 queue bounds do not establish codec, framework, GPU or whole-process memory
 bounds; see [allocation requirements](media-allocation.md).
+
+## A-SRC-07 — Notifications
+
+The official [Notifications API v2 contract](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/docs/ocs-endpoint-v2.md)
+defines capability discovery, authenticated listing, the DND response header and
+the hourly retry after HTTP 204. The matching
+[endpoint controller](https://github.com/nextcloud/notifications/blob/f106a3fedaaca27c54a5b701ad54f8b688e628ec/lib/Controller/EndpointController.php)
+distinguishes an ordinary empty list from having no registered notifier.
+Spreed's structured notification identities are defined in the
+[Talk 24 notifier](https://github.com/nextcloud/spreed/blob/0d736588dcfb42becf0e5688e0847e35d5b5efa2/lib/Notification/Notifier.php)
+and [Talk 25 notifier](https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/lib/Notification/Notifier.php).
+
+Apple's [notification permission guide](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)
+defines read-only settings inspection and an explicit authorization request.
+The [desktop contract](../product/desktop-and-accessibility.md#desk-002) keeps this
+system state separate from saved local delivery choices and source availability.

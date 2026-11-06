@@ -87,6 +87,10 @@ async fn messages(
     else {
         panic!("account notifications");
     };
+    assert_eq!(
+        value.source,
+        talk_core::protocol::NotificationSourceState::Available
+    );
     value
 }
 

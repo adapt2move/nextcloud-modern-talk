@@ -51,6 +51,14 @@ If macOS asks you to restart after allowing screen access, reopen the app. It
 returns to the ready screen for the same account and checks the actual permission
 states again. You can change permissions later in Settings.
 
+### Notifications
+
+On macOS, open **Settings → Notifications → Allow notifications** to request the
+system permission. Opening that page only checks the current state. If permission
+was denied, open macOS **System Settings → Notifications**, allow NextCloud Modern
+Talk, then return to the settings page or choose **Check again**. Banner/Sound
+choices in Talk are local preferences and cannot override a system denial or Focus.
+
 ### Closing the window and quitting
 
 On macOS, the red close button or **Command-W** hides the window and keeps Talk
