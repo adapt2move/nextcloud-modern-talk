@@ -30,6 +30,7 @@ fn listed(context: ConversationRef) -> protocol::Conversation {
             join_call: Decision::Unknown,
         },
         unread_messages: Some(0),
+        unread_direct_mention: Some(false),
         last_activity: Some(1),
         call_active: Some(false),
         sensitive: false,

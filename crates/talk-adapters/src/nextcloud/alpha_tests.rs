@@ -582,6 +582,34 @@ async fn unsupported_provider_and_unknown_permissions_are_truthful() {
     );
 }
 #[test]
+fn direct_mention_flag_requires_capability_and_boolean_observation() {
+    let id = ConversationId {
+        account: scope().account,
+        host: HostId::from_local(1),
+        local: 1,
+    };
+    let mut data = room();
+    data["unreadMentionDirect"] = json!(true);
+    let without = wire::Capabilities::decode(&features(&[])).unwrap();
+    let with = wire::Capabilities::decode(&features(&["direct-mention-flag"])).unwrap();
+    assert_eq!(
+        wire::room(&data, id, &without)
+            .unwrap()
+            .unread_direct_mention,
+        None
+    );
+    assert_eq!(
+        wire::room(&data, id, &with).unwrap().unread_direct_mention,
+        Some(true)
+    );
+    data["unreadMentionDirect"] = json!("true");
+    assert_eq!(
+        wire::room(&data, id, &with).unwrap().unread_direct_mention,
+        None
+    );
+}
+
+#[test]
 fn settings_unknown_attributes_never_grant_owner_mutation() {
     let c = wire::Capabilities::decode(&features(&["room-description"])).unwrap();
     let mut d = room();

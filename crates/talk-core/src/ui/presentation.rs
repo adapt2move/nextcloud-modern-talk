@@ -348,6 +348,7 @@ pub struct ConversationView {
     pub updated_label: Text<32>,
     pub kind: ConversationKind,
     pub unread: u32,
+    pub unread_direct_mention: Option<bool>,
     pub favorite: Option<bool>,
     pub organization: ConversationOrganization,
     pub tags: Option<Page<TagRef, 20>>,

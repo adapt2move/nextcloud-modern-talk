@@ -710,6 +710,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
+                unread_direct_mention: Some(id == 1 && unread > 0),
                 presence: if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {
@@ -1658,14 +1659,15 @@ impl NativeDesktopPort for DevelopmentPort {
                 match action {
                     MessageAction::MarkUnread => {
                         panel.result = Some((request, Completion::ServerAccepted));
-                        self.snapshot.conversations = page(
-                            self.snapshot.conversations.as_slice().iter().cloned().map(|mut row| {
-                                if row.context == context {
-                                    row.unread = row.unread.max(1);
-                                }
-                                row
-                            }),
-                        );
+                        self.snapshot.conversations =
+                            page(self.snapshot.conversations.as_slice().iter().cloned().map(
+                                |mut row| {
+                                    if row.context == context {
+                                        row.unread = row.unread.max(1);
+                                    }
+                                    row
+                                },
+                            ));
                     }
                     MessageAction::StageFiles(paths) => {
                         use talk_core::ui::messaging::{UploadState, UploadView};

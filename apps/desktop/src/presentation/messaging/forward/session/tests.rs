@@ -60,6 +60,7 @@ fn snapshot() -> PresentationSnapshot {
         updated_label: Text::new("").unwrap(),
         kind: ConversationKind::Group,
         unread: 0,
+        unread_direct_mention: None,
         favorite: None,
         organization: ConversationOrganization {
             classified: Some(false),

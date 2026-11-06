@@ -1293,6 +1293,8 @@ impl Accounts {
                                         let mut row = row.clone();
                                         if row.context == context {
                                             row.unread = 0;
+                                            row.unread_direct_mention =
+                                                row.unread_direct_mention.map(|_| false);
                                         }
                                         row
                                     }),

@@ -781,10 +781,12 @@ impl Desktop {
             })
             .when(row.unread > 0, |d| {
                 d.child(
-                    if matches!(
-                        row.kind,
-                        ConversationKind::Direct | ConversationKind::NoteToSelf
-                    ) {
+                    if row.unread_direct_mention == Some(true)
+                        || matches!(
+                            row.kind,
+                            ConversationKind::Direct | ConversationKind::NoteToSelf
+                        )
+                    {
                         div()
                             .flex_none()
                             .min_w(px(18.))
@@ -801,11 +803,19 @@ impl Desktop {
                             .items_center()
                             .justify_center()
                             .text_center()
-                            .child(if row.unread > 99 {
-                                "99+".to_owned()
-                            } else {
-                                row.unread.to_string()
-                            })
+                            .child(format!(
+                                "{}{}",
+                                if row.unread_direct_mention == Some(true) {
+                                    "@ "
+                                } else {
+                                    ""
+                                },
+                                if row.unread > 99 {
+                                    "99+".to_owned()
+                                } else {
+                                    row.unread.to_string()
+                                }
+                            ))
                     } else {
                         div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
                     },

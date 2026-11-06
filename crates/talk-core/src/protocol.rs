@@ -94,6 +94,8 @@ pub struct Conversation {
     pub archive: Decision,
     pub actions: RoomActions,
     pub unread_messages: Option<u32>,
+    /// A flag, not a count; absent when direct-mention-flag is unavailable.
+    pub unread_direct_mention: Option<bool>,
     pub last_activity: Option<u64>,
     pub call_active: Option<bool>,
     pub sensitive: bool,

@@ -1284,6 +1284,7 @@ mod tests {
                 join_call: Decision::Unknown,
             },
             unread_messages: Some(4),
+            unread_direct_mention: Some(false),
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,

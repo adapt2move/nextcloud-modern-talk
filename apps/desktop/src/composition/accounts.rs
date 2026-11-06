@@ -1557,6 +1557,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
             _ => ConversationKind::Unknown,
         },
         unread: r.unread_messages.unwrap_or(0),
+        unread_direct_mention: r.unread_direct_mention,
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {

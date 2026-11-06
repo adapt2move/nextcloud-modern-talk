@@ -55,6 +55,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
+  The direct-mention badge uses the server's boolean flag alongside the total
+  unread-message count; the server does not expose a direct-mention count.
   macOS Notifications settings now separate local choices from observed OS
   authorization and offer an explicit first request or denial guidance. The
   main-process permission prompt and delivery through the bundled notification helper still require
