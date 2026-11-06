@@ -1247,14 +1247,14 @@ mod gallery_tests {
             0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
         }
         for palette in [
-            super::super::theme::Palette::Blue,
-            super::super::theme::Palette::Sage,
+            crate::presentation::theme::Palette::Blue,
+            crate::presentation::theme::Palette::Sage,
         ] {
             for appearance in [
-                super::super::theme::Appearance::Light,
-                super::super::theme::Appearance::Dark,
+                crate::presentation::theme::Appearance::Light,
+                crate::presentation::theme::Appearance::Dark,
             ] {
-                let theme = super::super::theme::Theme::resolve(
+                let theme = crate::presentation::theme::Theme::resolve(
                     palette,
                     appearance,
                     gpui::WindowAppearance::Light,
