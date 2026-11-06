@@ -101,6 +101,10 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    MinimizeCall(CallScope),
+    ExpandCall(CallScope),
+    ToggleCallFullscreen(CallScope),
+    AcceptCallWithVideo,
     FocusCallParticipant(CallScope, Option<u128>),
     Navigate(ConversationRef),
     Destination(SidebarDestination),
@@ -198,6 +202,7 @@ pub struct InitialView {
     pub overlay: Option<Overlay>,
     pub prejoin: bool,
     pub focus_first_call_participant: bool,
+    pub start_with_call_dock: bool,
     pub onboarding: bool,
     pub scale: u16,
 }
@@ -288,6 +293,8 @@ pub struct Desktop {
     sidebar_hidden: bool,
     pub call_chat_open: bool,
     call_focus: Option<(CallScope, u128)>,
+    call_minimized: Option<CallScope>,
+    call_started: Option<(CallScope, std::time::Instant)>,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -347,6 +354,7 @@ impl Desktop {
             overlay: initial_overlay,
             prejoin,
             focus_first_call_participant,
+            start_with_call_dock,
             onboarding,
             scale,
         } = initial;
@@ -445,8 +453,25 @@ impl Desktop {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
         let call_focus = if development && focus_first_call_participant {
-            snapshot.call.as_ref().and_then(|call| call.participants.as_slice().first().map(|p| (call.scope, p.local_id)))
-        } else { None };
+            snapshot.call.as_ref().and_then(|call| {
+                call.participants
+                    .as_slice()
+                    .first()
+                    .map(|p| (call.scope, p.local_id))
+            })
+        } else {
+            None
+        };
+        let call_minimized = if development && start_with_call_dock {
+            snapshot.call.as_ref().map(|call| call.scope)
+        } else {
+            None
+        };
+        let call_started = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Active)
+            .map(|call| (call.scope, std::time::Instant::now()));
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
@@ -522,6 +547,8 @@ impl Desktop {
             sidebar_hidden: false,
             call_chat_open: true,
             call_focus,
+            call_minimized,
+            call_started,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -732,6 +759,37 @@ impl Desktop {
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
+        let live_scope = next
+            .call
+            .as_ref()
+            .filter(|call| {
+                !matches!(
+                    call.stage,
+                    CallStage::Ended | CallStage::Failed | CallStage::Incoming
+                )
+            })
+            .map(|call| call.scope);
+        if self
+            .call_minimized
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_minimized = None;
+        }
+        if self
+            .call_started
+            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        {
+            self.call_started = None;
+        }
+        if self.call_started.is_none() {
+            if let Some(call) = next
+                .call
+                .as_ref()
+                .filter(|call| call.stage == CallStage::Active)
+            {
+                self.call_started = Some((call.scope, std::time::Instant::now()));
+            }
+        }
         self.snapshot = next;
         let limit = self.composer_message_limit();
         self.composer
@@ -1228,9 +1286,51 @@ impl Desktop {
                     self.pending_navigation_focus = Some(open);
                 }
             }
+            LocalAction::MinimizeCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = Some(scope);
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ExpandCall(scope) => {
+                if self.call_minimized == Some(scope)
+                    && self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_minimized = None;
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ToggleCallFullscreen(scope) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    window.toggle_fullscreen();
+                }
+            }
             LocalAction::FocusCallParticipant(scope, participant) => {
-                if self.snapshot.call.as_ref().is_some_and(|call| call.scope == scope
-                    && participant.is_none_or(|id| call.participants.as_slice().iter().any(|p| p.local_id == id))) {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && participant.is_none_or(|id| {
+                            call.participants
+                                .as_slice()
+                                .iter()
+                                .any(|p| p.local_id == id)
+                        })
+                }) {
                     self.call_focus = participant.map(|id| (scope, id));
                 }
             }
@@ -1519,6 +1619,18 @@ impl Desktop {
                     self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
                         call: call.scope,
                         media: MediaIntent::MicrophoneOnCameraOff,
+                    }));
+                }
+            }
+            LocalAction::AcceptCallWithVideo => {
+                if let Some(call) = &self.snapshot.call
+                    && call.direct
+                    && call.stage == CallStage::Incoming
+                    && call.accept == Decision::Allowed
+                {
+                    self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
+                        call: call.scope,
+                        media: MediaIntent::MicrophoneOnCameraOn,
                     }));
                 }
             }
@@ -2242,6 +2354,7 @@ impl Render for Desktop {
             self.prejoin_view(window, cx).into_any_element()
         } else if self.snapshot.call.as_ref().is_some_and(|c| {
             c.stage != CallStage::Incoming
+                && self.call_minimized != Some(c.scope)
                 && !(matches!(c.stage, CallStage::Ended | CallStage::Failed)
                     && self.dismissed_terminal_call == Some(c.scope))
         }) {

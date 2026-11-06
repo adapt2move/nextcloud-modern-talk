@@ -1,3 +1,4 @@
+mod dock;
 use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
@@ -309,12 +310,27 @@ impl Desktop {
                     )),
             );
         }
-        if let Some(screen) = call.screen_stage.as_ref().filter(|screen| screen.kind == talk_core::ui::presentation::CallTileKind::Screen) {
+        if let Some(screen) = call
+            .screen_stage
+            .as_ref()
+            .filter(|screen| screen.kind == talk_core::ui::presentation::CallTileKind::Screen)
+        {
             stage = stage.child(
-                div().w_full().min_h(px(360.)).rounded(px(12.)).bg(t.stage_panel)
-                    .flex().flex_col().items_center().justify_center().gap_4()
+                div()
+                    .w_full()
+                    .min_h(px(360.))
+                    .rounded(px(12.))
+                    .bg(t.stage_panel)
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_4()
                     .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
-                    .child(self.lf("{name} teilt den Bildschirm", &[("name", screen.name.as_str())]))
+                    .child(self.lf(
+                        "{name} teilt den Bildschirm",
+                        &[("name", screen.name.as_str())],
+                    ))
                     .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."))),
             );
         } else if call.share == MediaState::Active {
@@ -334,12 +350,17 @@ impl Desktop {
         }
         // Reserve the docked chat before choosing a grid so tiles keep a
         // useful width when the panel opens or the window is narrow.
-        let stage_width = f32::from(window.viewport_size().width)
-            - if show_chat { 300. } else { 0. }
-            - 32.;
+        let stage_width =
+            f32::from(window.viewport_size().width) - if show_chat { 300. } else { 0. } - 32.;
         let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
         let focused = self.call_focus.and_then(|(scope, id)| {
-            (scope == call.scope && call.participants.as_slice().iter().any(|p| p.local_id == id)).then_some(id)
+            (scope == call.scope
+                && call
+                    .participants
+                    .as_slice()
+                    .iter()
+                    .any(|p| p.local_id == id))
+            .then_some(id)
         });
         let mut feature = None;
         let mut tiles = div()
@@ -387,61 +408,77 @@ impl Desktop {
                     )
             };
             let tile = div()
-                    .relative()
-                    .min_w_0()
-                    .min_h(px(if focused == Some(participant.local_id) {
-                        360.
-                    } else if call.participants.as_slice().len() <= 2 {
-                        330.
-                    } else {
-                        210.
-                    }))
-                    .rounded(px(12.))
-                    .bg(t.stage_panel)
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap_4()
-                    .p_6()
-                    .child(visual)
-                    .child(
-                        div()
-                            .flex_none()
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(self.scaled_icon("user", 14., t.stage_muted))
-                            .when(participant.raised_hand, |row| row.child(self.scaled_icon("hand", 14., t.stage_muted)).child(self.l("Hand gehoben")))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_ellipsis()
-                                    .text_size(self.sp(12.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(format!(
-                                        "{}{}",
-                                        participant.name.as_str(),
-                                        if participant.self_user {
-                                            self.l(" · Du")
-                                        } else {
-                                            ""
-                                        }
-                                    )),
-                            )
-                            .child(self.button(
-                                format!("focus-call-{}", participant.local_id),
-                                if focused == Some(participant.local_id) { "Raster" } else { "Person hervorheben" },
-                                ButtonStyle::Stage,
-                                true,
-                                LocalAction::FocusCallParticipant(call.scope,
-                                    if focused == Some(participant.local_id) { None } else { Some(participant.local_id) }),
-                                cx,
+                .relative()
+                .min_w_0()
+                .min_h(px(if focused == Some(participant.local_id) {
+                    360.
+                } else if call.participants.as_slice().len() <= 2 {
+                    330.
+                } else {
+                    210.
+                }))
+                .rounded(px(12.))
+                .bg(t.stage_panel)
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_4()
+                .p_6()
+                .child(visual)
+                .child(
+                    div()
+                        .flex_none()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(self.scaled_icon("user", 14., t.stage_muted))
+                        .when(participant.raised_hand, |row| {
+                            row.child(self.scaled_icon("hand", 14., t.stage_muted))
+                                .child(self.l("Hand gehoben"))
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_ellipsis()
+                                .text_size(self.sp(12.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(format!(
+                                    "{}{}",
+                                    participant.name.as_str(),
+                                    if participant.self_user {
+                                        self.l(" · Du")
+                                    } else {
+                                        ""
+                                    }
+                                )),
+                        )
+                        .child(self.button(
+                            gpui::SharedString::from(format!(
+                                "focus-call-{}",
+                                participant.local_id
                             )),
-                    );
+                            if focused == Some(participant.local_id) {
+                                "Raster"
+                            } else {
+                                "Person hervorheben"
+                            },
+                            ButtonStyle::Stage,
+                            true,
+                            LocalAction::FocusCallParticipant(
+                                call.scope,
+                                if focused == Some(participant.local_id) {
+                                    None
+                                } else {
+                                    Some(participant.local_id)
+                                },
+                            ),
+                            cx,
+                        )),
+                );
             if focused == Some(participant.local_id) {
                 feature = Some(tile);
             } else {
@@ -669,7 +706,23 @@ impl Desktop {
                                                 )
                                             )),
                                     ),
-                            ),
+                            )
+                            .child(self.icon_button(
+                                "minimize-call",
+                                ("chevron-down", "Anruf minimieren"),
+                                ButtonStyle::Stage,
+                                Availability::available().labelled(),
+                                LocalAction::MinimizeCall(call.scope),
+                                cx,
+                            ))
+                            .child(self.icon_button(
+                                "fullscreen-call",
+                                ("square", "Vollbild umschalten"),
+                                ButtonStyle::Stage,
+                                Availability::available().labelled(),
+                                LocalAction::ToggleCallFullscreen(call.scope),
+                                cx,
+                            )),
                     )
                     .when(self.local_feedback_visible(), |d| {
                         d.child(
@@ -818,7 +871,13 @@ fn media_label(microphone: bool, state: MediaState) -> &'static str {
 /// or ordering. The scroll area owns rows that do not fit vertically.
 fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
     let logical_width = width.max(0.) * 100. / f32::from(scale.max(1));
-    let capacity = if logical_width >= 900. { 3 } else if logical_width >= 520. { 2 } else { 1 };
+    let capacity = if logical_width >= 900. {
+        3
+    } else if logical_width >= 520. {
+        2
+    } else {
+        1
+    };
     capacity.min(participants.clamp(1, 3) as u16)
 }
 

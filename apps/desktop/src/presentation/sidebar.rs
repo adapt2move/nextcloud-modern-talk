@@ -586,6 +586,11 @@ impl Desktop {
                     .child(list),
             )
         };
+        let sidebar = sidebar.when(
+            self.docked_call()
+                && !matches!(self.overlay, Some(Overlay::Settings | Overlay::Accounts)),
+            |sidebar| sidebar.child(self.call_dock(cx)),
+        );
         sidebar.child(
             div()
                 .flex_none()
