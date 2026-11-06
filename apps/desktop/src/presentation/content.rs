@@ -1022,6 +1022,8 @@ impl Desktop {
         let mut card = div()
             .flex()
             .flex_col()
+            .w_full()
+            .max_w(px(560.))
             .gap_2()
             .p_3()
             .rounded(px(8.))
@@ -1745,24 +1747,22 @@ impl Desktop {
                 }
                 for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
                     let id = entry.id;
-                    let mut row = div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .p_3()
-                        .bg(self.theme.subtle)
-                        .rounded(px(8.))
-                        .child(entry.draft.question.as_str().to_owned())
-                        .child(self.button(
-                            ("poll-draft-use", id as usize),
-                            "Für neue Umfrage verwenden",
-                            ButtonStyle::Quiet,
-                            !busy,
-                            LocalAction::Content(Action::LoadDraft { id, edit: false }),
-                            cx,
-                        ));
+                    let mut actions =
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_1()
+                            .child(self.button(
+                                ("poll-draft-use", id as usize),
+                                "Für neue Umfrage verwenden",
+                                ButtonStyle::Quiet,
+                                !busy,
+                                LocalAction::Content(Action::LoadDraft { id, edit: false }),
+                                cx,
+                            ));
                     if self.snapshot.content_panel.poll_drafts_edit.enabled() {
-                        row = row.child(self.button(
+                        actions = actions.child(self.button(
                             ("poll-draft-edit", id as usize),
                             "Entwurf bearbeiten",
                             ButtonStyle::Quiet,
@@ -1771,8 +1771,9 @@ impl Desktop {
                             cx,
                         ));
                     }
-                    row = if self.content_ui.delete_draft == Some(id) {
-                        row.child(self.hint(self.l("Diesen Entwurf löschen?")))
+                    actions = if self.content_ui.delete_draft == Some(id) {
+                        actions
+                            .child(self.hint(self.l("Diesen Entwurf löschen?")))
                             .child(self.button(
                                 ("poll-draft-delete-confirm", id as usize),
                                 "Entwurf endgültig löschen",
@@ -1782,7 +1783,7 @@ impl Desktop {
                                 cx,
                             ))
                     } else {
-                        row.child(self.button(
+                        actions.child(self.button(
                             ("poll-draft-delete", id as usize),
                             "Entwurf löschen",
                             ButtonStyle::Quiet,
@@ -1791,7 +1792,17 @@ impl Desktop {
                             cx,
                         ))
                     };
-                    body = body.child(row);
+                    body = body.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .p_3()
+                            .bg(self.theme.subtle)
+                            .rounded(px(8.))
+                            .child(entry.draft.question.as_str().to_owned())
+                            .child(actions),
+                    );
                 }
             }
         }
@@ -2066,6 +2077,9 @@ impl Desktop {
         let mut body = div()
             .flex()
             .flex_col()
+            .items_start()
+            .w_full()
+            .max_w(px(560.))
             .gap_2()
             .p_3()
             .bg(self.theme.subtle)
@@ -2097,7 +2111,7 @@ impl Desktop {
                 && !self.poll_submission_blocked()
                 && toggled_poll_votes(poll.max_votes, selection.iter().copied(), option.id)
                     .is_some();
-            let mut row = div().flex().flex_col().gap_1().child(
+            let mut row = div().flex().flex_col().w_full().gap_1().child(
                 self.button(
                     (
                         "poll-option",
@@ -2143,7 +2157,12 @@ impl Desktop {
                         .border_color(self.theme.muted)
                         .into_any_element()
                 })
-                .child(div().flex_1().child(option.label.as_str().to_owned()))
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(self.theme.text)
+                        .child(option.label.as_str().to_owned()),
+                )
                 .when(option.own, |d| d.child(self.hint(self.l("Deine Stimme"))))
                 .when(pending && selected, |d| {
                     d.child(self.hint(self.l("Wird gesendet …")))
