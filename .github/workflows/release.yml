@@ -87,6 +87,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: python3 tools/release/candidate.py
+      - name: Load persistent Developer ID for publication
+        env:
+          NMT_MACOS_REQUIRE_SIGNED: ${{ inputs.publish && '1' || '0' }}
+          MACOS_CERTIFICATE_P12_BASE64: ${{ inputs.publish && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ inputs.publish && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          MACOS_SIGNING_TEAM: ${{ vars.MACOS_SIGNING_TEAM }}
+        run: python3 tools/ci/macos_signing.py
       - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
       - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
       - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
@@ -98,6 +105,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+      - name: Remove temporary signing keychain
+        if: always()
+        run: python3 tools/ci/macos_signing.py --cleanup
 
   publish:
     name: Publish verified prerelease

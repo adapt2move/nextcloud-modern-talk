@@ -52,7 +52,7 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   remain incomplete. Unknown notification eligibility stays suppressed.
   macOS Notifications settings now separate local choices from observed OS
   authorization and offer an explicit first request or denial guidance. The
-  packaged permission prompt and its identity in System Settings still require
+  main-process permission prompt and delivery through the bundled notification helper still require
   native Mac qualification; Linux fixtures and macOS compilation do not prove it.
   macOS window closing keeps the application services alive; native close/reopen
   and notification reception with a hidden window still need Mac qualification.
@@ -74,7 +74,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Platforms
 
-- The macOS app is ad-hoc signed and is not notarized. See the
+- macOS publication now requires a persistent Developer ID Application identity
+  and verifies the issuing team for the app and nested code. Non-publishing CI
+  packages and existing releases through v0.0.10 remain ad-hoc signed. Switching
+  from an old ad-hoc build can require one new Keychain/TCC approval; its old code
+  identity cannot safely be preserved. Notarization is not implemented. See the
   [first-launch instructions](install.md#first-launch-blocked-by-macos).
 - Mac CI checks compilation, package structure, native library paths and
   signatures. Native login, permissions, devices, PDF rendering and update installation still

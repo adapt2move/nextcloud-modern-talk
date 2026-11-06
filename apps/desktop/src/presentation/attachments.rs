@@ -6,7 +6,8 @@ use super::{
     messaging,
 };
 use gpui::{
-    Context, Div, ExternalPaths, Focusable, Render, SharedString, Window, div, prelude::*, px,
+    Context, Div, ExternalPaths, Focusable, MouseButton, Render, SharedString, Window, div,
+    prelude::*, px,
 };
 use talk_core::ui::{
     Page, Text,
@@ -297,7 +298,7 @@ impl Desktop {
         div().max_w_full().child(
             card.id(id)
                 .when(enabled && cfg!(target_os = "macos"), |card| {
-                    card.on_drag(
+                    card.drag_threshold(px(8.)).on_drag(
                         (reference, source),
                         move |(reference, source), _, window, cx| {
                             let reference = reference.clone();
@@ -477,6 +478,9 @@ impl Desktop {
             LocalAction::Content(content::Action::Download(reference.clone())),
             cx,
         )
+        // This action is inside the file's drag surface. Do not arm that
+        // ancestor on a download click (trackpads can move a few pixels).
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .opacity(0.)
         .group_hover(group, |style| style.opacity(1.))
         .focus(|style| style.opacity(1.))

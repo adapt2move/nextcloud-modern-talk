@@ -6,6 +6,7 @@ mod display_link;
 mod events;
 mod file_drag;
 mod keyboard;
+pub mod permissions;
 
 #[cfg(feature = "screen-capture")]
 mod screen_capture;

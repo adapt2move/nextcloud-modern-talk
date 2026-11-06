@@ -178,14 +178,35 @@ impl Accounts {
         account: AccountScope,
         action: view::ContentAction,
     ) -> Result<(), SubmitError> {
-        self.current(account)?;
         if self.snapshot.active_account != Some(account) {
             return Err(SubmitError::StaleScope);
         }
         use view::ContentAction as A;
+        // Dismissing a terminal local receipt needs no network authority.
+        if !matches!(action, A::DismissDownload) {
+            self.current(account)?;
+        }
         match action {
             A::Acknowledge => {
                 self.snapshot.content_panel.result = None;
+                self.touch();
+                Ok(())
+            }
+            A::DismissDownload => {
+                if self
+                    .snapshot
+                    .content_panel
+                    .transfer
+                    .as_ref()
+                    .is_some_and(|t| {
+                        !matches!(
+                            t.state,
+                            view::DownloadState::Transferring | view::DownloadState::Committing
+                        )
+                    })
+                {
+                    self.snapshot.content_panel.transfer = None;
+                }
                 self.touch();
                 Ok(())
             }
@@ -451,7 +472,31 @@ impl Accounts {
                 placeholder: reference.placeholder.clone(),
             }
         } else {
-            wire::ContentCommand::Asset(asset_request(&target)?)
+            let request = asset_request(&target)?;
+            if is_avatar(&target)
+                && self
+                    .snapshot
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .any(|a| {
+                        a.target == target
+                            && matches!(
+                                a.state,
+                                view::AssetState::Failed
+                                    | view::AssetState::Denied
+                                    | view::AssetState::Missing
+                                    | view::AssetState::Unsupported
+                            )
+                    })
+            {
+                // A failed decode or an observed refusal must not retry the
+                // same cached payload without a fresh server observation.
+                wire::ContentCommand::RevalidateAvatar(request)
+            } else {
+                wire::ContentCommand::Asset(request)
+            }
         };
         self.start_content(
             Job {
@@ -775,9 +820,19 @@ impl Accounts {
             Err(e) => Err(e),
         };
         match result {
-            Ok(wire::ContentResult::SelfProfile { name, organization }) => {
+            Ok(wire::ContentResult::SelfProfile {
+                name,
+                organization,
+                saved_at,
+            }) => {
                 self.snapshot.content_panel.self_name = name;
                 self.snapshot.content_panel.organization = organization;
+                let age = history::now_unix()
+                    .checked_sub(saved_at)
+                    .unwrap_or(4 * 60 * 60);
+                self.content_owner.profile_retry_at = Some(
+                    Instant::now() + Duration::from_secs((4 * 60 * 60u64).saturating_sub(age)),
+                );
             }
             Ok(wire::ContentResult::Video(bytes)) => {
                 if let Some(view::AssetTarget::Image(reference)) = job.target
@@ -918,11 +973,36 @@ impl Accounts {
     }
     fn content_failure(&mut self, job: &Job, error: IdentityError) {
         if job.context.is_none() && job.target.is_none() && !job.cloud {
-            self.content_owner.profile = None;
-            self.content_owner.profile_retry_at = Some(Instant::now() + Duration::from_secs(30));
+            self.content_owner.profile_retry_at =
+                Some(Instant::now() + Duration::from_secs(15 * 60));
             return;
         }
         if let Some(target) = job.target.clone() {
+            if is_avatar(&target)
+                && matches!(
+                    error,
+                    IdentityError::Request(
+                        ErrorKind::Transport
+                            | ErrorKind::Deadline
+                            | ErrorKind::RateLimited
+                            | ErrorKind::ServerUnavailable
+                            | ErrorKind::Busy
+                    )
+                )
+                && self
+                    .snapshot
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .any(|a| {
+                        a.target == target
+                            && (matches!(a.state, view::AssetState::Ready { .. })
+                                || a.emoji.is_some())
+                    })
+            {
+                return;
+            }
             if matches!(target, view::AssetTarget::Thumbnail(_))
                 && matches!(
                     error,
@@ -1495,7 +1575,7 @@ impl Accounts {
                                     match asset.target {
                                         view::AssetTarget::Thumbnail(_)
                                         | view::AssetTarget::Image(_) => 60,
-                                        _ => 24 * 60 * 60,
+                                        _ => 7 * 24 * 60 * 60,
                                     }
                                 };
                                 at.elapsed() < Duration::from_secs(ttl)
@@ -1543,11 +1623,15 @@ impl Accounts {
             }
         }
         if let Some(account) = self.snapshot.active_account
-            && self.content_owner.profile != Some(account)
             && self
                 .content_owner
                 .profile_retry_at
                 .is_none_or(|at| at <= Instant::now())
+            && !self
+                .content_owner
+                .jobs
+                .iter()
+                .any(|j| j.context.is_none() && j.target.is_none() && !j.cloud)
         {
             let job = Job {
                 request: RequestId(0),
@@ -1562,15 +1646,18 @@ impl Accounts {
                 preview_generation: None,
                 avatar_actor: None,
             };
-            if self
-                .start_content(job, wire::ContentCommand::SelfProfile)
-                .is_ok()
-            {
+            let command = if self.content_owner.profile == Some(account) {
+                wire::ContentCommand::RevalidateProfile
+            } else {
+                wire::ContentCommand::SelfProfile
+            };
+            if self.start_content(job, command).is_ok() {
                 self.content_owner.profile = Some(account);
             }
         }
         self.retry_content_asset(Instant::now());
         self.retry_thumbnail_assets(Instant::now());
+        self.revalidate_avatar();
         if self.snapshot.selected.is_some()
             && self
                 .content_owner

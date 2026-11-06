@@ -71,6 +71,8 @@ use uuid::Uuid;
 pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
+#[cfg(target_os = "macos")]
+pub use mac::permissions::*;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub(crate) use linux::*;

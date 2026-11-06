@@ -1,7 +1,6 @@
-// App-bundled permission and UserNotifications bridge. No capture or call engine.
+// App-bundled PDF and notification delivery bridge. Authorization belongs to the main app.
 // Built for the existing macOS 15.7 floor, without critical-alert entitlements.
 import AppKit
-import AVFoundation
 import CoreGraphics
 import Foundation
 import UserNotifications
@@ -9,82 +8,6 @@ import UserNotifications
 func emit(_ line: String) {
     guard let data = (line + "\n").data(using: .utf8), data.count <= 64 else { return }
     FileHandle.standardOutput.write(data)
-}
-
-func permissionStatus(_ media: AVMediaType) -> String {
-    switch AVCaptureDevice.authorizationStatus(for: media) {
-    case .authorized: return "granted"
-    case .notDetermined: return "not-determined"
-    case .denied: return "denied"
-    case .restricted: return "restricted"
-    @unknown default: return "unknown"
-    }
-}
-
-@MainActor
-func checkPermission(kind: String, request: Bool) {
-    if kind == "notifications" {
-        checkNotificationPermission(request: request)
-        return
-    }
-    if kind == "screen" {
-        // Read-only preflight belongs to the desktop process. Only the deliberate
-        // request stays here so Rust can kill/reap a cancelled or timed-out prompt.
-        guard request else { exit(2) }
-        let granted = CGRequestScreenCaptureAccess()
-        emit(granted ? "granted" : "unknown")
-        exit(0)
-    }
-    let media: AVMediaType
-    switch kind {
-    case "microphone": media = .audio
-    case "camera": media = .video
-    default: exit(2)
-    }
-    if request && AVCaptureDevice.authorizationStatus(for: media) == .notDetermined {
-        AVCaptureDevice.requestAccess(for: media) { _ in
-            emit(permissionStatus(media))
-            exit(0)
-        }
-        // One deliberate permission prompt, no AVCaptureSession construction.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 115) { exit(3) }
-        RunLoop.main.run()
-    } else {
-        emit(permissionStatus(media))
-    }
-}
-
-func notificationStatus(_ settings: UNNotificationSettings) -> String {
-    switch settings.authorizationStatus {
-    case .notDetermined: return "not-determined"
-    case .authorized, .provisional: return "granted"
-    case .denied: return "denied"
-    default: return "unknown"
-    }
-}
-
-@MainActor
-func checkNotificationPermission(request: Bool) {
-    let app = NSApplication.shared
-    app.setActivationPolicy(.accessory)
-    let finish: @Sendable (UNNotificationSettings) -> Void = { settings in
-        emit(notificationStatus(settings))
-        exit(0)
-    }
-    UNUserNotificationCenter.current().getNotificationSettings { settings in
-        if request && settings.authorizationStatus == .notDetermined {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
-                guard error == nil else { exit(2) }
-                UNUserNotificationCenter.current().getNotificationSettings(completionHandler: finish)
-            }
-        } else {
-            finish(settings)
-        }
-    }
-    // Only an explicit Request may display a sheet. The Rust owner also kills
-    // and reaps this helper on cancellation or its operation-specific deadline.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 115) { exit(3) }
-    app.run()
 }
 
 func decodeHex(_ value: String, maximum: Int) -> String? {
@@ -291,7 +214,7 @@ func previewPDF(large: Bool) {
 
 @main
 struct TalkNativeHelper {
-    // AppKit and permission entry stay on the main actor, including Swift 5 builds.
+    // AppKit entry stays on the main actor, including Swift 5 builds.
     @MainActor
     static func main() {
         let arguments = CommandLine.arguments
@@ -300,8 +223,7 @@ struct TalkNativeHelper {
             previewPDF(large: arguments[2] == "large")
         } else if arguments.count == 2 && arguments[1] == "reduce-motion" {
             emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
-        } else if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
-            checkPermission(kind: arguments[2], request: arguments[3] == "request")
+
         } else if arguments.count == 12 && arguments[1] == "notify", let delegate = NotificationDelegate(arguments: arguments) {
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)

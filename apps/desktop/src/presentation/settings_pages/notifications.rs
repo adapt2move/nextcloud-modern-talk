@@ -137,6 +137,18 @@ page = page.child(section);
                 cx,
             ));
         }
+        if access.authorization == NotificationAuthorization::NotDetermined
+            && matches!(access.operation, NotificationAccessOperation::Failed { .. })
+        {
+            actions = actions.child(self.button(
+                "notification-access-settings",
+                "Systemeinstellungen öffnen",
+                ButtonStyle::Secondary,
+                availability,
+                LocalAction::NotificationAccess(NotificationAccessAction::OpenSystemSettings),
+                cx,
+            ));
+        }
         panel = panel.child(actions.child(self.button(
             "notification-access-check",
             "Erneut prüfen",
@@ -166,7 +178,8 @@ page = page.child(section);
                 NotificationError::PermissionDenied | NotificationError::Stale => {
                     "Prüfe den Zugriff erneut, um den aktuellen Status zu erfahren."
                 }
-                _ => "Die Zugriffsaktion ist fehlgeschlagen. Bitte erneut prüfen.",
+                NotificationError::Unavailable => "Starte die installierte App, um macOS-Freigaben zu verwalten.",
+                _ => "macOS konnte die Freigabe nicht anfragen. Öffne die Systemeinstellungen und prüfe den Eintrag für NextCloud Modern Talk.",
             })));
         }
         panel

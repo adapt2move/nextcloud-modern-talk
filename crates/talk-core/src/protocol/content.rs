@@ -144,7 +144,10 @@ pub enum PollCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentCommand {
     SelfProfile,
+    RevalidateProfile,
     Asset(AssetRequest),
+    /// Read-only background check. Existing pixels remain visible while this runs.
+    RevalidateAvatar(AssetRequest),
     /// Deliberate playback input, distinct from a static attachment thumbnail.
     Video {
         message: MessageId,
@@ -164,6 +167,7 @@ pub enum ContentResult {
     SelfProfile {
         name: Option<Text<256>>,
         organization: Option<Text<256>>,
+        saved_at: u64,
     },
     Image(ImageBytes),
     Video(VideoBytes),

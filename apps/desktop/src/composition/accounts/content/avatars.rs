@@ -5,12 +5,15 @@ use super::*;
 
 const MAX_ENTRIES: usize = 128;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
-const TTL: u64 = 24 * 60 * 60;
+const TTL: u64 = 7 * 24 * 60 * 60;
+const REVALIDATE_AFTER: u64 = 4 * 60 * 60;
 
 pub(super) struct Pixels {
     pub bytes: wire::ImageBytes,
     pub key: u64,
     pub ready: bool,
+    actor: Option<Text<256>>,
+    ordinary_user: bool,
 }
 #[derive(Clone)]
 pub(super) struct Binding {
@@ -29,6 +32,8 @@ pub(super) struct Avatars {
     // One currently observed, complete member list, at most 100 identities.
     // Cleared on navigation, scope changes or a lost member/control observation.
     members: Vec<(talk_core::protocol::conversation::MemberId, [u8; 32])>,
+    checked: Vec<([u8; 32], Instant)>,
+    check_at: Option<Instant>,
 }
 pub(super) fn fresh(source: wire::AvatarSource, now: u64) -> bool {
     source.saved_at <= now && now - source.saved_at < TTL
@@ -133,6 +138,25 @@ impl Avatars {
         let Some(source) = bytes.avatar_source() else {
             return Vec::new();
         };
+        if let Some(pixels) = self.entries.iter_mut().find(|p| p.key == key) {
+            pixels.ordinary_user |=
+                !matches!(target, view::AssetTarget::ConversationAvatar(_)) && !source.restricted;
+            if pixels.bytes.avatar_source().map(|s| s.identity) != Some(source.identity) {
+                pixels.actor = None;
+            }
+            pixels.bytes = bytes.clone();
+            if actor.is_some() {
+                pixels.actor = actor.clone();
+            }
+        }
+        // Repoint authorized consumers together; the old key remains mounted
+        // until decode finishes. Unchanged bytes keep their renderer key.
+        for binding in &mut self.bindings {
+            if binding.source.identity == source.identity {
+                binding.source.saved_at = source.saved_at;
+                binding.key = Some(key);
+            }
+        }
         self.bind_source(target, source, Some(key), actor)
     }
     pub fn bind_emoji(
@@ -141,6 +165,27 @@ impl Avatars {
         source: wire::AvatarSource,
         actor: Option<Text<256>>,
     ) -> Vec<Binding> {
+        let previous: Vec<_> = self
+            .bindings
+            .iter()
+            .filter(|b| b.source.identity == source.identity)
+            .filter_map(|b| b.key)
+            .collect();
+        for binding in &mut self.bindings {
+            if binding.source.identity == source.identity {
+                binding.source.saved_at = source.saved_at;
+                binding.key = None;
+            }
+        }
+        // A newly observed emoji supersedes an older raster of this actor.
+        self.entries.retain(|p| {
+            !previous.contains(&p.key) || self.bindings.iter().any(|b| b.key == Some(p.key))
+        });
+        for pixels in &mut self.entries {
+            if previous.contains(&pixels.key) && pixels.actor == actor {
+                pixels.actor = None;
+            }
+        }
         self.bind_source(target, source, None, actor)
     }
     fn bind_source(
@@ -209,6 +254,8 @@ impl Avatars {
             bytes,
             key,
             ready: false,
+            actor: None,
+            ordinary_user: false,
         });
         retired
     }
@@ -237,12 +284,27 @@ impl Avatars {
             }
             keep
         });
+        // A fresh member/control observation can revoke a member image. Its
+        // binding is not a mere row unmount: release an otherwise unreferenced
+        // allocation rather than promoting that observation into a user cache.
+        self.entries.retain(|p| {
+            !retired.iter().any(|b| {
+                b.key == Some(p.key)
+                    && matches!(b.target, view::AssetTarget::ParticipantAvatar { .. })
+            }) || self.bindings.iter().any(|b| b.key == Some(p.key))
+        });
         self.remove_unreferenced();
+        self.entries
+            .retain(|p| p.bytes.avatar_source().is_some_and(|s| fresh(s, now)));
+        self.checked
+            .retain(|(_, at)| at.elapsed() < Duration::from_secs(15 * 60));
         retired
     }
     fn remove_unreferenced(&mut self) {
-        self.entries
-            .retain(|p| self.bindings.iter().any(|b| b.key == Some(p.key)));
+        self.entries.retain(|p| {
+            p.ready && p.ordinary_user && p.bytes.avatar_source().is_some_and(|s| !s.restricted)
+                || self.bindings.iter().any(|b| b.key == Some(p.key))
+        });
     }
 }
 
@@ -302,13 +364,23 @@ impl Accounts {
             .avatars
             .bind_emoji(target.clone(), source, actor);
         self.retire_avatar_bindings(retired);
-        self.set_asset(view::AssetView {
-            target,
-            state: view::AssetState::Ready { key: 0 },
-            emoji: Some(text),
-            color,
-            document_pages: None,
-        });
+        let targets: Vec<_> = self
+            .content_owner
+            .avatars
+            .bindings
+            .iter()
+            .filter(|b| b.source.identity == source.identity)
+            .map(|b| b.target.clone())
+            .collect();
+        for target in targets {
+            self.set_asset(view::AssetView {
+                target,
+                state: view::AssetState::Ready { key: 0 },
+                emoji: Some(text.clone()),
+                color: color.clone(),
+                document_pages: None,
+            });
+        }
     }
     pub(super) fn participant_avatar_allowed(&self, context: ConversationRef) -> bool {
         self.snapshot
@@ -433,6 +505,12 @@ impl Accounts {
                 ),
         );
         let same_scope = avatars.scope == self.snapshot.active_account;
+        if !same_scope {
+            // Orphaned pixels are reusable only within this exact account runtime.
+            avatars.entries.clear();
+            avatars.checked.clear();
+            avatars.check_at = None;
+        }
         avatars.members.retain(|(member, _)| {
             same_scope
                 && self.snapshot.selected.is_some_and(|context| {
@@ -487,6 +565,25 @@ impl Accounts {
         if !is_avatar(target) || !self.asset_is_current(target) {
             return false;
         }
+        if self
+            .snapshot
+            .content_panel
+            .assets
+            .as_slice()
+            .iter()
+            .any(|a| {
+                &a.target == target
+                    && matches!(
+                        a.state,
+                        view::AssetState::Failed
+                            | view::AssetState::Denied
+                            | view::AssetState::Missing
+                            | view::AssetState::Unsupported
+                    )
+            })
+        {
+            return false;
+        }
         self.prune_avatars();
         let binding = self
             .content_owner
@@ -494,6 +591,39 @@ impl Accounts {
             .binding(target, history::now_unix())
             .cloned();
         let new_binding = binding.is_none();
+        let binding = binding.or_else(|| {
+            let view::AssetTarget::MessageAvatar { context, .. } = target else {
+                return None;
+            };
+            if !self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|r| r.context == *context && r.draft_clipboard == Decision::Allowed)
+            {
+                return None;
+            }
+            let actor = self.avatar_actor(target)?;
+            self.content_owner
+                .avatars
+                .entries
+                .iter()
+                .rev()
+                .find_map(|pixels| {
+                    let source = pixels.bytes.avatar_source()?;
+                    (pixels.ready
+                        && !source.restricted
+                        && fresh(source, history::now_unix())
+                        && pixels.actor.as_ref() == Some(&actor))
+                    .then(|| Binding {
+                        target: target.clone(),
+                        source,
+                        key: Some(pixels.key),
+                        actor: Some(actor.clone()),
+                    })
+                })
+        });
         let binding = binding.or_else(|| {
             let view::AssetTarget::ParticipantAvatar {
                 context,
@@ -568,6 +698,76 @@ impl Accounts {
         self.touch();
         true
     }
+    pub(super) fn revalidate_avatar(&mut self) {
+        // Decoration yields to ordinary content. One bounded check per identity
+        // every four hours; failures retain pixels and back off for 15 minutes.
+        if self
+            .content_owner
+            .avatars
+            .check_at
+            .is_some_and(|at| at > Instant::now())
+            || !self.content_owner.jobs.is_empty()
+            || !self.content_owner.images.is_empty()
+        {
+            return;
+        }
+        let Some(account) = self
+            .snapshot
+            .active_account
+            .filter(|a| self.current(*a).is_ok())
+        else {
+            return;
+        };
+        let now = history::now_unix();
+        self.content_owner.avatars.check_at = Some(Instant::now() + Duration::from_secs(30));
+        let candidate = self
+            .content_owner
+            .avatars
+            .bindings
+            .iter()
+            .find(|b| {
+                fresh(b.source, now)
+                    && now - b.source.saved_at >= REVALIDATE_AFTER
+                    && self.asset_is_current(&b.target)
+                    && !self.content_owner.avatars.checked.iter().any(|(id, at)| {
+                        *id == b.source.identity && at.elapsed() < Duration::from_secs(15 * 60)
+                    })
+            })
+            .cloned();
+        let Some(binding) = candidate else {
+            return;
+        };
+        self.content_owner.avatars.check_at = Some(Instant::now() + Duration::from_secs(1));
+        let Ok(request) = asset_request(&binding.target) else {
+            return;
+        };
+        let job = Job {
+            request: RequestId(0),
+            account,
+            context: local_context(&binding.target),
+            operation: OperationId::from_local(0),
+            target: Some(binding.target.clone()),
+            poll: None,
+            mutation: false,
+            cloud: false,
+            attachment: None,
+            preview_generation: None,
+            avatar_actor: self.avatar_actor(&binding.target),
+        };
+        if self
+            .start_content(job, wire::ContentCommand::RevalidateAvatar(request))
+            .is_ok()
+        {
+            let checked = &mut self.content_owner.avatars.checked;
+            checked.retain(|(id, at)| {
+                *id != binding.source.identity && at.elapsed() < Duration::from_secs(15 * 60)
+            });
+            if checked.len() >= MAX_ENTRIES {
+                checked.remove(0);
+            }
+            checked.push((binding.source.identity, Instant::now()));
+        }
+    }
     /// Restore the same bounded member window that presentation consumes before
     /// publishing a fresh panel. Retained pixels alone cannot admit a target;
     /// current controls and the current member list must already authorize it.
@@ -614,6 +814,79 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emoji_refresh_updates_aliases_together_and_retires_the_superseded_raster() {
+        let (mut model, context, target, _) = model();
+        let now = history::now_unix();
+        let image = bytes(1, now - REVALIDATE_AFTER, false, 32);
+        ready(&mut model, view::AssetTarget::SelfAvatar, &image, 7);
+        model.receive_image(context.account, target.clone(), image.clone(), None, None);
+        let source = wire::AvatarSource {
+            identity: [1; 32],
+            saved_at: now,
+            restricted: false,
+        };
+        model.receive_emoji(view::AssetTarget::SelfAvatar, text("sun"), None, source);
+        for target in [view::AssetTarget::SelfAvatar, target] {
+            let binding = model.content_owner.avatars.binding(&target, now).unwrap();
+            assert_eq!(binding.source.saved_at, now);
+            assert_eq!(binding.key, None);
+            assert!(
+                model
+                    .snapshot
+                    .content_panel
+                    .assets
+                    .as_slice()
+                    .iter()
+                    .any(|a| a.target == target
+                        && a.emoji
+                            .as_ref()
+                            .is_some_and(|value| value.as_str() == "sun"))
+            );
+        }
+        assert!(!model.content_owner.avatars.contains(7));
+        assert_eq!(model.snapshot.active_account, Some(context.account));
+    }
+
+    #[test]
+    fn unmounted_ordinary_pixels_survive_and_unchanged_refresh_keeps_the_key() {
+        let mut cache = Avatars::default();
+        let old = bytes(1, 100, false, 32);
+        cache.stage(old.clone(), 7);
+        cache.bind(view::AssetTarget::SelfAvatar, &old, 7, None);
+        cache.finish(7);
+        assert_eq!(cache.prune(101, |_| false).len(), 1);
+        assert!(cache.binding(&view::AssetTarget::SelfAvatar, 101).is_none());
+        assert_eq!(
+            cache.pixels(&old).unwrap().key,
+            7,
+            "a row does not own the decoded allocation"
+        );
+        let refreshed = bytes(1, 100 + REVALIDATE_AFTER, false, 32);
+        let key = cache.pixels(&refreshed).unwrap().key;
+        cache.bind(view::AssetTarget::SelfAvatar, &refreshed, key, None);
+        assert_eq!(cache.keys().collect::<Vec<_>>(), vec![7]);
+        assert_eq!(
+            cache
+                .binding(&view::AssetTarget::SelfAvatar, 100 + REVALIDATE_AFTER)
+                .unwrap()
+                .source
+                .saved_at,
+            100 + REVALIDATE_AFTER
+        );
+        cache.prune(100 + REVALIDATE_AFTER + TTL, |_| true);
+        assert_eq!(cache.keys().count(), 0, "offline retention remains finite");
+        let restricted = bytes(2, 100, true, 32);
+        cache.stage(restricted.clone(), 8);
+        cache.bind(view::AssetTarget::SelfAvatar, &restricted, 8, None);
+        cache.finish(8);
+        cache.prune(101, |_| false);
+        assert!(
+            !cache.contains(8),
+            "restricted pixels do not survive their authorized binding"
+        );
+    }
     use talk_core::ui::conversation::{
         ConversationPanel, DirectorySource, Member, MemberRole, PersonRef,
     };
@@ -1498,7 +1771,7 @@ mod tests {
         let (mut model, context, _, _) = model();
         let target = view::AssetTarget::ConversationAvatar(context);
         let now = history::now_unix();
-        let saved_at = now - 23 * 60 * 60;
+        let saved_at = now - (TTL - 60 * 60);
         let source = wire::AvatarSource {
             identity: [3; 32],
             saved_at,

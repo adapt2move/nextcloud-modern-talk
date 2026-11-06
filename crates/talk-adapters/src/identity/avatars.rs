@@ -1,7 +1,7 @@
 //! Disposable profile images, separate from restoration metadata and protected
 //! chat/draft/attachment storage. Private account files, never credential files.
 use super::{ledger::Ledger, private_fs::PrivateDir};
-use crate::nextcloud::avatars::{AvatarStore, fresh};
+use crate::nextcloud::avatars::{AvatarStore, Profile, fresh};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::sync::{Arc, Mutex};
 use talk_core::ids::AccountId;
@@ -55,6 +55,8 @@ fn open(dir: &PrivateDir, account: AccountId) -> Result<Connection, ()> {
         PRAGMA temp_store=MEMORY; PRAGMA max_page_count=4096; PRAGMA trusted_schema=OFF;
         PRAGMA secure_delete=ON;
         CREATE TABLE IF NOT EXISTS avatars(key TEXT PRIMARY KEY CHECK(length(key)=66), saved INTEGER NOT NULL, bytes BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1), saved INTEGER NOT NULL,
+            name TEXT CHECK(length(CAST(name AS BLOB))<=256), organization TEXT CHECK(length(CAST(organization AS BLOB))<=256));
         DELETE FROM avatars WHERE length(key)<>66 OR substr(key,1,2) NOT IN ('u-','r-');")
         .map_err(|_| ())?;
     let page_size: i64 = db
@@ -69,6 +71,53 @@ fn open(dir: &PrivateDir, account: AccountId) -> Result<Connection, ()> {
     Ok(db)
 }
 impl AvatarStore for Store {
+    fn profile(&mut self, now: u64) -> Result<Option<Profile>, ()> {
+        let (_ledger, db) = self.connection()?;
+        let row: Option<(i64, Option<String>, Option<String>)> = db
+            .query_row(
+                "SELECT saved,name,organization FROM profile WHERE id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| ())?;
+        let Some((at, name, organization)) = row else {
+            return Ok(None);
+        };
+        if at < 0 || !fresh(at as u64, now) {
+            db.execute("DELETE FROM profile", []).map_err(|_| ())?;
+            return Ok(None);
+        }
+        Ok(Some(Profile {
+            name: name
+                .as_deref()
+                .map(talk_core::bounded::Text::new)
+                .transpose()
+                .map_err(|_| ())?,
+            organization: organization
+                .as_deref()
+                .map(talk_core::bounded::Text::new)
+                .transpose()
+                .map_err(|_| ())?,
+            saved_at: at as u64,
+        }))
+    }
+    fn put_profile(&mut self, profile: &Profile) -> Result<(), ()> {
+        if profile.saved_at > i64::MAX as u64 {
+            return Err(());
+        }
+        let (_ledger, db) = self.connection()?;
+        db.execute(
+            "INSERT OR REPLACE INTO profile VALUES(1,?1,?2,?3)",
+            params![
+                profile.saved_at as i64,
+                profile.name.as_ref().map(|s| s.as_str()),
+                profile.organization.as_ref().map(|s| s.as_str())
+            ],
+        )
+        .map_err(|_| ())?;
+        Ok(())
+    }
     fn retain_rooms(&mut self, allowed: &[String]) -> Result<(), ()> {
         if allowed.len() > 100 {
             return Err(());

@@ -111,6 +111,11 @@ impl Desktop {
                 )
             })
             .child(drag)
+            .when_some(
+                self.download_status(cx)
+                    .filter(|_| !self.projection_blocked),
+                |d, status| d.child(status),
+            )
             .when(navigation && self.narrow_navigation(window), |d| {
                 d.child(
                     self.icon_button(

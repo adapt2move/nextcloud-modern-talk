@@ -8,9 +8,14 @@
       "sha256": "aa0745f2433cc883028b0501b8caac709dd23dd9a065547d69dc478250555803"
     },
     {
+      "original_sha256": "5c227b7b562aa7471d2f3e78b599ac668c6915b54ec994ce981ce6e29a55e9a6",
+      "path": "src/elements/div.rs",
+      "sha256": "aa8b5f3bb71fdc42625d9653e056b6b4d1d73d6319413e6e4a58fa95dd89b700"
+    },
+    {
       "original_sha256": "7106499142d5416edaf44168da5c7dcd778c527398cb86e487131ba6689b94ff",
       "path": "src/platform.rs",
-      "sha256": "34af27e8a72e738cd54338d1a9e919ff4666563e531e2e0696e516f14fc6bd16"
+      "sha256": "eaacf171e3a396d9315c7eb8ccf0e91addce909bf013ec51fd597a560d6b2607"
     },
     {
       "original_sha256": "d6407a0e8685e03621e671fbbf52402217e6aacd1b1b5a285ec6693a980d7b2b",
@@ -25,7 +30,7 @@
     {
       "original_sha256": "cec6bf0c2fb32124f605a73d57bf11d5aa884c4c09904ee94d34b9ebfab9208b",
       "path": "src/platform/mac.rs",
-      "sha256": "1d3ec1ef0aab5bd20716167205c94f62403b7e9628e6037dfa6476cf730777d6"
+      "sha256": "768cf75f1891bb757e86fa2ba880c1a65ee098783aed6aad6c4fd12825c4fcf6"
     },
     {
       "original_sha256": null,
@@ -36,6 +41,16 @@
       "original_sha256": "3caecf82301a0514064afd29d8c1b964313d2c23d16655dc703d16918b01c18f",
       "path": "src/platform/mac/metal_renderer.rs",
       "sha256": "1d17d2629b61cf59d2c2df722e3a100be79a86d19c7aa135d3884392053e4640"
+    },
+    {
+      "original_sha256": null,
+      "path": "src/platform/mac/permission_probe.rs",
+      "sha256": "42123afd118d3180353e1a5a9d051ab3d0bacbc0939d9e0aec1df245accabaf2"
+    },
+    {
+      "original_sha256": null,
+      "path": "src/platform/mac/permissions.rs",
+      "sha256": "415ce9eff7a2e6a69b0b530ec8b0fa81a919adcf900b7819c5b688dfc361b70e"
     },
     {
       "original_sha256": "0061a0eccdb8467e89eaeacedc7d5d010be956a5c778fff0ad7d3b30bb736334",

@@ -205,6 +205,7 @@ pub enum ConnectionFailure {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccountConnectionState {
     Connected,
+    Connecting,
     Guest,
     Disconnected,
 }

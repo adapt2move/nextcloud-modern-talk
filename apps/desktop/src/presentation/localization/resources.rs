@@ -1004,6 +1004,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Direct conversations",
         "Conversaciones directas",
     ),
+    ("Download abbrechen", "Cancel download", "Cancelar descarga"),
     ("Du", "You", "Tú"),
     (
         "Du bist nicht mehr im Anruf.",
@@ -1598,6 +1599,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Konto hinzufügen", "Add account", "Añadir cuenta"),
     ("Konto unbekannt", "Unknown account", "Cuenta desconocida"),
     (
+        "Konto wird verbunden …",
+        "Connecting account …",
+        "Conectando la cuenta …",
+    ),
+    (
         "Kontoeinstellungen",
         "Account settings",
         "Ajustes de la cuenta",
@@ -2007,6 +2013,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Restart the app only if macOS asks you to after allowing access.",
         "Reinicia la app solo si macOS te lo pide después de permitir el acceso.",
     ),
+    (
+        "Starte die installierte App, um macOS-Freigaben zu verwalten.",
+        "Launch the installed app to manage macOS permissions.",
+        "Abre la aplicación instalada para gestionar los permisos de macOS.",
+    ),
     ("Status unbekannt", "Unknown status", "Estado desconocido"),
     ("Status unklar", "Status uncertain", "Estado incierto"),
     ("Strg K", "Ctrl K", "Ctrl K"),
@@ -2392,6 +2403,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "macOS hat den Zugriff auf den Schlüsselbund verweigert. Erlaube dieser App den Zugriff auf ihre gespeicherte Anmeldung und versuche das Entfernen erneut.",
         "macOS denied access to the keychain. Allow this app to access its saved sign-in, then try removing the account again.",
         "macOS ha denegado el acceso al llavero. Permite que esta app acceda a su inicio de sesión guardado y vuelve a eliminar la cuenta.",
+    ),
+    (
+        "macOS konnte die Freigabe nicht anfragen. Öffne die Systemeinstellungen und prüfe den Eintrag für NextCloud Modern Talk.",
+        "macOS could not request permission. Open System Settings and check the entry for NextCloud Modern Talk.",
+        "macOS no ha podido solicitar el permiso. Abre Ajustes del Sistema y comprueba la entrada de NextCloud Modern Talk.",
     ),
     ("macOS-Freigabe", "macOS permission", "Permiso de macOS"),
     ("{n} Antwort", "{n} reply", "{n} respuesta"),

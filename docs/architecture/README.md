@@ -73,6 +73,15 @@ record the upstream references.
 
 ## Policy and lifetime
 
+macOS authorization belongs to the running application's code identity. The
+settings and notification owners use the vendored GPUI platform boundary for
+AVFoundation, CoreGraphics and UserNotifications checks and explicit requests.
+Native work is dispatched on the application's main queue, with one retained
+callback admission per permission kind. A cancelled or timed-out waiter cannot
+reclaim a still-live OS callback's slot or publish a late result. The Swift
+delivery/PDF helper does not request authorization. Publication uses one persistent
+Developer ID team; changing from an ad-hoc build can require a new OS approval.
+
 Capabilities, configuration, current permissions, session state and explicit user
 intent determine available actions. A server version or cached snapshot grants no
 permission. Policy observations have finite freshness; unknown, restrictive or expired

@@ -20,8 +20,9 @@ runtime installation is needed.
 
 ### First launch blocked by macOS
 
-The alpha has an ad-hoc code signature, without an Apple Developer ID signature
-or notarization. If macOS says the developer cannot be verified or Apple cannot
+Releases through v0.0.10 and non-publishing test packages have ad-hoc signatures.
+New publication requires a persistent Developer ID Application signature;
+notarization is not implemented. If macOS says the developer cannot be verified or Apple cannot
 check the app, first try to open the installed app, then:
 
 1. Open **System Settings → Privacy & Security**.

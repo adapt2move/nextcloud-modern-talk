@@ -77,6 +77,19 @@ impl Desktop {
         retry: LocalAction,
         cx: &Context<Self>,
     ) -> Div {
+        if self.snapshot.accounts.as_slice().iter().any(|a| {
+            Some(a.scope) == self.snapshot.active_account
+                && a.connection == talk_core::ui::presentation::AccountConnectionState::Connecting
+        }) {
+            return div()
+                .px_2()
+                .py_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(self.pending_dots(self.theme.muted))
+                .child(self.hint(self.l("Konto wird verbunden …")));
+        }
         if state.initial_loading() {
             return self.collection_skeleton(Skeleton::Rows);
         }

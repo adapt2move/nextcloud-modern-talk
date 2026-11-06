@@ -66,7 +66,10 @@ def check(root, actionlint=False, placement=True):
                     "cargo build --locked", "tools/cargo.py build --locked", "tools/release/build.py",
                 )):
                     raise ValueError("Compile-only job lacks its build: " + name)
-                if (file.name != "ci.yml" and conditions) or re.search(r"(?m)^        if:", job):
+                # Unconditional teardown must also run after a failed signing
+                # build. `always()` cannot conditionally skip compilation.
+                step_conditions = re.findall(r"(?m)^        if: (.*)$", job)
+                if (file.name != "ci.yml" and conditions) or any(c != "always()" for c in step_conditions):
                     raise ValueError("Compile-only builds must not be conditionally skipped: " + name)
     for folder in ("tools/release", "tools/ci"):
         for source in (root / folder).glob("*.py"):

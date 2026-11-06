@@ -644,5 +644,56 @@ class MacPackageTests(unittest.TestCase):
         create.assert_not_called()
 
 
+class PersistentSigningTests(unittest.TestCase):
+    def test_publication_fails_closed_without_the_existing_identity(self):
+        import macos_signing
+        with self.assertRaisesRegex(ValueError, "persistent Developer ID"):
+            macos_signing.configuration({"NMT_MACOS_REQUIRE_SIGNED": "1"})
+        for env in ({"NMT_MACOS_SIGNING_TEAM": "ABCDEFGHIJ"},
+                    {"NMT_MACOS_SIGNING_IDENTITY": "-"},
+                    {"NMT_MACOS_REQUIRE_SIGNED": "true"}):
+            with self.assertRaises(ValueError):
+                macos_signing.configuration(env)
+
+    def test_application_and_nested_code_require_the_same_developer_team(self):
+        import macos_signing
+        config = {"NMT_MACOS_SIGNING_IDENTITY": "A" * 40, "NMT_MACOS_SIGNING_TEAM": "ABCDEFGHIJ",
+                  "NMT_MACOS_SIGNING_KEYCHAIN": "/synthetic/keychain", "NMT_MACOS_REQUIRE_SIGNED": "1"}
+        commands = []
+        with patch.dict(os.environ, config, clear=True):
+            macos_signing.sign(Path("Synthetic.app"), commands.append, application=True)
+            macos_signing.sign(Path("plugin.dylib"), commands.append)
+            macos_signing.verify_application(Path("Synthetic.app"), commands.append)
+        for command in commands:
+            if "--sign" in command:
+                self.assertNotIn("--deep", command, "sign inside out; never silently re-sign nested code")
+                self.assertIn("runtime", command)
+                self.assertIn("--timestamp", command)
+                self.assertNotIn("--timestamp=none", command)
+            else:
+                requirement = next(arg for arg in command if str(arg).startswith("-R="))
+                self.assertIn("anchor apple generic", requirement)
+                self.assertIn('certificate leaf[subject.OU] = "ABCDEFGHIJ"', requirement)
+                self.assertIn("100.6.1.13", requirement)
+        self.assertIn("--entitlements", commands[0])
+        self.assertIn('identifier "org.adapt2move.nextcloud-modern-talk"', commands[-1][-2])
+
+    def test_ad_hoc_builds_do_not_claim_persistent_identity(self):
+        import macos_signing
+        commands = []
+        with patch.dict(os.environ, {}, clear=True):
+            macos_signing.sign(Path("Synthetic.app"), commands.append, application=True)
+            self.assertIn("ad-hoc", macos_signing.description())
+        self.assertEqual(commands, [["codesign", "--force", "--sign", "-", "--timestamp=none", Path("Synthetic.app")]])
+
+    def test_signed_package_cannot_ignore_native_identity_verification_failure(self):
+        import macos_signing
+        with patch.dict(os.environ, {"NMT_MACOS_SIGNING_IDENTITY": "A" * 40,
+                                    "NMT_MACOS_SIGNING_TEAM": "ABCDEFGHIJ"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "wrong team"):
+                macos_signing.verify_application(Path("Synthetic.app"),
+                    lambda _: (_ for _ in ()).throw(ValueError("wrong team")))
+
+
 if __name__ == "__main__":
     unittest.main()

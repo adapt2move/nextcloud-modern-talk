@@ -171,6 +171,7 @@ impl Default for ContentPanel {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
+    DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),
     ClosePreview,

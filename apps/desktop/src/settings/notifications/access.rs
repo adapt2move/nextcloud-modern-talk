@@ -117,22 +117,27 @@ pub(super) fn perform(
             .map_err(mapped)?;
         return Ok(None); // Opening Settings is not a grant.
     }
-    let helper = match super::super::native_process::mac_helper() {
-        Ok(helper) => helper,
-        Err(_) => return Ok(Some(NotificationAuthorization::Unavailable)),
-    };
-    let requesting = command.action == NotificationAccessAction::Request;
-    let output = super::super::native_process::capture(
-        std::process::Command::new(helper).args([
-            "permission",
-            "notifications",
-            if requesting { "request" } else { "check" },
-        ]),
-        Duration::from_secs(if requesting { 120 } else { 3 }),
-        cancelled,
-    )
-    .map_err(mapped)?;
-    decode(&output).map(Some)
+    #[cfg(target_os = "macos")]
+    {
+        let status = super::super::macos_access::observe(
+            gpui::MacPermissionKind::Notifications,
+            command.action == NotificationAccessAction::Request,
+            cancelled,
+        )
+        .map_err(mapped)?;
+        Ok(Some(match status {
+            gpui::MacPermissionStatus::NotDetermined => NotificationAuthorization::NotDetermined,
+            gpui::MacPermissionStatus::Granted => NotificationAuthorization::Granted,
+            gpui::MacPermissionStatus::Denied | gpui::MacPermissionStatus::Restricted => {
+                NotificationAuthorization::Denied
+            }
+            gpui::MacPermissionStatus::Unknown | gpui::MacPermissionStatus::RestartRequired => {
+                NotificationAuthorization::Unknown
+            }
+        }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err(NotificationError::Unavailable)
 }
 
 fn mapped(error: talk_core::preferences::permissions::PermissionError) -> NotificationError {
@@ -149,16 +154,6 @@ fn mapped(error: talk_core::preferences::permissions::PermissionError) -> Notifi
         PermissionError::Failed => NotificationError::Failed,
     }
 }
-fn decode(output: &str) -> Result<NotificationAuthorization, NotificationError> {
-    match output.trim() {
-        "not-determined" => Ok(NotificationAuthorization::NotDetermined),
-        "granted" => Ok(NotificationAuthorization::Granted),
-        "denied" => Ok(NotificationAuthorization::Denied),
-        "unknown" => Ok(NotificationAuthorization::Unknown),
-        _ => Err(NotificationError::Failed),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,8 +333,5 @@ mod tests {
             ..expired
         };
         assert_eq!(perform(&shared, current), Err(NotificationError::Cancelled));
-        for invalid in ["granted\ndenied", "", "authorized", "private helper error"] {
-            assert_eq!(decode(invalid), Err(NotificationError::Failed));
-        }
     }
 }

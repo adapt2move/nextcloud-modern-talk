@@ -125,6 +125,7 @@ with tempfile.TemporaryDirectory(prefix='identity-ui-fixtures-') as temporary:
     case('native-message-state-owner', lambda root: append(root, 'apps/desktop/src/presentation/messaging.rs', local_state))
     case('native-state-outside-owner', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', local_state), 1, 'native presentation import')
     case('native-worker-call', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.http_client(); }'), 1, 'hidden I/O')
+    case('native-permission-call', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'use gpui::macos_permission as hidden;'), 1, 'permission bridge directly')
     case('native-clipboard-outside-input', lambda root: append(root, 'apps/desktop/src/presentation/state.rs', 'fn hidden(cx: &gpui::App) { cx.read_from_clipboard(); }'), 1, 'hidden I/O')
     case('native-deep-route', lambda root: (root/'apps/desktop/src/presentation/nested').mkdir() or (root/'apps/desktop/src/presentation/nested/leak.rs').write_text('const ROUTE: &str = "/ocs/v2.php/fixture";'), 1, 'native presentation contains')
     # I2 edges stay private even when their implementations are linked.

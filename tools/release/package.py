@@ -22,6 +22,7 @@ import tempfile
 import zipfile
 import macos_runtime
 import macos_dmg
+import macos_signing
 
 
 TARGETS = {"x86_64-unknown-linux-gnu": "linux-x86_64", "aarch64-apple-darwin": "macos-arm64-unsigned"}
@@ -273,7 +274,7 @@ def assemble(stage, output, allow_fixture=False):
             if spec["kind"] == "development":
                 spec["files"]["bin/talk-desktop"] = macos_runtime.unsigned_executable_sha256(binary_dir / "talk-desktop")
                 spec["build"]["macos_main_identity"] = macos_runtime.MAIN_IDENTITY
-                spec["build"]["bundle_signing"] = "ad-hoc; no Developer ID; not notarized"
+                spec["build"]["bundle_signing"] = macos_signing.description()
                 spec["build"]["native_linkage"] = macos_runtime.inspect_bundle(root)
             (resources / "provenance.json").write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n")
             # Archive permissions must work regardless of the build user's umask.
@@ -286,12 +287,13 @@ def assemble(stage, output, allow_fixture=False):
                 # be predictable under a private build user's restrictive umask.
                 old_umask = os.umask(0o022)
                 try:
-                    macos_runtime.run(["codesign", "--force", "--sign", "-", "--timestamp=none", root])
+                    macos_signing.sign(root, macos_runtime.run, application=True)
                 finally:
                     os.umask(old_umask)
                 # No bundle member is written after this point. Verify immediately
                 # so a native layout/sealing failure has an unambiguous checkpoint.
                 macos_runtime.run(["codesign", "--verify", "--deep", "--strict", root])
+                macos_signing.verify_application(root, macos_runtime.run)
                 print("macOS package: strict bundle verification passed immediately after signing", flush=True)
                 if macos_runtime.unsigned_executable_sha256(binary_dir / "talk-desktop") != spec["files"]["bin/talk-desktop"]:
                     raise ValueError("Bundle signing changed the signature-independent main executable identity")
@@ -338,7 +340,7 @@ def assemble(stage, output, allow_fixture=False):
     # Record actual output bytes, never a placeholder download URL.
     report = {"schema": 1, "kind": spec["kind"], "version": spec["version"], "target": spec["target"],
               "source": spec["source"], "input_sha256": sha(stage / "input.json"), "media_enabled": spec["media"]["enabled"],
-              "signing": "no Developer ID / not notarized" if mac else "unsigned distribution archive",
+              "signing": macos_signing.description() if mac else "unsigned distribution archive",
               "assets": {p.name: {"sha256": sha(p), "bytes": p.stat().st_size} for p in sorted(output.iterdir())}}
     if mac and spec["kind"] == "development":
         report["manual_download"] = base + ".dmg"
