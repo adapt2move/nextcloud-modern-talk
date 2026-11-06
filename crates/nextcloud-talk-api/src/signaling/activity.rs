@@ -77,6 +77,19 @@ mod batch_tests {
     use serde_json::json;
 
     #[test]
+    fn force_mute_is_only_projected_for_the_local_session() {
+        let row = |target: &str| {
+            json!({"type":"message", "data": json!({
+            "from":"peer", "to":"local", "roomType":"video", "type":"control",
+            "payload":{"action":"forceMute", "peerId":target}
+        }).to_string()})
+        };
+        let batch = parse_batch(&json!([row("local"), row("other")]), "local", 1).unwrap();
+        assert_eq!(batch.events().len(), 1);
+        assert!(matches!(&batch.events()[0], Event::ForceMuteBy { .. }));
+    }
+
+    #[test]
     fn activity_is_scoped_and_bounded_in_batch() {
         let row = |to: &str| {
             json!({"type":"message", "data": json!({

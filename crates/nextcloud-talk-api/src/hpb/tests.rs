@@ -325,7 +325,7 @@ fn mapped_identity_cannot_change_and_media_queue_overflow_closes_route() {
     );
     let mut state = shared.state.lock().unwrap();
     let room = state.room.as_mut().unwrap();
-    for _ in 0..83 {
+    for _ in 0..82 {
         room.push(Event::PolicyChanged).unwrap();
     }
     assert_eq!(room.push(Event::PolicyChanged), Err(ErrorKind::Busy));
@@ -631,6 +631,7 @@ fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
             .is_empty()
     );
     shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    shared.incoming(&json!({"type":"message","message":{"sender":{"type":"session","sessionid":"hpb-other"},"data":{"type":"control","roomType":"video","payload":{"action":"forceMute","peerId":"hpb-own"}}}})).unwrap();
     shared.incoming(&message("hpb-other", true, 1)).unwrap();
     shared.incoming(&message("hpb-other", false, 2)).unwrap();
     shared.incoming(&message("hpb-other", true, 1)).unwrap();
@@ -643,6 +644,9 @@ fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
         from, activity: Activity::RaisedHand { state: false, timestamp: 2 }
     } if from == &peer("talk-other")))
     );
+    assert!(room.signals.iter().any(
+        |(_, event)| matches!(event, Event::ForceMuteBy { from } if from == &peer("talk-other"))
+    ));
     // Fill the queue with transient activity, then retain a mandatory update.
     for i in 0..20 {
         room.push_activity(peer(&format!("peer-{i}")), Activity::Reaction("👍".into()));
