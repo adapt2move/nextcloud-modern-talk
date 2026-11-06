@@ -35,6 +35,8 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;
+    // Presence changes are not room policy or metadata invalidations.
+    identity.user_status = None;
     identity
 }
 impl Metadata {
@@ -631,7 +633,22 @@ impl Accounts {
                         } else if self.snapshot.content == ContentState::Denied {
                             reload_messages = true;
                         }
-                        let mut row = conversation(&details.conversation, context.account);
+                        let mut row = self
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|existing| existing.context == context)
+                            .map_or_else(
+                                || conversation(&details.conversation, context.account),
+                                |existing| {
+                                    conversation_with_existing(
+                                        &details.conversation,
+                                        context.account,
+                                        existing,
+                                    )
+                                },
+                            );
                         if let Some(count) = details
                             .participant_count
                             .and_then(|count| u16::try_from(count).ok())

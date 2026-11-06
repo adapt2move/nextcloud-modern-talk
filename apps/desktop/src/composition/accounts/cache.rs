@@ -585,6 +585,8 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
         archived: room.archived,
         archive: Decision::Unknown,
         presence: Presence::Unknown,
+        status_icon: None,
+        status_message: None,
         participants: room.participant_count.and_then(|n| u16::try_from(n).ok()),
         send: Decision::Unknown,
         attach: Decision::Unknown,
@@ -1506,6 +1508,7 @@ mod tests {
     }
     fn observed(scope: AccountScope) -> protocol::Conversation {
         protocol::Conversation {
+            user_status: None,
             id: ConversationId {
                 account: scope.account,
                 host: HostId::from_local(9),

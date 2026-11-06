@@ -69,6 +69,8 @@ fn snapshot() -> PresentationSnapshot {
         archived: Some(false),
         archive: Decision::Unknown,
         presence: Presence::Unknown,
+        status_icon: None,
+        status_message: None,
         participants: None,
         send: Decision::Allowed,
         attach: Decision::Denied,

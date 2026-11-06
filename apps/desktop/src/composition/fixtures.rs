@@ -47,6 +47,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-server-unavailable",
     "accounts-server-denied",
     "chat-ux",
+    "chat-presence",
     "chat-ux-call",
     "chat-edit",
     "thread-error",
@@ -687,11 +688,16 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
-                presence: if kind == ConversationKind::Direct {
+                presence: if scenario == "chat-presence" && id == 3 {
+                    Presence::Away
+                } else if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {
                     Presence::Unknown
                 },
+                status_icon: (scenario == "chat-presence" && id == 3).then(|| text("☕")),
+                status_message: (scenario == "chat-presence" && id == 3)
+                    .then(|| text("Kaffeepause")),
                 participants: Some(if kind == ConversationKind::Direct {
                     2
                 } else {
@@ -715,15 +721,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     );
     populate(
         &mut s,
-        context(if matches!(scenario, "direct-call" | "outgoing") {
-            3
-        } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
-            2
-        } else if scenario == "room" {
-            4
-        } else {
-            1
-        }),
+        context(
+            if matches!(scenario, "direct-call" | "outgoing" | "chat-presence") {
+                3
+            } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
+                2
+            } else if scenario == "room" {
+                4
+            } else {
+                1
+            },
+        ),
     );
     match scenario {
         "offline" => s.content = ContentState::Offline,

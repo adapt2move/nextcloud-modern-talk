@@ -507,7 +507,18 @@ fn request(
     match route {
         "ocs/v2.php/cloud/user" if get => return Ok(R::Account),
         "ocs/v2.php/cloud/capabilities" if get => return Ok(R::Capabilities),
-        "ocs/v2.php/apps/spreed/api/v4/room" if get => return Ok(R::Rooms),
+        "ocs/v2.php/apps/spreed/api/v4/room" if get => {
+            return Ok(
+                if query
+                    .iter()
+                    .any(|(key, value)| *key == "includeStatus" && value == "true")
+                {
+                    R::RoomsWithStatus
+                } else {
+                    R::Rooms
+                },
+            );
+        }
         "ocs/v2.php/apps/spreed/api/v4/room" if post => {
             return Ok(R::CreateGroup {
                 name: v("roomName")?,

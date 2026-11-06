@@ -66,7 +66,10 @@ mod tests {
     #[test]
     fn status_is_bound_to_current_user_and_unknown_is_not_available() {
         assert_eq!(UserStatus::from_wire(None), UserStatus::Unknown);
-        assert_eq!(UserStatus::from_wire(Some("invisible")), UserStatus::Invisible);
+        assert_eq!(
+            UserStatus::from_wire(Some("invisible")),
+            UserStatus::Invisible
+        );
         assert_eq!(UserStatus::from_wire(Some("future")), UserStatus::Unknown);
         assert_eq!(
             decode(

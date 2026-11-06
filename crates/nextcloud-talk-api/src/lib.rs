@@ -76,6 +76,8 @@ pub enum Request {
     Account,
     Capabilities,
     Rooms,
+    /// Room list with direct-message status; caller must check user_status.enabled.
+    RoomsWithStatus,
     Room(RoomToken),
     Participants(RoomToken),
     History {
@@ -766,6 +768,16 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Method::GET,
             "ocs/v2.php/apps/spreed/api/v4/room".into(),
             vec![("noStatusUpdate", "1".into())],
+            vec![],
+            Kind::Rooms,
+        ),
+        Request::RoomsWithStatus => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v4/room".into(),
+            vec![
+                ("noStatusUpdate", "1".into()),
+                ("includeStatus", "true".into()),
+            ],
             vec![],
             Kind::Rooms,
         ),

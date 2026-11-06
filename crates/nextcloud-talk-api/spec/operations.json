@@ -764,8 +764,8 @@
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room",
       "status": "implemented",
-      "api": "Request::Rooms",
-      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+      "api": "Request::Rooms | Request::RoomsWithStatus",
+      "scope": "Bounded room list; includeStatus=true for direct rooms only when user_status.enabled. Source: Talk 24/25 docs/conversation.md at 0d736588dcfb42becf0e5688e0847e35d5b5efa2 and eed360d176edcb6888dad60965cb694e6bf62ae3."
     },
     {
       "operation_id": "room-create-room",

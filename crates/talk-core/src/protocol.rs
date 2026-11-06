@@ -61,7 +61,7 @@ pub enum UserPresence {
 pub struct UserStatus {
     pub presence: UserPresence,
     pub icon: Option<Text<64>>,
-    pub message: Option<Text<256>>,
+    pub message: Option<Text<320>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,6 +98,8 @@ pub struct RoomActions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Conversation {
+    /// Ephemeral direct-message presence from the latest room-list observation.
+    pub user_status: Option<UserStatus>,
     pub id: ConversationId,
     pub call_scope: Option<CallScope>,
     /// Set only by the identity ledger owner from an authoritative server room ID.

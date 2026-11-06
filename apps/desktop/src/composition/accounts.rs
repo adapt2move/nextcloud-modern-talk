@@ -778,7 +778,7 @@ impl Accounts {
                     }
                     Ok(RuntimeReply::Protocol(ProtocolReply::TagCreated(tag))) if tag.id.scope == scope => { self.load_tags = Some(scope); Completion::ServerAccepted }
                     Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id.account == scope.account => {
-                        if self.snapshot.active_account == Some(scope) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context.conversation == row.id { conversation(&row, scope) } else { r.clone() })); }
+                        if self.snapshot.active_account == Some(scope) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context.conversation == row.id { conversation_with_existing(&row, scope, r) } else { r.clone() })); }
                         Completion::ServerAccepted
                     }
                     Err(error) => { if self.snapshot.active_account == Some(scope) { self.snapshot.tag_state = content_error(error); } completion_error(error) }
@@ -793,7 +793,7 @@ impl Accounts {
             Purpose::Mutation(request, context) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id == context.conversation => {
-                        if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation(&row, context.account) } else { r.clone() })); }
+                        if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation_with_existing(&row, context.account, r) } else { r.clone() })); }
                         Completion::ServerAccepted
                     }
                     Err(error) => completion_error(error),
@@ -1578,7 +1578,23 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         },
         archived: r.archived,
         archive: r.archive,
-        presence: Presence::Unknown,
+        presence: match r.user_status.as_ref().map(|status| status.presence) {
+            Some(protocol::UserPresence::Online) => Presence::Available,
+            Some(protocol::UserPresence::Away) => Presence::Away,
+            Some(protocol::UserPresence::DoNotDisturb) => Presence::DoNotDisturb,
+            Some(protocol::UserPresence::Offline | protocol::UserPresence::Invisible) => {
+                Presence::Offline
+            }
+            Some(protocol::UserPresence::Unknown) | None => Presence::Unknown,
+        },
+        status_icon: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.icon.clone()),
+        status_message: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.message.clone()),
         participants: None,
         send: r.actions.send_message,
         attach: Decision::Unknown,
@@ -1592,6 +1608,26 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         call: Decision::Unknown,
         call_scope: r.call_scope,
     }
+}
+
+// Single-room metadata and mutation replies do not request status. Preserve only
+// the current same-room observation; the next authoritative list can clear it.
+fn conversation_with_existing(
+    room: &protocol::Conversation,
+    scope: AccountScope,
+    existing: &ConversationView,
+) -> ConversationView {
+    let mut row = conversation(room, scope);
+    if room.user_status.is_none()
+        && row.context == existing.context
+        && row.kind == ConversationKind::Direct
+        && existing.kind == ConversationKind::Direct
+    {
+        row.presence = existing.presence;
+        row.status_icon = existing.status_icon.clone();
+        row.status_message = existing.status_message.clone();
+    }
+    row
 }
 
 impl Purpose {

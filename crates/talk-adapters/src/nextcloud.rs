@@ -810,13 +810,17 @@ impl NextcloudClient {
                     .await?,
             }),
             ProtocolRequest::ListConversations => {
+                let mut query = vec![("noStatusUpdate", "1".into())];
+                if caps.user_status_enabled == Some(true) {
+                    query.push(("includeStatus", "true".into()));
+                }
                 let response = self
                     .transport
                     .ocs(
                         context,
                         Method::GET,
                         "ocs/v2.php/apps/spreed/api/v4/room",
-                        &[("noStatusUpdate", "1".into())],
+                        &query,
                         &[],
                         false,
                     )

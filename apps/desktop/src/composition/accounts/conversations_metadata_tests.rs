@@ -3,6 +3,7 @@ use talk_core::ids::ConversationId;
 
 fn listed(context: ConversationRef) -> protocol::Conversation {
     protocol::Conversation {
+        user_status: None,
         id: context.conversation,
         call_scope: None,
         navigation_key: None,
@@ -497,4 +498,39 @@ fn metadata_retention_is_bounded_to_current_room_scope_and_removal_retires_opera
     metadata.reconcile(context.account, &list(context, []));
     assert!(metadata.rooms.is_empty());
     assert!(!metadata.complete(context, OperationId::from_local(5)));
+}
+
+#[test]
+fn status_changes_do_not_invalidate_metadata_and_single_room_replies_retain_current_status() {
+    let context = crate::composition::fixtures::context(1);
+    let mut room = listed(context);
+    room.kind = RoomKind::Direct;
+    let mut metadata = Metadata::default();
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    room.user_status = Some(protocol::UserStatus {
+        presence: protocol::UserPresence::Away,
+        icon: Some(text("☕")),
+        message: Some(text("Break")),
+    });
+    assert!(
+        metadata
+            .reconcile(context.account, &list(context, [room.clone()]))
+            .is_empty()
+    );
+    let shown = conversation(&room, context.account);
+    assert_eq!(shown.presence, Presence::Away);
+    assert_eq!(shown.status_message.as_ref().unwrap().as_str(), "Break");
+    room.user_status = None;
+    let retained = conversation_with_existing(&room, context.account, &shown);
+    assert_eq!(retained.presence, Presence::Away);
+    assert_eq!(retained.status_message, shown.status_message);
+    let mut other = shown.clone();
+    other.context.conversation.local += 1;
+    let unrelated = conversation_with_existing(&room, context.account, &other);
+    assert_eq!(unrelated.presence, Presence::Unknown);
+    assert!(unrelated.status_message.is_none());
+    // A fresh list without status clears it instead of using the retained value.
+    let cleared = conversation(&room, context.account);
+    assert_eq!(cleared.presence, Presence::Unknown);
+    assert!(cleared.status_message.is_none());
 }

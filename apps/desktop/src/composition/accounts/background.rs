@@ -1247,6 +1247,7 @@ mod tests {
     }
     fn room(n: u128) -> protocol::Conversation {
         protocol::Conversation {
+            user_status: None,
             id: talk_core::ids::ConversationId {
                 account: scope(1).account,
                 host: HostId::from_local(1),

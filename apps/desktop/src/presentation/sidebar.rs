@@ -704,6 +704,46 @@ impl Desktop {
             && self.destination != SidebarDestination::Inbox;
         let id = scoped_id(namespace, context, 0, 0);
         let row_focus = self.control_focus(id.clone(), cx);
+        let avatar = if let Some(avatar) = self.projected_avatar(
+            talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
+            22.,
+        ) {
+            avatar
+        } else if row.kind == ConversationKind::Direct {
+            self.person_avatar(row.initials.as_str(), 22.)
+        } else {
+            div()
+                .flex_none()
+                .size(px(22.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.scaled_icon(
+                    if row.organization.classified == Some(true) {
+                        "lock"
+                    } else {
+                        match (row.kind, row.organization.category) {
+                            (ConversationKind::NoteToSelf, _) => "file",
+                            (_, ConversationCategory::Channel) => "megaphone",
+                            (_, ConversationCategory::Conference(_)) => "video",
+                            (_, ConversationCategory::Huddle) => "headphones",
+                            _ => "chat",
+                        }
+                    },
+                    16.,
+                    t.sidebar_secondary,
+                ))
+        };
+        let avatar = if row.kind == ConversationKind::Direct {
+            self.avatar_with_presence(
+                avatar,
+                row.presence,
+                9.,
+                if selected { t.selected } else { t.sidebar },
+            )
+        } else {
+            avatar
+        };
         let control = self
             .button(
                 id,
@@ -721,38 +761,7 @@ impl Desktop {
             .py_1()
             .min_h(self.sp(20.) + px(12.))
             .when(selected, |d| d.bg(t.selected).text_color(t.selected_text))
-            .child(
-                if let Some(avatar) = self.projected_avatar(
-                    talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
-                    22.,
-                ) {
-                    avatar
-                } else if row.kind == ConversationKind::Direct {
-                    self.person_avatar(row.initials.as_str(), 22.)
-                } else {
-                    div()
-                        .flex_none()
-                        .size(px(22.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(self.scaled_icon(
-                            if row.organization.classified == Some(true) {
-                                "lock"
-                            } else {
-                                match (row.kind, row.organization.category) {
-                                    (ConversationKind::NoteToSelf, _) => "file",
-                                    (_, ConversationCategory::Channel) => "megaphone",
-                                    (_, ConversationCategory::Conference(_)) => "video",
-                                    (_, ConversationCategory::Huddle) => "headphones",
-                                    _ => "chat",
-                                }
-                            },
-                            16.,
-                            t.sidebar_secondary,
-                        ))
-                },
-            )
+            .child(avatar)
             .child(
                 div()
                     .flex_1()

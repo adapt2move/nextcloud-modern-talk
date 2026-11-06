@@ -51,6 +51,19 @@ not establish native UI, macOS input, production TLS or media behavior.
 
 If needed, `access.py fetch --directory ... --file credentials.json` (or `fixtures.json`, `manifest.json`, `login-flow.json`, `app-password.json`) copies the named file privately without printing it. Never put secrets in command arguments, logs, screenshots or reports.
 
+## Direct-message status check
+
+The opt-in status runner creates a synthetic direct conversation and status,
+then reads the status through the Rust adapter. It removes the owned backend
+and private fixture on completion:
+
+```sh
+python3 tests/lab/presence.py --profile r35 --output /absolute/new/presence-results
+```
+
+Use `--profile all` to exercise both pinned server families. This is a backend
+check; it does not qualify native presentation or accessibility.
+
 ## Browser authorization preparation
 
 `dev.py login-start --state ...` starts Login Flow v2 and saves the private flow. Read its login URL privately, authorize in a disposable browser, then use `dev.py login-poll --state ...`. HTTP 404 is pending or expired, not success; a completed poll writes private `app-password.json`. These helpers do not implement the native client's login/storage runtime or qualify SSO, revocation or races. Use `--help` for command options.
