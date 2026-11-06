@@ -1605,6 +1605,7 @@ mod tests {
                 replyable: true,
                 parent: None,
                 thread: None,
+                thread_replies: 0,
                 reactions: Page::empty(),
             }]),
             pins: Page::empty(),

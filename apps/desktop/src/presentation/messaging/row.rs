@@ -290,25 +290,30 @@ impl Desktop {
                     .child(self.reaction_picker_button(m, menu::Source::Badges, cx)),
             );
         }
-        if m.reply_count > 0 && self.message_feature_enabled(MessageFeature::Threads) {
-            content = content.child(
-                self.control(
-                    scoped_id("thread-footer", context, m.local_id, 0),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    LocalAction::Thread(context, m.local_id),
-                    cx,
-                )
-                .justify_start()
-                .p_0()
-                .min_h(px(28.))
-                .text_color(t.accent)
-                .child(self.scaled_icon("chat", 14., t.accent))
-                .child(self.count(
-                    super::super::localization::Count::Replies,
-                    m.reply_count.into(),
-                )),
+        if m.reply_count > 0 {
+            let count = self.count(
+                super::super::localization::Count::Replies,
+                m.reply_count.into(),
             );
+            content = if self.message_feature_enabled(MessageFeature::Threads) {
+                content.child(
+                    self.control(
+                        scoped_id("thread-footer", context, m.local_id, 0),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        LocalAction::Thread(context, m.local_id),
+                        cx,
+                    )
+                    .justify_start()
+                    .p_0()
+                    .min_h(px(28.))
+                    .text_color(t.accent)
+                    .child(self.scaled_icon("chat", 14., t.accent))
+                    .child(count),
+                )
+            } else {
+                content.child(self.hint(&count))
+            };
         }
         if !m.metadata.deleted && m.metadata.truncated {
             content = content.child(self.hint(

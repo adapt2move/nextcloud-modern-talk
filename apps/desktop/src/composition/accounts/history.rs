@@ -1016,6 +1016,7 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
             .metadata
             .thread
             .and_then(|id| u64::try_from(id).ok()),
+        thread_replies: message.reply_count,
         reactions: page(
             message
                 .metadata
@@ -1040,7 +1041,7 @@ fn restored_message(message: &CachedMessage) -> MessageView {
         own: message.own,
         delivery: talk_core::ui::presentation::DeliveryState::Received,
         attachments: Page::empty(),
-        reply_count: 0,
+        reply_count: message.thread_replies,
         metadata: talk_core::ui::messaging::MessageMetadata {
             rich: page(
                 message

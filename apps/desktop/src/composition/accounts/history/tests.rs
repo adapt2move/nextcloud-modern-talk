@@ -3,6 +3,19 @@ use talk_core::ids::{ConversationId, HostId, RuntimeGeneration};
 use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
+#[test]
+fn cached_thread_count_roundtrips_without_restoring_authority() {
+    let key = context(1, 1, 1, 1);
+    let mut detail = message(key, 7, "Thread root");
+    detail.thread_replies = Some(4);
+    detail.thread = Some(detail.message.id);
+    let cached = cached_message(&message_view(&detail)).unwrap();
+    let restored = restored_message(&cached);
+    assert_eq!(restored.reply_count, 4);
+    assert_eq!(restored.metadata.thread, Some(7));
+    assert_eq!(restored.metadata.edit, Decision::Unknown);
+}
+
 fn system_message(key: ConversationRef, id: u64, tag: Option<&str>) -> MessageDetails {
     let mut row = message(
         key,

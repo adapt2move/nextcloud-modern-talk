@@ -176,6 +176,8 @@ pub struct CachedMessage {
     pub replyable: bool,
     pub parent: Option<CachedReply>,
     pub thread: Option<u64>,
+    #[serde(default)]
+    pub thread_replies: u16,
     #[serde(with = "codec::page")]
     pub reactions: Page<CachedReaction, 64>,
     #[serde(default = "Page::empty", with = "codec::page")]
