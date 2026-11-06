@@ -27,7 +27,11 @@ impl Transport {
                 .path_segments_mut()
                 .map_err(|_| self.error(ErrorKind::Malformed))?;
             parts.pop_if_empty().push(self.binding.user.as_str());
-            for segment in path.split('/').skip(1).filter(|segment| !segment.is_empty()) {
+            for segment in path
+                .split('/')
+                .skip(1)
+                .filter(|segment| !segment.is_empty())
+            {
                 parts.push(segment);
             }
         }

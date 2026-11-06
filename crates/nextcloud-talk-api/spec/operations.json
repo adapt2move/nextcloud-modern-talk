@@ -472,6 +472,14 @@
       "scope": "Create-only filename probing; no replace-existing mode."
     },
     {
+      "operation_id": "files-dav-list-directory",
+      "method": "PROPFIND",
+      "path": "/remote.php/dav/files/{user}/{path}",
+      "status": "partial",
+      "api": "Client::list_directory",
+      "scope": "Depth-one listings bounded by response bytes and entry count; oversized directories fail explicitly. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html"
+    },
+    {
       "operation_id": "files-sharing-share-to-room",
       "method": "POST",
       "path": "/ocs/v2.php/apps/files_sharing/api/v1/shares",

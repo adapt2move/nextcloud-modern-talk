@@ -21,7 +21,9 @@ async fn directory_listing_uses_depth_one_and_encoded_account_path() {
     assert_eq!(bytes, body.as_bytes());
     let requests = server.requests();
     let request = &requests[0];
-    assert!(request.starts_with("PROPFIND /remote.php/dav/files/synthetic-user/Plans%20&%20notes "));
+    assert!(
+        request.starts_with("PROPFIND /remote.php/dav/files/synthetic-user/Plans%20&%20notes ")
+    );
     assert!(request.to_ascii_lowercase().contains("depth: 1\r\n"));
     assert!(request.contains("<d:resourcetype/>"));
 }
@@ -46,7 +48,10 @@ async fn existing_file_share_sends_room_path_and_caption() {
         .collect();
     assert_eq!(form.get("shareType").map(String::as_str), Some("10"));
     assert_eq!(form.get("shareWith").map(String::as_str), Some("room1234"));
-    assert_eq!(form.get("path").map(String::as_str), Some("/Documents/a file.txt"));
+    assert_eq!(
+        form.get("path").map(String::as_str),
+        Some("/Documents/a file.txt")
+    );
     let metadata: serde_json::Value = serde_json::from_str(&form["talkMetaData"]).unwrap();
     assert_eq!(metadata["caption"], "A caption");
 }
