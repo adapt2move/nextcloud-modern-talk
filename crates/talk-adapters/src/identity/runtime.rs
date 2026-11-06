@@ -1675,6 +1675,7 @@ impl Worker {
                     request,
                     ProtocolRequest::Messaging {
                         command: talk_core::protocol::messaging::MessagingCommand::UploadFile { .. }
+                            | talk_core::protocol::messaging::MessagingCommand::ShareFile { .. }
                             | talk_core::protocol::messaging::MessagingCommand::DownloadFile { .. },
                         ..
                     } | ProtocolRequest::Content {

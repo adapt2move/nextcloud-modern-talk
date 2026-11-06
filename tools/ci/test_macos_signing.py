@@ -45,6 +45,30 @@ class SigningTests(unittest.TestCase):
                 macos_signing.cleanup(directory)
                 self.assertFalse(directory.exists())
 
+    def test_internal_import_does_not_trust_a_root_or_accept_a_different_certificate(self):
+        for fingerprint in ("A" * 40, "B" * 40):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                env = {"RUNNER_TEMP": temp, "GITHUB_ENV": str(root / "env"),
+                       "MACOS_CERTIFICATE_P12_BASE64": base64.b64encode(b"synthetic-p12").decode(),
+                       "MACOS_CERTIFICATE_PASSWORD": "synthetic-password", "MACOS_SIGNING_MODE": "internal",
+                       "MACOS_SIGNING_CERTIFICATE": "A" * 40}
+                commands = []
+                def run(command):
+                    commands.append(command)
+                    return ('1) ' + fingerprint + ' "Synthetic Alpha" (CSSMERR_TP_NOT_TRUSTED)\n'
+                            if command[1] == "find-identity" else "")
+                with patch.dict(os.environ, env, clear=True), patch.object(macos_signing, "run", side_effect=run):
+                    if fingerprint == "A" * 40:
+                        macos_signing.prepare()
+                        self.assertIn("NMT_MACOS_SIGNING_MODE=internal", (root / "env").read_text())
+                        macos_signing.cleanup(next(p for p in root.iterdir() if p.is_dir()))
+                    else:
+                        with self.assertRaisesRegex(ValueError, "matching persistent"):
+                            macos_signing.prepare()
+                        self.assertFalse(list(root.glob("nmt-signing-*")))
+                self.assertFalse(any("add-trusted-cert" in c or "default-keychain" in c or "list-keychains" in c for c in commands))
+
     def test_cleanup_rejects_an_unowned_directory(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"RUNNER_TEMP": temp}):
             with self.assertRaises(ValueError):

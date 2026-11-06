@@ -48,7 +48,7 @@ pub(super) struct ContentOwner {
     pub(super) preview_generation: u64,
     descriptors: Vec<(view::AssetTarget, talk_adapters::identity::CachedAttachment)>,
     jobs: Vec<Job>,
-    images: Vec<ImageJob>,
+    pub(super) images: Vec<ImageJob>,
     pub(super) next_key: u64,
     pub(super) retained: Vec<(u64, usize)>,
     avatars: avatars::Avatars,
@@ -73,6 +73,8 @@ pub(super) struct ContentOwner {
 #[derive(Clone)]
 pub(crate) struct ImageJob {
     pub cached: bool,
+    // An explicitly selected local file; never exposed in UI snapshots or caches.
+    pub local: Option<(Text<16384>, wire::TransferProgress)>,
     pub attachment: Option<talk_adapters::identity::CachedAttachment>,
     pub preview_generation: Option<u64>,
     pub account: AccountScope,
@@ -961,6 +963,7 @@ impl Accounts {
             }
             self.content_owner.images.push(ImageJob {
                 cached: false,
+                local: None,
                 attachment,
                 preview_generation,
                 account,
@@ -1189,20 +1192,24 @@ impl Accounts {
             .retain(|(target, _)| assets.as_slice().iter().any(|a| &a.target == target));
     }
     pub(crate) fn take_content_image(&mut self) -> Option<ImageJob> {
-        if self.content_owner.images.is_empty() {
-            None
-        } else {
-            Some(self.content_owner.images.remove(0))
+        while !self.content_owner.images.is_empty() {
+            let job = self.content_owner.images.remove(0);
+            if job.local.is_none() || self.upload_preview_current(&job.target, job.local.as_ref()) {
+                return Some(job);
+            }
         }
+        None
     }
     pub(crate) fn finish_content_image(&mut self, job: &ImageJob, bytes: Option<usize>) -> bool {
         self.prune_avatars();
         let avatar = is_avatar(&job.target) && job.bytes.avatar_source().is_some();
         let retained_avatar = avatar && self.content_owner.avatars.contains(job.key);
         if self.snapshot.active_account != Some(job.account)
+            || (job.local.is_some()
+                && !self.upload_preview_current(&job.target, job.local.as_ref()))
             || (!retained_avatar
                 && local_context(&job.target).is_some_and(|c| Some(c) != self.snapshot.selected))
-            || (!job.cached && self.current(job.account).is_err())
+            || (!job.cached && job.local.is_none() && self.current(job.account).is_err())
             || (job.cached && !self.cached_thumbnail_job_current(job))
         {
             return false;
@@ -1361,6 +1368,10 @@ impl Accounts {
         (self.snapshot.active_account == Some(scope) && self.current(scope).is_ok()).then_some(link)
     }
     pub(super) fn asset_is_current(&self, target: &view::AssetTarget) -> bool {
+        if matches!(target, view::AssetTarget::Thumbnail(reference) if talk_core::ui::messaging::UploadView::is_message_id(reference.message))
+        {
+            return self.upload_preview_current(target, None);
+        }
         if let view::AssetTarget::Image(reference) | view::AssetTarget::Thumbnail(reference) =
             target
             && self

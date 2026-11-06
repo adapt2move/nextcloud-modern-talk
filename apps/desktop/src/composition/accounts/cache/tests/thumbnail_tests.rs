@@ -71,6 +71,7 @@ fn thumbnail(message: u64) -> CacheThumbnail {
 }
 fn image_job(context: ConversationRef, cached: bool) -> ImageJob {
     ImageJob {
+        local: None,
         preview_generation: None,
         attachment: Some(thumbnail(7).attachment),
         cached,

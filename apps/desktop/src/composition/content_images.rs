@@ -5,7 +5,42 @@ use image::ImageDecoder;
 use std::sync::Arc;
 
 pub(super) fn decode(job: &ImageJob) -> Option<(Arc<gpui::RenderImage>, usize)> {
-    let bytes = job.bytes.as_slice();
+    let local;
+    let bytes = if let Some((path, cancellation)) = &job.local {
+        use std::io::Read;
+        if cancellation.is_cancelled() {
+            return None;
+        }
+        #[cfg(unix)]
+        let file = {
+            use rustix::fs::{Mode, OFlags, open};
+            std::fs::File::from(
+                open(
+                    path.as_str(),
+                    OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+                    Mode::empty(),
+                )
+                .ok()?,
+            )
+        };
+        #[cfg(not(unix))]
+        let file = std::fs::File::open(path.as_str()).ok()?;
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+            return None;
+        }
+        let mut buffer = Vec::with_capacity(metadata.len() as usize);
+        file.take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut buffer)
+            .ok()?;
+        if cancellation.is_cancelled() || buffer.len() > 4 * 1024 * 1024 {
+            return None;
+        }
+        local = buffer;
+        local.as_slice()
+    } else {
+        job.bytes.as_slice()
+    };
     if bytes.is_empty() || bytes.len() > talk_core::protocol::content::MAX_IMAGE_BYTES {
         return None;
     }
@@ -171,6 +206,7 @@ mod tests {
     fn job(bytes: Vec<u8>) -> ImageJob {
         ImageJob {
             cached: false,
+            local: None,
             attachment: None,
             preview_generation: None,
             account: AccountScope {
@@ -303,5 +339,47 @@ mod tests {
         let restored = image::load_from_memory(&encoded).unwrap();
         assert_eq!((restored.width(), restored.height()), (320, 240));
         assert!(!encoded.windows(6).any(|bytes| bytes == b"Exif\0\0"));
+    }
+    #[test]
+    fn selected_local_preview_is_bounded_and_cancellation_prevents_reading() {
+        let directory = std::env::temp_dir().join(format!(
+            "nmt-image-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("image.png");
+        std::fs::write(
+            &path,
+            include_bytes!("../../assets/fixtures/content-photo.png"),
+        )
+        .unwrap();
+        let progress = talk_core::protocol::content::TransferProgress::default();
+        let mut local = job(Vec::new());
+        local.target = AssetTarget::Thumbnail(talk_core::ui::content::AttachmentRef {
+            context: crate::composition::fixtures::context(1),
+            message: 7,
+            placeholder: talk_core::ui::Text::new("upload").unwrap(),
+        });
+        local.local = Some((
+            talk_core::ui::Text::new(path.to_str().unwrap()).unwrap(),
+            progress.clone(),
+        ));
+        let decoded = decode(&local).expect("explicit local image");
+        assert!(decoded.1 <= 320 * 240 * 4);
+        progress.cancel();
+        assert!(decode(&local).is_none());
+        local.local.as_mut().unwrap().1 = Default::default();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(4 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(decode(&local).is_none());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

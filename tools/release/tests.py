@@ -17,7 +17,7 @@ import zipfile
 
 from build import dependency_notices, macos_linkage, notice_supplement
 from package import REQUIRED_NOTICES, assemble, sha, validate
-from macos_tests import MacRuntimeTests, MacPackageTests
+from macos_tests import MacRuntimeTests, MacPackageTests, PersistentSigningTests
 from vendor import GPUI_ARCHIVE, verify_gpui
 
 

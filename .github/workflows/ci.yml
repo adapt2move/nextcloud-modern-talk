@@ -44,6 +44,7 @@ jobs:
       - run: python3 tools/ci/test_macos_signing.py
       - run: python3 tools/test_cargo.py
       - run: python3 tools/test_dev.py
+      - run: python3 tools/release/internal_identity_tests.py
       - run: python3 tools/release/tests.py
       - run: python3 tools/release/publication_tests.py
       - name: Native prerequisites
@@ -110,8 +111,10 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
-      - name: Compile native permission and notification helper
+      - name: Compile native PDF and notification helper
         run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
+      - name: Verify persistent internal code identity across two signed versions
+        run: python3 tools/native/check-macos-signing.py
       - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
       - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

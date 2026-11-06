@@ -380,6 +380,7 @@ impl Accounts {
                 MessagingCommand::UploadFile {
                     local_path: local,
                     name,
+                    progress: protocol::content::TransferProgress::default(),
                 }
             }
             Kind::Download {

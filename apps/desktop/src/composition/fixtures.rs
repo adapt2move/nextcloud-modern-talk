@@ -55,6 +55,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content-loading",
     "chat-content-failed",
     "chat-attachments",
+    "chat-upload",
+    "chat-upload-uncertain",
     "chat-motion",
     "history",
     "history-pagination",
@@ -387,6 +389,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         Some(
             "chat-content"
                 | "chat-attachments"
+                | "chat-upload"
+                | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
                 | "chat-content-failed"
@@ -396,6 +400,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         content::configure(&mut state);
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
+        }
+        if matches!(scenario, Some("chat-upload" | "chat-upload-uncertain")) {
+            content::pending_upload(&mut state, scenario == Some("chat-upload-uncertain"));
         }
         if matches!(
             scenario,
@@ -1166,6 +1173,8 @@ impl DevelopmentPort {
                 Some(
                     "chat-content"
                         | "chat-attachments"
+                        | "chat-upload"
+                        | "chat-upload-uncertain"
                         | "chat-content-progress"
                         | "chat-content-loading"
                         | "chat-content-failed"
@@ -1639,6 +1648,10 @@ impl NativeDesktopPort for DevelopmentPort {
                                 name: text(name),
                                 bytes: None,
                                 state: UploadState::Selected,
+                                submitted: false,
+                                transferred: 0,
+                                uploaded: false,
+                                server_message: None,
                             });
                         }
                         panel.uploads = page(uploads);
@@ -1653,12 +1666,27 @@ impl NativeDesktopPort for DevelopmentPort {
                                 .cloned(),
                         )
                     }
-                    MessageAction::SendFiles { .. } => {
+                    MessageAction::SendFiles { caption, .. } => {
                         // Presentation-only pending state, never a fabricated upload receipt.
+                        panel.files_queued = Some(request);
+                        let mut first = true;
+                        for file in panel.uploads.as_slice().iter().filter(|f| !f.submitted) {
+                            let row = message(
+                                file.message_id(),
+                                "Fictional author",
+                                "FA",
+                                "10:00",
+                                if first { caption.as_str() } else { "" },
+                                true,
+                            );
+                            first = false;
+                            let _ = self.snapshot.messages.try_push(row);
+                        }
                         panel.uploads_running = true;
                         panel.uploads =
                             page(panel.uploads.as_slice().iter().cloned().map(|mut file| {
                                 file.state = talk_core::ui::messaging::UploadState::Uploading;
+                                file.submitted = true;
                                 file
                             }));
                     }

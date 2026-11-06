@@ -506,7 +506,7 @@ impl Desktop {
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
     }
-    fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
+    pub(in crate::presentation) fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
         let AssetState::Ready { key } = self.asset(target)?.state else {
             return None;
         };

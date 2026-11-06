@@ -144,6 +144,8 @@ Use `chat-reactions`, `chat-reactions-pending` and `chat-reactions-denied` for d
 
 Use `chat-content`, `chat-content-loading` and `chat-content-failed` to inspect proportional thumbnail tiles, labelled loading/failure states and the opaque media dialog. Open a tile, resize the window and check that the complete image stays inside its stage above the footer. These fixtures do not fetch files or establish server latency, actual retry timing or native macOS PDF support.
 
+Use `chat-upload` and `chat-upload-uncertain` for the immediate outgoing image row, inline progress and missing-confirmation actions. These are fictional projections with no file/server effects.
+
 Use `chat-attachments` for compact JSON/ZIP cards and the selected-file strip.
 Remove chips, hover/focus Download and drop multiple local files into the chat.
 The fixture shows a pending send rather than fabricating upload success. It has

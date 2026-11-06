@@ -1343,6 +1343,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Gespeichertes Konto", "Saved account", "Cuenta guardada"),
     ("Gespräch", "Conversation", "Conversación"),
     (
+        "Gespräch aktualisieren",
+        "Refresh conversation",
+        "Actualizar conversación",
+    ),
+    (
         "Gespräch mit Gastzugang",
         "Guest-accessible conversation",
         "Conversación con acceso de invitados",
@@ -1420,6 +1425,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Hinweise auf neue Nachrichten.",
         "Alerts for new messages.",
         "Avisos de mensajes nuevos.",
+    ),
+    (
+        "Hochladen unterbrochen. Erneut versuchen.",
+        "Upload interrupted. Try again.",
+        "Subida interrumpida. Vuelve a intentarlo.",
     ),
     ("Huddles", "Huddles", "Reuniones rápidas"),
     ("Im Anruf", "In call", "En llamada"),
@@ -1930,6 +1940,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Show sidebar",
         "Mostrar barra lateral",
     ),
+    (
+        "Sendehinweis ausblenden",
+        "Hide send status",
+        "Ocultar estado del envío",
+    ),
     ("Senden", "Send", "Enviar"),
     (
         "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten.",
@@ -1957,6 +1972,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede acceder al servidor.",
     ),
     ("Serveradresse", "Server address", "Dirección del servidor"),
+    (
+        "Serverbestätigung fehlt. Das Gespräch wird abgeglichen …",
+        "Waiting for server confirmation. Checking the conversation …",
+        "Falta la confirmación del servidor. Comprobando la conversación …",
+    ),
     (
         "Sicher anmelden",
         "Sign in securely",
@@ -2233,6 +2253,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Waiting for you to sign in …",
         "Esperando a que inicies sesión…",
     ),
+    (
+        "Wartet auf Hochladen …",
+        "Waiting to upload …",
+        "Esperando para subir …",
+    ),
     ("Webinar", "Webinar", "Seminario web"),
     ("Weiter", "Continue", "Continuar"),
     (
@@ -2272,6 +2297,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Wiederholen", "Redo", "Rehacer"),
     ("Wird gespeichert …", "Saving …", "Guardando…"),
+    (
+        "Wird im Gespräch bestätigt …",
+        "Confirming in the conversation …",
+        "Confirmando en la conversación …",
+    ),
     ("Wird verarbeitet", "Processing", "Procesando"),
     (
         "Wähle ein Gespräch.",

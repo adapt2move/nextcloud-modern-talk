@@ -268,6 +268,7 @@ impl Accounts {
                 document_pages: None,
             });
             self.content_owner.images.push(ImageJob {
+                local: None,
                 preview_generation: None,
                 cached: true,
                 account: context.account,

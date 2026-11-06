@@ -1,10 +1,11 @@
-//! Composer attachments and native file gestures. Only typed intents cross to I/O owners.
+//! Native file gestures and incoming file cards. Typed intents cross to I/O owners.
+mod uploads;
 use super::{
     ButtonStyle, Desktop, LocalAction, content,
     controls::{Availability, scoped_id},
     feedback::Feedback,
-    messaging,
 };
+pub(super) use crate::presentation::attachments::uploads::PendingSend;
 use gpui::{
     Context, Div, ExternalPaths, Focusable, MouseButton, Render, SharedString, Window, div,
     prelude::*, px,
@@ -12,18 +13,10 @@ use gpui::{
 use talk_core::ui::{
     Page, Text,
     content::AttachmentRef,
-    messaging::{
-        ComposeTarget, MessageAction, MessageFeature, RichObject, UploadFailure, UploadState,
-    },
-    presentation::{ConversationRef, RequestId, UiIntent},
+    messaging::{MessageAction, MessageFeature, RichObject},
+    presentation::{ConversationRef, UiIntent},
 };
 
-pub(super) struct PendingSend {
-    context: ConversationRef,
-    request: RequestId,
-    body: Text<4096>,
-    editor: u64,
-}
 struct DragLabel {
     name: String,
 }
@@ -62,112 +55,7 @@ pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
         None => extension,
     }
 }
-fn upload_label(state: UploadState) -> &'static str {
-    match state {
-        UploadState::Selected => "Bereit zum Senden",
-        UploadState::Uploading => "Wird hochgeladen …",
-        UploadState::Sharing => "Wird gesendet …",
-        UploadState::Uncertain => "Sendestatus unklar. Bitte im Gespräch prüfen.",
-        UploadState::Failed(UploadFailure::TooMany) => {
-            "Du kannst höchstens 8 Dateien auf einmal anhängen."
-        }
-        UploadState::Failed(UploadFailure::Missing) => "Datei nicht mehr gefunden.",
-        UploadState::Failed(UploadFailure::TooLarge) => {
-            "Die Datei ist zu groß. Maximal 32 MiB pro Datei."
-        }
-        UploadState::Failed(UploadFailure::Denied) => "Keine Berechtigung zum Senden dieser Datei.",
-        UploadState::Failed(UploadFailure::Connection) => {
-            "Datei konnte nicht gesendet werden. Erneut versuchen."
-        }
-        UploadState::Failed(UploadFailure::Unsupported) => {
-            "Diese Datei kann nicht gesendet werden."
-        }
-    }
-}
 impl Desktop {
-    pub(super) fn can_send_attachments(&self) -> bool {
-        self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-            Some(panel.context) == self.snapshot.selected
-                && !panel.uploads_running
-                && !panel
-                    .uploads
-                    .as_slice()
-                    .iter()
-                    .any(|file| file.state == UploadState::Uncertain)
-                && panel
-                    .uploads
-                    .as_slice()
-                    .iter()
-                    .any(|file| file.state == UploadState::Selected)
-        }) && self.message_feature_enabled(MessageFeature::Files)
-            && !self.media_offline()
-            && self.message_ui.editing.is_none()
-            && self.snapshot.selected.is_some_and(|context| {
-                !self.drafts.pending(context)
-                    && self.drafts.target(context) == ComposeTarget::default()
-            })
-    }
-    pub(super) fn send_attachments(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|panel| !panel.uploads.as_slice().is_empty())
-        {
-            return false;
-        }
-        if !self.can_send_attachments() {
-            return true;
-        }
-        let Some(body) = self.composer_submission(cx) else {
-            return true;
-        };
-        let context = self.snapshot.selected.expect("attachment context");
-        let editor = self.composer.read(cx).edit_generation();
-        if let Some(request) = self.submit_message(MessageAction::SendFiles {
-            caption: body.clone(),
-            target: self.drafts.target(context),
-        }) {
-            self.file_send = Some(PendingSend {
-                context,
-                request,
-                body,
-                editor,
-            });
-            self.message_ui.list.scroll_to(gpui::ListOffset {
-                item_ix: self.message_ui.list.item_count(),
-                offset_in_item: px(0.),
-            });
-        }
-        true
-    }
-    pub(super) fn refresh_attachment_send(&mut self, cx: &mut Context<Self>) {
-        let Some(pending) = self.file_send.as_ref() else {
-            return;
-        };
-        if self.snapshot.selected != Some(pending.context) {
-            self.file_send = None;
-            return;
-        }
-        if self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .and_then(|panel| panel.files_sent)
-            != Some(pending.request)
-        {
-            return;
-        }
-        let pending = self.file_send.take().expect("pending file caption");
-        let input = self.composer.read(cx);
-        if !input.composing()
-            && input.edit_generation() == pending.editor
-            && input.submitted_value() == Some(pending.body.as_str())
-        {
-            self.composer.update(cx, |input, _| input.reset());
-            self.save_draft(cx);
-        }
-    }
     pub(super) fn stage_dropped_files(
         &mut self,
         context: ConversationRef,
@@ -208,76 +96,6 @@ impl Desktop {
             self.composer.focus_handle(cx).focus(window);
         }
         cx.notify();
-    }
-    pub(super) fn upload_strip(&self, cx: &Context<Self>) -> Div {
-        let Some(panel) = self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .filter(|panel| Some(panel.context) == self.snapshot.selected)
-        else {
-            return div();
-        };
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(panel.uploads.as_slice().iter().map(|file| {
-                div()
-                    .w(px(280.))
-                    .max_w_full()
-                    .rounded(px(8.))
-                    .bg(self.theme.subtle)
-                    .p_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(self.scaled_icon("file", 22., self.theme.muted))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(self.sp(13.))
-                                    .child(file.name.as_str().to_owned()),
-                            )
-                            .child(self.hint(self.l(upload_label(file.state)))),
-                    )
-                    .when(
-                        matches!(file.state, UploadState::Uploading | UploadState::Sharing),
-                        |row| row.child(self.pending_dots(self.theme.muted)),
-                    )
-                    .when(matches!(file.state, UploadState::Failed(_)), |row| {
-                        row.child(self.icon_button(
-                            scoped_id("retry-file", panel.context, u128::from(file.id), 0),
-                            ("refresh", "Erneut versuchen"),
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                !panel.uploads_running && !self.media_offline(),
-                                "Die Verbindung ist derzeit nicht bereit.",
-                            ),
-                            LocalAction::Message(messaging::Action::Command(
-                                MessageAction::RetryFile(file.id),
-                            )),
-                            cx,
-                        ))
-                    })
-                    .child(self.icon_button(
-                        scoped_id("remove-file", panel.context, u128::from(file.id), 0),
-                        ("x", "Anhang entfernen"),
-                        ButtonStyle::Quiet,
-                        Availability::when(!panel.uploads_running, "Dateien werden gesendet …"),
-                        LocalAction::Message(messaging::Action::Command(
-                            MessageAction::RemoveFile(file.id),
-                        )),
-                        cx,
-                    ))
-            }))
     }
     pub(in crate::presentation) fn exportable_card(
         &self,

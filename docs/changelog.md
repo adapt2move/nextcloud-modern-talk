@@ -12,11 +12,15 @@
 - Request and check macOS microphone, camera, screen and notification permission
   in the running application. Keep callback admission bounded across cancellation
   and never interpret an opened System Settings page as permission.
-- Require a persistent Developer ID Application signature for publication. Sign
-  bundled code and the app with the same team, verify that identity and remove
-  the temporary CI keychain after the build. Non-publishing test packages remain
-  ad-hoc signed; notarization is not implemented. Moving from an older ad-hoc app
-  can require one new OS approval.
+- Show outgoing files and images immediately in the chat, with subtle upload
+  progress below the file. Clear the admitted caption and allow further text
+  while uploading. Reconcile missing share acknowledgements using exact message
+  references; keep the local preview until the server thumbnail arrives.
+- Require a persistent macOS signing identity for publication. Support an internal
+  alpha certificate pinned to the app identifier as well as Developer ID with
+  team verification. Sign bundled code consistently and remove temporary CI
+  keychains after building. Internal signatures provide no Apple publisher trust
+  or notarization; switching from an older ad-hoc app can require new OS approval.
 - Keep the light/dark badge inside the selected appearance swatch's ring.
 
 [Installation](https://github.com/adapt2move/nextcloud-modern-talk/blob/v0.0.11/docs/install.md)

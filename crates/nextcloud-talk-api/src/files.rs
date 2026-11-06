@@ -36,12 +36,26 @@ impl Client {
         reader: R,
         size: u64,
     ) -> Result<(), Error> {
+        self.upload_file_progress(c, path, reader, size, std::sync::Arc::new(|_, _| {}))
+            .await
+    }
+    /// Counts request-body bytes, not a confirmed server commit.
+    pub async fn upload_file_progress<R: AsyncRead + Unpin + Send + 'static>(
+        &mut self,
+        c: &OperationContext,
+        path: FilePath,
+        reader: R,
+        size: u64,
+        progress: std::sync::Arc<dyn Fn(u64, Option<u64>) + Send + Sync>,
+    ) -> Result<(), Error> {
         self.validate(c)?;
         if size > MAX_FILE_BYTES {
             return Err(self.error(ErrorKind::TooLarge));
         }
-        let stream =
-            futures_lite::stream::unfold((reader, size), |(mut reader, remaining)| async move {
+        progress(0, Some(size));
+        let stream = futures_lite::stream::unfold(
+            (reader, size, progress),
+            move |(mut reader, remaining, progress)| async move {
                 if remaining == 0 {
                     return None;
                 }
@@ -49,15 +63,18 @@ impl Client {
                 match reader.read(&mut block).await {
                     Ok(0) => Some((
                         Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
-                        (reader, 0),
+                        (reader, 0, progress),
                     )),
                     Ok(n) => {
                         block.truncate(n);
-                        Some((Ok(block), (reader, remaining - n as u64)))
+                        let remaining = remaining - n as u64;
+                        progress(size - remaining, Some(size));
+                        Some((Ok(block), (reader, remaining, progress)))
                     }
-                    Err(e) => Some((Err(e), (reader, 0))),
+                    Err(e) => Some((Err(e), (reader, 0, progress))),
                 }
-            });
+            },
+        );
         self.transport
             .file(
                 c,

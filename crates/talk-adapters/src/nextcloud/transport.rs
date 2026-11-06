@@ -307,9 +307,25 @@ impl Transport {
         path: api::files::FilePath,
         file: tokio::fs::File,
         size: u64,
+        progress: talk_core::protocol::content::TransferProgress,
     ) -> Result<(), PortError> {
+        let cancellation = c.cancellation.clone();
+        if progress.is_cancelled() {
+            cancellation.cancel();
+        }
         self.api
-            .upload_file(&context(c), path, file, size)
+            .upload_file_progress(
+                &context(c),
+                path,
+                file,
+                size,
+                std::sync::Arc::new(move |bytes, total| {
+                    progress.update(bytes, total);
+                    if progress.is_cancelled() {
+                        cancellation.cancel();
+                    }
+                }),
+            )
             .await
             .map_err(error)
     }

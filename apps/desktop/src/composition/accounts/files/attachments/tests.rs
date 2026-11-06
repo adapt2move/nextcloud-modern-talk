@@ -19,6 +19,16 @@ fn result(model: &mut Accounts, id: u64, step: Step, result: Result<Reply, Error
         step,
     };
     model.attachment_owner.flight = Some(work);
+    if step == Step::Share
+        && let Some(file) = model
+            .attachment_owner
+            .batch
+            .as_mut()
+            .and_then(|b| b.files.iter_mut().find(|f| f.view.id == id))
+        && let Some(outgoing) = file.outgoing.as_mut()
+    {
+        outgoing.operation = Some(operation);
+    }
     model.complete_file_work(
         work,
         result
@@ -186,7 +196,7 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
             .as_ref()
             .unwrap()
             .uploads
-            .as_slice()[0]
+            .as_slice()[1]
             .state,
         UploadState::Failed(UploadFailure::Denied)
     );
@@ -196,7 +206,13 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
     );
     result(&mut model, 2, Step::Share, Ok(Reply::Changed));
     let panel = model.snapshot.message_panel.as_ref().unwrap();
-    assert!(panel.uploads.as_slice().is_empty());
+    assert!(
+        panel
+            .uploads
+            .as_slice()
+            .iter()
+            .all(|f| f.state == UploadState::Confirming)
+    );
     assert!(!panel.uploads_running);
     assert_eq!(panel.files_sent, Some(RequestId(10)));
 }
@@ -220,7 +236,16 @@ fn uncertain_write_blocks_replay_and_preserves_other_files_and_caption() {
                 ComposeTarget::default(),
             )
             .unwrap();
-        result(&mut model, 1, Step::Upload, Err(error));
+        result(
+            &mut model,
+            1,
+            Step::Upload,
+            Ok(Reply::Uploaded {
+                path: text("/draft/one"),
+                bytes: 100,
+            }),
+        );
+        result(&mut model, 1, Step::Share, Err(error));
         assert_eq!(
             model
                 .snapshot
@@ -253,14 +278,7 @@ fn uncertain_write_blocks_replay_and_preserves_other_files_and_caption() {
                 .is_none()
         );
         assert_eq!(
-            model
-                .attachment_owner
-                .batch
-                .as_ref()
-                .unwrap()
-                .caption
-                .as_ref()
-                .unwrap()
+            model.attachment_owner.batch.as_ref().unwrap().captions[0]
                 .1
                 .as_str(),
             "preserved"
@@ -555,4 +573,314 @@ fn stale_drag_source_or_account_cannot_start_an_export_and_tombstones_dominate_p
             .is_err()
     );
     assert!(model.snapshot.file_export.is_none());
+}
+
+#[test]
+fn admission_projects_a_chat_row_and_progress_without_waiting_for_network() {
+    let (mut model, context) = model();
+    model
+        .stage_files(context, paths(&["one.png", "two.json"]))
+        .unwrap();
+    let before = model.snapshot.messages.as_slice().len();
+    model
+        .send_files(
+            RequestId(10),
+            context,
+            text("My favourite"),
+            ComposeTarget::default(),
+        )
+        .unwrap();
+    let rows = model.snapshot.messages.as_slice();
+    assert_eq!(rows.len(), before + 2);
+    assert_eq!(rows[before].body.as_str(), "My favourite");
+    assert!(rows[before + 1].body.as_str().is_empty());
+    assert!(
+        rows[before..]
+            .iter()
+            .all(|row| row.own && UploadView::is_message_id(row.local_id))
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().files_queued,
+        Some(RequestId(10))
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().files_sent,
+        None
+    );
+    let batch = model.attachment_owner.batch.as_mut().unwrap();
+    batch.files[0].view.state = UploadState::Uploading;
+    batch.files[0].progress.update(64, Some(100));
+    model.project_uploads();
+    let file = &model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .uploads
+        .as_slice()[0];
+    assert_eq!((file.transferred, file.bytes), (64, Some(100)));
+    assert!(model.pending.is_empty());
+}
+
+#[test]
+fn late_canonical_message_settles_an_uncertain_share_once_and_preserves_other_files() {
+    let (mut model, context) = model();
+    model
+        .stage_files(context, paths(&["one.png", "two.json"]))
+        .unwrap();
+    model
+        .send_files(
+            RequestId(10),
+            context,
+            text("caption"),
+            ComposeTarget::default(),
+        )
+        .unwrap();
+    result(
+        &mut model,
+        1,
+        Step::Upload,
+        Ok(Reply::Uploaded {
+            path: text("/draft/one"),
+            bytes: 100,
+        }),
+    );
+    let work = result(&mut model, 1, Step::Share, Err(ErrorKind::Uncertain));
+    let mut canonical = model.snapshot.messages.as_slice()[0].clone();
+    canonical.local_id = 777;
+    canonical.own = true;
+    canonical.delivery = talk_core::ui::presentation::DeliveryState::Received;
+    canonical.metadata.local_operation = Some(work.operation.as_local());
+    canonical.metadata.rich = Page::empty();
+    for correct in [false, true] {
+        canonical.own = correct;
+        model.snapshot.messages.try_push(canonical.clone()).unwrap();
+        model.project_uploads();
+        if !correct {
+            assert_eq!(
+                model
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .unwrap()
+                    .uploads
+                    .as_slice()[0]
+                    .state,
+                UploadState::Uncertain
+            );
+            model.snapshot.messages = page(
+                model
+                    .snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .filter(|m| m.local_id != 777)
+                    .cloned(),
+            );
+        }
+    }
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.uploads.as_slice().len(), 1);
+    assert_eq!(panel.uploads.as_slice()[0].id, 2);
+    assert!(panel.uploads_running);
+    assert_eq!(panel.files_sent, Some(RequestId(10)));
+    assert!(
+        !model
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .any(|m| m.local_id == (1u128 << 126) | 1)
+    );
+    assert!(matches!(
+        model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((2, Step::Upload, _))
+    ));
+    model.complete_file_work(work, Err(IdentityError::Request(ErrorKind::Deadline)));
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn a_cancelled_or_replaced_local_preview_never_becomes_ready() {
+    let (mut model, context) = model();
+    model.stage_files(context, paths(&["one.png"])).unwrap();
+    let job = model.take_content_image().unwrap();
+    assert!(job.local.is_some());
+    model.remove_file(context, 1).unwrap();
+    model.stage_files(context, paths(&["one.png"])).unwrap();
+    assert!(!model.finish_content_image(&job, Some(128)));
+    let next = model.take_content_image().unwrap();
+    assert_ne!(job.key, next.key);
+    assert!(model.finish_content_image(&next, Some(128)));
+    model.snapshot.selected = None;
+    assert!(!model.finish_content_image(&next, Some(128)));
+}
+
+#[test]
+fn retrying_an_unshared_upload_requires_an_explicit_action_and_does_not_submit_new_drafts() {
+    let (mut model, context) = model();
+    model.stage_files(context, paths(&["one.json"])).unwrap();
+    model
+        .send_files(
+            RequestId(10),
+            context,
+            text("caption"),
+            ComposeTarget::default(),
+        )
+        .unwrap();
+    result(&mut model, 1, Step::Upload, Err(ErrorKind::Uncertain));
+    assert!(
+        model
+            .attachment_owner
+            .batch
+            .as_ref()
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    model.stage_files(context, paths(&["new.json"])).unwrap();
+    model.retry_file(context, 1).unwrap();
+    result(
+        &mut model,
+        1,
+        Step::Upload,
+        Ok(Reply::Uploaded {
+            path: text("/draft/one"),
+            bytes: 10,
+        }),
+    );
+    result(&mut model, 1, Step::Share, Ok(Reply::Changed));
+    assert!(
+        model
+            .attachment_owner
+            .batch
+            .as_ref()
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    assert!(
+        !model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()[1]
+            .submitted
+    );
+}
+
+#[test]
+fn correlated_image_keeps_local_pixels_until_the_remote_preview_or_denial_arrives() {
+    use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
+    let (mut model, context) = model();
+    model.stage_files(context, paths(&["one.png"])).unwrap();
+    let job = model.take_content_image().unwrap();
+    assert!(model.finish_content_image(&job, Some(128)));
+    model
+        .send_files(
+            RequestId(10),
+            context,
+            text("caption"),
+            ComposeTarget::default(),
+        )
+        .unwrap();
+    result(
+        &mut model,
+        1,
+        Step::Upload,
+        Ok(Reply::Uploaded {
+            path: text("/draft/one"),
+            bytes: 100,
+        }),
+    );
+    let work = result(&mut model, 1, Step::Share, Ok(Reply::Changed));
+    let mut canonical = model.snapshot.messages.as_slice()[0].clone();
+    canonical.local_id = 777;
+    canonical.own = true;
+    canonical.delivery = talk_core::ui::presentation::DeliveryState::Received;
+    canonical.metadata.local_operation = Some(work.operation.as_local());
+    assert_eq!(
+        canonical
+            .metadata
+            .rich
+            .as_slice()
+            .iter()
+            .filter(|o| o.kind.as_str() == "file")
+            .count(),
+        1
+    );
+    model.snapshot.messages.try_push(canonical.clone()).unwrap();
+    model.project_uploads();
+    let file = &model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .uploads
+        .as_slice()[0];
+    assert_eq!(
+        (file.state, file.server_message),
+        (UploadState::Shared, Some(777))
+    );
+    assert!(
+        !model
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .any(|m| m.local_id == file.message_id())
+    );
+    assert!(model.asset_is_current(&job.target));
+    model
+        .stage_files(context, paths(&["another.json"]))
+        .unwrap();
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()
+            .len(),
+        2
+    );
+    assert!(model.asset_is_current(&job.target));
+    model.set_asset(AssetView {
+        target: AssetTarget::Thumbnail(AttachmentRef {
+            context,
+            message: 777,
+            placeholder: canonical.metadata.rich.as_slice()[0].placeholder.clone(),
+        }),
+        state: AssetState::Denied,
+        emoji: None,
+        color: None,
+        document_pages: None,
+    });
+    model.project_uploads();
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()
+            .len(),
+        1
+    );
+    assert!(!model.asset_is_current(&job.target));
+    assert!(!model.finish_content_image(&job, Some(128)));
 }

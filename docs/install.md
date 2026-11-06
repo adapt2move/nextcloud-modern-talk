@@ -21,8 +21,9 @@ runtime installation is needed.
 ### First launch blocked by macOS
 
 Releases through v0.0.10 and non-publishing test packages have ad-hoc signatures.
-New publication requires a persistent Developer ID Application signature;
-notarization is not implemented. If macOS says the developer cannot be verified or Apple cannot
+Published updates require a persistent internal alpha or Developer ID Application
+signature. Internal alpha signing supplies no Apple publisher trust; notarization
+is not implemented. If macOS says the developer cannot be verified or Apple cannot
 check the app, first try to open the installed app, then:
 
 1. Open **System Settings → Privacy & Security**.

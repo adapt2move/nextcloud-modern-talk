@@ -249,7 +249,7 @@ def assemble(stage, output, allow_fixture=False):
             copied[name] = dest
         (resources / "INSTALL.txt").write_text(
             "NextCloud Modern Talk alpha\n"
-            + ("Drag NextCloud Modern Talk to Applications, eject the disk image, then open the installed app. Its media runtime is included; no GStreamer installation is required. The app is not Developer ID signed or notarized. If macOS cannot verify the developer, try opening the app once, then use System Settings > Privacy & Security > Open Anyway and confirm Open. On a German Mac: Systemeinstellungen > Datenschutz & Sicherheit > Dennoch öffnen. Do not disable Gatekeeper.\n" if mac else
+            + ("Drag NextCloud Modern Talk to Applications, eject the disk image, then open the installed app. Its media runtime is included; no GStreamer installation is required. Application signing: " + macos_signing.description() + ". The app is not notarized. If macOS cannot verify the developer, try opening the app once, then use System Settings > Privacy & Security > Open Anyway and confirm Open. On a German Mac: Systemeinstellungen > Datenschutz & Sicherheit > Dennoch öffnen. Do not disable Gatekeeper.\n" if mac else
                "Ubuntu 24.04 x86_64 candidate: install the matching .deb using sudo apt install ./FILE.deb; launch talk-desktop from the application menu. The tar archive needs the runtime libraries recorded in provenance.\n")
             + f"Installation: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/install.md\n"
             + f"Known limitations: https://github.com/adapt2move/nextcloud-modern-talk/blob/v{spec['version']}/docs/limitations.md\n"

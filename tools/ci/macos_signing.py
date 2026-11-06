@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import the existing release identity into one disposable runner keychain.
+"""Import a persistent release identity into one disposable runner keychain.
 
 No default keychain/search-list changes, credential output or generated release
 identity. Missing credentials fail a publishing build before compilation.
@@ -27,8 +27,15 @@ def credentials(env):
     encoded = env.get("MACOS_CERTIFICATE_P12_BASE64", "")
     password = env.get("MACOS_CERTIFICATE_PASSWORD", "")
     team = env.get("MACOS_SIGNING_TEAM", "")
-    if not encoded or not password or not re.fullmatch(r"[A-Z0-9]{10}", team):
-        raise ValueError("Publishing needs MACOS_CERTIFICATE_P12_BASE64, MACOS_CERTIFICATE_PASSWORD and MACOS_SIGNING_TEAM")
+    mode = env.get("MACOS_SIGNING_MODE", "developer-id")
+    pin = env.get("MACOS_SIGNING_CERTIFICATE", "")
+    if not encoded or not password:
+        raise ValueError("Publishing needs MACOS_CERTIFICATE_P12_BASE64 and MACOS_CERTIFICATE_PASSWORD")
+    if mode == "developer-id":
+        if not re.fullmatch(r"[A-Z0-9]{10}", team) or pin:
+            raise ValueError("Developer ID requires MACOS_SIGNING_TEAM")
+    elif mode != "internal" or team or not re.fullmatch(r"[A-F0-9]{40}", pin):
+        raise ValueError("Internal signing requires MACOS_SIGNING_CERTIFICATE and no Apple team")
     if len(encoded) > 350_000:
         raise ValueError("macOS signing certificate exceeds its size limit")
     encoded = "".join(encoded.split())
@@ -38,7 +45,7 @@ def credentials(env):
         raise ValueError("Invalid macOS signing certificate encoding") from None
     if not data or len(data) > 256 * 1024:
         raise ValueError("Invalid macOS signing certificate size")
-    return data, password, team
+    return data, password, team, mode, pin
 
 
 def cleanup(directory):
@@ -54,7 +61,7 @@ def cleanup(directory):
 
 
 def prepare():
-    data, password, team = credentials(os.environ)
+    data, password, team, mode, pin = credentials(os.environ)
     directory = Path(tempfile.mkdtemp(prefix="nmt-signing-", dir=os.environ["RUNNER_TEMP"]))
     directory.chmod(0o700)
     keychain = directory / "release.keychain-db"
@@ -71,13 +78,19 @@ def prepare():
         run(["security", "unlock-keychain", "-p", local_password, str(keychain)])
         run(["security", "import", str(certificate), "-k", str(keychain), "-P", password, "-T", "/usr/bin/codesign"])
         run(["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", local_password, str(keychain)])
-        identities = run(["security", "find-identity", "-v", "-p", "codesigning", str(keychain)])
-        fingerprints = re.findall(r'\b([A-F0-9]{40}) "Developer ID Application: [^"\r\n]+ \(' + re.escape(team) + r'\)"', identities)
-        if len(fingerprints) != 1:
-            raise ValueError("Exactly one valid Developer ID Application identity of the configured team is required")
+        identities = run(["security", "find-identity", *(["-v"] if mode == "developer-id" else []), "-p", "codesigning", str(keychain)])
+        if mode == "developer-id":
+            fingerprints = re.findall(r'\b([A-F0-9]{40}) "Developer ID Application: [^"\r\n]+ \(' + re.escape(team) + r'\)"', identities)
+        else:
+            # Untrusted self-signed roots are intentional here. No trust entry
+            # is installed; codesign verifies the exact leaf after every seal.
+            fingerprints = list(set(re.findall(r'\b([A-F0-9]{40}) "[^"\r\n]+"', identities)))
+        if len(fingerprints) != 1 or mode == "internal" and fingerprints[0] != pin:
+            raise ValueError("Exactly one matching persistent code-signing identity is required")
         with Path(os.environ["GITHUB_ENV"]).open("a") as output:
             output.write("NMT_MACOS_REQUIRE_SIGNED=1\nNMT_MACOS_SIGNING_IDENTITY=" + fingerprints[0]
                          + "\nNMT_MACOS_SIGNING_TEAM=" + team + "\nNMT_MACOS_SIGNING_KEYCHAIN=" + str(keychain)
+                         + "\nNMT_MACOS_SIGNING_MODE=" + mode + "\nNMT_MACOS_SIGNING_CERTIFICATE=" + pin
                          + "\nNMT_MACOS_SIGNING_TEMP=" + str(directory) + "\n")
     except BaseException:
         cleanup(directory)

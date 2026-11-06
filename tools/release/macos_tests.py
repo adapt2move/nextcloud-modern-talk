@@ -647,7 +647,7 @@ class MacPackageTests(unittest.TestCase):
 class PersistentSigningTests(unittest.TestCase):
     def test_publication_fails_closed_without_the_existing_identity(self):
         import macos_signing
-        with self.assertRaisesRegex(ValueError, "persistent Developer ID"):
+        with self.assertRaisesRegex(ValueError, "persistent macOS"):
             macos_signing.configuration({"NMT_MACOS_REQUIRE_SIGNED": "1"})
         for env in ({"NMT_MACOS_SIGNING_TEAM": "ABCDEFGHIJ"},
                     {"NMT_MACOS_SIGNING_IDENTITY": "-"},
@@ -677,6 +677,29 @@ class PersistentSigningTests(unittest.TestCase):
                 self.assertIn("100.6.1.13", requirement)
         self.assertIn("--entitlements", commands[0])
         self.assertIn('identifier "org.adapt2move.nextcloud-modern-talk"', commands[-1][-2])
+
+    def test_internal_signing_pins_the_leaf_and_identifier_without_claiming_developer_id(self):
+        import macos_signing
+        env = {"NMT_MACOS_SIGNING_IDENTITY": "A" * 40, "NMT_MACOS_SIGNING_MODE": "internal",
+               "NMT_MACOS_SIGNING_CERTIFICATE": "A" * 40, "NMT_MACOS_REQUIRE_SIGNED": "1"}
+        commands = []
+        with patch.dict(os.environ, env, clear=True):
+            macos_signing.sign(Path("Synthetic.app"), commands.append, application=True)
+            macos_signing.verify_application(Path("Synthetic.app"), commands.append)
+            self.assertIn("no Developer ID", macos_signing.description())
+        self.assertNotIn("--options", commands[0])
+        self.assertNotIn("--timestamp", commands[0])
+        self.assertIn("--timestamp=none", commands[0])
+        self.assertIn("--requirements", commands[0])
+        requirement = commands[0][commands[0].index("--requirements") + 1]
+        self.assertIn('certificate leaf = H"' + "A" * 40 + '"', requirement)
+        self.assertIn('identifier "org.adapt2move.nextcloud-modern-talk"', requirement)
+        self.assertNotIn("anchor trusted", requirement)
+        for pin in ("", "B" * 40):
+            with self.assertRaises(ValueError):
+                macos_signing.configuration({**env, "NMT_MACOS_SIGNING_CERTIFICATE": pin})
+        with self.assertRaises(ValueError):
+            macos_signing.configuration({**env, "NMT_MACOS_SIGNING_TEAM": "ABCDEFGHIJ"})
 
     def test_ad_hoc_builds_do_not_claim_persistent_identity(self):
         import macos_signing
