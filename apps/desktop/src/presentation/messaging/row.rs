@@ -385,6 +385,39 @@ impl Desktop {
                 crate::presentation::localization::Count::Replies,
                 m.reply_count.into(),
             );
+            let replies = self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .filter(|panel| panel.context == context && panel.thread_root == Some(m.local_id))
+                .map(|panel| panel.thread_messages.as_slice());
+            let mut recent = Vec::new();
+            if let Some(replies) = replies {
+                for reply in replies
+                    .iter()
+                    .rev()
+                    .filter(|reply| reply.local_id != m.local_id && !reply.metadata.deleted)
+                {
+                    if reply.metadata.author_key.as_ref().is_some_and(|key| {
+                        !recent.iter().any(|previous: &&MessageView| {
+                            previous.metadata.author_key.as_ref() == Some(key)
+                        })
+                    }) {
+                        recent.push(reply);
+                        if recent.len() == 3 {
+                            break;
+                        }
+                    }
+                }
+            }
+            let last_time = replies
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .rev()
+                        .find(|reply| reply.local_id != m.local_id && !reply.metadata.deleted)
+                })
+                .map(|reply| reply.time_label.as_str().to_owned());
             content = if self.message_feature_enabled(MessageFeature::Threads) {
                 content.child(
                     self.control(
@@ -399,7 +432,13 @@ impl Desktop {
                     .min_h(px(28.))
                     .text_color(t.accent)
                     .child(self.scaled_icon("chat", 14., t.accent))
-                    .child(count),
+                    .children(
+                        recent
+                            .iter()
+                            .map(|reply| self.person_avatar(reply.initials.as_str(), 20.)),
+                    )
+                    .child(count)
+                    .when_some(last_time, |button, time| button.child(self.hint(&time))),
                 )
             } else {
                 content.child(self.hint(&count))

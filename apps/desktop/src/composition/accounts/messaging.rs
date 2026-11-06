@@ -853,6 +853,12 @@ impl Accounts {
             }
             V::ShareFile { path, caption } => W::ShareFile { path, caption },
         };
+        let cached_thread = thread_root.and_then(|root| {
+            self.history
+                .get(context)
+                .and_then(|history| history.thread(root))
+                .cloned()
+        });
         self.start_message(request, context, command, work)?;
         if let Some((message, emoji)) = author_target
             && let Some(panel) = self
@@ -871,7 +877,7 @@ impl Accounts {
             && let Some(panel) = self.snapshot.message_panel.as_mut()
         {
             if panel.thread_root != Some(root) {
-                panel.thread_messages = Page::empty();
+                panel.thread_messages = cached_thread.unwrap_or_else(Page::empty);
             }
             panel.thread_root = Some(root);
         }
@@ -1173,6 +1179,7 @@ impl Accounts {
             return;
         };
         let mut reload = false;
+        let mut thread_changed = false;
         let completion = match result {
             Ok(result) => {
                 let mut completion = Completion::ServerAccepted;
@@ -1207,6 +1214,29 @@ impl Accounts {
                                     .map(message_view)
                                     .filter(|m| !m.metadata.pin_notice),
                             );
+                            thread_changed = true;
+                        } else if work == Work::Poll
+                            && let Some(root) = panel.thread_root
+                        {
+                            let updates = messages
+                                .as_slice()
+                                .iter()
+                                .map(message_view)
+                                .filter(|row| {
+                                    !row.metadata.pin_notice
+                                        && (row.metadata.thread == Some(root)
+                                            || panel
+                                                .thread_messages
+                                                .as_slice()
+                                                .iter()
+                                                .any(|old| old.local_id == row.local_id))
+                                })
+                                .collect::<Vec<_>>();
+                            if !updates.is_empty() {
+                                panel.thread_messages =
+                                    merge_thread(&panel.thread_messages, updates);
+                                thread_changed = true;
+                            }
                         }
                     }
                     wire::MessagingResult::Message(message) if work == Work::Send => {
@@ -1452,6 +1482,18 @@ impl Accounts {
             });
         }
         reconcile_related(panel, &self.snapshot.messages, &changed);
+        let thread_cache = if completion == Completion::ServerAccepted
+            && (thread_changed || !changed.is_empty())
+        {
+            panel
+                .thread_root
+                .map(|root| (root, panel.thread_messages.clone()))
+        } else {
+            None
+        };
+        if let Some((root, rows)) = thread_cache {
+            self.history.remember_thread(context, root, rows);
+        }
         if work == Work::History
             && completion != Completion::ServerAccepted
             && !self.history.get(context).is_some_and(|h| h.loaded)
@@ -1549,6 +1591,24 @@ fn cache_reaction_authors(
     }
     values.push(entry);
     page(values)
+}
+fn merge_thread(
+    existing: &Page<MessageView, 50>,
+    incoming: impl IntoIterator<Item = MessageView>,
+) -> Page<MessageView, 50> {
+    let mut rows = existing.as_slice().to_vec();
+    for row in incoming.into_iter().take(50) {
+        if let Some(old) = rows.iter_mut().find(|old| old.local_id == row.local_id) {
+            *old = row;
+        } else {
+            rows.push(row);
+        }
+    }
+    rows.sort_by_key(|row| row.local_id);
+    if rows.len() > 50 {
+        rows.drain(..rows.len() - 50);
+    }
+    page(rows)
 }
 
 #[cfg(test)]
@@ -2022,6 +2082,25 @@ pub(super) fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_thread_updates_replace_rows_and_bound_the_page() {
+        let initial = page((1..=50).map(|id| row(id, "before")));
+        let merged = merge_thread(&initial, [row(25, "edited"), row(51, "new")]);
+        assert_eq!(merged.as_slice().len(), 50);
+        assert_eq!(merged.as_slice()[0].local_id, 2);
+        assert_eq!(
+            merged
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 25)
+                .unwrap()
+                .body
+                .as_str(),
+            "edited"
+        );
+        assert_eq!(merged.as_slice().last().unwrap().local_id, 51);
+    }
 
     #[test]
     fn reaction_author_cache_is_bounded_and_replaces_matching_entry() {

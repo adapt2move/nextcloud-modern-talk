@@ -68,6 +68,8 @@ pub(super) struct History {
     // Only while an older admitted read can overwrite a confirmed mutation.
     // This also protects thread/pin rows outside the main 100-message page.
     reaction_snapshots: Vec<ReactionSnapshot>,
+    // Four recently opened threads per scoped room; no permission is cached.
+    threads: Vec<(u128, Page<MessageView, 50>)>,
     capabilities: Option<(Instant, Version, protocol::messaging::MessagingCapabilities)>,
     // Same room/runtime lifetime as history; at most 50 canonical pin excerpts.
     // A confirmed write fences all already-admitted pin reads, just like edits.
@@ -98,6 +100,7 @@ impl History {
             tail_probe: None,
             metadata_probe: None,
             reaction_snapshots: Vec::new(),
+            threads: Vec::new(),
             capabilities: None,
             pins: Page::empty(),
             pins_version: Version(0, false),
@@ -140,6 +143,13 @@ impl History {
                     visible
                 }),
         )
+    }
+
+    pub(super) fn thread(&self, root: u128) -> Option<&Page<MessageView, 50>> {
+        self.threads
+            .iter()
+            .find(|(id, _)| *id == root)
+            .map(|(_, rows)| rows)
     }
 
     /// Only a live page's adjacent IDs can identify the server's preceding
@@ -388,6 +398,21 @@ pub(super) struct Cache {
     last_admission: u64,
 }
 impl Cache {
+    pub(super) fn remember_thread(
+        &mut self,
+        context: ConversationRef,
+        root: u128,
+        rows: Page<MessageView, 50>,
+    ) {
+        let Some(room) = self.get_mut(context) else {
+            return;
+        };
+        room.threads.retain(|(id, _)| *id != root);
+        if room.threads.len() >= 4 {
+            room.threads.remove(0);
+        }
+        room.threads.push((root, rows));
+    }
     /// Record the actual dispatched cursor, including a bounded hidden-tail
     /// repair. The flight must not infer it from a newer canonical event cursor.
     pub(super) fn poll_admitted(
