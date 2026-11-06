@@ -18,7 +18,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - The call view has adaptive gallery, local focus and a speaking-level-based
   speaker view. The level is a short-lived indicator from received audio, not
   speech recognition or a connection-quality measurement. The dock is inside
-  the main window; it is not a separate always-on-top window.
+  the main window; it is not a separate always-on-top window. Sidebar avatars
+  come from the current call; other active rooms show the call badge until
+  participant identities are available.
 - The screen stage has camera/screen tile identities and a fictional fixture,
   but no screen stream is connected. Raised hands and reactions are scoped to
   projected participants and require advertised server support; their signaling

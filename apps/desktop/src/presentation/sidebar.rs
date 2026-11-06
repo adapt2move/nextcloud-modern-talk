@@ -776,13 +776,27 @@ impl Desktop {
                 |d| d.child(self.scaled_icon("lock", 12., t.muted)),
             )
             .when(row.call_active == Some(true), |d| {
-                d.child(self.status_icon(
+                let mut badge = d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 2),
                     ("headphones", "Anruf läuft"),
                     (13., t.success),
                     row_focus.clone(),
                     cx,
-                ))
+                ));
+                // Only the currently owned call has authoritative, scoped
+                // participant identities; other active rooms retain the badge.
+                if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                    call.scope.account == context.account
+                        && call.scope.conversation == context.conversation
+                        && matches!(call.stage, talk_core::ui::presentation::CallStage::Active)
+                }) {
+                    let mut avatars = div().flex().items_center().gap_1();
+                    for person in call.participants.as_slice().iter().take(2) {
+                        avatars = avatars.child(self.person_avatar(person.initials.as_str(), 18.));
+                    }
+                    badge = badge.child(avatars);
+                }
+                badge
             })
             .when(self.favorite_value(row) == Some(true), |d| {
                 d.child(self.status_icon(
