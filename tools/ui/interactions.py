@@ -138,7 +138,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Antwortoption'); type_text('Studio')
         expect('completed poll keeps both distinct choices', ['Team lunch', 'Garden', 'Studio'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
-        click('Veröffentlichen')
+        click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'chat-voice':
         path, _, _ = observe()
