@@ -425,10 +425,10 @@ pub(crate) fn parse_batch(
                     }
                 } else if matches!(kind, "raiseHand" | "reaction") {
                     activities += 1;
-                    if activities <= 16 {
-                        if let Ok(activity) = activity::Activity::decode(kind, &data["payload"]) {
-                            events.push(Event::Activity { from, activity });
-                        }
+                    if activities <= 16
+                        && let Ok(activity) = activity::Activity::decode(kind, &data["payload"])
+                    {
+                        events.push(Event::Activity { from, activity });
                     }
                 } else if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
                     hints += 1;

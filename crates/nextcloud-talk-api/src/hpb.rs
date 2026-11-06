@@ -104,17 +104,17 @@ impl Room {
     fn push_activity(&mut self, from: PeerSession, activity: crate::signaling::activity::Activity) {
         use crate::signaling::activity::Activity;
         // Coalesce each hand so a delayed raise cannot replace a later lower.
-        if let Activity::RaisedHand { timestamp, .. } = &activity {
-            if let Some((_, event)) = self.signals.iter_mut().find(|(_, event)| {
+        if let Activity::RaisedHand { timestamp, .. } = &activity
+            && let Some((_, event)) = self.signals.iter_mut().find(|(_, event)| {
                 matches!(event, Event::Activity { from: sender, activity: Activity::RaisedHand { .. } } if sender == &from)
-            }) {
-                if let Event::Activity { activity: Activity::RaisedHand { timestamp: previous, .. }, .. } = event {
-                    if *timestamp > *previous {
-                        *event = Event::Activity { from, activity };
-                    }
-                }
-                return;
+            })
+        {
+            if let Event::Activity { activity: Activity::RaisedHand { timestamp: previous, .. }, .. } = event
+                && *timestamp > *previous
+            {
+                *event = Event::Activity { from, activity };
             }
+            return;
         }
         let count = self
             .signals
