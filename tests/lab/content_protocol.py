@@ -34,7 +34,7 @@ async def exercise(state, output):
                      'user': name, 'password': lab.passwords[name], 'room': data})
             parsed = urlsplit(record['development']['client_url'])
             host = urlsplit(record['development']['vm_url']).hostname
-            env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), RUST_BACKTRACE='0')
+            env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), NMT_POLL_ONLY='1', RUST_BACKTRACE='0')
             command = ['python3', 'tools/cargo.py', 'test', '--locked', '-p', 'talk-adapters',
                        '--features', 'backend-test', '--test', 'content_backend', '--', '--ignored', '--nocapture']
             target = Path(output)

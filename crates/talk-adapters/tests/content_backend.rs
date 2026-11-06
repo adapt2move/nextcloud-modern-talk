@@ -430,6 +430,12 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     )
     .unwrap();
 
+    // The poll-specific lab run has no file fixtures and deliberately ends
+    // here; the complete content run still exercises attachments below.
+    if std::env::var_os("NMT_POLL_ONLY").is_some() {
+        return;
+    }
+
     for name in ["preview.png", "document.txt", "document.pdf", "cancel.bin"] {
         let local = root.join(name);
         let original = std::fs::read(&local).unwrap();

@@ -163,6 +163,28 @@ impl Desktop {
         .into_any_element()
     }
 
+    /// All result rows share one admission while retaining distinct element IDs.
+    pub(super) fn poll_result_reveal(&self, poll: u64, option: u16, element: Div) -> AnyElement {
+        let trigger: ElementId = ("poll-results", poll as usize).into();
+        let admitted = self
+            .motion_trigger
+            .as_ref()
+            .filter(|motion| motion.reveal_elapsed(&trigger, Instant::now()).is_some())
+            .map(|motion| motion.admitted);
+        reveal::ActionReveal::new(
+            (
+                "poll-result-bar",
+                ((poll as usize) << 8) ^ usize::from(option),
+            )
+                .into(),
+            element,
+            admitted,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .into_any_element()
+    }
+
     pub(super) fn reveal(&self, id: impl Into<ElementId>, element: Div) -> AnyElement {
         if self.reduced_motion {
             element.into_any_element()

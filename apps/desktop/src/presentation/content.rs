@@ -108,7 +108,7 @@ impl ContentUi {
             swipe: gallery::Swipe::default(),
             return_overlay: None,
             question: cx.new(|cx| TextInput::new("Frage der Umfrage", 4000, theme, cx)),
-            options: (0..MAX_POLL_OPTIONS)
+            options: (0..2)
                 .map(|_| cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)))
                 .collect(),
             option_count: 2,
@@ -263,6 +263,7 @@ impl Desktop {
             for input in &self.content_ui.options {
                 input.update(cx, |i, _| i.reset());
             }
+            self.content_ui.options.truncate(2);
             self.content_ui.option_count = 2;
             self.content_ui.multiple = false;
             self.content_ui.max_votes = 1;
@@ -367,6 +368,7 @@ impl Desktop {
                 for input in &self.content_ui.options {
                     input.update(cx, |i, _| i.reset());
                 }
+                self.content_ui.options.truncate(2);
                 if self.overlay == Some(Overlay::CreatePoll) {
                     self.overlay = self.content_ui.return_overlay.take();
                     self.pending_modal_focus = self.overlay.is_some();
@@ -673,8 +675,15 @@ impl Desktop {
                 self.content_ui.question.focus_handle(cx).focus(window);
             }
             Action::AddOption => {
-                self.content_ui.option_count =
-                    (self.content_ui.option_count + 1).min(MAX_POLL_OPTIONS)
+                if self.content_ui.option_count < MAX_POLL_OPTIONS {
+                    if self.content_ui.options.len() == self.content_ui.option_count {
+                        let theme = self.theme;
+                        self.content_ui
+                            .options
+                            .push(cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)));
+                    }
+                    self.content_ui.option_count += 1;
+                }
             }
             Action::RemoveOption(index) => {
                 if self.content_ui.option_count > 2 && index < self.content_ui.option_count {
@@ -776,6 +785,12 @@ impl Desktop {
                     .cloned()
                     && (!edit || self.snapshot.content_panel.poll_drafts_edit.enabled())
                 {
+                    while self.content_ui.options.len() < entry.draft.options.as_slice().len() {
+                        let theme = self.theme;
+                        self.content_ui
+                            .options
+                            .push(cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)));
+                    }
                     self.content_ui.question.update(cx, |input, _| {
                         input.set_context_value(entry.draft.question.as_str());
                     });
@@ -1455,7 +1470,7 @@ impl Desktop {
         } else {
             5
         };
-        for (index, option) in poll.options.as_slice().iter().take(count).enumerate() {
+        for option in poll.options.as_slice().iter().take(count) {
             let selected = selection.contains(&option.id);
             let enabled = poll.vote.enabled()
                 && !poll.closed
@@ -1507,11 +1522,7 @@ impl Desktop {
                             .w(gpui::relative(percent as f32 / 100.)),
                     );
                 row = row
-                    .child(if index == 0 {
-                        self.reveal_from_action(("poll-results", poll.id as usize).into(), bar)
-                    } else {
-                        bar.into_any_element()
-                    })
+                    .child(self.poll_result_reveal(poll.id, option.id, bar))
                     .child(self.hint(&format!("{percent}% · {votes}")));
             }
             body = body.child(row);
