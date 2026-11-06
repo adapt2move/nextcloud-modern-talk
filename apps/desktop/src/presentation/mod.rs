@@ -106,6 +106,7 @@ pub enum LocalAction {
     ToggleCallFullscreen(CallScope),
     JoinRoomCall(CallScope),
     AcceptCallWithVideo,
+    StartDirectWithVideo,
     FocusCallParticipant(CallScope, Option<u128>),
     Navigate(ConversationRef),
     Destination(SidebarDestination),
@@ -1664,6 +1665,17 @@ impl Desktop {
                         call: call.scope,
                         media: MediaIntent::MicrophoneOnCameraOff,
                     }));
+                }
+            }
+            LocalAction::StartDirectWithVideo => {
+                if self.selected().is_some_and(|row| {
+                    row.kind == talk_core::ui::presentation::ConversationKind::Direct
+                }) && let Some(CallEntry::Direct(call)) = self.selected_call()
+                {
+                    self.submit(UiIntent::StartDirect {
+                        call,
+                        media: MediaIntent::MicrophoneOnCameraOn,
+                    });
                 }
             }
             LocalAction::AcceptCallWithVideo => {

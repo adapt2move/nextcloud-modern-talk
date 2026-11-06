@@ -39,6 +39,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Aceptar con vídeo",
     ),
     (
+        "Mit Video anrufen",
+        "Start video call",
+        "Iniciar videollamada",
+    ),
+    (
         "Person hervorheben",
         "Focus participant",
         "Destacar participante",

@@ -368,6 +368,16 @@ impl Desktop {
                     cx,
                 ))
             })
+            .when(row.kind == ConversationKind::Direct, |d| {
+                d.child(self.icon_button(
+                    "call-video",
+                    ("video", "Mit Video anrufen"),
+                    ButtonStyle::Quiet,
+                    call_availability.explained_elsewhere(),
+                    LocalAction::StartDirectWithVideo,
+                    cx,
+                ))
+            })
             .child(self.icon_button(
                 "room-info",
                 ("settings", "Gesprächseinstellungen"),
@@ -389,6 +399,14 @@ impl Desktop {
                         "call".into(),
                         call_availability.below_control(),
                         Some(call_name),
+                        cx,
+                    ))
+                })
+                .when(row.kind == ConversationKind::Direct, |d| {
+                    d.child(self.reason_tip(
+                        "call-video".into(),
+                        call_availability.below_control(),
+                        Some("Mit Video anrufen"),
                         cx,
                     ))
                 })
