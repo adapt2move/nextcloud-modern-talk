@@ -703,6 +703,10 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             share: MediaState::Unavailable,
             screen_stage: None,
             recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: Page::empty(),
+            latest_reaction: None,
             participants: Page::empty(),
         });
         assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));

@@ -609,6 +609,10 @@ impl Accounts {
             share: MediaState::Unavailable,
             screen_stage: None,
             recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: Page::empty(),
+            latest_reaction: None,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -793,6 +797,16 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                 talk_core::ui::presentation::CallRecordingState::Unknown
             }
         },
+        hand_supported: value.hand_supported,
+        hand_raised: value.hand_raised,
+        reactions: value.reactions.clone(),
+        latest_reaction: value.latest_reaction.as_ref().map(|reaction| {
+            talk_core::ui::presentation::CallReactionView {
+                sequence: reaction.sequence,
+                participant: reaction.participant,
+                emoji: reaction.emoji.clone(),
+            }
+        }),
         participants: page(
             value
                 .participants
@@ -848,6 +862,10 @@ mod action_tests {
                 screen: DeviceState::Off,
                 peers: 0,
                 recording: talk_core::policy::RecordingState::Unknown,
+                hand_supported: false,
+                hand_raised: false,
+                reactions: Page::empty(),
+                latest_reaction: None,
                 counters: Default::default(),
                 revision: 1,
             }),

@@ -98,6 +98,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-speaker",
     "call-screen-stage",
     "call-recording",
+    "call-reactions",
     "call-active",
     "call-requested",
     "sharing",
@@ -781,6 +782,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-speaker"
             | "call-screen-stage"
             | "call-recording"
+            | "call-reactions"
             | "sharing"
             | "call-denied"
             | "call-active"
@@ -864,6 +866,28 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 talk_core::ui::presentation::CallRecordingState::Unknown
             },
+            hand_supported: matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ),
+            hand_raised: false,
+            reactions: if matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ) {
+                page([text("👍"), text("🎉"), text("❤️")])
+            } else {
+                Page::empty()
+            },
+            latest_reaction: if scenario == "call-reactions" {
+                Some(talk_core::ui::presentation::CallReactionView {
+                    sequence: 1,
+                    participant: Some(1),
+                    emoji: text("🎉"),
+                })
+            } else {
+                None
+            },
             participants: page(
                 if matches!(
                     scenario,
@@ -871,6 +895,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                         | "call-participants-raised"
                         | "call-screen-stage"
                         | "call-speaker"
+                        | "call-reactions"
                 ) {
                     let mut people = participants().to_vec();
                     people[0].raised_hand = true;
@@ -1869,6 +1894,10 @@ impl NativeDesktopPort for DevelopmentPort {
                     share: MediaState::Unavailable,
                     screen_stage: None,
                     recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+                    hand_supported: false,
+                    hand_raised: false,
+                    reactions: Page::empty(),
+                    latest_reaction: None,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

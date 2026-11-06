@@ -170,6 +170,10 @@ impl LiveCall {
             screen: DeviceState::Unavailable,
             peers: 0,
             recording: RecordingState::Unknown,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: talk_core::bounded::Page::empty(),
+            latest_reaction: None,
             counters: MediaCounters::default(),
             revision: 0,
         };

@@ -413,6 +413,14 @@ pub enum Command {
         call: CallScope,
         wishes: MediaWishes,
     },
+    SetHand {
+        call: CallScope,
+        raised: bool,
+    },
+    React {
+        call: CallScope,
+        emoji: crate::bounded::Text<64>,
+    },
     Consent(CallScope),
     Reconnect(CallScope),
     Stop(CallScope),
@@ -421,7 +429,10 @@ pub enum Command {
 impl Command {
     pub fn scope(&self) -> CallScope {
         match self {
-            Self::Start { call, .. } | Self::Change { call, .. } => *call,
+            Self::Start { call, .. }
+            | Self::Change { call, .. }
+            | Self::SetHand { call, .. }
+            | Self::React { call, .. } => *call,
             Self::Consent(call)
             | Self::Reconnect(call)
             | Self::Stop(call)
@@ -458,8 +469,20 @@ pub struct Snapshot {
     pub screen: DeviceState,
     pub peers: u16,
     pub recording: RecordingState,
+    pub hand_supported: bool,
+    pub hand_raised: bool,
+    pub reactions: crate::bounded::Page<crate::bounded::Text<64>, 32>,
+    pub latest_reaction: Option<CallReaction>,
     pub counters: MediaCounters,
     pub revision: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallReaction {
+    pub sequence: u64,
+    /// None identifies the local sender; other IDs are call-scoped peers.
+    pub participant: Option<u128>,
+    pub emoji: crate::bounded::Text<64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

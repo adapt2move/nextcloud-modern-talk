@@ -480,6 +480,13 @@ pub enum CallRecordingState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallReactionView {
+    pub sequence: u64,
+    pub participant: Option<u128>,
+    pub emoji: Text<64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
     pub title: Text<256>,
@@ -492,6 +499,10 @@ pub struct CallView {
     /// Screen metadata only; frames remain in the scoped media image owner.
     pub screen_stage: Option<CallScreenStage>,
     pub recording: CallRecordingState,
+    pub hand_supported: bool,
+    pub hand_raised: bool,
+    pub reactions: Page<Text<64>, 32>,
+    pub latest_reaction: Option<CallReactionView>,
     pub participants: Page<ParticipantView, 16>,
 }
 
@@ -729,6 +740,14 @@ pub enum UiIntent {
     SetCamera {
         call: CallScope,
         enabled: bool,
+    },
+    SetCallHand {
+        call: CallScope,
+        raised: bool,
+    },
+    SendCallReaction {
+        call: CallScope,
+        emoji: Text<64>,
     },
     ShareScreen(CallScope),
     StopScreen(CallScope),
