@@ -70,8 +70,20 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
+    ("Hand heben (H)", "Raise hand (H)", "Levantar la mano (H)"),
     ("Hand senken", "Lower hand", "Bajar la mano"),
+    ("Hand senken (H)", "Lower hand (H)", "Bajar la mano (H)"),
+    (
+        "Kamera ausschalten (V)",
+        "Turn camera off (V)",
+        "Apagar cámara (V)",
+    ),
     ("Kamera auswählen", "Choose camera", "Elegir cámara"),
+    (
+        "Kamera einschalten (V)",
+        "Turn camera on (V)",
+        "Encender cámara (V)",
+    ),
     ("Klingeln angefragt", "Ring requested", "Llamada solicitada"),
     (
         "Klingeln nicht möglich",
@@ -87,6 +99,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Mikrofon auswählen",
         "Choose microphone",
         "Elegir micrófono",
+    ),
+    (
+        "Mikrofon einschalten (M)",
+        "Turn microphone on (M)",
+        "Encender micrófono (M)",
     ),
     (
         "Mit Video annehmen",
@@ -109,9 +126,12 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Mute participant",
         "Silenciar participante",
     ),
+    ("REC", "REC", "REC"),
     ("Raster", "Gallery", "Galería"),
+    ("Reaktion senden", "Send reaction", "Enviar reacción"),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
     ("Spricht", "Speaking", "Hablando"),
+    ("Stummschalten (M)", "Mute (M)", "Silenciar (M)"),
     (
         "Stummschaltung angefragt",
         "Mute requested",

@@ -102,6 +102,7 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ToggleCallReactions(CallScope),
     ConfirmEndCall,
     MinimizeCall(CallScope),
     ExpandCall(CallScope),
@@ -305,6 +306,7 @@ pub struct Desktop {
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_reactions_open: Option<CallScope>,
     call_focus: Option<(CallScope, u128)>,
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
@@ -585,6 +587,7 @@ impl Desktop {
             navigation_open: false,
             sidebar_hidden: false,
             call_chat_open: true,
+            call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
             call_focus: None,
             call_speaker,
             call_minimized,
@@ -822,6 +825,12 @@ impl Desktop {
             .is_some_and(|(scope, _)| Some(scope) != live_scope)
         {
             self.call_started = None;
+        }
+        if self
+            .call_reactions_open
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_reactions_open = None;
         }
         if self
             .call_device_picker
@@ -1242,6 +1251,7 @@ impl Desktop {
                 }
                 self.call_device_picker = None;
                 self.device_picker = None;
+                self.call_reactions_open = None;
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
@@ -1382,6 +1392,7 @@ impl Desktop {
                         )
                 }) {
                     self.call_minimized = Some(scope);
+                    self.call_reactions_open = None;
                     self.call_device_picker = None;
                     self.device_picker = None;
                     self.root_focus.focus(window);
@@ -1488,6 +1499,18 @@ impl Desktop {
                     }
                 }
             }
+            LocalAction::ToggleCallReactions(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !call.reactions.as_slice().is_empty()
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    self.call_reactions_open =
+                        (self.call_reactions_open != Some(scope)).then_some(scope);
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                }
+            }
             LocalAction::ToggleCallChat => {
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
@@ -1509,6 +1532,13 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.call_reactions_open.take().is_some() {
+                    if let Some(focus) = self.control_focus.current(&"call-reactions".into()) {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
                 if let Some((_, kind)) = self.call_device_picker.take() {
                     self.device_picker = None;
                     if let Some(focus) = self
@@ -1745,11 +1775,14 @@ impl Desktop {
                     self.feedback = None;
                 }
                 let cancelled_login = matches!(intent, UiIntent::CancelLogin(_));
-                if self.submit(intent)
-                    && cancelled_login
-                    && !self.snapshot.accounts.as_slice().is_empty()
-                {
-                    self.onboarding_open = false;
+                let call_reaction = matches!(intent, UiIntent::SendCallReaction { .. });
+                if self.submit(intent) {
+                    if cancelled_login && !self.snapshot.accounts.as_slice().is_empty() {
+                        self.onboarding_open = false;
+                    }
+                    if call_reaction {
+                        self.call_reactions_open = None;
+                    }
                 }
             }
             LocalAction::Call => match self.selected_call() {
@@ -1873,6 +1906,7 @@ impl Desktop {
                 self.enter_device_page();
             }
             LocalAction::CallDevicePicker(scope, kind) => {
+                self.call_reactions_open = None;
                 if self.snapshot.call.as_ref().is_some_and(|call| {
                     call.scope == scope
                         && matches!(call.stage, CallStage::Active | CallStage::Connecting)

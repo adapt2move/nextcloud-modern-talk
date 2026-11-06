@@ -129,6 +129,13 @@ impl Desktop {
                             );
                         }
                     }
+                    if call.can_end_everyone {
+                        body = body.child(self.button(
+                            "end-everyone", "Für alle beenden", ButtonStyle::Secondary,
+                            Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
+                            LocalAction::Open(Overlay::ConfirmEndCall), cx,
+                        ));
+                    }
                 }
                 body
             }

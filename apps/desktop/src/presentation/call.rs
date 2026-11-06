@@ -680,16 +680,14 @@ impl Desktop {
                         .child(self.call_chat(cx)),
                 )
             });
-        let mut controls = div()
-            .flex_none()
+        let mut primary_controls = div()
+            .flex_1()
+            .min_w_0()
             .flex()
             .flex_wrap()
             .items_center()
             .justify_center()
-            .gap_4()
-            .p_4()
-            .border_t_1()
-            .border_color(t.stage_panel);
+            .gap_2();
         for (id, symbol, label, state, action) in [
             (
                 "microphone",
@@ -698,7 +696,11 @@ impl Desktop {
                 } else {
                     "mic-off"
                 },
-                media_label(true, call.microphone),
+                if matches!(call.microphone, MediaState::Active | MediaState::Requested) {
+                    "Stummschalten (M)"
+                } else {
+                    "Mikrofon einschalten (M)"
+                },
                 call.microphone,
                 LocalAction::Intent(UiIntent::SetMicrophone {
                     call: call.scope,
@@ -712,7 +714,11 @@ impl Desktop {
                 } else {
                     "video-off"
                 },
-                media_label(false, call.camera),
+                if matches!(call.camera, MediaState::Active | MediaState::Requested) {
+                    "Kamera ausschalten (V)"
+                } else {
+                    "Kamera einschalten (V)"
+                },
                 call.camera,
                 LocalAction::Intent(UiIntent::SetCamera {
                     call: call.scope,
@@ -735,143 +741,153 @@ impl Desktop {
                 }),
             ),
         ] {
-            controls = controls.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .child(
-                                self.icon_button(
-                                    id,
-                                    (symbol, label),
-                                    ButtonStyle::Stage,
-                                    {
-                                        let availability = Availability::when(
-                                            matches!(
-                                                state,
-                                                MediaState::Off
-                                                    | MediaState::Active
-                                                    | MediaState::Requested
-                                            ),
-                                            media_reason(state),
-                                        )
-                                        .labelled();
-                                        match id {
-                                            "microphone" => availability.help("Tastenkürzel: M"),
-                                            "camera" => availability.help("Tastenkürzel: V"),
-                                            _ => availability,
-                                        }
-                                    },
-                                    action,
-                                    cx,
-                                )
-                                .size(px(44.)),
-                            )
-                            .when_some(
-                                match id {
-                                    "microphone" => Some(
-                                        talk_core::preferences::devices::DeviceKind::Microphone,
-                                    ),
-                                    "camera" => {
-                                        Some(talk_core::preferences::devices::DeviceKind::Camera)
-                                    }
-                                    _ => None,
-                                },
-                                |row, kind| {
-                                    row.child(
-                                        self.icon_button(
-                                            ("call-device", kind as usize),
-                                            (
-                                                "chevron-up",
-                                                if id == "microphone" {
-                                                    "Mikrofon auswählen"
-                                                } else {
-                                                    "Kamera auswählen"
-                                                },
-                                            ),
-                                            ButtonStyle::Stage,
-                                            Availability::available().hinted(),
-                                            LocalAction::CallDevicePicker(call.scope, kind),
-                                            cx,
-                                        )
-                                        .w(px(24.)),
-                                    )
-                                },
-                            ),
+            let available = !call.end_pending
+                && matches!(
+                    state,
+                    MediaState::Off | MediaState::Active | MediaState::Requested
+                );
+            let control = self
+                .round_icon_button(
+                    id,
+                    (symbol, label),
+                    ButtonStyle::Stage,
+                    Availability::when(available, media_reason(state)).hinted(),
+                    action,
+                    cx,
+                )
+                .size(px(44.))
+                .min_h(px(44.))
+                .rounded_full();
+            let mut group = div().relative().flex().items_center().child(control);
+            if id != "screen-share" && matches!(state, MediaState::Unavailable | MediaState::Denied)
+            {
+                group = group.child(
+                    div()
+                        .absolute()
+                        .top(px(0.))
+                        .left(px(34.))
+                        .size(px(9.))
+                        .rounded_full()
+                        .bg(t.warning)
+                        .border_1()
+                        .border_color(t.stage),
+                );
+            }
+            if let Some(kind) = match id {
+                "microphone" => Some(talk_core::preferences::devices::DeviceKind::Microphone),
+                "camera" => Some(talk_core::preferences::devices::DeviceKind::Camera),
+                _ => None,
+            } {
+                group = group.child(
+                    self.icon_button(
+                        ("call-device", kind as usize),
+                        (
+                            "chevron-up",
+                            if id == "microphone" {
+                                "Mikrofon auswählen"
+                            } else {
+                                "Kamera auswählen"
+                            },
+                        ),
+                        ButtonStyle::Stage,
+                        Availability::available().hinted(),
+                        LocalAction::CallDevicePicker(call.scope, kind),
+                        cx,
                     )
-                    .child(
-                        div()
-                            .text_size(self.sp(12.))
-                            .text_color(t.stage_muted)
-                            .child(self.l(label)),
-                    ),
-            );
+                    .w(px(22.))
+                    .rounded_full(),
+                );
+            }
+            primary_controls = primary_controls.child(group);
         }
         if call.hand_supported {
-            let label = if call.hand_raised {
-                "Hand senken"
-            } else {
-                "Hand heben"
-            };
-            controls = controls.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        self.icon_button(
-                            "call-hand",
-                            ("hand", label),
-                            ButtonStyle::Stage,
-                            Availability::available().labelled().help("Tastenkürzel: H"),
-                            LocalAction::Intent(UiIntent::SetCallHand {
-                                call: call.scope,
-                                raised: !call.hand_raised,
-                            }),
-                            cx,
-                        )
-                        .size(px(44.)),
-                    )
-                    .child(
-                        div()
-                            .text_size(self.sp(12.))
-                            .text_color(t.stage_muted)
-                            .child(self.l(label)),
+            primary_controls = primary_controls.child(
+                self.round_icon_button(
+                    "call-hand",
+                    (
+                        "hand",
+                        if call.hand_raised {
+                            "Hand senken (H)"
+                        } else {
+                            "Hand heben (H)"
+                        },
                     ),
+                    ButtonStyle::Stage,
+                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet.")
+                        .hinted(),
+                    LocalAction::Intent(UiIntent::SetCallHand {
+                        call: call.scope,
+                        raised: !call.hand_raised,
+                    }),
+                    cx,
+                )
+                .size(px(44.))
+                .min_h(px(44.))
+                .rounded_full(),
             );
         }
         if !call.reactions.as_slice().is_empty() {
-            let mut reactions = div().flex().flex_wrap().items_center().gap_1().relative();
-            for (index, emoji) in call.reactions.as_slice().iter().enumerate() {
-                reactions = reactions.child(self.button(
-                    ("call-reaction", index),
-                    emoji.as_str().to_owned(),
+            let mut reaction_control = div().relative().child(
+                self.round_icon_button(
+                    "call-reactions",
+                    ("smile", "Reaktion senden"),
                     ButtonStyle::Stage,
-                    true,
-                    LocalAction::Intent(UiIntent::SendCallReaction {
-                        call: call.scope,
-                        emoji: emoji.clone(),
-                    }),
+                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet.")
+                        .hinted(),
+                    LocalAction::ToggleCallReactions(call.scope),
                     cx,
-                ));
+                )
+                .size(px(44.))
+                .min_h(px(44.))
+                .rounded_full(),
+            );
+            if self.call_reactions_open == Some(call.scope) {
+                let mut menu = div()
+                    .id("call-reaction-menu")
+                    .absolute()
+                    .bottom(px(54.))
+                    .left(px(-72.))
+                    .w(px(192.))
+                    .max_h(px(200.))
+                    .overflow_y_scroll()
+                    .p_2()
+                    .rounded(px(12.))
+                    .border_1()
+                    .border_color(t.border)
+                    .bg(t.stage_panel)
+                    .shadow_lg()
+                    .flex()
+                    .flex_wrap()
+                    .gap_1();
+                for (index, emoji) in call.reactions.as_slice().iter().enumerate() {
+                    menu = menu.child(
+                        self.button(
+                            ("call-reaction", index),
+                            emoji.as_str().to_owned(),
+                            ButtonStyle::Stage,
+                            true,
+                            LocalAction::Intent(UiIntent::SendCallReaction {
+                                call: call.scope,
+                                emoji: emoji.clone(),
+                            }),
+                            cx,
+                        )
+                        .min_w(px(40.))
+                        .min_h(px(40.))
+                        .p_1(),
+                    );
+                }
+                reaction_control = reaction_control.child(menu);
             }
-            let local_reaction = if call
+            if !call
                 .participants
                 .as_slice()
                 .iter()
                 .any(|person| person.self_user)
             {
-                None
-            } else {
-                self.call_reaction(call.scope, None)
-            };
-            controls = controls.child(reactions.children(local_reaction));
+                reaction_control = reaction_control.children(self.call_reaction(call.scope, None));
+            }
+            primary_controls = primary_controls.child(reaction_control);
         }
         for (id, symbol, label, action) in [
             (
@@ -882,73 +898,52 @@ impl Desktop {
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
         ] {
-            controls = controls.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        self.icon_button(
-                            id,
-                            (symbol, label),
-                            ButtonStyle::Stage,
-                            Availability::available().labelled(),
-                            action,
-                            cx,
-                        )
-                        .size(px(44.)),
-                    )
-                    .child(
-                        div()
-                            .text_size(self.sp(12.))
-                            .text_color(t.stage_muted)
-                            .child(self.l(label)),
-                    ),
+            primary_controls = primary_controls.child(
+                self.round_icon_button(
+                    id,
+                    (symbol, label),
+                    ButtonStyle::Stage,
+                    Availability::available().hinted(),
+                    action,
+                    cx,
+                )
+                .size(px(44.))
+                .min_h(px(44.))
+                .rounded_full(),
             );
         }
-        if call.can_end_everyone {
-            controls = controls.child(self.button(
-                "end-everyone",
-                "Für alle beenden",
-                ButtonStyle::Stage,
-                Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
-                LocalAction::Open(Overlay::ConfirmEndCall),
-                cx,
-            ));
-        }
-        controls = controls.child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_1()
-                .child(
-                    self.icon_button(
-                        "leave-call",
-                        (
-                            "phone-down",
-                            if call.direct {
-                                "Auflegen"
-                            } else {
-                                "Anruf verlassen"
-                            },
-                        ),
-                        ButtonStyle::StageDanger,
-                        Availability::available().labelled(),
-                        LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
-                        cx,
-                    )
-                    .w(px(56.))
-                    .h(px(44.)),
+        let controls = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .border_t_1()
+            .border_color(t.stage_panel)
+            .child(div().w(px(56.)).flex_none())
+            .child(primary_controls)
+            .child(
+                self.icon_button(
+                    "leave-call",
+                    (
+                        "phone-down",
+                        if call.direct {
+                            "Auflegen"
+                        } else {
+                            "Anruf verlassen"
+                        },
+                    ),
+                    ButtonStyle::StageDanger,
+                    Availability::available().hinted(),
+                    LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
+                    cx,
                 )
-                .child(
-                    div()
-                        .text_size(self.sp(12.))
-                        .text_color(t.stage_muted)
-                        .child(self.l(if call.direct { "Auflegen" } else { "Verlassen" })),
-                ),
-        );
+                .w(px(56.))
+                .h(px(44.))
+                .min_h(px(44.))
+                .rounded_full(),
+            );
         div().size_full().p_3().bg(t.chrome()).child(
             self.content_card(
                 div()
@@ -1012,16 +1007,10 @@ impl Desktop {
                                     cx,
                                 ))
                             })
-                            .when_some(recording_label(call.recording), |header, label| {
-                                header.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .text_size(self.sp(12.))
-                                        .child(self.scaled_icon("info", 14., t.warning))
-                                        .child(self.l(label)),
-                                )
+                            .when(call.recording == talk_core::ui::presentation::CallRecordingState::Active, |header| {
+                                header.child(div().px_3().py_1().rounded_full().bg(t.danger)
+                                    .text_color(t.danger_bg).text_size(self.sp(12.))
+                                    .font_weight(FontWeight::BOLD).child(self.l("REC")))
                             })
                             .child(self.icon_button(
                                 "minimize-call",
@@ -1224,18 +1213,6 @@ fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
         1
     };
     capacity.min(participants.clamp(1, 3) as u16)
-}
-
-fn recording_label(state: talk_core::ui::presentation::CallRecordingState) -> Option<&'static str> {
-    use talk_core::ui::presentation::CallRecordingState;
-    match state {
-        CallRecordingState::Inactive => None,
-        CallRecordingState::Starting => Some("Aufzeichnung startet …"),
-        CallRecordingState::Active => Some("Aufzeichnung läuft"),
-        CallRecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
-        CallRecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
-        CallRecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
-    }
 }
 
 #[cfg(test)]
