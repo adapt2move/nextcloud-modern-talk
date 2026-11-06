@@ -571,6 +571,50 @@ fn call_reactions_follow_bounded_server_configuration() {
     }
 }
 #[tokio::test]
+async fn ringing_requires_fresh_call_permission_and_absent_local_user() {
+    for case in [
+        "allowed",
+        "revoked",
+        "guest",
+        "already-in-call",
+        "caller-left",
+    ] {
+        let mut replies = join_replies();
+        replies.push(reply(json!({"version":{"major":35},"capabilities":{"spreed":{
+            "features":["conversation-v4","send-call-notification"],"config":{"call":{"enabled":true}}
+        }}})));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"permissions":if case == "revoked" {4} else {6}}),
+        ));
+        replies.push(reply(json!([{"attendeeId":44,"actorType":if case == "guest" {"guests"} else {"users"},
+            "actorId":"other-user","displayName":"Other","inCall":if case == "already-in-call" {1} else {0},"sessionIds":["other-session"]}])));
+        replies.push(reply(if case == "caller-left" {
+            json!([])
+        } else {
+            json!([{"sessionId":"own-session"}])
+        }));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let result = moderation.ring(&context(&runtime), 44).await;
+        if case == "allowed" {
+            assert!(result.is_ok());
+            assert!(server.seen.lock().unwrap().iter().any(|request| {
+                request.starts_with("POST /ocs/v2.php/apps/spreed/api/v4/call/testroom/ring/44?")
+            }));
+        } else {
+            assert!(result.is_err(), "{case}");
+            assert!(!server.seen.lock().unwrap().iter().any(|request| {
+                request.starts_with("POST /ocs/v2.php/apps/spreed/api/v4/call/testroom/ring/")
+            }));
+        }
+    }
+}
+#[tokio::test]
 async fn call_handle_cannot_cross_clients_even_with_equal_caller_keys() {
     let server_a = Server::start(join_replies()).await;
     let server_b = Server::start(join_replies()).await;

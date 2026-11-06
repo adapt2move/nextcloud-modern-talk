@@ -251,9 +251,9 @@
       "operation_id": "call-ring-attendee",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/call/{token}/ring/{attendeeId}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "MeetingModerationWriter::ring",
+      "scope": "One explicit call-scoped request after fresh capability, effective permission, caller-session and eligible absent-user checks; a receipt does not prove notification delivery."
     },
     {
       "operation_id": "call-sip-dial-out",
