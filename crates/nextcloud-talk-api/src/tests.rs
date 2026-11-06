@@ -18,10 +18,7 @@ fn subscribed_threads_are_account_scoped_and_paged() {
         route,
         "ocs/v2.php/apps/spreed/api/v1/chat/subscribed-threads"
     );
-    assert_eq!(
-        query,
-        vec![("limit", "50".into()), ("offset", "50".into())]
-    );
+    assert_eq!(query, vec![("limit", "50".into()), ("offset", "50".into())]);
     assert!(!mutation);
 }
 

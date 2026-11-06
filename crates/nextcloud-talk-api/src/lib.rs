@@ -66,7 +66,9 @@ impl AppCredential {
 /// Readback/reconciliation policy and application permission decisions belong to the caller.
 pub enum Request {
     /// Account-wide subscribed threads, paged independently of any room.
-    SubscribedThreads { offset: u32 },
+    SubscribedThreads {
+        offset: u32,
+    },
     Chat {
         room: RoomToken,
         command: chat::Command,

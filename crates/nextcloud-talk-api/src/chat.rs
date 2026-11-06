@@ -377,9 +377,11 @@ mod thread_tests {
 
     #[test]
     fn subscribed_page_decodes_multiple_rooms_and_rejects_overflow() {
-        let item = |id, token| json!({"thread": {
-            "id": id, "roomToken": token, "title": "Topic", "numReplies": 2
-        }});
+        let item = |id, token| {
+            json!({"thread": {
+                "id": id, "roomToken": token, "title": "Topic", "numReplies": 2
+            }})
+        };
         let data = json!([item(1, "room1234"), item(2, "room5678")]);
         let crate::Reply::Chat(Response::Threads(threads)) =
             decode(ResponseKind::Threads, &data).unwrap()

@@ -21,6 +21,12 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Marking unread from a message requires a preceding message whose adjacency was
   observed in the current runtime; the first loaded row and cached-only gaps do
   not supply that evidence. Manual unread actions currently require a connection.
+- Existing threads can be opened in a docked pane at wide window sizes; replies
+  are composed in the main composer. Thread subscription navigation and pane
+  controls are incomplete. The Talk 24/25 API creates a thread with a new root
+  message; it does not expose an operation to convert an existing ordinary
+  message into a thread. See the upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)
+  and [chat controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ChatController.php).
 - Markdown covers bounded CommonMark, strikethrough and task markers. Tables
   remain readable source; HTML and Markdown images do not execute or load.
   The composer supports direct editing of basic marks, headings, lists, task
