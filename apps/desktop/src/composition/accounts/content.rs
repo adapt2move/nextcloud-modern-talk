@@ -61,7 +61,7 @@ pub(super) struct ContentOwner {
     thumbnail_retries: Vec<ThumbnailRetry>,
     leases: Vec<(view::AssetTarget, Instant)>,
     pub(super) transfer: Option<wire::TransferProgress>,
-    link: Option<(AccountScope, Text<2048>)>,
+    link: Option<(AccountScope, Option<view::AssetTarget>, Text<2048>)>,
     message_link: Option<links::Pending>,
     refresh_poll: Option<(ConversationRef, u64)>,
     // One deliberate preview may wait behind the two admitted content jobs.
@@ -99,6 +99,46 @@ fn is_avatar(target: &view::AssetTarget) -> bool {
     )
 }
 impl Accounts {
+    /// A fresh account listing invalidates all cloud previews from the former
+    /// listing, including pending decode/network work. No old file grant or
+    /// pixels can be revived by a late completion.
+    fn retire_cloud_previews(&mut self) {
+        let operations: Vec<_> = self
+            .content_owner
+            .jobs
+            .iter()
+            .filter(|job| {
+                !job.cloud && matches!(job.target, Some(view::AssetTarget::CloudFile { .. }))
+            })
+            .map(|job| job.operation)
+            .collect();
+        if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                if matches!(pending.purpose, Purpose::Content(id) if operations.contains(&id)) {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
+        self.content_owner
+            .jobs
+            .retain(|job| !operations.contains(&job.operation));
+        self.content_owner
+            .images
+            .retain(|job| !matches!(job.target, view::AssetTarget::CloudFile { .. }));
+        self.content_owner
+            .pending_assets
+            .retain(|job| !matches!(job.target, view::AssetTarget::CloudFile { .. }));
+        self.snapshot.content_panel.assets = page(
+            self.snapshot
+                .content_panel
+                .assets
+                .as_slice()
+                .iter()
+                .filter(|asset| !matches!(asset.target, view::AssetTarget::CloudFile { .. }))
+                .cloned(),
+        );
+        self.retire_content_keys();
+    }
     pub(super) fn clear_content_assets(&mut self) {
         self.content_owner.preview_generation =
             self.content_owner.preview_generation.saturating_add(1);
@@ -150,7 +190,8 @@ impl Accounts {
                     .as_slice()
                     .iter()
                     .filter(|a| {
-                        a.state != view::AssetState::Loading
+                        !matches!(a.target, view::AssetTarget::CloudFile { .. })
+                            && a.state != view::AssetState::Loading
                             && (local_context(&a.target).is_none()
                                 || self.retained_message_avatar(&a.target))
                     })
@@ -164,6 +205,9 @@ impl Accounts {
         } else {
             (None, None)
         };
+        let file_browser_supported = (old.account == account)
+            .then_some(old.file_browser_supported)
+            .flatten();
         if old.account != account {
             self.content_owner.profile = None;
             self.content_owner.profile_retry_at = None;
@@ -173,6 +217,7 @@ impl Accounts {
             assets,
             self_name,
             organization,
+            file_browser_supported,
             ..Default::default()
         };
         if old_account_changed {
@@ -243,6 +288,7 @@ impl Accounts {
             A::CloseFileBrowser => {
                 self.content_owner.browser.close();
                 self.snapshot.content_panel.file_browser = None;
+                self.retire_cloud_previews();
                 self.touch();
                 Ok(())
             }
@@ -934,7 +980,7 @@ impl Accounts {
                 }
             }
             Ok(wire::ContentResult::CloudLink(link)) if job.cloud => {
-                self.content_owner.link = Some((job.account, link));
+                self.content_owner.link = Some((job.account, job.target, link));
                 self.snapshot.content_panel.result =
                     Some((job.request, Completion::ServerAccepted));
             }
@@ -1449,14 +1495,20 @@ impl Accounts {
         admitted
     }
     pub(crate) fn take_cloud_link(&mut self) -> Option<Text<2048>> {
-        let (scope, link) = self.content_owner.link.take()?;
-        (self.snapshot.active_account == Some(scope) && self.current(scope).is_ok()).then_some(link)
+        let (scope, target, link) = self.content_owner.link.take()?;
+        (self.snapshot.active_account == Some(scope)
+            && self.current(scope).is_ok()
+            && target
+                .as_ref()
+                .is_none_or(|target| self.asset_is_current(target)))
+        .then_some(link)
     }
     pub(super) fn asset_is_current(&self, target: &view::AssetTarget) -> bool {
         if let view::AssetTarget::CloudFile {
             account,
             path,
             file,
+            generation,
         } = target
         {
             return self.snapshot.active_account == Some(*account)
@@ -1467,6 +1519,7 @@ impl Accounts {
                     .as_ref()
                     .is_some_and(|browser| {
                         browser.account == *account
+                            && browser.generation == *generation
                             && browser.entries.as_slice().iter().any(|entry| {
                                 entry.path == *path
                                     && entry
@@ -2790,6 +2843,51 @@ mod tests {
                 .all(|asset| asset.target == view::AssetTarget::SelfAvatar)
         );
         assert_eq!(model.content_owner.retained, vec![(1, 16)]);
+    }
+
+    #[test]
+    fn cloud_previews_and_links_lose_authority_when_a_listing_changes() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat-cloud-files"));
+        let browser = model.snapshot.content_panel.file_browser.as_mut().unwrap();
+        let mut entries = browser.entries.as_slice().to_vec();
+        let entry = entries.iter_mut().find(|entry| !entry.directory).unwrap();
+        entry.file_id = Some(text("42"));
+        let target = view::AssetTarget::CloudFile {
+            account: browser.account,
+            path: entry.path.clone(),
+            file: 42,
+            generation: browser.generation,
+        };
+        browser.entries = page(entries);
+        assert!(model.asset_is_current(&target));
+        model.set_asset(asset(target.clone(), 812));
+        model.content_owner.retained.push((812, 128));
+        model
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_mut()
+            .unwrap()
+            .generation += 1;
+        assert!(!model.asset_is_current(&target));
+        model.retire_cloud_previews();
+        assert!(
+            !model
+                .snapshot
+                .content_panel
+                .assets
+                .as_slice()
+                .iter()
+                .any(|asset| asset.target == target)
+        );
+        assert!(
+            !model
+                .content_owner
+                .retained
+                .iter()
+                .any(|(key, _)| *key == 812)
+        );
     }
 
     #[test]

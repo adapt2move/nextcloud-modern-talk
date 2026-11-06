@@ -2042,7 +2042,14 @@ impl Render for Desktop {
             input.theme = t;
             input.text_scale = f32::from(self.scale) / 100.;
             input.clipboard_export_allowed = true;
-            input.interactive = self.overlay == Some(Overlay::CloudFiles) && !incoming;
+            input.interactive = self.overlay == Some(Overlay::CloudFiles)
+                && self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_some_and(|browser| browser.search_available)
+                && !incoming;
             input.set_placeholder(self.l("Dateien suchen …"));
         });
         self.content_ui

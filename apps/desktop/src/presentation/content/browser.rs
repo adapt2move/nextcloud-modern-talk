@@ -4,6 +4,14 @@ use gpui::{FontWeight, KeyDownEvent, SharedString};
 
 pub(super) const PAGE_SIZE: usize = 40;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum Location {
+    Folder(Text<16384>),
+    Recent,
+    Favorites,
+    Search(Text<256>),
+}
+
 fn parent_path(path: &str) -> Option<Text<16384>> {
     if path == "/" {
         return None;
@@ -19,7 +27,74 @@ fn size_label(size: Option<u64>) -> String {
         Some(n) => format!("{:.1} MB", n as f64 / (1024. * 1024.)),
     }
 }
+fn file_icon(name: &str, mime: Option<&str>, directory: bool) -> &'static str {
+    if directory {
+        return "folder";
+    }
+    let extension = name.rsplit_once('.').map_or("", |(_, ext)| ext);
+    let has_extension = |options: &[&str]| {
+        options
+            .iter()
+            .any(|value| extension.eq_ignore_ascii_case(value))
+    };
+    if mime.is_some_and(|mime| mime.starts_with("image/"))
+        || has_extension(&["png", "jpg", "jpeg", "gif", "webp", "svg"])
+    {
+        "file-image"
+    } else if mime.is_some_and(|mime| mime.starts_with("video/"))
+        || has_extension(&["mp4", "webm", "mov", "mkv"])
+    {
+        "file-video"
+    } else if mime.is_some_and(|mime| mime.starts_with("audio/"))
+        || has_extension(&["mp3", "ogg", "wav", "m4a"])
+    {
+        "file-audio"
+    } else if mime.is_some_and(|mime| {
+        matches!(
+            mime,
+            "application/zip" | "application/x-tar" | "application/gzip"
+        )
+    }) || has_extension(&["zip", "tar", "gz", "7z"])
+    {
+        "file-archive"
+    } else {
+        "file"
+    }
+}
 impl Desktop {
+    pub(super) fn remember_cloud_location(&mut self) {
+        use talk_core::ui::content::FileSection;
+        let Some(browser) = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| Some(browser.account) == self.snapshot.active_account)
+        else {
+            return;
+        };
+        let location = match browser.section {
+            FileSection::All => Location::Folder(browser.path.clone()),
+            FileSection::Recent => Location::Recent,
+            FileSection::Favorites => Location::Favorites,
+            FileSection::Search => {
+                let Ok(term) = Text::new(self.content_ui.browser_search_value.trim()) else {
+                    return;
+                };
+                if term.as_str().is_empty() {
+                    return;
+                }
+                Location::Search(term)
+            }
+        };
+        if self.content_ui.browser_history.last() == Some(&location) {
+            return;
+        }
+        if self.content_ui.browser_history.len() == 12 {
+            self.content_ui.browser_history.remove(0);
+        }
+        self.content_ui.browser_history.push(location);
+    }
     fn select_cloud_file(
         &mut self,
         path: Text<16384>,
@@ -173,10 +248,14 @@ impl Desktop {
                         .filter(|context| context.account == browser.account)
                 {
                     if self.content_ui.browser_selection.is_empty() {
-                        self.submit_content(ContentAction::StageCloudFile {
-                            context,
-                            path: entry.path,
-                        });
+                        self.content_action(
+                            Action::Command(ContentAction::StageCloudFile {
+                                context,
+                                path: entry.path,
+                            }),
+                            window,
+                            cx,
+                        );
                     } else {
                         self.content_action(Action::BrowserStageSelection, window, cx);
                     }
@@ -200,7 +279,7 @@ impl Desktop {
                 "up" => Some(current.map_or(entries.len() - 1, |index| index.saturating_sub(1))),
                 "home" => Some(0),
                 "end" => Some(entries.len() - 1),
-                _ if key.chars().count() == 1 && !modifiers.shift => {
+                _ if key.chars().count() == 1 => {
                     let now = std::time::Instant::now();
                     if self.content_ui.browser_typeahead_at.is_none_or(|at| {
                         now.duration_since(at) > std::time::Duration::from_millis(750)
@@ -250,15 +329,27 @@ impl Desktop {
         };
         let path = browser.path.as_str();
         use talk_core::ui::content::FileSection;
-        body = body.child(
-            self.input_surface(&self.content_ui.browser_search, cx)
-                .child(self.content_ui.browser_search.clone()),
-        );
+        if browser.search_available {
+            body = body.child(
+                self.input_surface(&self.content_ui.browser_search, cx)
+                    .child(self.content_ui.browser_search.clone()),
+            );
+        }
         body = body.child(
             div()
                 .flex()
                 .flex_wrap()
                 .gap_2()
+                .when(!self.content_ui.browser_history.is_empty(), |row| {
+                    row.child(self.icon_button(
+                        "cloud-history-back",
+                        ("arrow-left", "Zurück"),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        LocalAction::Content(Action::BrowserBack),
+                        cx,
+                    ))
+                })
                 .child(self.chip(
                     "cloud-all",
                     "Alle Dateien",
@@ -268,20 +359,24 @@ impl Desktop {
                     )),
                     cx,
                 ))
-                .child(self.chip(
-                    "cloud-recent",
-                    "Zuletzt",
-                    (browser.section == FileSection::Recent, 1, 3),
-                    LocalAction::Content(Action::BrowserRecent),
-                    cx,
-                ))
-                .child(self.chip(
-                    "cloud-favorites",
-                    "Favoriten",
-                    (browser.section == FileSection::Favorites, 2, 3),
-                    LocalAction::Content(Action::BrowserFavorites),
-                    cx,
-                )),
+                .when(browser.search_available, |row| {
+                    row.child(self.chip(
+                        "cloud-recent",
+                        "Zuletzt",
+                        (browser.section == FileSection::Recent, 1, 3),
+                        LocalAction::Content(Action::BrowserRecent),
+                        cx,
+                    ))
+                })
+                .when(browser.favorites_available, |row| {
+                    row.child(self.chip(
+                        "cloud-favorites",
+                        "Favoriten",
+                        (browser.section == FileSection::Favorites, 2, 3),
+                        LocalAction::Content(Action::BrowserFavorites),
+                        cx,
+                    ))
+                }),
         );
         let parent = parent_path(path);
         let root = Text::new("/").expect("constant");
@@ -341,7 +436,21 @@ impl Desktop {
                 cx,
             ));
         }
-        if browser.error.is_some() {
+        if browser.error == Some(talk_core::ui::UnavailableReason::Unsupported) {
+            body = body.child(self.hint(self.l("Diese Dateioption ist derzeit nicht verfügbar.")));
+            if browser.section != FileSection::All {
+                body = body.child(self.button(
+                    "cloud-unsupported-root",
+                    "Alle Dateien",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Content(Action::BrowseDirectory(
+                        Text::new("/").expect("constant"),
+                    )),
+                    cx,
+                ));
+            }
+        } else if browser.error.is_some() {
             body = body.child(
                 div()
                     .flex()
@@ -472,6 +581,7 @@ impl Desktop {
                         account: browser.account,
                         path: entry.path.clone(),
                         file,
+                        generation: browser.generation,
                     })
                 });
             let mut row = div()
@@ -500,7 +610,11 @@ impl Desktop {
                         .items_center()
                         .justify_center()
                         .child(self.scaled_icon(
-                            if entry.directory { "inbox" } else { "file" },
+                            file_icon(
+                                entry.name.as_str(),
+                                entry.mime.as_ref().map(Text::as_str),
+                                entry.directory,
+                            ),
                             18.,
                             self.theme.muted,
                         ))
@@ -745,5 +859,22 @@ impl Desktop {
             );
         }
         body
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_icon;
+    #[test]
+    fn file_icons_prefer_directory_and_recognize_mime_or_extension() {
+        assert_eq!(file_icon("pictures", Some("image/png"), true), "folder");
+        assert_eq!(file_icon("photo.PNG", None, false), "file-image");
+        assert_eq!(
+            file_icon("recording", Some("audio/ogg"), false),
+            "file-audio"
+        );
+        assert_eq!(file_icon("movie.webm", None, false), "file-video");
+        assert_eq!(file_icon("bundle.zip", None, false), "file-archive");
+        assert_eq!(file_icon("notes.txt", None, false), "file");
     }
 }

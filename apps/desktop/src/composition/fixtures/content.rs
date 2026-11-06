@@ -400,7 +400,10 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
         path: text(path),
         section: talk_core::ui::content::FileSection::All,
         sort: talk_core::ui::content::FileSort::Name,
+        generation: 1,
         pagination: None,
+        search_available: true,
+        favorites_available: true,
         loading: false,
         offline: false,
         error: None,
@@ -416,13 +419,83 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
             size: *size,
             modified: Some(text("04 Nov 2026")),
             modified_unix: Some(1793750400),
-            mime: None,
-            file_id: None,
+            mime: if name.ends_with(".png") {
+                Some(text("image/png"))
+            } else if name.ends_with(".pdf") {
+                Some(text("application/pdf"))
+            } else {
+                None
+            },
+            file_id: match *name {
+                "Workshop.png" => Some(text("7101")),
+                "Projektübersicht.pdf" => Some(text("7102")),
+                _ => None,
+            },
         })),
     });
+    let mut assets: Vec<_> = snapshot
+        .content_panel
+        .assets
+        .as_slice()
+        .iter()
+        .filter(|asset| !matches!(asset.target, AssetTarget::CloudFile { .. }))
+        .cloned()
+        .collect();
+    if path == "/" {
+        for (file, name, key) in [(7101, "Workshop.png", 4), (7102, "Projektübersicht.pdf", 5)] {
+            assets.push(AssetView {
+                target: AssetTarget::CloudFile {
+                    account,
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                state: AssetState::Ready { key },
+                emoji: None,
+                color: None,
+                document_pages: None,
+            });
+        }
+    }
+    snapshot.content_panel.assets = page(assets);
 }
 
 pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::content::ImageJob> {
+    if scenario == Some("chat-cloud-files") {
+        let mut jobs = images(Some("chat-content"));
+        for (file, name, key, bytes) in [
+            (
+                7101,
+                "Workshop.png",
+                4,
+                include_bytes!("../../../assets/fixtures/content-photo.png").as_slice(),
+            ),
+            (
+                7102,
+                "Projektübersicht.pdf",
+                5,
+                include_bytes!("../../../assets/fixtures/content-document.png").as_slice(),
+            ),
+        ] {
+            jobs.push(super::super::accounts::content::ImageJob {
+                cached: false,
+                local: None,
+                attachment: None,
+                preview_generation: None,
+                account: scope(),
+                target: AssetTarget::CloudFile {
+                    account: scope(),
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                key,
+                bytes: talk_core::protocol::content::ImageBytes::new(bytes.to_vec())
+                    .expect("bounded authored fixture"),
+            });
+        }
+        return jobs;
+    }
     if !matches!(
         scenario,
         Some(

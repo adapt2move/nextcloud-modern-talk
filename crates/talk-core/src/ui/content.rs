@@ -34,6 +34,7 @@ pub enum AssetTarget {
         account: AccountScope,
         path: Text<16384>,
         file: u64,
+        generation: u64,
     },
     Thumbnail(AttachmentRef),
     Image(AttachmentRef),
@@ -154,8 +155,12 @@ pub struct FileBrowserView {
     pub section: FileSection,
     pub sort: FileSort,
     pub entries: Page<CloudFileView, 1000>,
+    /// Local listing identity, retired when a fresh server observation arrives.
+    pub generation: u64,
     /// DAV page offset and total, including the folder itself. No server token.
     pub pagination: Option<(u64, u64)>,
+    pub search_available: bool,
+    pub favorites_available: bool,
     pub loading: bool,
     pub offline: bool,
     pub error: Option<UnavailableReason>,
@@ -184,6 +189,8 @@ pub enum FileSort {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
     pub file_browser: Option<FileBrowserView>,
+    /// Explicit DAV refusal for this account; unknown until observed.
+    pub file_browser_supported: Option<bool>,
     pub browser_download: Option<BrowserDownloadView>,
     pub self_name: Option<Text<256>>,
     pub organization: Option<Text<256>>,
@@ -205,6 +212,7 @@ impl Default for ContentPanel {
     fn default() -> Self {
         Self {
             file_browser: None,
+            file_browser_supported: None,
             browser_download: None,
             self_name: None,
             organization: None,

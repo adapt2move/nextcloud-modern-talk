@@ -137,8 +137,13 @@ impl Desktop {
                 icon: "cloud",
                 availability: Availability::when(
                     self.message_feature_enabled(MessageFeature::Files)
-                        && self.composer_available(),
-                    "Dateien können in diesem Gespräch nicht gesendet werden.",
+                        && self.composer_available()
+                        && self.snapshot.content_panel.file_browser_supported != Some(false),
+                    if self.snapshot.content_panel.file_browser_supported == Some(false) {
+                        "Diese Dateioption ist derzeit nicht verfügbar."
+                    } else {
+                        "Dateien können in diesem Gespräch nicht gesendet werden."
+                    },
                 ),
             },
             Item {

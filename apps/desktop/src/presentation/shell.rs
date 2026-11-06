@@ -511,6 +511,7 @@ impl Desktop {
         .children(drop_hint)
         .when(drop_enabled, |card| {
             card.can_drop(|value, _, _| value.is::<gpui::ExternalPaths>())
+                .drag_over::<gpui::ExternalPaths>(|style, _, _, _| style)
                 .on_drop(
                     cx.listener(move |this, paths: &gpui::ExternalPaths, window, cx| {
                         this.stage_dropped_files(drop_context, paths, window, cx);

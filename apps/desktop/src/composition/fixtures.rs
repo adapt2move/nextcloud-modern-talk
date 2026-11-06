@@ -1662,6 +1662,24 @@ impl NativeDesktopPort for DevelopmentPort {
                         }
                         panel.uploads = page(uploads);
                     }
+                    MessageAction::StageClipboardImage { name, image } => {
+                        use talk_core::ui::messaging::{UploadState, UploadView};
+                        let mut uploads = panel.uploads.as_slice().to_vec();
+                        if uploads.len() >= 8 {
+                            return Err(SubmitError::Busy);
+                        }
+                        uploads.push(UploadView {
+                            id: 1000 + uploads.len() as u64,
+                            name,
+                            bytes: Some(image.as_slice().len() as u64),
+                            state: UploadState::Selected,
+                            submitted: false,
+                            transferred: 0,
+                            uploaded: false,
+                            server_message: None,
+                        });
+                        panel.uploads = page(uploads);
+                    }
                     MessageAction::RemoveFile(id) => {
                         panel.uploads = page(
                             panel

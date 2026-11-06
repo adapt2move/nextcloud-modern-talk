@@ -199,7 +199,7 @@ impl Desktop {
                 .child(self.input_surface(&self.upload_folder, cx).child(self.upload_folder.clone()))
                 .child(self.dialog_actions()
                     .child(self.button("browse-upload-folder", "Ordner auswählen", ButtonStyle::Secondary,
-                        availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),
+                        availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some() && self.snapshot.content_panel.file_browser_supported != Some(false)),
                         LocalAction::Content(super::content::Action::OpenFolderPicker), cx))
                     .child(self.button("save-upload-folder",self.l("Ordner speichern"),ButtonStyle::Primary,availability(values.and_then(|v|v.attachment_folder.as_ref()).is_some()),LocalAction::SaveUploadFolder,cx)));
             if values.is_some_and(|v| v.conversation_subfolders == Some(true)) {

@@ -81,6 +81,9 @@ pub(super) struct Owner {
     current: Option<(AccountScope, RequestId, Query)>,
     retry: Option<Retry>,
     download: Option<(OperationId, AccountScope, RequestId, wire::TransferProgress)>,
+    generation: u64,
+    search_unsupported: Option<AccountScope>,
+    favorites_unsupported: Option<AccountScope>,
 }
 impl Owner {
     pub(super) fn close(&mut self) {
@@ -95,6 +98,12 @@ impl Owner {
     }
     pub(super) fn retain_account(&mut self, account: Option<AccountScope>) {
         self.cache.retain(|item| Some(item.account) == account);
+        if self.search_unsupported != account {
+            self.search_unsupported = None;
+        }
+        if self.favorites_unsupported != account {
+            self.favorites_unsupported = None;
+        }
     }
     pub(super) fn take_job(&mut self, operation: OperationId) -> Option<(Query, u8)> {
         let index = self.jobs.iter().position(|(id, _, _)| *id == operation)?;
@@ -282,7 +291,7 @@ impl Accounts {
         account: AccountScope,
         path: Text<16384>,
     ) -> Result<(), SubmitError> {
-        let file = self
+        let (file, generation) = self
             .snapshot
             .content_panel
             .file_browser
@@ -298,6 +307,13 @@ impl Accounts {
             .and_then(|entry| entry.file_id.as_ref())
             .and_then(|id| id.as_str().parse::<u64>().ok())
             .filter(|id| *id > 0)
+            .zip(
+                self.snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map(|browser| browser.generation),
+            )
             .ok_or(SubmitError::StaleScope)?;
         self.start_content(
             Job {
@@ -309,6 +325,7 @@ impl Accounts {
                     account,
                     path,
                     file,
+                    generation,
                 }),
                 poll: None,
                 mutation: false,
@@ -368,6 +385,15 @@ impl Accounts {
         query: Query,
         attempts: u8,
     ) -> Result<(), SubmitError> {
+        if matches!(query, Query::Search(_) | Query::Recent)
+            && self.content_owner.browser.search_unsupported == Some(account)
+            || matches!(query, Query::Favorites)
+                && self.content_owner.browser.favorites_unsupported == Some(account)
+            || matches!(query, Query::Folder(_, _))
+                && self.snapshot.content_panel.file_browser_supported == Some(false)
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+        }
         let now = Instant::now();
         self.content_owner.browser.cache.retain(|item| {
             item.account == account && now.saturating_duration_since(item.saved) < CACHE_LIFETIME
@@ -389,6 +415,8 @@ impl Accounts {
                 (page(entries), item.pagination)
             });
         self.content_owner.browser.current = Some((account, request, query.clone()));
+        self.content_owner.browser.generation =
+            self.content_owner.browser.generation.saturating_add(1);
         self.snapshot.content_panel.file_browser = Some(view::FileBrowserView {
             account,
             path: query.path(),
@@ -397,11 +425,15 @@ impl Accounts {
             entries: cached
                 .as_ref()
                 .map_or_else(Page::empty, |(entries, _)| entries.clone()),
+            generation: self.content_owner.browser.generation,
             pagination: cached.as_ref().and_then(|(_, pagination)| *pagination),
+            search_available: self.content_owner.browser.search_unsupported != Some(account),
+            favorites_available: self.content_owner.browser.favorites_unsupported != Some(account),
             loading: true,
             offline: false,
             error: None,
         });
+        self.retire_cloud_previews();
         let job = Job {
             request,
             account,
@@ -508,8 +540,12 @@ impl Accounts {
             Err(error) => Err(error),
             _ => Err(IdentityError::Request(ErrorKind::Malformed)),
         };
+        let mut retire_previews = false;
         match result {
             Ok((files, pagination)) => {
+                if matches!(query, Query::Folder(_, _)) {
+                    self.snapshot.content_panel.file_browser_supported = Some(true);
+                }
                 let mut entries: Vec<_> = files
                     .as_slice()
                     .iter()
@@ -525,10 +561,14 @@ impl Accounts {
                     })
                     .collect();
                 sort_entries(&mut entries, browser.sort);
+                self.content_owner.browser.generation =
+                    self.content_owner.browser.generation.saturating_add(1);
+                browser.generation = self.content_owner.browser.generation;
                 browser.entries = page(entries);
                 browser.pagination = pagination;
                 browser.offline = false;
                 browser.error = None;
+                retire_previews = true;
                 self.content_owner
                     .browser
                     .cache
@@ -545,6 +585,21 @@ impl Accounts {
                 });
             }
             Err(error) => {
+                if matches!(error, IdentityError::Request(ErrorKind::Unsupported)) {
+                    match query {
+                        Query::Folder(_, _) => {
+                            self.snapshot.content_panel.file_browser_supported = Some(false)
+                        }
+                        Query::Recent | Query::Search(_) => {
+                            self.content_owner.browser.search_unsupported = Some(account);
+                            browser.search_available = false;
+                        }
+                        Query::Favorites => {
+                            self.content_owner.browser.favorites_unsupported = Some(account);
+                            browser.favorites_available = false;
+                        }
+                    }
+                }
                 let transient = matches!(
                     error,
                     IdentityError::Request(
@@ -574,6 +629,7 @@ impl Accounts {
                 } else {
                     if !transient {
                         browser.entries = Page::empty();
+                        retire_previews = true;
                         self.content_owner
                             .browser
                             .cache
@@ -583,10 +639,17 @@ impl Accounts {
                 }
             }
         }
+        if retire_previews {
+            self.retire_cloud_previews();
+        }
         self.touch();
     }
     pub(super) fn retry_cloud_files(&mut self) {
         let now = Instant::now();
+        self.content_owner
+            .browser
+            .cache
+            .retain(|item| now.saturating_duration_since(item.saved) < CACHE_LIFETIME);
         if !self
             .content_owner
             .browser

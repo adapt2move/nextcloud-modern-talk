@@ -344,6 +344,7 @@ impl Transport {
                 401 | 403 => return Err(self.error(ErrorKind::PermissionDenied)),
                 404 => return Err(self.error(ErrorKind::NotFound)),
                 409 | 412 => return Err(self.error(ErrorKind::Conflict)),
+                405 | 501 if listing => return Err(self.error(ErrorKind::Unsupported)),
                 413 => return Err(self.error(ErrorKind::TooLarge)),
                 429 => return Err(self.error(ErrorKind::RateLimited)),
                 _ => return Err(self.error(ErrorKind::ServerUnavailable)),

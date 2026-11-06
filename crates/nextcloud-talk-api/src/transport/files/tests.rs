@@ -91,6 +91,15 @@ async fn directory_listing_rejects_non_multistatus_success() {
 }
 
 #[tokio::test]
+async fn unsupported_dav_method_is_not_reported_as_a_transient_failure() {
+    let server = Server::start(vec![(405, String::new(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let error = owner.favorite_files(&context(&runtime)).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Unsupported);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
 async fn existing_file_share_sends_room_path_and_caption() {
     let server = Server::start(vec![reply(json!({"id": "42"}))]).await;
     let (mut owner, runtime) = client(&server);

@@ -132,6 +132,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k');key('ctrl+v')
         expect('denied draft copy did not replace platform clipboard',['CLIPMARK'])
     elif scenario == 'chat-content':
+        # The plus control is a native icon; this point was inspected at 1280x800.
+        run(['xdotool', 'mousemove', '--window', xid, '314', '742', 'click', '1'], env)
+        expect('composer plus exposes both file sources', ['Vom Computer hochladen', 'Aus NextCloud teilen'])
+        key('Escape')
         click('Nachricht', xmin=200, ymin=600)
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
                        input='file:///tmp/Fictional-paste.txt\r\n', text=True, env=env,
@@ -141,6 +145,18 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('the X11 clipboard did not retain the native file-list fixture')
         key('ctrl+v')
         expect('native file-list paste stages a file chip', ['Fictional-paste.txt', 'Bereit zum Senden'])
+        image = Path('apps/desktop/assets/fixtures/content-photo.png').read_bytes()
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i'],
+                       input=image, env=env, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True, timeout=10)
+        key('ctrl+v')
+        expect('native image paste stages an image chip', ['Fictional-paste.txt', 'clipboard.png'])
+    elif scenario == 'chat-cloud-files':
+        # The file row is visible in dark and light captures, but low contrast
+        # can make Tesseract miss its name. Verify the resulting selection below.
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
+        click('Auswahl')
+        expect('selected cloud file returns to the composer', ['Projektübersicht.pdf', 'Bereit zum Senden'], ['NextCloud-Dateien'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

@@ -1722,7 +1722,10 @@ impl Desktop {
                 "browse-cloud-files",
                 "Alle Dateien anzeigen",
                 ButtonStyle::Secondary,
-                true,
+                Availability::when(
+                    self.snapshot.content_panel.file_browser_supported != Some(false),
+                    "Diese Dateioption ist derzeit nicht verfügbar.",
+                ),
                 LocalAction::Content(super::content::Action::OpenCloudBrowser),
                 cx,
             ));

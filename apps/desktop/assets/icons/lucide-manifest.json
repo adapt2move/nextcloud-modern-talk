@@ -151,10 +151,45 @@
       "transformation": "none"
     },
     {
+      "asset": "file-archive.svg",
+      "upstream_path": "icons/file-archive.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-archive.svg",
+      "sha256": "50adc280c84fcde3a62288e91a049557bb15ab3162fcb9533f4e2f821eaad7dd",
+      "transformation": "none"
+    },
+    {
+      "asset": "file-audio.svg",
+      "upstream_path": "icons/file-audio.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-audio.svg",
+      "sha256": "679bd56e43c3f817d544788a7e90a0fbb8636162a0b5925844bd7435db456013",
+      "transformation": "none"
+    },
+    {
+      "asset": "file-image.svg",
+      "upstream_path": "icons/file-image.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-image.svg",
+      "sha256": "258b199a41deca975018e808568f017adc11ba1c5b1ffb7a956daa0e22f30a35",
+      "transformation": "none"
+    },
+    {
+      "asset": "file-video.svg",
+      "upstream_path": "icons/file-video.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-video.svg",
+      "sha256": "f9f5f97ade68e7975187b5e44a5b24154cd96c656758f4d34a764e46d11e251b",
+      "transformation": "none"
+    },
+    {
       "asset": "file.svg",
       "upstream_path": "icons/file-text.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-text.svg",
       "sha256": "486fab70d8ad3cdc69b5ff9b6c356a58d41fcc4c885359cbf9d6e088a7c47f70",
+      "transformation": "none"
+    },
+    {
+      "asset": "folder.svg",
+      "upstream_path": "icons/folder.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/folder.svg",
+      "sha256": "f0d92b94b797a8ab7d4c4ae33c3236c47f64068351b4e14bdb5014ee42898a39",
       "transformation": "none"
     },
     {

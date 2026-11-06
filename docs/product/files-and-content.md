@@ -8,16 +8,19 @@ This document defines file, media and structured-content behavior. The [feature 
 
 Acceptance: upload and sharing are distinct states. A completed upload whose chat share failed is shown as “Hochgeladen, noch nicht geteilt”, with a safe retry/share action; it is not uploaded again blindly. Partial batches show per-file outcomes and cancellation. Permission denial, no quota, deleted local source, path collision, disconnection, and server rejection preserve recoverable choices without claiming delivery.
 
-The composer stages up to eight local files from the native multi-file picker or
-an external file drop. Compact removable chips show selection, upload, sharing
+The composer stages up to eight local files from the native multi-file picker,
+supported native file-list or image clipboard formats, or an external file drop.
+Compact removable chips show selection, upload, sharing
 and per-file failure states; selection itself performs no upload. The ordinary
 Send action sends the optional caption once, on the first confirmed share.
 Files upload and share sequentially, with the existing 32 MiB per-file transport
 limit and current server permissions. A definitive failed share retries the
 already uploaded path. An uncertain dispatched write pauses the batch and has
 no automatic or blind retry. Paths remain session-local, expire after thirty
-minutes and retire on a room/account change. Reply/thread/silent modes must be
-closed before sending attachments because this share API does not preserve them.
+minutes and retire on a room/account change. Reply, thread, caption and silent
+metadata are sent only when their server capabilities and room policy allow them.
+The account attachment destination can be chosen with the native folder browser;
+the server's conversation-subfolder contract remains required for uploads.
 
 ## CONTENT-002
 
@@ -25,11 +28,25 @@ closed before sending attachments because this share API does not preserve them.
 
 Acceptance: selecting a file never changes its sharing permissions until explicit send. If the file moved or access was revoked, fail safely and refresh. File-share credentials and private download URLs stay out of public diagnostics. Declining an access change leaves the file unshared.
 
+The account-scoped native picker stages up to eight existing files in the
+composer. Send creates a Talk room share for each item with a correlation
+reference and supported caption, reply, thread and silent metadata. Pending rows
+are replaced by correlated messages; an uncertain share is reconciled before
+another attempt. Selection alone never creates a share.
+
 ## CONTENT-003
 
 **View shared items and previews (P1 basic; P3 complete browser).** Offer a room-scoped files/media/links view when `rich-object-list-media` allows it. Display safe image/document/media previews, loading, unavailable preview, expired/deleted share, and download progress. Use native decoders/viewers where implemented; unsupported formats offer save/open externally with a clear handoff. Avoid autoplay and unexpected external resource loading.
 
 Acceptance: one account's cached thumbnail cannot appear for another. Canceling a download leaves no misleading completed file. Opening a remote resource requires a deliberate action under the security policy. A missing preview falls back to file metadata, not a broken or blank message.
+
+The shared-items view also opens the account's native Files browser. Its folder,
+recent, favorite and search views provide metadata, thumbnails where available,
+keyboard navigation, selection and explicit open/download actions. Folder pages
+are fetched lazily where the server supports pagination. Recently viewed listings
+are bounded in-memory account state, shown immediately while a refresh runs and
+available during the session when disconnected. They are not persisted under
+the room-content retention policy in [AUTH-009](accounts.md#auth-009).
 
 Images and videos use compact thumbnail tiles without filenames. Size a loaded tile to its aspect ratio within 320×240 points, displaying the entire image without cropping or the former half-resolution display cap. Two landscape tiles can fit side by side in the 648-point grid. Consecutive bare media messages from the same actor within two minutes may form groups of up to eight; captions, replies, reactions, pins and other meaningful metadata keep their own rows. Grouping preserves every message's identity and permitted actions. PDF cards retain their filenames. Ordinary files such as JSON and ZIP use compact filename/type/size cards without thumbnail requests or a media-gallery entry. Missing or unsupported thumbnails fall back to those cards. Each attachment exposes a keyboard-focusable Download icon on hover or focus; clicking an ordinary file also offers Save. Loading and failed previews have visible labels; transient failures allow a bounded automatic retry and a deliberate retry action. When a loaded image changes a row's height, invalidate list measurements while preserving the reader's anchor.
 

@@ -43,9 +43,19 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   Lost share acknowledgements are reconciled by reading history, never replaying
   that share. These pending attachment intents are not durable across restart.
   Local raster previews use the same bounded decoder and stay out of disk caches.
-  Attachment paste and sending in reply/thread/silent modes remain unsupported.
+  File-list and image paste and incoming file drops need native qualification on
+  each platform; file-list paste has been exercised on Linux X11. Caption and
+  reply/thread/silent metadata require the corresponding server capabilities.
   Native outgoing file drags use AppKit file promises on macOS and still need
   Finder qualification; Linux and Windows use the Download action.
+- The account Files browser keeps up to eight recently visited listings in memory
+  for ten minutes, scoped to the account. It can show them while disconnected
+  during the same session; they do not survive restart. Folder paging uses the
+  server's pagination support when available, and sorting applies to the current
+  page. Search and recent results are limited to 200; other DAV responses are
+  bounded to 1,000 entries and a response-size limit. A server that rejects DAV
+  search or favorites disables that section. Existing-file shares are staged and
+  reconciled in the session and are not queued across restart.
 - The media gallery and local video player are implemented but await native GUI,
   real-server and packaged-runtime qualification. The player accepts MP4
   H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders

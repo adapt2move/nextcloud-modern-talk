@@ -151,6 +151,7 @@ impl Desktop {
                 .iter()
                 .filter(|file| !file.submitted)
                 .map(|file| {
+                    let preview = self.asset_image(&Self::local_upload_target(panel.context, file));
                     div()
                         .w(px(280.))
                         .max_w_full()
@@ -160,7 +161,16 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(self.scaled_icon("file", 22., self.theme.muted))
+                        .child(if let Some(preview) = preview {
+                            img(preview)
+                                .size(px(32.))
+                                .rounded(px(4.))
+                                .object_fit(ObjectFit::Cover)
+                                .into_any_element()
+                        } else {
+                            self.scaled_icon("file", 22., self.theme.muted)
+                                .into_any_element()
+                        })
                         .child(
                             div()
                                 .min_w_0()

@@ -267,6 +267,37 @@ async fn released_server_file_listing_and_existing_share() {
         panic!("search reply");
     };
     assert!(search.as_slice().iter().any(|entry| entry.path == path));
+    let reply_target = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::Send {
+            text: text("Fixture reply target"),
+            options: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let parent = match reply_target {
+        MR::Message(message) => {
+            assert!(message.own);
+            assert_eq!(
+                message.message.own_operation,
+                Some(OperationId::from_local(sequence))
+            );
+            message.message.id
+        }
+        MR::Send(receipt) => {
+            assert_eq!(receipt.operation, OperationId::from_local(sequence));
+            let talk_core::protocol::SendState::ServerAccepted(id) = receipt.state else {
+                panic!("reply target was not confirmed");
+            };
+            id
+        }
+        _ => panic!("reply target returned no correlated acceptance"),
+    };
     let shared = message(
         &mut client,
         &runtime,
@@ -276,11 +307,16 @@ async fn released_server_file_listing_and_existing_share() {
         M::ShareExistingFile {
             path,
             caption: text("Fixture caption"),
-            options: Default::default(),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                reply_to: Some(parent),
+                silent: true,
+                ..Default::default()
+            },
         },
     )
     .await
     .unwrap();
+    let share_operation = OperationId::from_local(sequence);
     assert!(matches!(shared, MR::Changed));
     let MR::Messages { messages, .. } = message(
         &mut client,
@@ -301,6 +337,25 @@ async fn released_server_file_listing_and_existing_share() {
             .iter()
             .any(|item| item.kind.as_str() == "file")
     }));
+    for message in messages.as_slice() {
+        println!(
+            "fixture shared item: text={:?}, operation={:?}, parent={:?}",
+            message.message.text,
+            message.message.own_operation,
+            message.parent.as_ref().map(|parent| parent.id)
+        );
+    }
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(share_operation)
+                && message.message.text.as_str().contains("Fixture caption")
+                && message
+                    .parent
+                    .as_ref()
+                    .is_some_and(|reply| reply.id == parent)
+        }),
+        "the shared file must reconcile its reference, caption and reply"
+    );
     println!("files-backend directory-and-existing-share: pass");
 }
 

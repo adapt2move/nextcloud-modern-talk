@@ -256,7 +256,7 @@ impl Client {
                 .filter(|cursor| {
                     cursor.path == *path
                         && offset < cursor.total
-                        && offset % DIRECTORY_PAGE_SIZE == 0
+                        && offset.is_multiple_of(DIRECTORY_PAGE_SIZE)
                         && cursor.saved.elapsed() < std::time::Duration::from_secs(120)
                 })
                 .ok_or_else(|| self.error(ErrorKind::Conflict))?;
