@@ -336,6 +336,7 @@ async fn attachment_share_is_correlated_after_a_lost_ack_without_a_second_post()
                     command: M::ShareFile {
                         path: Text::new("/draft/one").unwrap(),
                         caption: Text::new("caption").unwrap(),
+                        voice_message: false,
                     },
                 },
             )

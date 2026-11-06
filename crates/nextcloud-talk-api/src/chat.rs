@@ -104,6 +104,7 @@ pub enum Command {
         file_name: String,
         reference: String,
         caption: String,
+        voice_message: bool,
     },
 }
 #[derive(Clone, Debug)]
@@ -809,6 +810,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             file_name,
             reference,
             caption,
+            voice_message,
         } => {
             text(path, 16384)?;
             text(file_name, 255)?;
@@ -825,7 +827,12 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("referenceId", reference.clone()),
                 ("allowUpdate", "false".into()),
             ]);
-            if !caption.is_empty() {
+            if *voice_message {
+                f.push((
+                    "talkMetaData",
+                    serde_json::json!({"messageType":"voice-message"}).to_string(),
+                ));
+            } else if !caption.is_empty() {
                 f.push((
                     "talkMetaData",
                     serde_json::json!({"caption":caption}).to_string(),

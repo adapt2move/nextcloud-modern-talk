@@ -204,7 +204,11 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     };
     assert_eq!(emoji.as_str(), "🌿");
     println!("content-backend server-room-emoji: pass");
-    let R::PollCapabilities { create, .. } = content(
+    let R::PollCapabilities {
+        create,
+        drafts,
+        edit_draft,
+    } = content(
         &mut alice,
         &runtime,
         a,
@@ -212,10 +216,100 @@ async fn released_server_polls_avatars_previews_and_downloads() {
         poll(room, P::Capabilities),
     )
     .await
-    .unwrap() else {
+    .unwrap()
+    else {
         panic!("capabilities");
     };
     assert_eq!(create.allowed, Decision::Allowed);
+    if drafts.server == talk_core::protocol::FeatureSupport::Supported
+        && drafts.allowed == Decision::Allowed
+    {
+        let R::PollDraftSaved(saved) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::SaveDraft(draft(false))),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft creation");
+        };
+        let id = saved.id;
+        let R::PollDrafts(values) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::ListDrafts),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft listing");
+        };
+        assert!(values.as_slice().iter().any(|value| value.id == id));
+        assert!(
+            content(
+                &mut bob,
+                &runtime,
+                b,
+                &mut sequence,
+                poll(bob_room, P::ListDrafts)
+            )
+            .await
+            .is_err()
+        );
+        if edit_draft.server == talk_core::protocol::FeatureSupport::Supported {
+            let mut updated = draft(true);
+            updated.question = text("Updated fictional draft");
+            updated.max_votes = 2;
+            let R::PollDraftSaved(saved) = content(
+                &mut alice,
+                &runtime,
+                a,
+                &mut sequence,
+                poll(
+                    room,
+                    P::UpdateDraft {
+                        poll: id,
+                        draft: updated,
+                    },
+                ),
+            )
+            .await
+            .unwrap() else {
+                panic!("draft update");
+            };
+            assert_eq!(saved.id, id);
+            assert_eq!(saved.draft.max_votes, 2);
+            assert_eq!(saved.draft.question.as_str(), "Updated fictional draft");
+        }
+        let R::PollDraftDeleted(deleted) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::DeleteDraft(id)),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft deletion");
+        };
+        assert_eq!(deleted, id);
+        let R::PollDrafts(values) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::ListDrafts),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft listing after delete");
+        };
+        assert!(!values.as_slice().iter().any(|value| value.id == id));
+        println!("content-backend poll-drafts: pass");
+    }
     let mut ids = Vec::new();
     for hidden in [true, false] {
         let R::Poll(created) = content(
@@ -365,6 +459,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
             M::ShareFile {
                 path,
                 caption: text(""),
+                voice_message: false,
             },
         )
         .await

@@ -720,6 +720,7 @@ impl Accounts {
                     .path
                     .clone(),
                 caption,
+                voice_message: false,
             },
             V::Thread(root) => W::History {
                 before: None,
@@ -823,7 +824,11 @@ impl Accounts {
                     destination: destination.conversation,
                 }
             }
-            V::ShareFile { path, caption } => W::ShareFile { path, caption },
+            V::ShareFile { path, caption } => W::ShareFile {
+                path,
+                caption,
+                voice_message: false,
+            },
         };
         self.start_message(request, context, command, work)?;
         if let Some(root) = thread_root

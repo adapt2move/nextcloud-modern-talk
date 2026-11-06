@@ -57,6 +57,7 @@ impl Batch {
                 Step::Share,
                 Command::ShareFile {
                     path: path.clone(),
+                    voice_message: false,
                     caption: file
                         .outgoing
                         .as_ref()

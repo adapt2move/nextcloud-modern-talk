@@ -172,7 +172,7 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
         }),
     );
     assert!(
-        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((1, Step::Share, Command::ShareFile { path, caption })) if path.as_str()=="/draft/one" && caption.as_str()=="caption")
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((1, Step::Share, Command::ShareFile { path, caption, .. })) if path.as_str()=="/draft/one" && caption.as_str()=="caption")
     );
     result(&mut model, 1, Step::Share, Ok(Reply::Changed));
     assert_eq!(
@@ -202,7 +202,7 @@ fn sequential_batch_shares_once_and_retries_sharing_without_reuploading_or_repea
     );
     model.retry_file(context, 2).unwrap();
     assert!(
-        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((2, Step::Share, Command::ShareFile { path, caption })) if path.as_str()=="/draft/two" && caption.as_str().is_empty())
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(), Some((2, Step::Share, Command::ShareFile { path, caption, .. })) if path.as_str()=="/draft/two" && caption.as_str().is_empty())
     );
     result(&mut model, 2, Step::Share, Ok(Reply::Changed));
     let panel = model.snapshot.message_panel.as_ref().unwrap();

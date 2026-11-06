@@ -228,6 +228,7 @@ pub enum MessagingCommand {
     ShareFile {
         path: Text<16384>,
         caption: Text<4096>,
+        voice_message: bool,
     },
     Translate {
         message: MessageId,

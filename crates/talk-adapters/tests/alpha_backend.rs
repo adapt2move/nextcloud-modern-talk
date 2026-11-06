@@ -796,6 +796,7 @@ async fn released_server_messaging_and_room_controls() {
         M::ShareFile {
             path,
             caption: text(""),
+            voice_message: false,
         },
     )
     .await;

@@ -1143,9 +1143,19 @@ impl NextcloudClient {
                 object_type: "file".into(),
                 before: before.map(|m| self.message_scope(m, id)).transpose()?,
             },
-            C::ShareFile { path, caption } => {
+            C::ShareFile {
+                path,
+                caption,
+                voice_message,
+            } => {
                 if caps.attachments_allowed != Some(true) {
                     return Err(self.error(ErrorKind::PermissionDenied));
+                }
+                if *voice_message && !caps.has("voice-message-sharing") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if *voice_message && !caption.as_str().is_empty() {
+                    return Err(self.error(ErrorKind::Malformed));
                 }
                 WireCommand::ShareAttachment {
                     path: path.as_str().into(),
@@ -1158,6 +1168,7 @@ impl NextcloudClient {
                         .clone(),
                     caption: caption.as_str().into(),
                     reference: send_reference(operation),
+                    voice_message: *voice_message,
                 }
             }
             _ => return Err(self.error(ErrorKind::Unconfigured)),
