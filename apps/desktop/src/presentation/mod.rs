@@ -21,6 +21,7 @@ mod organization;
 mod overlays;
 mod own_status;
 mod own_status_message;
+mod people_card;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
@@ -92,6 +93,7 @@ pub enum LocalAction {
     CheckUpdates,
     InstallUpdate(u64),
     Room(conversation_dialog::Action),
+    Person(people_card::Action),
     Message(messaging::Action),
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
@@ -221,6 +223,7 @@ pub struct Desktop {
     // never cleared by an error snapshot; composition owns restart/quit.
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
+    people_card: people_card::Card,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -484,6 +487,7 @@ impl Desktop {
             _text_selection_observer: text_selection_observer,
             _text_link_subscription: text_link_subscription,
             room_ui,
+            people_card: people_card::Card::new(cx),
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -1082,6 +1086,7 @@ impl Desktop {
                     self.submit_creation(talk_core::ui::conversation::CreateAction::Group(name));
                 }
             }
+            LocalAction::Person(action) => self.person_action(action, window, cx),
             LocalAction::CreateDirect(person) => {
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
@@ -2067,6 +2072,7 @@ impl Render for Desktop {
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
         self.prepare_member_dialog(window, cx);
+        self.prepare_person_card(window);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -2410,7 +2416,8 @@ impl Render for Desktop {
                     }
                 }
                 if !composing
-                    && (this.member_dialog_key(event, window, cx)
+                    && (this.person_key(event, window, cx)
+                        || this.member_dialog_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)

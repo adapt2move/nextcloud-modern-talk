@@ -168,6 +168,11 @@ pub enum ProtocolRequest {
         operation: OperationId,
         recipient: crate::protocol::conversation::RecipientId,
     },
+    /// A currently observed room participant; the adapter revalidates membership.
+    CreateDirectForMember {
+        operation: OperationId,
+        member: crate::protocol::conversation::MemberId,
+    },
     LeaveConversation(ConversationId),
     ActivateConversation(ConversationId),
     DeactivateConversation(ConversationId),

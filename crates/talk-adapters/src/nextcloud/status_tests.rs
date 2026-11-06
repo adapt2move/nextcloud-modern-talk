@@ -256,3 +256,72 @@ async fn clear_status_accepts_a_confirmed_missing_own_status() {
     assert!(reply.values.status_message.is_none());
     assert_eq!(server.count(), 3);
 }
+
+#[tokio::test]
+async fn participant_status_is_capability_gated_and_scoped_to_local_users() {
+    for enabled in [true, false] {
+        let mut data = caps(35);
+        data["capabilities"]["user_status"] = json!({"enabled": enabled});
+        let capabilities = wire::Capabilities::decode(&data).unwrap();
+        let mut group = room();
+        group["type"] = json!(2);
+        let participants = json!([
+            {"attendeeId": 3, "actorType": "users", "actorId": "alice", "displayName": "Alice", "participantType": 3,
+             "status": "away", "statusIcon": "☕", "statusMessage": "Break"},
+            {"attendeeId": 4, "actorType": "guests", "actorId": "guest", "displayName": "Guest", "participantType": 4,
+             "status": "online"}
+        ]);
+        let server = Server::start(vec![Reply::data(participants)]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let id = client.bind_room(&group).unwrap();
+        let talk_core::protocol::conversation::ConversationResult::Members(members) = client
+            .members(&context(&runtime), id, &capabilities)
+            .await
+            .unwrap()
+        else {
+            panic!("member list")
+        };
+        let members = members.as_slice();
+        assert_eq!(members.len(), 2);
+        if enabled {
+            let status = members[0].user_status.as_ref().unwrap();
+            assert_eq!(status.presence, UserPresence::Away);
+            assert_eq!(status.icon.as_ref().unwrap().as_str(), "☕");
+            assert_eq!(status.message.as_ref().unwrap().as_str(), "Break");
+        } else {
+            assert!(members[0].user_status.is_none());
+        }
+        assert!(members[1].user_status.is_none());
+        let requests = server.seen.lock().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&requests[0]).contains("includeStatus=true"),
+            enabled
+        );
+    }
+}
+
+#[test]
+fn person_author_correlation_is_room_and_actor_scoped() {
+    let data = room();
+    let runtime = runtime();
+    let mut client = client("http://127.0.0.1:1/cloud/", runtime);
+    let first = client.bind_room(&data).unwrap();
+    let mut second = first;
+    second.local += 1;
+    let key = super::super::messaging::actor_key(first, "users", "alice").unwrap();
+    assert_eq!(
+        key,
+        super::super::messaging::actor_key(first, "users", "alice").unwrap()
+    );
+    assert_ne!(
+        key,
+        super::super::messaging::actor_key(first, "guests", "alice").unwrap()
+    );
+    assert_ne!(
+        key,
+        super::super::messaging::actor_key(second, "users", "alice").unwrap()
+    );
+    assert!(!key.as_str().contains("alice"));
+    assert!(super::super::messaging::actor_key(first, "users", "bad\nactor").is_none());
+}

@@ -48,6 +48,7 @@ pub const SCENARIOS: &[&str] = &[
     "accounts-server-denied",
     "chat-ux",
     "chat-presence",
+    "people-card",
     "status-picker",
     "status-message",
     "chat-ux-call",
@@ -199,6 +200,36 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("people-card") {
+        let mut state = snapshot(Some("chat-grouped"));
+        dialog::configure(&mut state);
+        let context = state.selected.expect("fixture room");
+        let panel = state.conversation_panel.as_mut().expect("fixture details");
+        panel.members_loaded = true;
+        panel.members = page([talk_core::ui::conversation::Member {
+            id: talk_core::ui::conversation::PersonRef { context, local: 71 },
+            name: text("Mara Fischer"),
+            author_key: Some(text("5:users:mara")),
+            presence: Presence::Away,
+            status_icon: Some(text("☕")),
+            status_message: Some(text("Zurück nach der Kaffeepause")),
+            role: talk_core::ui::conversation::MemberRole::Moderator,
+            source: talk_core::ui::conversation::DirectorySource::User,
+            permissions: Some(511),
+            self_user: false,
+        }]);
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                talk_core::ui::messaging::MessageFeature::Mentions,
+                talk_core::ui::conversation::Availability {
+                    implemented: true,
+                    server: talk_core::ui::presentation::FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+        }
+        return state;
+    }
     if matches!(scenario, Some("status-picker" | "status-message")) {
         let mut state = snapshot(Some("chat-presence"));
         state.accounts = page(

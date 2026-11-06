@@ -26,6 +26,14 @@ class PresenceLab(Lab):
         self.require("presence.enabled", caps.get("capabilities", {}).get("user_status", {}).get("enabled") is True)
         room = self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room",
                             body={"roomType": 1, "invite": "lab_bob"}, expected=(200, 201), name="presence.direct")
+        self.request("lab_alice", "POST", f"/ocs/v2.php/apps/spreed/api/v1/chat/{room['token']}",
+                     body={"message": "Hello from the presence lab"}, expected=(201,), name="presence.invite-direct")
+        self.request("lab_bob", "POST", f"/ocs/v2.php/apps/spreed/api/v4/room/{room['token']}/participants/active",
+                     body={}, name="presence.join-direct")
+        group = self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room",
+                             body={"roomType": 2, "roomName": "Presence group"}, expected=(200, 201), name="presence.group")
+        self.request("lab_alice", "POST", f"/ocs/v2.php/apps/spreed/api/v4/room/{group['token']}/participants",
+                     body={"newParticipant": "lab_bob", "source": "users"}, name="presence.group-invite")
         self.request("lab_bob", "PUT", "/ocs/v2.php/apps/user_status/api/v1/user_status/status",
                      body={"statusType": "away"}, name="presence.set-away")
         self.request("lab_bob", "PUT", "/ocs/v2.php/apps/user_status/api/v1/user_status/message/custom",

@@ -80,6 +80,8 @@ pub enum Request {
     RoomsWithStatus,
     Room(RoomToken),
     Participants(RoomToken),
+    /// Participant status is requested only when user_status is enabled.
+    ParticipantsWithStatus(RoomToken),
     History {
         room: RoomToken,
         before: Option<u64>,
@@ -792,6 +794,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Method::GET,
             room("v4/room", t, "/participants"),
             vec![],
+            vec![],
+            Kind::Participants,
+        ),
+        Request::ParticipantsWithStatus(t) => (
+            Method::GET,
+            room("v4/room", t, "/participants"),
+            vec![("includeStatus", "true".into())],
             vec![],
             Kind::Participants,
         ),

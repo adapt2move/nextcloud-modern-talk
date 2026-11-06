@@ -79,6 +79,55 @@ impl NextcloudClient {
         Ok(ProtocolReply::People(page))
     }
 
+    /// Re-fetch the selected room's membership before converting its scoped handle
+    /// to a direct-chat recipient. Display names never grant this authority.
+    pub(super) async fn create_direct_for_member(
+        &mut self,
+        c: &OperationContext,
+        operation: OperationId,
+        member: talk_core::protocol::conversation::MemberId,
+        caps: &Capabilities,
+    ) -> Result<ProtocolReply, PortError> {
+        if member.conversation.account != c.scope.account {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let room = self.room(c, member.conversation, caps).await?;
+        self.allowed(room.actions.list_participants)?;
+        let result = self.members(c, member.conversation, caps).await?;
+        let talk_core::protocol::conversation::ConversationResult::Members(members) = result else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        if !members.as_slice().iter().any(|entry| {
+            entry.id == member && !entry.is_self && entry.source == RecipientSource::User
+        }) {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let actor_id = self
+            .members
+            .iter()
+            .find(|entry| entry.id == member && entry.actor_type == "users")
+            .map(|entry| entry.actor_id.clone())
+            .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+        let recipient = RecipientId {
+            scope: c.scope,
+            local: member.local,
+        };
+        let now = self.transport.now();
+        self.people.retain(|entry| entry.id != recipient);
+        if self.people.len() >= 100 {
+            self.people.remove(0);
+        }
+        self.people.push(PersonBinding {
+            id: recipient,
+            actor_id,
+            expires: Moment {
+                epoch: now.epoch,
+                millis: now.millis.saturating_add(120_000),
+            },
+        });
+        self.create_direct(c, operation, recipient, caps).await
+    }
+
     pub(super) async fn create_direct(
         &mut self,
         c: &OperationContext,

@@ -971,6 +971,10 @@ impl NextcloudClient {
                 self.create_direct(context, operation, recipient, &caps)
                     .await
             }
+            ProtocolRequest::CreateDirectForMember { operation, member } => {
+                self.create_direct_for_member(context, operation, member, &caps)
+                    .await
+            }
             ProtocolRequest::CreateGroup { name } => {
                 if self.creation_uncertain {
                     return Err(self.error(ErrorKind::Uncertain));
@@ -1133,6 +1137,7 @@ impl NextcloudPort for NextcloudClient {
                         | ProtocolRequest::SetConversationTags { .. }
                         | ProtocolRequest::CreateGroup { .. }
                         | ProtocolRequest::CreateDirect { .. }
+                        | ProtocolRequest::CreateDirectForMember { .. }
                         | ProtocolRequest::MarkRead(_)
                         | ProtocolRequest::LeaveConversation(_)
                         | ProtocolRequest::ActivateConversation(_)

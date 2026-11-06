@@ -81,6 +81,9 @@ pub struct Member {
     /// Opaque account-local user identity from this fresh member observation.
     /// It grants no access and is never projected into serialized UI state.
     pub avatar_identity: Option<[u8; 32]>,
+    /// Capability-qualified participant status from the bounded member list.
+    pub user_status: Option<super::UserStatus>,
+    pub author_key: Option<Text<256>>,
     pub name: Text<256>,
     pub role: Role,
     pub source: RecipientSource,

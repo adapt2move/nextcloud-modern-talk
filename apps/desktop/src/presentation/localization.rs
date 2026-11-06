@@ -6,6 +6,7 @@ mod content;
 mod conversation;
 mod onboarding;
 mod own_status;
+mod people;
 mod recovery;
 mod resources;
 mod updates;
@@ -26,6 +27,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         updates::MESSAGES,
         onboarding::MESSAGES,
         own_status::MESSAGES,
+        people::MESSAGES,
     ] {
         if let Ok(index) = catalog.binary_search_by_key(&key, |row| row.0) {
             return if locale == Locale::Spanish {
@@ -88,6 +90,7 @@ mod tests {
             updates::MESSAGES,
             onboarding::MESSAGES,
             own_status::MESSAGES,
+            people::MESSAGES,
         ] {
             let mut last = "";
             for &(key, en, es) in catalog {

@@ -172,7 +172,7 @@ UI_EXPORTS = {
 }
 # These modules contain only recursively inspected bounded presentation values.
 UI_MODULE_TYPES = {
-    "presentation": {"Completion", "ConversationRef", "FeatureSupport", "RequestId", "MessageView"},
+    "presentation": {"Completion", "ConversationRef", "FeatureSupport", "RequestId", "MessageView", "Presence"},
     "conversation": {
         "Availability", "RemoteState", "ConversationPanel", "ConversationAction",
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",

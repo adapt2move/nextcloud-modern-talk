@@ -582,6 +582,7 @@ impl Desktop {
                     self.feedback = Some(notice.in_conversation(context));
                 }
             }
+            self.complete_person_mention(request, completion, cx);
             if let Some((pending, query)) = &self.message_ui.mention_request
                 && *pending == request
                 && completion == Completion::ServerAccepted

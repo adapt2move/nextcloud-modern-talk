@@ -920,8 +920,8 @@
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/participants",
       "status": "implemented",
-      "api": "Request::Participants",
-      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+      "api": "Request::Participants | Request::ParticipantsWithStatus",
+      "scope": "Bounded member list; includeStatus=true only with user_status.enabled. Status is optional and returned only below 100 members. Source: Talk 24/25 docs/participant.md at 0d736588dcfb42becf0e5688e0847e35d5b5efa2 and eed360d176edcb6888dad60965cb694e6bf62ae3."
     },
     {
       "operation_id": "room-add-participant-to-room",

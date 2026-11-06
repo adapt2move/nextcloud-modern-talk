@@ -596,17 +596,21 @@ impl NextcloudClient {
             .map(|i| i.server)
             .ok_or_else(|| self.error(ErrorKind::NotFound))
     }
-    async fn members(
+    pub(super) async fn members(
         &mut self,
         c: &OperationContext,
         id: ConversationId,
+        caps: &Capabilities,
     ) -> Result<ConversationResult, PortError> {
         let token = api::models::RoomToken::parse(self.check_room(id)?)
             .map_err(|k| self.error(transport::kind(k)))?;
-        let reply = self
-            .transport
-            .api_request(c, api::Request::Participants(token))
-            .await?;
+        let include_status = caps.supported() && caps.user_status_enabled == Some(true);
+        let request = if include_status {
+            api::Request::ParticipantsWithStatus(token)
+        } else {
+            api::Request::Participants(token)
+        };
+        let reply = self.transport.api_request(c, request).await?;
         let api::Reply::Participants(values) = reply else {
             return Err(self.error(ErrorKind::Malformed));
         };
@@ -634,6 +638,26 @@ impl NextcloudClient {
                     id: handle,
                     avatar_identity: (actor_type == "users")
                         .then(|| avatars::canonical_identity("user", &actor_id)),
+                    user_status: if include_status && actor_type == "users" {
+                        p.status
+                            .as_deref()
+                            .map(|value| talk_core::protocol::UserStatus {
+                                presence: wire::presence(api::presence::UserStatus::from_wire(
+                                    Some(value),
+                                )),
+                                icon: p
+                                    .status_icon
+                                    .as_deref()
+                                    .and_then(|value| Text::new(value).ok()),
+                                message: p
+                                    .status_message
+                                    .as_deref()
+                                    .and_then(|value| Text::new(value).ok()),
+                            })
+                    } else {
+                        None
+                    },
+                    author_key: super::messaging::actor_key(id, &actor_type, &actor_id),
                     name: Text::new(p.display_name.as_deref().unwrap_or(""))
                         .map_err(|_| self.error(ErrorKind::TooLarge))?,
                     role,
@@ -758,7 +782,7 @@ impl NextcloudClient {
         };
         self.setting_allowed(setting, &room, &data, caps)?;
         if command == C::Members {
-            return self.members(c, id).await;
+            return self.members(c, id, caps).await;
         }
         if let C::PreviewEmailCsv(text) = &command {
             if !caps.has("email-csv-import") || room.classified {

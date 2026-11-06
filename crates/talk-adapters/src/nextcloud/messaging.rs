@@ -403,14 +403,12 @@ impl NextcloudClient {
             .map(|s| Text::new(s))
             .transpose()
             .map_err(|_| self.error(ErrorKind::TooLarge))?;
-        // Length-prefix the actor type so guest/user namespaces cannot collide.
-        // Unknown or oversized identity remains ungroupable, never name-based.
+        // Correlate an author with a member without exposing the wire actor ID.
         let author_key = message
             .actor_type
             .as_deref()
             .zip(message.actor_id.as_deref())
-            .filter(|(kind, id)| !kind.is_empty() && !id.is_empty())
-            .and_then(|(kind, id)| Text::new(&format!("{}:{kind}:{id}", kind.len())).ok());
+            .and_then(|(kind, actor)| actor_key(id, kind, actor));
         let message = self.message(&message.project(), id)?;
         Ok(MessageDetails {
             message,
@@ -1439,6 +1437,7 @@ impl NextcloudClient {
                         continue;
                     }
                     out.try_push(Mention {
+                        author_key: actor_key(id, &v.source, &v.actor_id),
                         id: Text::new(&v.id).map_err(|_| self.error(ErrorKind::TooLarge))?,
                         label: Text::new(&v.label).map_err(|_| self.error(ErrorKind::TooLarge))?,
                         source: Text::new(&v.source)
@@ -1628,6 +1627,32 @@ fn reaction_counts(
         result.try_push(reaction).map_err(|_| ErrorKind::TooLarge)?;
     }
     Ok(result)
+}
+
+/// A room-bound correlation value, not a permission or a wire identity.
+pub(super) fn actor_key(room: ConversationId, kind: &str, actor: &str) -> Option<Text<256>> {
+    use sha2::{Digest, Sha256};
+    if kind.is_empty()
+        || actor.is_empty()
+        || kind.chars().any(char::is_control)
+        || actor.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"talk-room-author-v1");
+    hash.update(room.account.as_local().to_be_bytes());
+    hash.update(room.host.as_local().to_be_bytes());
+    hash.update(room.local.to_be_bytes());
+    hash.update((kind.len() as u64).to_be_bytes());
+    hash.update(kind.as_bytes());
+    hash.update(actor.as_bytes());
+    let value: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Text::new(&value).ok()
 }
 
 #[cfg(test)]

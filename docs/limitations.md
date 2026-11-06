@@ -30,9 +30,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Direct-conversation presence and custom status are refreshed with the room
   list when the server enables `user_status`. They remain session-local and are
   unknown after restart until refreshed. The account menu changes availability and
-  edits custom and predefined messages with expiry. Member and message-author status
-  and people cards are not yet implemented. Native accessibility qualification remains
-  separate from UI fixtures.
+  edits custom and predefined messages with expiry. Member status is loaded with the
+  room's bounded participant list, and message-author status is shown when that list
+  provides a matching identity. People cards use current room observations; direct
+  calling is available from cards in an eligible direct conversation. Native
+  accessibility qualification remains separate from UI fixtures.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms

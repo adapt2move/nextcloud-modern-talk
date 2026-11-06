@@ -217,6 +217,9 @@ pub struct Participant {
     pub attendee_id: Option<u64>,
     pub permissions: Option<u64>,
     pub room_token: Option<String>,
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
 }
 impl Participant {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -233,6 +236,9 @@ impl Participant {
             attendee_id: integer(v.get("attendeeId")),
             permissions: integer(v.get("permissions")),
             room_token: string(v.get("roomToken"), 30)?,
+            status: string(v.get("status"), 32)?,
+            status_icon: string(v.get("statusIcon"), 64)?,
+            status_message: string(v.get("statusMessage"), 320)?,
         };
         Ok(result)
     }

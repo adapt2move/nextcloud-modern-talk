@@ -5,14 +5,17 @@ use std::path::Path;
 use talk_adapters::nextcloud::{NetworkRuntime, test_support};
 use talk_core::{
     bounded::Text,
-    ids::{AccountId, AccountScope, ClockEpoch, HostId, RuntimeGeneration},
+    ids::{AccountId, AccountScope, ClockEpoch, HostId, OperationId, RuntimeGeneration},
     lifecycle::Cancellation,
     ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest},
     preferences::{
         RequestId,
         account::{AccountPreferenceChange, StatusChoice, StatusClearAfter, StatusMessageChange},
     },
-    protocol::{RoomKind, UserPresence},
+    protocol::{
+        RoomKind, UserPresence,
+        conversation::{ConversationCommand, ConversationResult},
+    },
 };
 
 #[tokio::test(flavor = "current_thread")]
@@ -64,6 +67,117 @@ async fn direct_room_list_exposes_server_status() {
         status.message.as_ref().map(|v| v.as_str()),
         Some("Presence fixture")
     );
+    let ProtocolReply::ConversationSettings {
+        result: ConversationResult::Members(members),
+        ..
+    } = client
+        .request(
+            OperationContext {
+                scope,
+                deadline,
+                cancellation: Cancellation::default(),
+            },
+            ProtocolRequest::ConversationSettings {
+                conversation: expected_room,
+                operation: OperationId::from_local(900),
+                command: ConversationCommand::Members,
+            },
+        )
+        .await
+        .expect("released server member status")
+    else {
+        panic!("member list reply");
+    };
+    let bob = members
+        .as_slice()
+        .iter()
+        .find(|member| {
+            member
+                .user_status
+                .as_ref()
+                .is_some_and(|status| status.presence == UserPresence::Away)
+        })
+        .expect("seeded participant");
+    let status = bob.user_status.as_ref().expect("participant status");
+    assert_eq!(status.presence, UserPresence::Away);
+    assert_eq!(status.icon.as_ref().map(|v| v.as_str()), Some("☕"));
+    assert_eq!(
+        status.message.as_ref().map(|v| v.as_str()),
+        Some("Presence fixture")
+    );
+
+    let group = list
+        .rooms
+        .as_slice()
+        .iter()
+        .find(|room| room.name.as_str() == "Presence group")
+        .expect("seeded group")
+        .id;
+    let fresh_context = || OperationContext {
+        scope,
+        deadline,
+        cancellation: Cancellation::default(),
+    };
+    let ProtocolReply::ConversationSettings {
+        result: ConversationResult::Members(group_members),
+        ..
+    } = client
+        .request(
+            fresh_context(),
+            ProtocolRequest::ConversationSettings {
+                conversation: group,
+                operation: OperationId::from_local(901),
+                command: ConversationCommand::Members,
+            },
+        )
+        .await
+        .expect("group members")
+    else {
+        panic!("group members reply")
+    };
+    let bob = group_members
+        .as_slice()
+        .iter()
+        .find(|member| {
+            member
+                .user_status
+                .as_ref()
+                .is_some_and(|status| status.presence == UserPresence::Away)
+        })
+        .expect("group participant")
+        .id;
+    let mut stale = bob;
+    stale.local ^= 1;
+    assert_eq!(
+        client
+            .request(
+                fresh_context(),
+                ProtocolRequest::CreateDirectForMember {
+                    operation: OperationId::from_local(902),
+                    member: stale,
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        talk_core::ports::ErrorKind::WrongScope
+    );
+    for _ in 0..2 {
+        let ProtocolReply::Conversation(direct) = client
+            .request(
+                fresh_context(),
+                ProtocolRequest::CreateDirectForMember {
+                    operation: OperationId::from_local(903),
+                    member: bob,
+                },
+            )
+            .await
+            .expect("open direct from member")
+        else {
+            panic!("direct room reply")
+        };
+        assert_eq!(direct.id, expected_room);
+    }
     for (number, choice) in [
         (1, StatusChoice::Away),
         (2, StatusChoice::DoNotDisturb),
