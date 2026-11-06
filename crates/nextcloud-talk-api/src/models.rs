@@ -411,6 +411,8 @@ pub struct Capabilities {
     pub server_default_permissions: Option<u16>,
     pub call_enabled: Option<bool>,
     pub recording_enabled: Option<bool>,
+    /// Bounded advertised in-call reactions; missing or malformed is unavailable.
+    pub call_reactions: Option<Vec<String>>,
     pub breakouts_enabled: Option<bool>,
     pub grid_limit: Option<u64>,
     pub grid_limit_enforced: Option<bool>,
@@ -458,6 +460,16 @@ impl Capabilities {
                 .and_then(|mask| u16::try_from(mask).ok()),
             call_enabled: s["config"]["call"]["enabled"].as_bool(),
             recording_enabled: s["config"]["call"]["recording"].as_bool(),
+            call_reactions: strings(s["config"]["call"].get("supported-reactions"), 32, false)
+                .ok()
+                .flatten()
+                .filter(|values| {
+                    values.iter().all(|value| {
+                        !value.is_empty()
+                            && value.len() <= 64
+                            && !value.chars().any(char::is_control)
+                    })
+                }),
             breakouts_enabled: s["config"]["call"]["breakout-rooms"].as_bool(),
             grid_limit: integer(s["config"]["call"].get("grid-limit")),
             grid_limit_enforced: s["config"]["call"]["grid-limit-enforced"].as_bool(),

@@ -16,6 +16,8 @@ pub(crate) struct Bundle {
     pub exists: Observed<bool>,
     pub settings: SignalingSettings,
     pub peers: Vec<Peer>,
+    pub hand_supported: bool,
+    pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
 }
 pub(crate) struct Peer {
     pub session: PeerSession,
@@ -99,6 +101,15 @@ impl Sources {
             return Err(unknown);
         }
         let has = |name: &str| c.features.iter().any(|f| f == name);
+        let hand_supported = has("raise-hand");
+        let mut reactions = talk_core::bounded::Page::empty();
+        for reaction in c.call_reactions.as_deref().unwrap_or_default() {
+            let value = talk_core::bounded::Text::new(reaction).map_err(|_| unknown)?;
+            if !reactions.as_slice().contains(&value) {
+                reactions.try_push(value).map_err(|_| unknown)?;
+            }
+        }
+
         let attributes = r.attributes.ok_or(unknown)?;
         if attributes & !31 != 0 {
             return Err(unknown);
@@ -281,6 +292,8 @@ impl Sources {
             },
             settings,
             peers,
+            hand_supported,
+            reactions,
         })
     }
 }
