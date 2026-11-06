@@ -48,7 +48,16 @@ impl Transport {
     pub(crate) fn open_meeting(
         &mut self,
         context: &OperationContext,
-    ) -> Result<(Transport, Transport, Transport, Arc<MeetingLifetime>), PortError> {
+    ) -> Result<
+        (
+            Transport,
+            Transport,
+            Transport,
+            Transport,
+            Arc<MeetingLifetime>,
+        ),
+        PortError,
+    > {
         self.validate(context)?;
         if self.meeting_active.swap(true, Ordering::AcqRel) {
             return Err(self.error(ErrorKind::Busy));
@@ -100,7 +109,7 @@ impl Transport {
             meeting_active: self.meeting_active.clone(),
             meeting_lifetime: Arc::downgrade(&lifetime),
         };
-        Ok((fork(), fork(), fork(), lifetime))
+        Ok((fork(), fork(), fork(), fork(), lifetime))
     }
     pub(crate) fn close_meeting(&self) {
         if let Some(lifetime) = self.meeting_lifetime.upgrade() {

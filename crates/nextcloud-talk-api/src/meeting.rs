@@ -88,10 +88,16 @@ pub struct MeetingWriter {
     selected: Vec<PeerBudget>,
     leave_started: bool,
     activity: Option<MeetingActivityWriter>,
+    moderation: Option<MeetingModerationWriter>,
 }
 /// A single separately owned lane for transient activity. It shares the call's
 /// lifetime but cannot block the policy refresh/write lane.
 pub struct MeetingActivityWriter {
+    transport: Transport,
+    binding: Arc<Binding>,
+}
+/// A single bounded lane for explicit, revalidated moderation actions.
+pub struct MeetingModerationWriter {
     transport: Transport,
     binding: Arc<Binding>,
 }
@@ -134,7 +140,8 @@ impl Client {
                 return Err(self.error(ErrorKind::WrongScope));
             }
         }
-        let (reader, writer, activity, lifetime) = self.transport.open_meeting(context)?;
+        let (reader, writer, activity, moderation, lifetime) =
+            self.transport.open_meeting(context)?;
         let hpb = self.hpb_route.take();
         let binding = Arc::new(Binding {
             room: call.room,
@@ -159,6 +166,10 @@ impl Client {
                 leave_started: false,
                 activity: Some(MeetingActivityWriter {
                     transport: activity,
+                    binding: binding.clone(),
+                }),
+                moderation: Some(MeetingModerationWriter {
+                    transport: moderation,
                     binding,
                 }),
             },
@@ -176,6 +187,120 @@ impl Drop for ReadGuard {
         }
     }
 }
+impl MeetingModerationWriter {
+    async fn observe(
+        &mut self,
+        context: &OperationContext,
+        request: Request,
+    ) -> Result<Reply, Error> {
+        let (method, route, query, form, kind, _) =
+            crate::plan(&request).map_err(|kind| self.binding.error(kind))?;
+        let response = self
+            .transport
+            .ocs(context, method, &route, &query, &form, false)
+            .await?;
+        self.binding.lifetime.validate(context)?;
+        crate::decode(kind, response).map_err(|kind| self.binding.error(kind))
+    }
+
+    /// One deliberate ring request. Fresh room, capability and session facts
+    /// are checked on this lane immediately before dispatch; success is only a
+    /// server receipt and never proves a notification was delivered or heard.
+    pub async fn ring(
+        &mut self,
+        context: &OperationContext,
+        attendee: u64,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if attendee == 0 {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || !caps.supports("send-call-notification")
+            || caps.call_enabled != Some(true)
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !room
+                .permissions
+                .is_some_and(|permissions| permissions & 2 != 0)
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let people = match self
+            .observe(&context, Request::Participants(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Participants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let mut targets = people
+            .iter()
+            .filter(|person| person.attendee_id == Some(attendee));
+        let Some(target) = targets.next() else {
+            return Err(self.binding.error(ErrorKind::NotFound));
+        };
+        if targets.next().is_some()
+            || target.actor_type.as_deref() != Some("users")
+            || target
+                .actor_id
+                .as_deref()
+                .is_none_or(|id| id.is_empty() || id == self.transport.user())
+            || target.in_call != Some(0)
+            || target.sessions.as_ref().is_none_or(|sessions| {
+                sessions
+                    .iter()
+                    .any(|session| in_call.iter().any(|active| &active.session == session))
+            })
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v4/call/{}/ring/{attendee}",
+            self.binding.room.as_str()
+        );
+        self.transport
+            .ocs(&context, Method::POST, &route, &[], &[], false)
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+}
+
 impl MeetingActivityWriter {
     /// Send one bounded batch to recipients reconciled by the call owner. The
     /// HTTP receipt or socket write does not prove delivery or user attention.
@@ -307,6 +432,10 @@ impl MeetingWriter {
     /// Transfer the one activity lane to the call owner once.
     pub fn take_activity_writer(&mut self) -> Option<MeetingActivityWriter> {
         self.activity.take()
+    }
+    /// Transfer the one moderation lane to the call owner once.
+    pub fn take_moderation_writer(&mut self) -> Option<MeetingModerationWriter> {
+        self.moderation.take()
     }
 
     pub fn topology(&self) -> Topology {
