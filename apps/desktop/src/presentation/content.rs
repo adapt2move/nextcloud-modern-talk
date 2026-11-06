@@ -1229,27 +1229,27 @@ impl Desktop {
                             .min_w_0()
                             .child(input.clone()),
                     )
-                    .child(self.button(
+                    .child(self.icon_button(
                         ("poll-option-up", index),
-                        "Nach oben",
+                        ("chevron-up", "Nach oben"),
                         ButtonStyle::Quiet,
-                        !busy && index > 0,
+                        (!busy && index > 0).into(),
                         LocalAction::Content(Action::MoveOption { index, up: true }),
                         cx,
                     ))
-                    .child(self.button(
+                    .child(self.icon_button(
                         ("poll-option-down", index),
-                        "Nach unten",
+                        ("chevron-down", "Nach unten"),
                         ButtonStyle::Quiet,
-                        !busy && index + 1 < self.content_ui.option_count,
+                        (!busy && index + 1 < self.content_ui.option_count).into(),
                         LocalAction::Content(Action::MoveOption { index, up: false }),
                         cx,
                     ))
-                    .child(self.button(
+                    .child(self.icon_button(
                         ("poll-option-remove", index),
-                        "Entfernen",
+                        ("trash-2", "Entfernen"),
                         ButtonStyle::Quiet,
-                        !busy && self.content_ui.option_count > 2,
+                        (!busy && self.content_ui.option_count > 2).into(),
                         LocalAction::Content(Action::RemoveOption(index)),
                         cx,
                     )),
@@ -1494,11 +1494,17 @@ impl Desktop {
                 )
                 .w_full()
                 .justify_start()
-                .child(self.scaled_icon(
-                    if selected { "check-circle" } else { "circle" },
-                    16.,
-                    self.theme.accent,
-                ))
+                .child(if selected {
+                    self.scaled_icon("check-circle", 16., self.theme.accent)
+                        .into_any_element()
+                } else {
+                    div()
+                        .size(px(16.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(self.theme.muted)
+                        .into_any_element()
+                })
                 .child(div().flex_1().child(option.label.as_str().to_owned()))
                 .when(option.own, |d| d.child(self.hint(self.l("Deine Stimme"))))
                 .when(pending && selected, |d| {

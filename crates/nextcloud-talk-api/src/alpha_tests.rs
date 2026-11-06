@@ -325,6 +325,30 @@ fn routes_validate_and_place_delete_parameters_in_query() {
     );
 }
 
+#[test]
+fn voice_share_uses_talk_metadata_without_changing_regular_attachments() {
+    for voice_message in [false, true] {
+        let planned = plan(&Request::Chat {
+            room: room(),
+            command: chat::Command::ShareAttachment {
+                path: "/Talk/recording".into(),
+                file_name: "Voice message.wav".into(),
+                reference: "fixture-reference".into(),
+                caption: String::new(),
+                voice_message,
+            },
+        })
+        .unwrap();
+        let metadata = planned.3.iter().find(|(key, _)| *key == "talkMetaData");
+        if voice_message {
+            let value: serde_json::Value = serde_json::from_str(&metadata.unwrap().1).unwrap();
+            assert_eq!(value["messageType"], "voice-message");
+        } else {
+            assert!(metadata.is_none());
+        }
+    }
+}
+
 #[derive(Default)]
 struct CountingSink {
     bytes: usize,

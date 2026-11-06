@@ -1769,6 +1769,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             edited: m.message.edited_at.is_some(),
             deleted,
             system: m.message.kind == protocol::MessageKind::System,
+            voice_message: m.message.kind == protocol::MessageKind::VoiceMessage,
             system_event: system_event(m),
             pin_notice: m.message.kind == protocol::MessageKind::System
                 && m.system.as_ref().is_some_and(|kind| {

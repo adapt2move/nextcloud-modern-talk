@@ -75,6 +75,8 @@ pub struct MessageMetadata {
     pub edited: bool,
     pub deleted: bool,
     pub system: bool,
+    /// The server explicitly marked this attachment as a voice message.
+    pub voice_message: bool,
     pub system_event: SystemEvent,
     /// Quiet pin and poll activity, classified from the untranslated system
     /// tag. Canonical history retains it; the visible timeline omits it. The
@@ -104,6 +106,7 @@ impl Default for MessageMetadata {
             edited: false,
             deleted: false,
             system: false,
+            voice_message: false,
             system_event: SystemEvent::Unknown,
             pin_notice: false,
             read_through: None,

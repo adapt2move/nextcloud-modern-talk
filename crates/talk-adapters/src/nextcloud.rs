@@ -447,6 +447,7 @@ impl NextcloudClient {
             .ok_or_else(|| self.error(ErrorKind::Malformed))?;
         let kind = match data.get("messageType").and_then(Value::as_str) {
             Some("comment") => MessageKind::Comment,
+            Some("voice-message") => MessageKind::VoiceMessage,
             Some("comment_deleted") => MessageKind::Deleted,
             Some("system") => MessageKind::System,
             _ => MessageKind::Unsupported,

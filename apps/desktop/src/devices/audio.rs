@@ -27,6 +27,14 @@ impl Backend {
     ) -> Result<Capture, DeviceError> {
         Capture::microphone(&self.host, id, signal)
     }
+    pub(super) fn record_voice(
+        &self,
+        id: &DeviceId,
+        signal: Arc<Signal>,
+        recording: Arc<super::voice::Recording>,
+    ) -> Result<Capture, DeviceError> {
+        Capture::record_voice(&self.host, id, signal, recording)
+    }
     pub(super) fn tone(&self, id: &DeviceId, signal: Arc<Signal>) -> Result<Capture, DeviceError> {
         Capture::tone(&self.host, id, signal)
     }
@@ -83,6 +91,44 @@ pub(super) struct Capture {
 impl Capture {
     pub(super) fn id(&self) -> &DeviceId {
         &self.id
+    }
+    fn record_voice(
+        host: &cpal::Host,
+        id: &DeviceId,
+        signal: Arc<Signal>,
+        recording: Arc<super::voice::Recording>,
+    ) -> Result<Self, DeviceError> {
+        let device = selected_device(host, id)?;
+        let config = device.default_input_config().map_err(map_error)?;
+        validate_config(&config)?;
+        if config.sample_rate() < super::voice::RATE {
+            return Err(DeviceError::CaptureFailed);
+        }
+        macro_rules! build {
+            ($t:ty) => {
+                voice_input::<$t>(&device, config.config(), signal, recording)
+            };
+        }
+        let stream = match config.sample_format() {
+            SampleFormat::F32 => build!(f32),
+            SampleFormat::F64 => build!(f64),
+            SampleFormat::I8 => build!(i8),
+            SampleFormat::I16 => build!(i16),
+            SampleFormat::I24 => build!(cpal::I24),
+            SampleFormat::I32 => build!(i32),
+            SampleFormat::I64 => build!(i64),
+            SampleFormat::U8 => build!(u8),
+            SampleFormat::U16 => build!(u16),
+            SampleFormat::U24 => build!(cpal::U24),
+            SampleFormat::U32 => build!(u32),
+            SampleFormat::U64 => build!(u64),
+            _ => return Err(DeviceError::CaptureFailed),
+        }?;
+        stream.play().map_err(map_error)?;
+        Ok(Self {
+            _stream: stream,
+            id: id.clone(),
+        })
     }
     fn microphone(
         host: &cpal::Host,
@@ -148,6 +194,43 @@ impl Capture {
             id: id.clone(),
         })
     }
+}
+fn voice_input<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    signal: Arc<Signal>,
+    recording: Arc<super::voice::Recording>,
+) -> Result<cpal::Stream, DeviceError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let errors = signal.clone();
+    let channels = usize::from(config.channels);
+    let rate = config.sample_rate;
+    let mut resampler = super::voice::Resampler::default();
+    device
+        .build_input_stream(
+            config,
+            move |data: &[T], _| {
+                if !signal.valid() || data.is_empty() {
+                    return;
+                }
+                recording.push(data, channels, rate, &mut resampler);
+                if recording.failed() {
+                    signal.fail(DeviceError::CaptureFailed);
+                }
+                signal.touch();
+                signal.observed.store(true, Ordering::Release);
+            },
+            move |error| {
+                if error.kind() != cpal::ErrorKind::Xrun {
+                    errors.fail(map_error(error));
+                }
+            },
+            None,
+        )
+        .map_err(map_error)
 }
 fn selected_device(host: &cpal::Host, id: &DeviceId) -> Result<cpal::Device, DeviceError> {
     let native_id: cpal::DeviceId = id
