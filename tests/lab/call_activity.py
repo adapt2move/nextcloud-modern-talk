@@ -73,7 +73,10 @@ def check(state):
                         body={}, name="call-activity-ring-absent")
             # Establish the authenticated browser session before binding it
             # to a room, as the ordinary account owner does during inspection.
-            lab.request("lab_bob", "GET", "/ocs/v2.php/cloud/user", name="call-activity-inspect-member")
+            user = lab.request("lab_bob", "GET", "/ocs/v2.php/cloud/user", name="call-activity-inspect-member")
+            lab.require("call-activity-member-identity", user.get("id") == "lab_bob")
+            before = {cookie.name: cookie.value for handler in lab.clients["lab_bob"].handlers
+                      if isinstance(handler, urllib.request.HTTPCookieProcessor) for cookie in handler.cookiejar}
             result = lab.request("lab_bob", "POST", room_path + "/participants/active",
                                  body={}, name="call-activity-join-member-room")
             sessions["lab_bob"] = result["sessionId"]
@@ -81,12 +84,15 @@ def check(state):
             members = lab.request("lab_alice", "GET", room_path + "/participants",
                                   name="call-activity-member-session")
             observed = [p for p in members if p.get("actorId") == "lab_bob"]
+            after = {cookie.name: cookie.value for handler in lab.clients["lab_bob"].handlers
+                     if isinstance(handler, urllib.request.HTTPCookieProcessor) for cookie in handler.cookiejar}
             cookie_counts = {actor: sum(len(handler.cookiejar) for handler in lab.clients[actor].handlers
                                         if isinstance(handler, urllib.request.HTTPCookieProcessor))
                              for actor in ("lab_alice", "lab_bob")}
             print(json.dumps({"member_session_observed": len(observed) == 1
                               and sessions["lab_bob"] in (observed[0].get("sessionIds") or []),
-                              "cookie_counts": cookie_counts}), flush=True)
+                              "cookie_counts": cookie_counts,
+                              "cookie_changes": sum(before.get(name) != value for name, value in after.items())}), flush=True)
             lab.request("lab_bob", "POST", call_path, body={"flags": 1, "silent": True},
                         name="call-activity-join-call")
             # The released server may acknowledge a no-op rather than returning
