@@ -14,18 +14,27 @@ pub enum UserStatus {
     Unknown,
 }
 
+impl UserStatus {
+    /// Unknown or absent wire values never imply that a user is available.
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("online") => Self::Online,
+            Some("away") => Self::Away,
+            Some("offline") => Self::Offline,
+            Some("invisible") => Self::Invisible,
+            Some("dnd") => Self::DoNotDisturb,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 fn decode(value: &Value, user: &str) -> Result<UserStatus, ErrorKind> {
     if string(value.get("userId"), 256)?.as_deref() != Some(user) {
         return Err(ErrorKind::WrongScope);
     }
-    Ok(match string(value.get("status"), 32)?.as_deref() {
-        Some("online") => UserStatus::Online,
-        Some("away") => UserStatus::Away,
-        Some("offline") => UserStatus::Offline,
-        Some("invisible") => UserStatus::Invisible,
-        Some("dnd") => UserStatus::DoNotDisturb,
-        _ => UserStatus::Unknown,
-    })
+    Ok(UserStatus::from_wire(
+        string(value.get("status"), 32)?.as_deref(),
+    ))
 }
 
 impl Client {
@@ -56,6 +65,9 @@ mod tests {
     use super::*;
     #[test]
     fn status_is_bound_to_current_user_and_unknown_is_not_available() {
+        assert_eq!(UserStatus::from_wire(None), UserStatus::Unknown);
+        assert_eq!(UserStatus::from_wire(Some("invisible")), UserStatus::Invisible);
+        assert_eq!(UserStatus::from_wire(Some("future")), UserStatus::Unknown);
         assert_eq!(
             decode(
                 &serde_json::json!({"userId":"alice","status":"dnd"}),
