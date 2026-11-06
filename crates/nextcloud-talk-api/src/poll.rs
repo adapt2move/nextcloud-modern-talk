@@ -314,6 +314,11 @@ impl Client {
     ) -> Result<(), Error> {
         self.validate(c)?;
         let poll = id(poll).map_err(|kind| self.error(kind))?;
+        // DELETE closes published polls as well as deleting drafts. Recheck the
+        // moderator-only draft list before issuing this destructive request.
+        if !self.poll_drafts(c, room).await?.iter().any(|draft| draft.id == poll) {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
         let route = format!("ocs/v2.php/apps/spreed/api/v1/poll/{}/{poll}", room.as_str());
         self.transport.ocs(c, Method::DELETE, &route, &[], &[], false).await
             .map_err(|error| self.mutation_error(error))?;
