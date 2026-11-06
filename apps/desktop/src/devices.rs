@@ -697,32 +697,37 @@ fn run(shared: &Shared) {
                         .ok_or(DeviceError::Unavailable)?
                         .record_voice(&id, signal.clone(), recording.clone())
                 });
-            let mut state = shared.lock();
-            if let Some(session) = state
-                .voice
-                .as_mut()
-                .filter(|v| Arc::ptr_eq(&v.signal, &signal))
+            let mut discard = None;
             {
-                match result {
-                    Ok(capture) if signal.valid() => {
-                        voice_capture = Some(capture);
-                        session.recording = Some(recording);
-                        session.phase = VoicePhase::Recording;
+                let mut state = shared.lock();
+                if let Some(session) = state
+                    .voice
+                    .as_mut()
+                    .filter(|v| Arc::ptr_eq(&v.signal, &signal))
+                {
+                    match result {
+                        Ok(capture) if signal.valid() => {
+                            voice_capture = Some(capture);
+                            session.recording = Some(recording);
+                            session.phase = VoicePhase::Recording;
+                        }
+                        Ok(capture) => discard = Some(capture),
+                        Err(error) => {
+                            session.failure = Some(error);
+                            session.signal.revoke();
+                            session.phase = VoicePhase::Stopping;
+                        }
                     }
-                    Ok(capture) => {
-                        drop(capture);
-                    }
-                    Err(error) => {
-                        session.failure = Some(error);
-                        session.signal.revoke();
-                        session.phase = VoicePhase::Stopping;
-                    }
+                    state.changed();
+                } else if let Ok(capture) = result {
+                    discard = Some(capture);
                 }
-                state.changed();
             }
+            drop(discard);
         }
         {
             let mut state = shared.lock();
+            let choice = state.preferences.microphone.clone();
             if let Some(session) = state
                 .voice
                 .as_mut()
@@ -730,6 +735,17 @@ fn run(shared: &Shared) {
             {
                 let error = decode_error(session.signal.error.load(Ordering::Acquire))
                     .or_else(|| session.signal.stalled().then_some(DeviceError::Removed))
+                    .or_else(|| {
+                        voice_capture
+                            .as_ref()
+                            .is_some_and(|capture| {
+                                inventory
+                                    .effective(&choice, DeviceKind::Microphone)
+                                    .as_ref()
+                                    != Ok(capture.id())
+                            })
+                            .then_some(DeviceError::Removed)
+                    })
                     .or_else(|| {
                         (!session.signal.observed.load(Ordering::Acquire)
                             && session.started.elapsed() >= Duration::from_secs(8))
