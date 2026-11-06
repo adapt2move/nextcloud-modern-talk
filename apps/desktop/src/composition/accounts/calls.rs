@@ -608,6 +608,7 @@ impl Accounts {
             camera: MediaState::Off,
             share: MediaState::Unavailable,
             screen_stage: None,
+            recording: talk_core::policy::RecordingState::Unknown,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -772,6 +773,7 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         camera: device(value.camera),
         share: device(value.screen),
         screen_stage: None,
+        recording: value.recording,
         participants: page(
             value
                 .participants
@@ -785,6 +787,8 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     presence: Presence::Unknown,
                     self_user: false,
                     raised_hand: p.raised_hand,
+                    call_microphone: Some(p.microphone),
+                    call_camera: Some(p.camera),
                 }),
         ),
     }

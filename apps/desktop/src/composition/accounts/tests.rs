@@ -702,6 +702,7 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             camera: MediaState::Off,
             share: MediaState::Unavailable,
             screen_stage: None,
+            recording: talk_core::policy::RecordingState::Unknown,
             participants: Page::empty(),
         });
         assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));

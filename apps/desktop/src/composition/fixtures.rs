@@ -93,9 +93,11 @@ pub const SCENARIOS: &[&str] = &[
     "call-error-unknown",
     "call-controls",
     "call-gallery",
+    "call-participants-raised",
     "call-dock",
     "call-speaker",
     "call-screen-stage",
+    "call-recording",
     "call-active",
     "call-requested",
     "sharing",
@@ -161,6 +163,8 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         presence: Presence::Available,
         self_user: me,
         raised_hand: false,
+        call_microphone: None,
+        call_camera: None,
     }
 }
 fn participants() -> [ParticipantView; 4] {
@@ -771,9 +775,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error-unknown"
             | "call-controls"
             | "call-gallery"
+            | "call-participants-raised"
             | "call-dock"
             | "call-speaker"
             | "call-screen-stage"
+            | "call-recording"
             | "sharing"
             | "call-denied"
             | "call-active"
@@ -850,13 +856,25 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 None
             },
+            recording: if scenario == "call-recording" {
+                talk_core::policy::RecordingState::Active
+            } else {
+                talk_core::policy::RecordingState::Unknown
+            },
             participants: page(
                 if matches!(
                     scenario,
-                    "call-gallery" | "call-screen-stage" | "call-speaker"
+                    "call-gallery"
+                        | "call-participants-raised"
+                        | "call-screen-stage"
+                        | "call-speaker"
                 ) {
                     let mut people = participants().to_vec();
                     people[0].raised_hand = true;
+                    people[0].call_microphone = Some(false);
+                    people[0].call_camera = Some(false);
+                    people[1].call_microphone = Some(true);
+                    people[1].call_camera = Some(false);
                     people[3].raised_hand = true;
                     people.extend([
                         participant(5, "Nora Beck", "NB", false),
@@ -1846,6 +1864,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     camera: MediaState::Unavailable,
                     share: MediaState::Unavailable,
                     screen_stage: None,
+                    recording: talk_core::policy::RecordingState::Unknown,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

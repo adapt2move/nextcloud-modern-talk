@@ -435,6 +435,12 @@ impl Desktop {
                         .items_center()
                         .gap_2()
                         .child(self.scaled_icon("user", 14., t.stage_muted))
+                        .when(participant.call_microphone == Some(false), |row| {
+                            row.child(self.scaled_icon("mic-off", 14., t.stage_muted))
+                        })
+                        .when(participant.call_camera == Some(false), |row| {
+                            row.child(self.scaled_icon("video-off", 14., t.stage_muted))
+                        })
                         .when(participant.raised_hand, |row| {
                             row.child(self.scaled_icon("hand", 14., t.stage_muted))
                                 .child(self.l("Hand gehoben"))
@@ -707,6 +713,17 @@ impl Desktop {
                                             )),
                                     ),
                             )
+                            .when_some(recording_label(call.recording), |header, label| {
+                                header.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .text_size(self.sp(12.))
+                                        .child(self.scaled_icon("info", 14., t.warning))
+                                        .child(self.l(label)),
+                                )
+                            })
                             .child(self.icon_button(
                                 "minimize-call",
                                 ("chevron-down", "Anruf minimieren"),
@@ -892,5 +909,17 @@ mod gallery_tests {
         assert_eq!(gallery_columns(700., 150, 8), 1);
         assert_eq!(gallery_columns(1200., 100, 1), 1);
         assert_eq!(gallery_columns(0., 100, 0), 1);
+    }
+}
+
+fn recording_label(state: talk_core::policy::RecordingState) -> Option<&'static str> {
+    use talk_core::policy::RecordingState;
+    match state {
+        RecordingState::Inactive => None,
+        RecordingState::Starting => Some("Aufzeichnung startet …"),
+        RecordingState::Active => Some("Aufzeichnung läuft"),
+        RecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
+        RecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
+        RecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
     }
 }

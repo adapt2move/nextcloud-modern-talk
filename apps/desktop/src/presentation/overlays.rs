@@ -54,8 +54,13 @@ impl Desktop {
                 if let Some(call) = &self.snapshot.call {
                     body = body.child(self.hint(call.title.as_str()));
                     for raised in [true, false] {
-                        for p in call.participants.as_slice().iter().filter(|p| p.raised_hand == raised) {
-                            body = body.child(self.participant_row(p));
+                        for p in call
+                            .participants
+                            .as_slice()
+                            .iter()
+                            .filter(|p| p.raised_hand == raised)
+                        {
+                            body = body.child(self.call_participant_row(p));
                         }
                     }
                 }
@@ -167,6 +172,39 @@ impl Desktop {
                 ),
             )
     }
+    fn call_participant_row(&self, p: &ParticipantView) -> Div {
+        let t = self.theme;
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .py_3()
+            .border_b_1()
+            .border_color(t.border)
+            .child(self.person_avatar(p.initials.as_str(), 36.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_ellipsis()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(p.name.as_str().to_owned()),
+            )
+            .when(p.raised_hand, |row| {
+                row.child(self.hint(self.l("Hand gehoben")))
+            });
+        if let Some(on) = p.call_microphone {
+            row = row
+                .child(self.scaled_icon(if on { "mic" } else { "mic-off" }, 16., t.muted))
+                .child(self.hint(self.l(if on { "Mikrofon an" } else { "Mikrofon aus" })));
+        }
+        if let Some(on) = p.call_camera {
+            row = row
+                .child(self.scaled_icon(if on { "video" } else { "video-off" }, 16., t.muted))
+                .child(self.hint(self.l(if on { "Kamera an" } else { "Kamera aus" })));
+        }
+        row
+    }
     fn participant_row(&self, p: &ParticipantView) -> Div {
         let t = self.theme;
         div()
@@ -193,7 +231,9 @@ impl Desktop {
                     )
                     .child(self.hint(p.role_label.as_str())),
             )
-            .when(p.raised_hand, |row| row.child(self.hint(self.l("Hand gehoben"))))
+            .when(p.raised_hand, |row| {
+                row.child(self.hint(self.l("Hand gehoben")))
+            })
             .child(
                 div()
                     .text_size(self.sp(12.))

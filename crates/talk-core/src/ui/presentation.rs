@@ -411,6 +411,9 @@ pub struct ParticipantView {
     pub presence: Presence,
     pub self_user: bool,
     pub raised_hand: bool,
+    /// Last observed call flags, absent outside the call projection.
+    pub call_microphone: Option<bool>,
+    pub call_camera: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -471,6 +474,7 @@ pub struct CallView {
     pub share: MediaState,
     /// Screen metadata only; frames remain in the scoped media image owner.
     pub screen_stage: Option<CallScreenStage>,
+    pub recording: crate::policy::RecordingState,
     pub participants: Page<ParticipantView, 16>,
 }
 

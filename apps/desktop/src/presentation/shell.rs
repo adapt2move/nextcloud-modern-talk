@@ -761,7 +761,7 @@ impl Desktop {
                     .child(self.avatar(call.participants.as_slice().iter().find(|p|!p.self_user).map_or("?",|p|p.initials.as_str()),true))
                     .child(self.title(call.title.as_str()))
                     .child(self.hint(&self.lf("Persönliches Gespräch · {account}",&[("account",account)])))
-                    .child(self.hint(self.l("Bis zur Annahme bleiben Mikrofon und Kamera aus.\nBeim Annehmen: Mikrofon an, Kamera aus — nach Freigabe.")))
+                    .child(self.hint(self.l("Bis zur Annahme bleiben Mikrofon und Kamera aus. Die Geräte werden erst nach Freigabe aktiviert.")))
                     .child(div().flex().justify_center().gap_8().py_3()
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("decline",("phone-down","Ablehnen"),ButtonStyle::Danger,Availability::available().labelled(),LocalAction::Intent(UiIntent::DeclineDirect(call.scope)),cx)).child(self.l("Ablehnen")))
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx)).child(self.l("Annehmen")))
