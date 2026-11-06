@@ -87,6 +87,13 @@ pub struct MeetingWriter {
     binding: Arc<Binding>,
     selected: Vec<PeerBudget>,
     leave_started: bool,
+    activity: Option<MeetingActivityWriter>,
+}
+/// A single separately owned lane for transient activity. It shares the call's
+/// lifetime but cannot block the policy refresh/write lane.
+pub struct MeetingActivityWriter {
+    transport: Transport,
+    binding: Arc<Binding>,
 }
 struct PeerBudget {
     peer: PeerSession,
@@ -127,7 +134,7 @@ impl Client {
                 return Err(self.error(ErrorKind::WrongScope));
             }
         }
-        let (reader, writer, lifetime) = self.transport.open_meeting(context)?;
+        let (reader, writer, activity, lifetime) = self.transport.open_meeting(context)?;
         let hpb = self.hpb_route.take();
         let binding = Arc::new(Binding {
             room: call.room,
@@ -147,9 +154,13 @@ impl Client {
             },
             MeetingWriter {
                 transport: writer,
-                binding,
+                binding: binding.clone(),
                 selected: Vec::with_capacity(17),
                 leave_started: false,
+                activity: Some(MeetingActivityWriter {
+                    transport: activity,
+                    binding,
+                }),
             },
             MeetingStop { lifetime, hpb },
         ))
@@ -165,6 +176,59 @@ impl Drop for ReadGuard {
         }
     }
 }
+impl MeetingActivityWriter {
+    /// Send one bounded batch to recipients reconciled by the call owner. The
+    /// HTTP receipt or socket write does not prove delivery or user attention.
+    pub async fn send(
+        &mut self,
+        context: &OperationContext,
+        peers: &[PeerSession],
+        activity: &crate::signaling::activity::Activity,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if peers.len() > 16
+            || peers.iter().enumerate().any(|(index, peer)| {
+                peer.0.as_str() == self.binding.session.as_str() || peers[..index].contains(peer)
+            })
+        {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let (kind, payload) = activity.encode().map_err(|e| self.binding.error(e))?;
+        if let Some(route) = &self.binding.hpb {
+            for peer in peers {
+                route
+                    .send_activity(&context, peer, activity.clone())
+                    .await
+                    .map_err(|e| self.binding.error(e))?;
+            }
+        } else if !peers.is_empty() {
+            let messages: Vec<_> = peers.iter().map(|peer| {
+                let inner = json!({"to":peer.0.as_str(),"roomType":"video","type":kind,"payload":payload});
+                json!({"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()})
+            }).collect();
+            let messages = serde_json::to_string(&messages)
+                .map_err(|_| self.binding.error(ErrorKind::Malformed))?;
+            let route = format!(
+                "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+                self.binding.room.as_str()
+            );
+            self.transport
+                .ocs(
+                    &context,
+                    Method::POST,
+                    &route,
+                    &[],
+                    &[("messages", messages)],
+                    false,
+                )
+                .await
+                .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        }
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+}
+
 impl MeetingReader {
     pub async fn poll(&mut self, context: &OperationContext) -> Result<SignalBatch, Error> {
         let context = self.binding.context(context)?;
@@ -240,6 +304,11 @@ impl From<Error> for ObservationError {
 }
 
 impl MeetingWriter {
+    /// Transfer the one activity lane to the call owner once.
+    pub fn take_activity_writer(&mut self) -> Option<MeetingActivityWriter> {
+        self.activity.take()
+    }
+
     pub fn topology(&self) -> Topology {
         if self.binding.hpb.is_some() {
             Topology::Sfu
