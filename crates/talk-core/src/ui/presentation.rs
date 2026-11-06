@@ -527,6 +527,9 @@ pub struct CallView {
     pub invitees_loaded: bool,
     pub invitees: Page<CallInviteeView, 100>,
     pub ring_status: Option<CallRingStatus>,
+    pub can_end_everyone: bool,
+    pub end_pending: bool,
+    pub end_failed: bool,
     pub participants: Page<ParticipantView, 16>,
 }
 
@@ -765,6 +768,7 @@ pub enum UiIntent {
         call: CallScope,
         enabled: bool,
     },
+    EndCallForEveryone(CallScope),
     RingCallParticipant {
         call: CallScope,
         target: u128,

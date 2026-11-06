@@ -135,9 +135,15 @@ impl LiveCall {
         ) {
             self.session.suspend();
         }
-        self.control
+        let end_for_everyone = matches!(command, Command::EndEveryone(_));
+        let result = self
+            .control
             .try_send(command)
-            .map_err(|_| api::ErrorKind::Busy)
+            .map_err(|_| api::ErrorKind::Busy);
+        if end_for_everyone && result.is_ok() {
+            self.session.suspend();
+        }
+        result
     }
     #[allow(
         clippy::too_many_arguments,
@@ -182,6 +188,9 @@ impl LiveCall {
             invitees_loaded: false,
             invitees: talk_core::bounded::Page::empty(),
             ring_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             counters: MediaCounters::default(),
             revision: 0,
         };
@@ -620,8 +629,8 @@ async fn media_loop(
     mut policies: mpsc::Receiver<PolicyUpdate>,
     hand_tx: watch::Sender<Option<outgoing::Message>>,
     reaction_tx: mpsc::Sender<outgoing::Message>,
-    ring_tx: mpsc::Sender<moderation::Ring>,
-    mut ring_results: mpsc::Receiver<moderation::RingResult>,
+    ring_tx: mpsc::Sender<moderation::Request>,
+    mut ring_results: mpsc::Receiver<moderation::Result>,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
@@ -648,6 +657,8 @@ async fn media_loop(
     let mut latest_reaction: Option<calls::CallReaction> = None;
     let mut last_reaction: Option<Instant> = None;
     let mut ring_status: Option<calls::CallRingStatus> = None;
+    let mut end_pending = false;
+    let mut end_failed = false;
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
@@ -663,10 +674,24 @@ async fn media_loop(
                         && call.phase() == Phase::Active && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
                         if let Some((attendee, _)) = invitee_ids.iter().find(|(_, local)| *local == target)
                             && bundle.invitees.iter().any(|person| person.attendee == *attendee && person.ring_eligible) {
-                            let outcome = if ring_tx.try_send(moderation::Ring { target, attendee: *attendee }).is_ok() {
+                            let outcome = if ring_tx.try_send(moderation::Request::Ring { target, attendee: *attendee }).is_ok() {
                                 calls::RingOutcome::Pending
                             } else { calls::RingOutcome::Failed };
                             ring_status = Some(calls::CallRingStatus { target, outcome });
+                        }
+                    }
+                    Command::EndEveryone(_) => {
+                        // Confirmation always stops local publication. A stale or
+                        // refused moderator action cannot silently restore it.
+                        call.set_wishes(scope, MediaWishes::default()).map_err(|_| ())?;
+                        session.suspend();
+                        if transport_ready && received_policy >= required_policy && bundle.end_supported
+                            && call.phase() == Phase::Active && !end_pending
+                            && ring_tx.try_send(moderation::Request::EndEveryone).is_ok() {
+                            end_pending = true;
+                            end_failed = false;
+                        } else if !end_pending {
+                            end_failed = true;
                         }
                     }
                     Command::Consent(_) => { call.consent(scope).map_err(|_| ())?; }
@@ -705,9 +730,19 @@ async fn media_loop(
                 }
             }
             while let Ok(result) = ring_results.try_recv() {
-                if ring_status.is_some_and(|status| status.target == result.target && status.outcome == calls::RingOutcome::Pending) {
-                    ring_status = Some(calls::CallRingStatus { target: result.target,
-                        outcome: if result.accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
+                match result {
+                    moderation::Result::Ring { target, accepted } => {
+                        if ring_status.is_some_and(|status| status.target == target && status.outcome == calls::RingOutcome::Pending) {
+                            ring_status = Some(calls::CallRingStatus { target,
+                                outcome: if accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
+                        }
+                    }
+                    moderation::Result::EndEveryone { accepted } if end_pending => {
+                        end_pending = false;
+                        if accepted { session.close(); stop.close(); }
+                        else { end_failed = true; }
+                    }
+                    moderation::Result::EndEveryone { .. } => {}
                 }
             }
             stage = "remote signaling";
@@ -992,6 +1027,9 @@ async fn media_loop(
                 snapshot.invitees_loaded = policy_ready;
                 snapshot.invitees = invitees;
                 snapshot.ring_status = ring_status;
+                snapshot.can_end_everyone = policy_ready && bundle.end_supported && call.phase() == Phase::Active;
+                snapshot.end_pending = end_pending;
+                snapshot.end_failed = end_failed;
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
                 snapshot.revision = snapshot.revision.saturating_add(1);

@@ -425,6 +425,7 @@ pub enum Command {
         call: CallScope,
         target: u128,
     },
+    EndEveryone(CallScope),
     Consent(CallScope),
     Reconnect(CallScope),
     Stop(CallScope),
@@ -439,6 +440,7 @@ impl Command {
             | Self::React { call, .. }
             | Self::Ring { call, .. } => *call,
             Self::Consent(call)
+            | Self::EndEveryone(call)
             | Self::Reconnect(call)
             | Self::Stop(call)
             | Self::Observe(call) => *call,
@@ -481,6 +483,9 @@ pub struct Snapshot {
     pub invitees_loaded: bool,
     pub invitees: crate::bounded::Page<CallInvitee, 100>,
     pub ring_status: Option<CallRingStatus>,
+    pub can_end_everyone: bool,
+    pub end_pending: bool,
+    pub end_failed: bool,
     pub counters: MediaCounters,
     pub revision: u64,
 }

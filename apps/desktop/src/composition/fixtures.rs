@@ -910,6 +910,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 Page::empty()
             },
             ring_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             participants: page(
                 if matches!(
                     scenario,
@@ -1923,6 +1926,9 @@ impl NativeDesktopPort for DevelopmentPort {
                     invitees_loaded: false,
                     invitees: Page::empty(),
                     ring_status: None,
+                    can_end_everyone: false,
+                    end_pending: false,
+                    end_failed: false,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

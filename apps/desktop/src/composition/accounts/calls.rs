@@ -442,6 +442,21 @@ impl Accounts {
                         wishes: ui.wishes,
                     }
                 }
+                UiIntent::EndCallForEveryone(call) => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active || !view.can_end_everyone || view.end_pending
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::EndEveryone(*call)
+                }
                 UiIntent::RingCallParticipant { call, target } => {
                     let view = self
                         .snapshot
@@ -573,6 +588,7 @@ impl Accounts {
                 | UiIntent::DeclineDirect(_)
                 | UiIntent::SetMicrophone { .. }
                 | UiIntent::SetCamera { .. }
+                | UiIntent::EndCallForEveryone(_)
                 | UiIntent::RingCallParticipant { .. }
                 | UiIntent::SetCallHand { .. }
                 | UiIntent::SendCallReaction { .. }
@@ -673,6 +689,9 @@ impl Accounts {
             invitees_loaded: false,
             invitees: Page::empty(),
             ring_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -892,6 +911,9 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     }
                 },
             }),
+        can_end_everyone: value.can_end_everyone,
+        end_pending: value.end_pending,
+        end_failed: value.end_failed,
         participants: page(
             value
                 .participants
@@ -954,6 +976,9 @@ mod action_tests {
                 invitees_loaded: false,
                 invitees: Page::empty(),
                 ring_status: None,
+                can_end_everyone: false,
+                end_pending: false,
+                end_failed: false,
                 counters: Default::default(),
                 revision: 1,
             }),

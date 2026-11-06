@@ -20,6 +20,7 @@ pub(crate) struct Bundle {
     pub hand_supported: bool,
     pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
     pub ring_supported: bool,
+    pub end_supported: bool,
 }
 pub(crate) struct Invitee {
     pub attendee: u64,
@@ -333,6 +334,10 @@ impl Sources {
             settings,
             peers,
             invitees,
+            end_supported: matches!(r.participant_type, Some(1 | 2 | 6))
+                && r.object_type.as_deref() != Some("room")
+                && r.has_call == Some(true)
+                && connected,
             ring_supported: has("send-call-notification")
                 && permissions & 2 != 0
                 && r.has_call == Some(true)
