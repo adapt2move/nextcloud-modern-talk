@@ -1098,6 +1098,7 @@ fn message(context: ConversationRef, id: u64, body: &str) -> MessageDetails {
         replyable: Some(true),
         parent: None,
         thread: None,
+        thread_replies: None,
         reactions: Page::empty(),
         rich: Page::empty(),
         system: None,

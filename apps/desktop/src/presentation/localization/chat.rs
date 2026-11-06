@@ -297,6 +297,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Añadir a favoritos",
     ),
     (
+        "Zur ursprünglichen Nachricht springen",
+        "Jump to the original message",
+        "Ir al mensaje original",
+    ),
+    (
         "Zweite Uhrzeit verwenden",
         "Use the second occurrence",
         "Usar la segunda vez",

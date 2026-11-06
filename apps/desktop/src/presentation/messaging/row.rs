@@ -132,14 +132,37 @@ impl Desktop {
             .when_some(
                 m.metadata.parent.as_ref().filter(|_| !m.metadata.deleted),
                 |d, parent| {
-                    d.child(self.quote_preview(
+                    let quote = self.quote_preview(
                         if parent.unavailable {
                             self.l("Ursprüngliche Nachricht nicht mehr verfügbar.")
                         } else {
                             parent.author.as_str()
                         },
                         (!parent.unavailable).then_some(parent.text.as_str()),
-                    ))
+                    );
+                    if parent.unavailable {
+                        d.child(quote)
+                    } else {
+                        d.child(
+                            self.control(
+                                scoped_id("message-parent", context, m.local_id, 0),
+                                ButtonStyle::Quiet,
+                                Availability::available().hinted(),
+                                LocalAction::MessageIn(context, Action::Locate(parent.id)),
+                                cx,
+                            )
+                            .justify_start()
+                            .min_w_0()
+                            .p_0()
+                            .child(quote)
+                            .child(self.reason_tip(
+                                scoped_id("message-parent", context, m.local_id, 0),
+                                Availability::available().hinted(),
+                                Some("Zur ursprünglichen Nachricht springen"),
+                                cx,
+                            )),
+                        )
+                    }
                 },
             );
         if m.metadata.deleted {
@@ -265,6 +288,26 @@ impl Desktop {
                         )
                     }))
                     .child(self.reaction_picker_button(m, menu::Source::Badges, cx)),
+            );
+        }
+        if m.reply_count > 0 && self.message_feature_enabled(MessageFeature::Threads) {
+            content = content.child(
+                self.control(
+                    scoped_id("thread-footer", context, m.local_id, 0),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::Thread(context, m.local_id),
+                    cx,
+                )
+                .justify_start()
+                .p_0()
+                .min_h(px(28.))
+                .text_color(t.accent)
+                .child(self.scaled_icon("chat", 14., t.accent))
+                .child(self.count(
+                    super::super::localization::Count::Replies,
+                    m.reply_count.into(),
+                )),
             );
         }
         if !m.metadata.deleted && m.metadata.truncated {
@@ -400,6 +443,28 @@ impl Desktop {
                                     .focus(|s| s.opacity(1.)),
                                 )
                             })
+                            .when(
+                                self.message_feature_enabled(MessageFeature::Threads)
+                                    && (m.metadata.thread.is_some() || m.reply_count > 0),
+                                |d| {
+                                    d.child(
+                                        self.icon_button(
+                                            scoped_id("message-thread", context, m.local_id, 0),
+                                            ("chat", "Thread öffnen"),
+                                            ButtonStyle::Quiet,
+                                            Availability::available(),
+                                            LocalAction::Thread(
+                                                context,
+                                                m.metadata.thread.unwrap_or(m.local_id),
+                                            ),
+                                            cx,
+                                        )
+                                        .opacity(0.)
+                                        .group_hover(action_group.clone(), |s| s.opacity(1.))
+                                        .focus(|s| s.opacity(1.)),
+                                    )
+                                },
+                            )
                             .child(
                                 self.icon_button(
                                     scoped_id("message-menu", context, m.local_id, 0),

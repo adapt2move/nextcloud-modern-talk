@@ -291,7 +291,7 @@ impl Desktop {
                         "",
                     ));
                 }
-                if message.metadata.replyable {
+                if message.metadata.thread.is_some() || message.reply_count > 0 {
                     items.push(Item::new(
                         Choice::Thread,
                         "Thread öffnen",

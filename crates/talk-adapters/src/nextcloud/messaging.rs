@@ -398,6 +398,9 @@ impl NextcloudClient {
             conversation: id,
             sequence,
         });
+        let thread_replies = message
+            .thread_replies
+            .and_then(|count| u32::try_from(count).ok());
         let replyable = message.replyable;
         let system = message
             .system
@@ -422,6 +425,7 @@ impl NextcloudClient {
             replyable,
             parent,
             thread,
+            thread_replies,
             reactions,
             rich,
             system,

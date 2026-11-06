@@ -42,6 +42,8 @@ pub struct MessageDetails {
     pub replyable: Option<bool>,
     pub parent: Option<ReplyContext>,
     pub thread: Option<MessageId>,
+    /// Number of replies when the server identifies this message as a thread root.
+    pub thread_replies: Option<u32>,
     pub reactions: Page<Reaction, 64>,
     pub rich: Page<RichObject, 32>,
     pub system: Option<Text<128>>,

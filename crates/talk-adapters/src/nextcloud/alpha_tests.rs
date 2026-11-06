@@ -21,11 +21,7 @@ fn message(id: u64) -> Value {
 
 #[tokio::test]
 async fn subscribed_threads_require_capability_and_known_account_room() {
-    for (enabled, token) in [
-        (false, "testroom"),
-        (true, "testroom"),
-        (true, "otherroom"),
-    ] {
+    for (enabled, token) in [(false, "testroom"), (true, "testroom"), (true, "otherroom")] {
         let mut replies = vec![Reply::data(features(if enabled {
             &["threads"]
         } else {
@@ -350,6 +346,8 @@ async fn reaction_permission_is_independent_of_chat_permission() {
 async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
     let mut first = message(7);
     first["actorId"] = json!("one");
+    first["threadId"] = json!(7);
+    first["threadReplies"] = json!(3);
     let mut second = message(8);
     second["actorId"] = json!("two");
     let mut guest = message(9);
@@ -388,6 +386,8 @@ async fn message_actor_keys_distinguish_equal_names_and_actor_types() {
         panic!("expected history");
     };
     let rows = messages.as_slice();
+    assert_eq!(rows[0].thread_replies, Some(3));
+    assert_eq!(rows[1].thread_replies, None);
     assert!(rows[0].author_key.is_some());
     assert_ne!(rows[0].author_key, rows[1].author_key);
     assert_ne!(rows[0].author_key, rows[2].author_key);

@@ -1753,7 +1753,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
         own: m.own,
         delivery: DeliveryState::Received,
         attachments: Page::empty(),
-        reply_count: 0,
+        reply_count: m.thread_replies.unwrap_or(0).min(u32::from(u16::MAX)) as u16,
         metadata: view::MessageMetadata {
             local_operation: m.message.own_operation.map(OperationId::as_local),
             local_order: None,
@@ -1976,12 +1976,14 @@ mod tests {
             replyable: None,
             parent: None,
             thread: None,
+            thread_replies: Some(3),
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
             edit: Decision::Unknown,
             delete: Decision::Unknown,
         };
+        assert_eq!(message_view(&message).reply_count, 3);
         for (serial, work, rows, cursor) in [
             (1_u64, Work::History, page([message]), None),
             (
@@ -2169,6 +2171,7 @@ mod tests {
             replyable: Some(true),
             parent: None,
             thread: None,
+            thread_replies: None,
             reactions: Page::empty(),
             rich: Page::empty(),
             system: None,
@@ -2326,6 +2329,7 @@ mod immediate_send_tests {
                 replyable: Some(true),
                 parent: None,
                 thread: None,
+                thread_replies: None,
                 reactions: Page::empty(),
                 rich: Page::empty(),
                 system: None,
