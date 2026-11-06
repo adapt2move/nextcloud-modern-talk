@@ -1,6 +1,11 @@
 //! Chat controls and native picker guidance; never user content.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Ab hier ungelesen",
+        "Mark unread from here",
+        "Marcar como no leído desde aquí",
+    ),
+    (
         "Als Entwurf bearbeiten",
         "Edit as draft",
         "Editar como borrador",
@@ -90,6 +95,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Die native Emoji-Auswahl konnte nicht geöffnet werden.",
         "The native emoji picker could not be opened.",
         "No se pudo abrir el selector nativo de emojis.",
+    ),
+    (
+        "Die vorherige Nachricht ist noch nicht geladen.",
+        "The previous message has not been loaded yet.",
+        "El mensaje anterior aún no se ha cargado.",
     ),
     (
         "Die Änderung ist für diese Nachricht zu groß oder nicht als Markdown darstellbar. Dein Entwurf bleibt erhalten.",

@@ -1293,6 +1293,7 @@ impl Desktop {
             }
             LocalAction::Navigate(context) => {
                 if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
+                    self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
                     if self.destination == SidebarDestination::Inbox {

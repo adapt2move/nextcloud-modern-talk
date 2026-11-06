@@ -109,6 +109,7 @@ pub enum MessagingFeature {
     Typing,
     ReadReceipts,
     MarkUnread,
+    UnreadFrom,
     Translation,
     Summary,
 }
@@ -157,6 +158,8 @@ pub enum MessagingCommand {
         emoji: Text<64>,
     },
     MarkUnread,
+    /// Explicitly rewind to the observed predecessor of the selected message.
+    MarkUnreadFrom(MessageId),
     MarkRead(MessageId),
     Typing(bool),
     Mentions(Text<256>),

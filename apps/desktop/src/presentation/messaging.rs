@@ -716,6 +716,16 @@ impl Desktop {
             self.message_ui.last_read = Some((context, effective));
         }
     }
+    pub(super) fn release_unread_hold(&mut self, context: ConversationRef) {
+        if self
+            .message_ui
+            .unread_hold
+            .is_some_and(|(room, _)| room == context)
+        {
+            self.message_ui.unread_hold = None;
+            self.message_ui.last_read = None;
+        }
+    }
     pub(super) fn message_available(&self, feature: MessageFeature) -> Availability {
         let value = self
             .snapshot
@@ -878,7 +888,10 @@ impl Desktop {
     }
     pub(super) fn submit_message(&mut self, action: MessageAction) -> Option<RequestId> {
         let context = self.snapshot.selected?;
-        let mark_unread = matches!(action, MessageAction::MarkUnread);
+        let mark_unread = matches!(
+            action,
+            MessageAction::MarkUnread | MessageAction::MarkUnreadFrom(_)
+        );
         let pin_intent = match &action {
             MessageAction::Pin(id) => Some((*id, true)),
             MessageAction::Unpin(id) => Some((*id, false)),
@@ -2316,6 +2329,7 @@ fn action_notice(action: &MessageAction) -> Option<Option<&'static str>> {
         | MessageAction::Unpin(_)
         | MessageAction::Delete(_)
         | MessageAction::MarkUnread
+        | MessageAction::MarkUnreadFrom(_)
         | MessageAction::React { .. }
         | MessageAction::ShareUpload { .. } => None,
         MessageAction::Forward { .. } => Some("Nachricht weitergeleitet."),

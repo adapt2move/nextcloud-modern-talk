@@ -21,6 +21,7 @@ pub(crate) enum Choice {
     Remind,
     Forward,
     MarkUnread,
+    MarkUnreadFrom,
     Thread,
     Back,
 }
@@ -162,6 +163,7 @@ impl Choice {
             Self::Remind => "clock",
             Self::Forward => "arrow-right",
             Self::MarkUnread => "inbox",
+            Self::MarkUnreadFrom => "inbox",
             Self::Thread => "chat",
             Self::Back => "arrow-left",
         }
@@ -178,6 +180,7 @@ impl Choice {
             Self::Remind => 5,
             Self::Forward => 6,
             Self::MarkUnread => 11,
+            Self::MarkUnreadFrom => 12,
             Self::Thread => 8,
             Self::Back => 9,
         }
@@ -289,6 +292,14 @@ impl Desktop {
                         "Gespräch als ungelesen markieren",
                         idle,
                         "",
+                    ));
+                }
+                if self.message_feature_enabled(MessageFeature::UnreadFrom) {
+                    items.push(Item::new(
+                        Choice::MarkUnreadFrom,
+                        "Ab hier ungelesen",
+                        idle && message.metadata.unread_after.is_some(),
+                        "Die vorherige Nachricht ist noch nicht geladen.",
                     ));
                 }
                 if message.metadata.thread.is_some() || message.reply_count > 0 {
@@ -508,6 +519,9 @@ impl Desktop {
                     }
                     Choice::MarkUnread => {
                         self.submit_message(MessageAction::MarkUnread);
+                    }
+                    Choice::MarkUnreadFrom => {
+                        self.submit_message(MessageAction::MarkUnreadFrom(target.message));
                     }
                     _ => {}
                 }

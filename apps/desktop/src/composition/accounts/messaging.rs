@@ -44,6 +44,7 @@ impl Work {
                 | Self::PinChange { .. }
                 | Self::Share
                 | Self::Send
+                | Self::Unread
         )
     }
     pub(super) fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
@@ -653,7 +654,7 @@ impl Accounts {
             V::Refresh => Work::History,
             V::Send { .. } => Work::Send,
             V::MarkRead(id) => Work::Read(*id),
-            V::MarkUnread => Work::Unread,
+            V::MarkUnread | V::MarkUnreadFrom(_) => Work::Unread,
             V::Typing(_) => Work::Typing,
             V::Pin(message) => Work::PinChange {
                 message: *message,
@@ -762,6 +763,13 @@ impl Accounts {
             },
             V::MarkRead(id) => W::MarkRead(message_id(context, id)?),
             V::MarkUnread => W::MarkUnread,
+            V::MarkUnreadFrom(message) => W::MarkUnreadFrom(message_id(
+                context,
+                self.history
+                    .get(context)
+                    .and_then(|history| history.predecessor(message))
+                    .ok_or(SubmitError::StaleScope)?,
+            )?),
             V::Typing(v) => W::Typing(v),
             V::Mentions(v) => W::Mentions(v),
             V::Search(query) => {
@@ -1772,6 +1780,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
                     matches!(kind.as_str(), "message_pinned" | "message_unpinned")
                 }),
             read_through: None,
+            unread_after: None,
             replyable: m.replyable == Some(true) && !deleted,
             parent: m.parent.as_ref().map(|p| view::Reply {
                 id: u128::from(p.id.sequence),
@@ -1907,6 +1916,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
         W::MarkUnread => V::MarkUnread,
+        W::UnreadFrom => V::UnreadFrom,
         _ => return None,
     })
 }

@@ -6,7 +6,11 @@ fn capabilities() -> Value {
     value["capabilities"]["spreed"]["features"]
         .as_array_mut()
         .unwrap()
-        .extend([json!("chat-read-status"), json!("chat-unread")]);
+        .extend([
+            json!("chat-read-status"),
+            json!("chat-unread"),
+            json!("chat-read-last"),
+        ]);
     value["capabilities"]["spreed"]["config"]["chat"]["read-privacy"] = json!(0);
     value
 }
@@ -152,6 +156,40 @@ async fn explicit_mark_unread_releases_the_local_automatic_read_floor() {
         request.starts_with(b"POST ")
             && String::from_utf8_lossy(request).contains("lastReadMessage=20")
     }));
+}
+
+#[tokio::test]
+async fn explicit_unread_from_rewinds_but_automatic_reads_stay_monotonic() {
+    let server = Server::start(vec![
+        Reply::data(capabilities()),
+        Reply::data(read_room(90)),
+        Reply::data(json!([])),
+        Reply::data(capabilities()),
+        Reply::data(read_room(20)),
+    ])
+    .await;
+    let rt = runtime();
+    let mut client = client(&server.origin, rt.clone());
+    let room = bind(&mut client);
+    let message = |sequence| MessageId {
+        conversation: room,
+        sequence,
+    };
+    assert!(matches!(
+        act(&mut client, &rt, room, 1, C::MarkUnreadFrom(message(20))).await,
+        R::Changed
+    ));
+    assert!(matches!(
+        act(&mut client, &rt, room, 2, C::MarkRead(message(10))).await,
+        R::Changed
+    ));
+    let requests = server.seen.lock().unwrap();
+    let writes: Vec<_> = requests
+        .iter()
+        .filter(|request| request.starts_with(b"POST "))
+        .collect();
+    assert_eq!(writes.len(), 1);
+    assert!(String::from_utf8_lossy(writes[0]).contains("lastReadMessage=20"));
 }
 
 #[tokio::test]

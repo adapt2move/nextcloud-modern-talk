@@ -54,6 +54,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Delete(_) => F::Delete,
         C::React { .. } | C::ReactionAuthors { .. } => F::React,
         C::MarkUnread => F::MarkUnread,
+        C::MarkUnreadFrom(_) => F::UnreadFrom,
         C::MarkRead(_) => F::ReadReceipts,
         C::Typing(_) => F::Typing,
         C::Mentions(_) => F::Mentions,
@@ -95,6 +96,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Typing => "typing-privacy",
         F::ReadReceipts => "chat-read-marker",
         F::MarkUnread => "chat-unread",
+        F::UnreadFrom => "chat-read-last",
         F::Translation => "translation",
         F::Summary => "chat-summary",
     }
@@ -264,6 +266,7 @@ impl NextcloudClient {
             F::Typing,
             F::ReadReceipts,
             F::MarkUnread,
+            F::UnreadFrom,
             F::Translation,
             F::Summary,
         ] {
@@ -988,6 +991,24 @@ impl NextcloudClient {
                     .map_err(|_| self.error(ErrorKind::Uncertain)),
                 None => Ok(R::Send(receipt)),
             };
+        }
+        if let C::MarkUnreadFrom(message) = command {
+            self.message_scope(message, id)?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|k| self.error(transport::kind(k)))?;
+            self.transport
+                .api_request(
+                    c,
+                    api::Request::MarkRead {
+                        room: token,
+                        message: message.sequence,
+                    },
+                )
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(message.sequence);
+            }
+            return Ok(R::Changed);
         }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;

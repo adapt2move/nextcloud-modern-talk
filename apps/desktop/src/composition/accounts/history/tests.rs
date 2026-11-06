@@ -16,6 +16,27 @@ fn cached_thread_count_roundtrips_without_restoring_authority() {
     assert_eq!(restored.metadata.edit, Decision::Unknown);
 }
 
+#[test]
+fn mark_unread_predecessor_requires_observed_adjacency() {
+    let key = context(1, 1, 1, 1);
+    let mut history = History::new(key);
+    history.messages = page([
+        message_view(&message(key, 10, "first")),
+        message_view(&message(key, 20, "second")),
+    ]);
+    assert_eq!(history.predecessor(20), None);
+    history.observe_read_page(&[(10, false), (20, false)], None);
+    assert_eq!(history.predecessor(20), Some(10));
+    assert_eq!(history.predecessor(10), None);
+    history.read_edges.clear();
+    assert_eq!(
+        history.visible_messages().as_slice()[1]
+            .metadata
+            .unread_after,
+        None
+    );
+}
+
 fn system_message(key: ConversationRef, id: u64, tag: Option<&str>) -> MessageDetails {
     let mut row = message(
         key,

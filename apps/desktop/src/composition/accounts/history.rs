@@ -136,9 +136,18 @@ impl History {
                     let mut visible = message.clone();
                     let target = self.read_through_pin_notices(message.local_id);
                     visible.metadata.read_through = (target != message.local_id).then_some(target);
+                    visible.metadata.unread_after = self.predecessor(message.local_id);
                     visible
                 }),
         )
+    }
+
+    /// Only a live page's adjacent IDs can identify the server's preceding
+    /// message. Cached pages and independently merged gaps confer no proof.
+    pub(super) fn predecessor(&self, id: u128) -> Option<u128> {
+        self.read_edges
+            .iter()
+            .find_map(|(previous, next)| (*next == id && *previous > 0).then_some(*previous))
     }
 
     /// Invisible pin activity carries no additional user content. A deliberate

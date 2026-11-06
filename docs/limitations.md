@@ -18,6 +18,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
+- Marking unread from a message requires a preceding message whose adjacency was
+  observed in the current runtime; the first loaded row and cached-only gaps do
+  not supply that evidence. Manual unread actions currently require a connection.
 - Markdown covers bounded CommonMark, strikethrough and task markers. Tables
   remain readable source; HTML and Markdown images do not execute or load.
   The composer supports direct editing of basic marks, headings, lists, task

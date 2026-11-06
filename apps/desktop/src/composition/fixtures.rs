@@ -985,6 +985,7 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
     let mut rows = snapshot.messages.as_slice().to_vec();
     for row in &mut rows {
         row.metadata.replyable = true;
+        row.metadata.unread_after = row.local_id.checked_sub(1).filter(|id| *id > 0);
         if row.local_id == 2 {
             row.metadata.deleted = true;
         }
@@ -1002,6 +1003,7 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
             MessageFeature::Files,
             MessageFeature::Pins,
             MessageFeature::MarkUnread,
+            MessageFeature::UnreadFrom,
         ]
         .map(|feature| {
             (
@@ -1657,7 +1659,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
-                    MessageAction::MarkUnread => {
+                    MessageAction::MarkUnread | MessageAction::MarkUnreadFrom(_) => {
                         panel.result = Some((request, Completion::ServerAccepted));
                         self.snapshot.conversations =
                             page(self.snapshot.conversations.as_slice().iter().cloned().map(

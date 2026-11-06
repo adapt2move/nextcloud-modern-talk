@@ -21,6 +21,7 @@ pub enum MessageFeature {
     Typing,
     ReadReceipts,
     MarkUnread,
+    UnreadFrom,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {
@@ -84,6 +85,8 @@ pub struct MessageMetadata {
     /// adjacent hidden pin activity with observed server-page continuity.
     /// Derived by composition; durable content never restores this evidence.
     pub read_through: Option<u128>,
+    /// Exact adjacent predecessor, proven by a live server page in this runtime.
+    pub unread_after: Option<u128>,
     pub replyable: bool,
     pub parent: Option<Reply>,
     pub thread: Option<u128>,
@@ -107,6 +110,7 @@ impl Default for MessageMetadata {
             system_event: SystemEvent::Unknown,
             pin_notice: false,
             read_through: None,
+            unread_after: None,
             replyable: false,
             parent: None,
             thread: None,
@@ -366,6 +370,7 @@ pub enum MessageAction {
     },
     MarkRead(u128),
     MarkUnread,
+    MarkUnreadFrom(u128),
     Typing(bool),
     Mentions(Text<256>),
     Search(Text<256>),
