@@ -105,6 +105,8 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tools/ci/build_env.py --target aarch64-apple-darwin --install-metal-toolchain
+      - name: Compile native permission and notification helper
+        run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
       - run: python3 tools/ci/prepare_gstreamer.py --target aarch64-apple-darwin
       - run: python3 tools/release/toolchain.py --target aarch64-apple-darwin
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -112,8 +114,6 @@ jobs:
           path: ~/.cargo/registry
           key: cargo-macos-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
       - run: python3 tools/cargo.py build --locked --workspace --all-targets --target aarch64-apple-darwin
-      - name: Compile native permission and notification helper
-        run: python3 tools/native/build-macos-helper.py --output "$RUNNER_TEMP/talk-native-helper"
       - name: Inspect native library dependencies
         run: |
           otool -L target/aarch64-apple-darwin/debug/talk-desktop "$RUNNER_TEMP/talk-native-helper"
