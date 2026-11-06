@@ -254,6 +254,13 @@ pub struct Drafts {
     targets: Vec<(ConversationRef, talk_core::ui::messaging::ComposeTarget)>,
 }
 impl Drafts {
+    /// Separate request namespace for the concurrently mounted thread editor.
+    pub fn thread_editor() -> Self {
+        Self {
+            next_request: 1_u64 << 63,
+            ..Self::default()
+        }
+    }
     /// Cached contexts carry no dispatch authority. Only an explicit stable
     /// room key can move their local text to a newly projected context.
     pub fn rebind_cached(&mut self, previous: &PresentationSnapshot, next: &PresentationSnapshot) {
@@ -461,7 +468,11 @@ impl Drafts {
         if draft.text.as_str().trim().is_empty() {
             return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
         }
-        let request = RequestId(self.next_request.checked_add(1).ok_or(SubmitError::Busy)?);
+        let next = self.next_request.checked_add(1).ok_or(SubmitError::Busy)?;
+        if (next ^ self.next_request) & (1_u64 << 63) != 0 {
+            return Err(SubmitError::Busy);
+        }
+        let request = RequestId(next);
         // Busy is non-admission: neither the text nor the pending state changes.
         port.try_submit(UiIntent::Message {
             request,

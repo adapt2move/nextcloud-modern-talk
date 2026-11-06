@@ -32,7 +32,6 @@ pub(crate) enum Action {
     Files,
     Silent,
     Pins,
-    ThreadReply(u128),
     Menu(u128),
     ReactionPalette(u128, menu::Source),
     React(u128, Text<64>),
@@ -271,6 +270,92 @@ impl MessageUi {
     }
 }
 impl Desktop {
+    pub(super) fn save_thread_draft(&mut self, cx: &gpui::App) -> bool {
+        let Some((context, _)) = self.thread_parent else {
+            return true;
+        };
+        let input = self.thread_composer.read(cx);
+        if input.composing() {
+            return false;
+        }
+        self.thread_drafts
+            .save(context, input.committed_value())
+            .is_ok()
+    }
+
+    pub(super) fn prepare_thread_draft(
+        &mut self,
+        context: ConversationRef,
+        root: u128,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.thread_parent == Some((context, root)) {
+            return true;
+        }
+        if !self.save_thread_draft(cx)
+            || !self.thread_drafts.set_target(
+                context,
+                ComposeTarget {
+                    thread: Some(root),
+                    ..ComposeTarget::default()
+                },
+            )
+        {
+            return false;
+        }
+        let text = self.thread_drafts.text(context).to_owned();
+        self.thread_composer.update(cx, |input, cx| {
+            let loaded = input.set_context_value(&text);
+            cx.notify();
+            loaded
+        })
+    }
+
+    pub(super) fn send_thread_draft(&mut self, cx: &mut Context<Self>) {
+        let Some((context, root)) = self.thread_parent else {
+            return;
+        };
+        if Some(context) != self.snapshot.selected
+            || self.overlay != Some(Overlay::Thread)
+            || self.thread_drafts.target(context).thread != Some(root)
+            || !self.thread_send_available(cx)
+            || !self.save_thread_draft(cx)
+        {
+            return;
+        }
+        let Some(row) = self.selected() else { return };
+        let gate = super::state::composer_send_decision(&self.snapshot, row);
+        let result = self.thread_drafts.send(context, gate, self.port.as_mut());
+        if let Ok(request) = result {
+            self.thread_drafts.capture_editor(
+                context,
+                request,
+                self.thread_composer.read(cx).edit_generation(),
+            );
+            self.feedback = None;
+        } else if let Err(error) = result {
+            self.report_draft_error(error, context);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn thread_send_available(&self, cx: &gpui::App) -> bool {
+        let Some((context, root)) = self.thread_parent else {
+            return false;
+        };
+        self.overlay == Some(Overlay::Thread)
+            && Some(context) == self.snapshot.selected
+            && self.thread_drafts.target(context).thread == Some(root)
+            && !self.thread_drafts.pending(context)
+            && !self.thread_composer.read(cx).composing()
+            && !self.thread_composer.read(cx).content.trim().is_empty()
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context && panel.availability(MessageFeature::Threads).enabled()
+            })
+            && self.selected().is_some_and(|row| {
+                super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed
+            })
+    }
     /// Reuse the composition owner's finite refresh tick for one debounced
     /// mention query. No per-keystroke task or unbounded request queue.
     pub(super) fn refresh_composer_mentions(&mut self, cx: &Context<Self>) {
@@ -969,27 +1054,6 @@ impl Desktop {
                 }
                 if self.overlay != Some(Overlay::Files) {
                     self.handle(LocalAction::Open(Overlay::Files), window, cx);
-                }
-            }
-            Action::ThreadReply(root) => {
-                let previous = self.drafts.target(context);
-                if self.save_draft(cx)
-                    && self.drafts.set_target(
-                        context,
-                        ComposeTarget {
-                            reply_to: None,
-                            thread: Some(root),
-                            silent: false,
-                        },
-                    )
-                {
-                    let value = self.drafts.text(context).to_owned();
-                    if !self.load_composer_value(&value, cx) {
-                        self.drafts.set_target(context, previous);
-                        return;
-                    }
-                    self.handle(LocalAction::Close, window, cx);
-                    self.composer.focus_handle(cx).focus(window);
                 }
             }
             Action::Menu(id) => self.toggle_message_menu(context, id, window, cx),
@@ -2367,10 +2431,7 @@ fn message_actions_allowed(message: &MessageView) -> bool {
         )
 }
 fn may_replace_composer(action: &Action, editing: Option<u128>, pending_edit: bool) -> bool {
-    !matches!(
-        action,
-        Action::Reply(_) | Action::ThreadReply(_) | Action::Edit(_)
-    ) || (editing.is_none() && !pending_edit)
+    !matches!(action, Action::Reply(_) | Action::Edit(_)) || (editing.is_none() && !pending_edit)
 }
 
 fn reply_allowed(
@@ -2577,7 +2638,7 @@ mod tests {
     }
     #[test]
     fn reply_thread_reply_and_new_edit_cannot_replace_an_unfinished_edit() {
-        for action in [Action::Reply(2), Action::ThreadReply(3), Action::Edit(4)] {
+        for action in [Action::Reply(2), Action::Edit(4)] {
             assert!(may_replace_composer(&action, None, false));
             assert!(!may_replace_composer(&action, Some(1), false));
             assert!(!may_replace_composer(&action, Some(1), true));

@@ -98,7 +98,8 @@ impl Desktop {
                             .min_h_0()
                             .p_4()
                             .child(self.thread_body(cx)),
-                    ),
+                    )
+                    .child(self.thread_composer_view(cx)),
             ),
         )
     }
@@ -244,6 +245,9 @@ impl Desktop {
                                 )),
                         )
                         .child(content)
+                        .when(overlay == Overlay::Thread, |d| {
+                            d.child(self.thread_composer_view(cx))
+                        })
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
                         })
@@ -567,29 +571,30 @@ impl Desktop {
                 }
             }
         }
-        let editing = self.message_ui.editing.is_some() || self.message_ui.pending_edit.is_some();
-        body.child(self.button(
-            "thread-reply",
-            "Im Thread antworten",
-            ButtonStyle::Secondary,
-            Availability::when(
-                state == ContentState::Ready
-                    && !editing
-                    && !self.drafts.pending(context)
-                    && panel.is_some_and(|panel| {
-                        panel
-                            .availability(talk_core::ui::messaging::MessageFeature::Threads)
-                            .enabled()
-                    }),
-                if editing {
-                    "Beende zuerst die aktuelle Bearbeitung."
-                } else {
-                    "Du hast dafür keine Berechtigung."
-                },
-            ),
-            LocalAction::Message(super::messaging::Action::ThreadReply(root)),
-            cx,
-        ))
+        body
+    }
+    fn thread_composer_view(&self, cx: &Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .border_t_1()
+            .border_color(self.theme.border)
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                self.input_surface(&self.thread_composer, cx)
+                    .items_start()
+                    .child(div().flex_1().min_w_0().child(self.thread_composer.clone())),
+            )
+            .child(div().flex().justify_end().child(self.button(
+                "thread-send",
+                "Senden",
+                ButtonStyle::Primary,
+                Availability::when(self.thread_send_available(cx), ""),
+                LocalAction::SendThread,
+                cx,
+            )))
     }
     fn thread_message(&self, message: &talk_core::ui::presentation::MessageView) -> Div {
         div()

@@ -103,6 +103,7 @@ pub enum LocalAction {
     ToggleCallChat,
     Navigate(ConversationRef),
     ResizeThread(bool),
+    SendThread,
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     Favorite(ConversationRef, bool),
@@ -297,6 +298,7 @@ pub struct Desktop {
     pub search: Entity<TextInput>,
     pub sidebar_filter: Entity<TextInput>,
     pub composer: Entity<TextInput>,
+    thread_composer: Entity<TextInput>,
     composer_focus: FocusHandle,
     composer_active: bool,
     file_send: Option<attachments::PendingSend>,
@@ -312,6 +314,7 @@ pub struct Desktop {
     pub thread_parent: Option<(ConversationRef, u128)>,
     thread_width: f32,
     drafts: Drafts,
+    thread_drafts: Drafts,
     root_focus: FocusHandle,
     modal_focus: FocusHandle,
     pending_modal_focus: bool,
@@ -387,6 +390,12 @@ impl Desktop {
             input.markdown = true;
             input
         });
+        let thread_composer = cx.new(|cx| {
+            let mut input = TextInput::new("Im Thread antworten …", 4096, theme, cx);
+            input.multiline = true;
+            input.markdown = true;
+            input
+        });
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
         let group_name = cx.new(|cx| TextInput::new("Name der Gruppe", 128, theme, cx));
         let upload_folder = cx.new(|cx| TextInput::new("/Talk", 2048, theme, cx));
@@ -438,7 +447,11 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
-            .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain([
+                message_ui.search.clone(),
+                message_ui.time_input.clone(),
+                thread_composer.clone(),
+            ])
             .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
@@ -528,6 +541,7 @@ impl Desktop {
             search,
             sidebar_filter,
             composer,
+            thread_composer,
             composer_focus,
             composer_active: false,
             file_send: None,
@@ -543,6 +557,7 @@ impl Desktop {
             thread_parent: None,
             thread_width: 400.,
             drafts: Drafts::default(),
+            thread_drafts: Drafts::thread_editor(),
             root_focus,
             modal_focus,
             pending_modal_focus: initial_overlay.is_some() || prejoin.is_some(),
@@ -572,6 +587,15 @@ impl Desktop {
                     .find(|m| m.reply_count > 0)
                     .map(|m| (c, m.local_id))
             });
+            if let Some((context, root)) = desktop.thread_parent {
+                desktop.thread_drafts.set_target(
+                    context,
+                    talk_core::ui::messaging::ComposeTarget {
+                        thread: Some(root),
+                        ..Default::default()
+                    },
+                );
+            }
         }
         if development && initial_overlay == Some(Overlay::Search) {
             desktop.search.update(cx, |i, _| i.set_value("Navigation"));
@@ -641,6 +665,14 @@ impl Desktop {
         self.projection_blocked = false;
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
+        let thread_unchanged = self.thread_parent.is_none_or(|(context, _)| {
+            self.thread_drafts.observe_editor(
+                context,
+                self.thread_composer.read(cx).edit_generation(),
+                self.thread_composer.read(cx).composing(),
+            )
+        });
+        let _ = self.save_thread_draft(cx);
         let selected_rebind = previous
             .and_then(|context| state::cached_draft_context(&self.snapshot, &next, context))
             .is_some_and(|context| Some(context) == next.selected);
@@ -659,6 +691,7 @@ impl Desktop {
             let _ = self.drafts.save(c, body);
         }
         self.drafts.rebind_cached(&self.snapshot, &next);
+        self.thread_drafts.rebind_cached(&self.snapshot, &next);
         let mut reset_draft = false;
         let completed_context = next
             .submission
@@ -681,6 +714,38 @@ impl Desktop {
             .map(|feedback| feedback.in_conversation(completed_context.unwrap_or(result.context)));
             reset_draft = completed_context == next.selected && composer_unchanged;
             // A Busy acknowledgement leaves the same result in the producer's latest slot.
+            self.pending_ack = Some(result);
+        }
+        let thread_completed_context = next
+            .submission
+            .and_then(|result| self.thread_drafts.submission_context(result));
+        if let Some(result) = next.submission
+            && self.thread_drafts.complete(result)
+        {
+            if thread_unchanged
+                && self.thread_parent.is_some_and(|(context, _)| {
+                    Some(context) == thread_completed_context && Some(context) == next.selected
+                })
+            {
+                let text = self
+                    .thread_drafts
+                    .text(thread_completed_context.unwrap_or(result.context))
+                    .to_owned();
+                self.thread_composer.update(cx, |input, cx| {
+                    input.set_context_value(&text);
+                    cx.notify();
+                });
+            }
+            self.feedback = match result.result {
+                Completion::Queued | Completion::ServerAccepted => None,
+                Completion::Failed(_) => Some(Feedback::error(
+                    "Nicht gesendet. Dein Entwurf bleibt erhalten.",
+                )),
+                Completion::Uncertain => Some(Feedback::warning(
+                    "Sendestatus unklar. Vor erneutem Senden muss der Status abgeglichen werden.",
+                )),
+            }
+            .map(|notice| notice.in_conversation(result.context));
             self.pending_ack = Some(result);
         }
         if let Some(result) = next.organization_result {
@@ -724,6 +789,7 @@ impl Desktop {
             self.pending_modal_focus = true;
         }
         self.drafts.retain_accounts(&next);
+        self.thread_drafts.retain_accounts(&next);
         if previous != next.selected || previous_account != next.active_account {
             self.retire_emoji_picker();
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
@@ -1057,9 +1123,11 @@ impl Desktop {
             LocalAction::InstallUpdate(generation) => {
                 if generation == self.updates.generation
                     && self.can_install_update()
+                    && self.save_thread_draft(cx)
                     && self.save_draft(cx)
                 {
                     if self.drafts.has_unsent()
+                        || self.thread_drafts.has_unsent()
                         || !self.composer.read(cx).content.is_empty()
                         || self.message_ui.pending_edit.is_some()
                         || self.input_composing(cx)
@@ -1097,7 +1165,7 @@ impl Desktop {
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
-                if !self.save_draft(cx) {
+                if !self.save_thread_draft(cx) || !self.save_draft(cx) {
                     cx.notify();
                     return;
                 }
@@ -1139,6 +1207,9 @@ impl Desktop {
                             .iter()
                             .any(|m| m.local_id == id || m.metadata.thread == Some(id)))
                 {
+                    if !self.prepare_thread_draft(context, id, cx) {
+                        return;
+                    }
                     self.thread_parent = Some((context, id));
                     let request =
                         self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
@@ -1254,6 +1325,9 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.overlay == Some(Overlay::Thread) && !self.save_thread_draft(cx) {
+                    return;
+                }
                 self.startup_account_dialog = false;
                 if self.close_forward_dialog(window, cx) {
                     cx.notify();
@@ -1296,7 +1370,10 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
-                if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit(UiIntent::OpenConversation(context))
+                {
                     self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
@@ -1314,6 +1391,7 @@ impl Desktop {
                 self.thread_width =
                     (self.thread_width + if wider { 64. } else { -64. }).clamp(288., 608.);
             }
+            LocalAction::SendThread => self.send_thread_draft(cx),
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
@@ -1893,6 +1971,14 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if self.composer_available()
+            && self.overlay == Some(Overlay::Thread)
+            && registry_modifiers.and_then(|m| matching(key, m, KeyContext::Composer))
+                == Some(ActionId::SendMessage)
+            && self.thread_composer.focus_handle(cx).is_focused(window)
+        {
+            self.handle(LocalAction::SendThread, window, cx);
+            cx.stop_propagation();
+        } else if self.composer_available()
             && registry_modifiers.and_then(|m| matching(key, m, KeyContext::Composer))
                 == Some(ActionId::SendMessage)
             && self.composer.focus_handle(cx).is_focused(window)
@@ -1921,6 +2007,7 @@ impl Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -1940,6 +2027,7 @@ impl Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2068,6 +2156,7 @@ impl Render for Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
@@ -2192,6 +2281,17 @@ impl Render for Desktop {
             i.clipboard_export_allowed = clipboard_export;
             i.max_visible_rows = max_rows.clamp(1, 5);
         });
+        self.thread_composer.update(cx, |input, _| {
+            input.set_placeholder(self.l("Im Thread antworten …"));
+            input.interactive = !incoming
+                && self.overlay == Some(Overlay::Thread)
+                && self
+                    .thread_parent
+                    .is_some_and(|(context, _)| Some(context) == self.snapshot.selected);
+            input.configure_message_limit(self.composer_message_limit());
+            input.clipboard_export_allowed = clipboard_export;
+            input.max_visible_rows = max_rows.clamp(1, 4);
+        });
         if self.update_restart_pending {
             self.disable_update_inputs(cx);
         }
@@ -2200,6 +2300,7 @@ impl Render for Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,

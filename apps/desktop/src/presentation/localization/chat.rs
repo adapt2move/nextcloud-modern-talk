@@ -207,6 +207,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Search this conversation",
         "Buscar en esta conversación",
     ),
+    (
+        "Im Thread antworten …",
+        "Reply in thread …",
+        "Responder en el hilo …",
+    ),
     ("In 30 Minuten", "In 30 minutes", "Dentro de 30 minutos"),
     ("In einer Stunde", "In one hour", "Dentro de una hora"),
     ("Inline-Code", "Inline code", "Código en línea"),

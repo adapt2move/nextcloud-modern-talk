@@ -457,7 +457,7 @@ impl Desktop {
                 .when(self.snapshot.call.as_ref().is_some_and(|call| call.scope.account.account == target.account
                     && !matches!(call.stage, super::CallStage::Ended | super::CallStage::Failed)),
                     |d| d.child(self.hint(self.l("Der laufende Anruf wird beendet.")).text_color(self.theme.danger)))
-                .when(self.drafts.has_unsent_for_account(target.account),
+                .when(self.drafts.has_unsent_for_account(target.account) || self.thread_drafts.has_unsent_for_account(target.account),
                     |d| d.child(self.hint(self.l("Lokale Entwürfe werden verworfen. Bereits gesendete Nachrichten können nicht zurückgerufen werden.")).text_color(self.theme.danger)))
                 .child(div().flex().flex_wrap().justify_end().gap_2()
                     .child(self.button("cancel-account-removal", "Abbrechen", ButtonStyle::Secondary,
