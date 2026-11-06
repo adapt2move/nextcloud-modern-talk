@@ -324,7 +324,12 @@ impl Desktop {
                     .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."))),
             );
         }
-        let columns = if wide { 2 } else { 1 };
+        // Reserve the docked chat before choosing a grid so tiles keep a
+        // useful width when the panel opens or the window is narrow.
+        let stage_width = f32::from(window.viewport_size().width)
+            - if show_chat { 300. } else { 0. }
+            - 32.;
+        let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
         let mut tiles = div()
             .grid()
             .grid_cols(columns)
@@ -777,5 +782,27 @@ fn media_label(microphone: bool, state: MediaState) -> &'static str {
         (false, MediaState::Requested) => "Kamera angefragt",
         (false, MediaState::Denied) => "Kamera nicht erlaubt",
         (false, MediaState::Unavailable) => "Kamera nicht verfügbar",
+    }
+}
+
+/// Bound the gallery to readable tiles without relying on participant identity
+/// or ordering. The scroll area owns rows that do not fit vertically.
+fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
+    let logical_width = width.max(0.) * 100. / f32::from(scale.max(1));
+    let capacity = if logical_width >= 900. { 3 } else if logical_width >= 520. { 2 } else { 1 };
+    capacity.min(participants.clamp(1, 3) as u16)
+}
+
+#[cfg(test)]
+mod gallery_tests {
+    use super::gallery_columns;
+
+    #[test]
+    fn gallery_respects_width_scale_and_participant_count() {
+        assert_eq!(gallery_columns(1200., 100, 8), 3);
+        assert_eq!(gallery_columns(700., 100, 8), 2);
+        assert_eq!(gallery_columns(700., 150, 8), 1);
+        assert_eq!(gallery_columns(1200., 100, 1), 1);
+        assert_eq!(gallery_columns(0., 100, 0), 1);
     }
 }

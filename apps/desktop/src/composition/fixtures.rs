@@ -92,6 +92,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-error",
     "call-error-unknown",
     "call-controls",
+    "call-gallery",
     "call-active",
     "call-requested",
     "sharing",
@@ -765,6 +766,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error"
             | "call-error-unknown"
             | "call-controls"
+            | "call-gallery"
             | "sharing"
             | "call-denied"
             | "call-active"
@@ -832,7 +834,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 MediaState::Unavailable
             },
-            participants: page(if direct || id == 2 {
+            participants: page(if scenario == "call-gallery" {
+                let mut people = participants().to_vec();
+                people[0].raised_hand = true;
+                people[3].raised_hand = true;
+                people.extend([
+                    participant(5, "Nora Beck", "NB", false),
+                    participant(6, "Emil Hartmann", "EH", false),
+                    participant(7, "Samira Wolf", "SW", false),
+                    participant(8, "Luis Berger", "LB", false),
+                ]);
+                people
+            } else if direct || id == 2 {
                 vec![participants()[0].clone(), participants()[2].clone()]
             } else {
                 participants().to_vec()
