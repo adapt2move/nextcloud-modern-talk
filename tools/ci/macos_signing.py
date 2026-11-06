@@ -19,8 +19,51 @@ def run(arguments):
     result = subprocess.run(arguments, capture_output=True, text=True, timeout=30)
     if result.returncode:
         # security's stderr may include certificate/keychain/provider details.
-        raise ValueError("Temporary macOS signing keychain operation failed")
+        operation = arguments[1] if len(arguments) > 1 else "unknown"
+        raise ValueError("Temporary macOS signing keychain operation failed ("
+                         + operation + ", exit " + str(result.returncode) + ")")
     return result.stdout
+
+
+def compatible_identity(certificate, password):
+    """Rewrap our internal P12 for Apple's legacy importer, preserving its key.
+
+    The certificate still uses SHA-256/RSA. SHA-1 here is the password-container
+    MAC, never the code signature or certificate signature. Private-key PEM stays
+    in a pipe/in memory and never enters a file, workflow output or diagnostics.
+    Developer ID imports keep their supplied distribution container unchanged.
+    """
+    destination = certificate.with_name("compatible.p12")
+    with destination.open("xb"):
+        destination.chmod(0o600)
+    environment = dict(os.environ, NMT_P12_IMPORT_PASSWORD=password)
+    decode = subprocess.run(["openssl", "pkcs12", "-in", str(certificate),
+        "-passin", "env:NMT_P12_IMPORT_PASSWORD", "-nodes", "-nocerts"],
+        capture_output=True, timeout=30, env=environment)
+    if decode.returncode or not decode.stdout or len(decode.stdout) > 512 * 1024:
+        raise ValueError("Internal signing container conversion failed (decode)")
+    public = subprocess.run(["openssl", "pkcs12", "-in", str(certificate),
+        "-passin", "env:NMT_P12_IMPORT_PASSWORD", "-nokeys"],
+        capture_output=True, timeout=30, env=environment)
+    if public.returncode or not public.stdout or len(public.stdout) > 256 * 1024:
+        raise ValueError("Internal signing container conversion failed (certificate)")
+    public_file = certificate.with_name("compatible-cert.pem")
+    try:
+        with public_file.open("xb") as output:
+            public_file.chmod(0o600)
+            output.write(public.stdout)
+        # OpenSSL needs a seekable certificate input. Only the public part uses
+        # a file; the private key is consumed separately from the input pipe.
+        encode = subprocess.run(["openssl", "pkcs12", "-export", "-out", str(destination),
+            "-in", str(public_file), "-inkey", "/dev/stdin",
+            "-passout", "env:NMT_P12_IMPORT_PASSWORD", "-keypbe", "PBE-SHA1-3DES",
+            "-certpbe", "PBE-SHA1-3DES", "-macalg", "sha1", "-iter", "100000"],
+            input=decode.stdout, capture_output=True, timeout=30, env=environment)
+    finally:
+        public_file.unlink(missing_ok=True)
+    if encode.returncode or not destination.stat().st_size or destination.stat().st_size > 256 * 1024:
+        raise ValueError("Internal signing container conversion failed (encode)")
+    return destination
 
 
 def credentials(env):
@@ -76,7 +119,8 @@ def prepare():
         run(["security", "create-keychain", "-p", local_password, str(keychain)])
         run(["security", "set-keychain-settings", "-lut", "7200", str(keychain)])
         run(["security", "unlock-keychain", "-p", local_password, str(keychain)])
-        run(["security", "import", str(certificate), "-k", str(keychain), "-P", password, "-T", "/usr/bin/codesign"])
+        imported = compatible_identity(certificate, password) if mode == "internal" else certificate
+        run(["security", "import", str(imported), "-f", "pkcs12", "-k", str(keychain), "-P", password, "-T", "/usr/bin/codesign"])
         run(["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", local_password, str(keychain)])
         identities = run(["security", "find-identity", *(["-v"] if mode == "developer-id" else []), "-p", "codesigning", str(keychain)])
         if mode == "developer-id":
@@ -97,6 +141,7 @@ def prepare():
         raise
     finally:
         certificate.unlink(missing_ok=True)
+        certificate.with_name("compatible.p12").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
