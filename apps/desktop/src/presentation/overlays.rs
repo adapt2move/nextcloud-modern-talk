@@ -250,6 +250,49 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
+        let mut details = div().flex().flex_wrap().items_center().gap_2();
+        if p.speaking {
+            details = details.child(self.hint(self.l("Spricht")));
+        }
+        if p.raised_hand {
+            details = details
+                .child(self.scaled_icon("hand", 14., t.muted))
+                .child(self.hint(self.l("Hand gehoben")));
+        }
+        if let Some(on) = p.call_microphone {
+            details = details
+                .child(self.scaled_icon(if on { "mic" } else { "mic-off" }, 14., t.muted))
+                .child(self.hint(self.l(if on { "Mikrofon an" } else { "Mikrofon aus" })));
+        }
+        if let Some(on) = p.call_camera {
+            details = details
+                .child(self.scaled_icon(if on { "video" } else { "video-off" }, 14., t.muted))
+                .child(self.hint(self.l(if on { "Kamera an" } else { "Kamera aus" })));
+        }
+        let mut text = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_ellipsis()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(p.name.as_str().to_owned()),
+            )
+            .child(details);
+        if let Some(status) = call
+            .mute_status
+            .filter(|status| status.target == p.local_id)
+        {
+            use talk_core::ui::presentation::CallRingOutcome;
+            text = text.child(self.hint(self.l(match status.outcome {
+                CallRingOutcome::Pending => "Stummschaltung wird angefragt …",
+                CallRingOutcome::Requested => "Stummschaltung angefragt",
+                CallRingOutcome::Failed => "Stummschaltung nicht möglich",
+            })));
+        }
         let mut row = div()
             .flex()
             .items_center()
@@ -258,39 +301,7 @@ impl Desktop {
             .border_b_1()
             .border_color(t.border)
             .child(self.person_avatar(p.initials.as_str(), 36.))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_ellipsis()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(p.name.as_str().to_owned()),
-            )
-            .when(p.speaking, |row| row.child(self.hint(self.l("Spricht"))))
-            .when(p.raised_hand, |row| {
-                row.child(self.hint(self.l("Hand gehoben")))
-            });
-        if let Some(on) = p.call_microphone {
-            row = row
-                .child(self.scaled_icon(if on { "mic" } else { "mic-off" }, 16., t.muted))
-                .child(self.hint(self.l(if on { "Mikrofon an" } else { "Mikrofon aus" })));
-        }
-        if let Some(on) = p.call_camera {
-            row = row
-                .child(self.scaled_icon(if on { "video" } else { "video-off" }, 16., t.muted))
-                .child(self.hint(self.l(if on { "Kamera an" } else { "Kamera aus" })));
-        }
-        if let Some(status) = call
-            .mute_status
-            .filter(|status| status.target == p.local_id)
-        {
-            use talk_core::ui::presentation::CallRingOutcome;
-            row = row.child(self.hint(self.l(match status.outcome {
-                CallRingOutcome::Pending => "Stummschaltung wird angefragt …",
-                CallRingOutcome::Requested => "Stummschaltung angefragt",
-                CallRingOutcome::Failed => "Stummschaltung nicht möglich",
-            })));
-        }
+            .child(text);
         if p.call_can_mute {
             row = row.child(self.icon_button(
                 gpui::SharedString::from(format!("mute-call-{}", p.local_id)),
