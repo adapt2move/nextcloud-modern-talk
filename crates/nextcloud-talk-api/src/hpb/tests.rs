@@ -621,9 +621,10 @@ fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
     for i in 0..20 {
         room.push_activity(peer(&format!("peer-{i}")), Activity::Reaction("👍".into()));
     }
-    for _ in 0..84 {
-        let _ = room.push(Event::PolicyChanged);
+    for _ in 0..83 {
+        room.push(Event::PolicyChanged).unwrap();
     }
+    assert!(!room.cancellation.is_cancelled());
     assert!(
         room.signals
             .iter()

@@ -1971,6 +1971,49 @@ impl Desktop {
             self.freeze_for_update(window, cx);
             cx.notify();
             cx.stop_propagation();
+        } else if self.overlay.is_none()
+            && self.prejoin.is_none()
+            && !self.incoming_visible()
+            && !self.text_input_focused(window, cx)
+            && registry_modifiers == Some(Modifiers::None)
+            && matches!(key.as_str(), "m" | "v")
+            && self.snapshot.call.as_ref().is_some_and(|call| {
+                self.call_minimized != Some(call.scope)
+                    && matches!(
+                        call.stage,
+                        CallStage::Active | CallStage::Connecting | CallStage::Reconnecting
+                    )
+            })
+        {
+            if let Some(call) = self.snapshot.call.as_ref() {
+                let scope = call.scope;
+                let state = if key == "m" {
+                    call.microphone
+                } else {
+                    call.camera
+                };
+                if matches!(
+                    state,
+                    talk_core::ui::presentation::MediaState::Off
+                        | talk_core::ui::presentation::MediaState::Active
+                        | talk_core::ui::presentation::MediaState::Requested
+                ) {
+                    let enabled = state == talk_core::ui::presentation::MediaState::Off;
+                    let intent = if key == "m" {
+                        UiIntent::SetMicrophone {
+                            call: scope,
+                            enabled,
+                        }
+                    } else {
+                        UiIntent::SetCamera {
+                            call: scope,
+                            enabled,
+                        }
+                    };
+                    self.handle(LocalAction::Intent(intent), window, cx);
+                    cx.stop_propagation();
+                }
+            }
         } else if matches!(
             action,
             Some(ActionId::NextControl | ActionId::PreviousControl)
@@ -2085,6 +2128,23 @@ impl Desktop {
         {
             input.update(cx, |input, _| input.interactive = false);
         }
+    }
+    fn text_input_focused(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.message_ui.search,
+            &self.message_ui.time_input,
+        ]
+        .into_iter()
+        .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
+        .any(|input| input.focus_handle(cx).is_focused(window))
     }
     fn input_composing(&self, cx: &App) -> bool {
         [

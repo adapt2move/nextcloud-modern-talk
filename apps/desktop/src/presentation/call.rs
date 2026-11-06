@@ -641,14 +641,23 @@ impl Desktop {
                             id,
                             (symbol, label),
                             ButtonStyle::Stage,
-                            Availability::when(
-                                matches!(
-                                    state,
-                                    MediaState::Off | MediaState::Active | MediaState::Requested
-                                ),
-                                media_reason(state),
-                            )
-                            .labelled(),
+                            {
+                                let availability = Availability::when(
+                                    matches!(
+                                        state,
+                                        MediaState::Off
+                                            | MediaState::Active
+                                            | MediaState::Requested
+                                    ),
+                                    media_reason(state),
+                                )
+                                .labelled();
+                                match id {
+                                    "microphone" => availability.help("Tastenkürzel: M"),
+                                    "camera" => availability.help("Tastenkürzel: V"),
+                                    _ => availability,
+                                }
+                            },
                             action,
                             cx,
                         )

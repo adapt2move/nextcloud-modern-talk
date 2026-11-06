@@ -45,6 +45,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Raster", "Gallery", "Galería"),
     (
+        "Tastenkürzel: M",
+        "Keyboard shortcut: M",
+        "Atajo de teclado: M",
+    ),
+    (
+        "Tastenkürzel: V",
+        "Keyboard shortcut: V",
+        "Atajo de teclado: V",
+    ),
+    (
         "Vollbild umschalten",
         "Toggle fullscreen",
         "Alternar pantalla completa",
