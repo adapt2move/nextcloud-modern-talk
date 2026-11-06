@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Real macOS signing contract: two app versions, one disposable internal signer.
 
-Does not run the app, request OS permissions, install trust or change the default
-keychain. It proves native import/sealing/requirement continuity, not TCC behavior.
+Does not run the app, request OS permissions or change the default keychain.
+Only the newly generated fixture certificate can receive temporary user-level
+code-signing trust; teardown removes it. This does not qualify TCC behavior.
 """
 import base64
 import importlib.util
@@ -42,11 +43,20 @@ def check():
         os.environ.update({"MACOS_CERTIFICATE_P12_BASE64": base64.b64encode((backup / "identity.p12").read_bytes()).decode(),
             "MACOS_CERTIFICATE_PASSWORD": (backup / "password").read_text(), "MACOS_SIGNING_MODE": "internal",
             "MACOS_SIGNING_CERTIFICATE": fingerprint, "MACOS_SIGNING_TEAM": "", "GITHUB_ENV": str(root / "env")})
+        trusted = False
         try:
             ci.prepare()
             for line in (root / "env").read_text().splitlines():
                 name, value = line.split("=", 1)
                 os.environ[name] = value
+            valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
+            print("Fixture identity valid for code signing before trust: " + str(fingerprint in valid), flush=True)
+            if fingerprint not in valid:
+                ci.run(["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign",
+                    "-k", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"], str(backup / "certificate.pem")])
+                trusted = True
+                valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
+                print("Fixture identity valid for code signing after scoped trust: " + str(fingerprint in valid), flush=True)
             requirements = []
             for version in (1, 2):
                 app = root / ("Version" + str(version) + ".app")
@@ -72,6 +82,8 @@ def check():
             if requirements[0] != requirements[1]:
                 raise ValueError("The designated requirement changed between application versions")
         finally:
+            if trusted:
+                ci.run(["security", "remove-trusted-cert", str(backup / "certificate.pem")])
             if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
                 ci.cleanup(Path(directory))
             for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):

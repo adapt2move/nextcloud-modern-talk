@@ -5,6 +5,9 @@ Pushes to `main` and manual runs on `main` also run Windows and macOS. Manual ru
 on other branches run Linux only by default. An explicit manual `signing_probe`
 run checks only a disposable macOS signing identity on the selected ref. It does
 not use release credentials or run the application, and does not replace full CI.
+The probe may temporarily trust its newly generated fixture certificate for code
+signing in the disposable runner user's trust domain, then removes that entry.
+It installs no TLS/system trust and does not affect end-user Macs.
 
 | Job | Runner | Work |
 | --- | --- | --- |
