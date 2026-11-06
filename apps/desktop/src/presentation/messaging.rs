@@ -79,6 +79,7 @@ pub(super) struct MessageUi {
     failed_selection: Option<(ConversationRef, u128)>,
     history: Rc<RefCell<history::History>>,
     last_read: Option<(ConversationRef, u128)>,
+    unread_hold: Option<(ConversationRef, RequestId)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
     pub time_input: Entity<TextInput>,
@@ -253,6 +254,7 @@ impl MessageUi {
             failed_selection: None,
             history: Rc::new(RefCell::new(history::History::default())),
             last_read: None,
+            unread_hold: None,
             last_located: None,
             time_target: None,
             time_input: cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx)),
@@ -421,6 +423,7 @@ impl Desktop {
             self.message_ui.geometry.borrow_mut().visible_read = None;
         }
         if self.message_ui.context != self.snapshot.selected {
+            self.message_ui.unread_hold = None;
             self.message_ui.arrival.borrow_mut().reset();
             *self.message_ui.geometry.borrow_mut() = MessageGeometry::default();
             *self.message_ui.history.borrow_mut() = history::History::default();
@@ -559,6 +562,12 @@ impl Desktop {
             .filter(|p| Some(p.context) == self.snapshot.selected)
             .and_then(|p| p.result)
         {
+            if self.message_ui.unread_hold.is_some_and(|(context, pending)| {
+                Some(context) == self.snapshot.selected && pending == request
+            }) && matches!(completion, Completion::Failed(_))
+            {
+                self.message_ui.unread_hold = None;
+            }
             if self.message_ui.reaction_request == Some(request) {
                 self.message_ui.reaction_request = None;
             }
@@ -656,6 +665,9 @@ impl Desktop {
         self.snapshot.selected
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
+        if self.message_ui.unread_hold.is_some_and(|(room, _)| room == context) {
+            return;
+        }
         if !self.snapshot.message_panel.as_ref().is_some_and(|p| {
             p.context == context && p.availability(MessageFeature::ReadReceipts).enabled()
         }) {
@@ -855,6 +867,7 @@ impl Desktop {
     }
     pub(super) fn submit_message(&mut self, action: MessageAction) -> Option<RequestId> {
         let context = self.snapshot.selected?;
+        let mark_unread = matches!(action, MessageAction::MarkUnread);
         let pin_intent = match &action {
             MessageAction::Pin(id) => Some((*id, true)),
             MessageAction::Unpin(id) => Some((*id, false)),
@@ -868,6 +881,9 @@ impl Desktop {
             context,
             action,
         }) {
+            if mark_unread {
+                self.message_ui.unread_hold = Some((context, request));
+            }
             if let Some((source, pin)) = pin_intent {
                 self.admit_pin_intent(context, request, source, pin);
             }
@@ -2288,6 +2304,7 @@ fn action_notice(action: &MessageAction) -> Option<Option<&'static str>> {
         MessageAction::Pin(_)
         | MessageAction::Unpin(_)
         | MessageAction::Delete(_)
+        | MessageAction::MarkUnread
         | MessageAction::React { .. }
         | MessageAction::ShareUpload { .. } => None,
         MessageAction::Forward { .. } => Some("Nachricht weitergeleitet."),

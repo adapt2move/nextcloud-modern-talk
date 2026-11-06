@@ -815,8 +815,34 @@ impl Desktop {
         // the top-level gutter; stacked container/row insets waste that space.
         div()
             .flex_none()
+            .flex()
+            .items_center()
             .when(namespace == "room", |d| d.pl(px(4.)))
-            .child(control)
+            .child(control.flex_1().min_w_0())
+            .when(
+                selected
+                    && self.message_feature_enabled(
+                        talk_core::ui::messaging::MessageFeature::MarkUnread,
+                    ),
+                |row| {
+                    row.child(
+                        self.icon_button(
+                            scoped_id("room-mark-unread", context, 0, 0),
+                            ("inbox", "Gespräch als ungelesen markieren"),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::MessageIn(
+                                context,
+                                super::messaging::Action::Command(
+                                    talk_core::ui::messaging::MessageAction::MarkUnread,
+                                ),
+                            ),
+                            cx,
+                        )
+                        .size(px(28.)),
+                    )
+                },
+            )
     }
 
     pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {

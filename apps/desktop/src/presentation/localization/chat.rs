@@ -1,11 +1,6 @@
 //! Chat controls and native picker guidance; never user content.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
-        "Gespräch als ungelesen markieren",
-        "Mark conversation as unread",
-        "Marcar conversación como no leída",
-    ),
-    (
         "Als Entwurf bearbeiten",
         "Edit as draft",
         "Editar como borrador",
@@ -175,6 +170,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Geplante Nachricht entfernt.",
         "Scheduled message removed.",
         "Mensaje programado eliminado.",
+    ),
+    (
+        "Gespräch als ungelesen markieren",
+        "Mark conversation as unread",
+        "Marcar conversación como no leída",
     ),
     (
         "Gesprächssuche schließen",

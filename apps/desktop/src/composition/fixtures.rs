@@ -1656,6 +1656,17 @@ impl NativeDesktopPort for DevelopmentPort {
                     .as_mut()
                     .ok_or(SubmitError::StaleScope)?;
                 match action {
+                    MessageAction::MarkUnread => {
+                        panel.result = Some((request, Completion::ServerAccepted));
+                        self.snapshot.conversations = page(
+                            self.snapshot.conversations.as_slice().iter().cloned().map(|mut row| {
+                                if row.context == context {
+                                    row.unread = row.unread.max(1);
+                                }
+                                row
+                            }),
+                        );
+                    }
                     MessageAction::StageFiles(paths) => {
                         use talk_core::ui::messaging::{UploadState, UploadView};
                         let mut uploads = panel.uploads.as_slice().to_vec();
