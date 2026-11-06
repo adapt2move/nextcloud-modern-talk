@@ -55,6 +55,10 @@ class MacRuntimeTests(unittest.TestCase):
         self.assertEqual(len(declared), len(set(declared)))
         required = {f"lib/gstreamer-1.0/libgst{name}.dylib" for name in runtime.PLUGINS}
         self.assertTrue(required <= set(declared), sorted(required - set(declared)))
+        self.assertIn("wavparse", runtime.PLUGINS.get("wavparse", []),
+                      "the recorder's WAV output must be playable in the bundled runtime")
+        self.assertIn("oggdemux", runtime.PLUGINS.get("ogg", []))
+        self.assertIn("vorbisdec", runtime.PLUGINS.get("vorbis", []))
         # The attachment player selects local native/LGPL codec branches. An
         # SDK's incidental GPL decoder or network/autoplug plugin is not consent
         # to redistribute or use it in the account-bound content owner.
