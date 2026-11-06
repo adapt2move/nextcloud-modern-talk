@@ -167,6 +167,7 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         self_user: me,
         raised_hand: false,
         speaking: false,
+        call_can_mute: false,
         call_microphone: None,
         call_camera: None,
     }
@@ -912,6 +913,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 Page::empty()
             },
             ring_status: None,
+            mute_status: None,
             can_end_everyone: scenario == "call-end-confirm",
             end_pending: false,
             end_failed: false,
@@ -930,6 +932,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     people[0].call_camera = Some(false);
                     people[1].call_microphone = Some(true);
                     people[1].speaking = true;
+                    people[1].call_can_mute = scenario == "call-participants-raised";
                     people[1].call_camera = Some(false);
                     people[3].raised_hand = true;
                     people.extend([
@@ -1928,6 +1931,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     invitees_loaded: false,
                     invitees: Page::empty(),
                     ring_status: None,
+                    mute_status: None,
                     can_end_everyone: false,
                     end_pending: false,
                     end_failed: false,
@@ -1946,6 +1950,25 @@ impl NativeDesktopPort for DevelopmentPort {
                     .filter(|view| view.scope == call && view.can_end_everyone)
                     .ok_or(SubmitError::StaleScope)?;
                 view.end_pending = true;
+            }
+            UiIntent::MuteCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .participants
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.call_can_mute)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.mute_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
+                });
             }
             UiIntent::RingCallParticipant { call, target } => {
                 let view = self

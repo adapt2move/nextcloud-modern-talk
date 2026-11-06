@@ -21,6 +21,7 @@ pub(crate) struct Bundle {
     pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
     pub ring_supported: bool,
     pub end_supported: bool,
+    pub mute_supported: bool,
 }
 pub(crate) struct Invitee {
     pub attendee: u64,
@@ -334,6 +335,10 @@ impl Sources {
             settings,
             peers,
             invitees,
+            mute_supported: has("force-mute")
+                && matches!(r.participant_type, Some(1 | 2))
+                && r.has_call == Some(true)
+                && connected,
             end_supported: matches!(r.participant_type, Some(1 | 2 | 6))
                 && r.object_type.as_deref() != Some("room")
                 && r.has_call == Some(true)

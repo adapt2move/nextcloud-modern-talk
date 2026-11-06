@@ -7,11 +7,19 @@ use talk_core::lifecycle::Cancellation;
 use tokio::sync::mpsc;
 
 pub(super) enum Request {
-    Ring { target: u128, attendee: u64 },
+    Ring {
+        target: u128,
+        attendee: u64,
+    },
+    Mute {
+        target: u128,
+        peer: nextcloud_talk_api::signaling::PeerSession,
+    },
     EndEveryone,
 }
 pub(super) enum Result {
     Ring { target: u128, accepted: bool },
+    Mute { target: u128, accepted: bool },
     EndEveryone { accepted: bool },
 }
 
@@ -35,6 +43,10 @@ pub(super) async fn run(
             Request::Ring { target, attendee } => Result::Ring {
                 target,
                 accepted: writer.ring(&ctx, attendee).await.is_ok(),
+            },
+            Request::Mute { target, peer } => Result::Mute {
+                target,
+                accepted: writer.mute_participant(&ctx, &peer).await.is_ok(),
             },
             Request::EndEveryone => Result::EndEveryone {
                 accepted: writer.end_for_everyone(&ctx).await.is_ok(),

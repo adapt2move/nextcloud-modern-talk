@@ -62,7 +62,7 @@ impl Desktop {
                             .iter()
                             .filter(|p| p.raised_hand == raised)
                         {
-                            body = body.child(self.call_participant_row(p));
+                            body = body.child(self.call_participant_row(p, call, cx));
                         }
                     }
                     if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
@@ -243,7 +243,12 @@ impl Desktop {
                 ),
             )
     }
-    fn call_participant_row(&self, p: &ParticipantView) -> Div {
+    fn call_participant_row(
+        &self,
+        p: &ParticipantView,
+        call: &talk_core::ui::presentation::CallView,
+        cx: &Context<Self>,
+    ) -> Div {
         let t = self.theme;
         let mut row = div()
             .flex()
@@ -274,6 +279,30 @@ impl Desktop {
             row = row
                 .child(self.scaled_icon(if on { "video" } else { "video-off" }, 16., t.muted))
                 .child(self.hint(self.l(if on { "Kamera an" } else { "Kamera aus" })));
+        }
+        if let Some(status) = call
+            .mute_status
+            .filter(|status| status.target == p.local_id)
+        {
+            use talk_core::ui::presentation::CallRingOutcome;
+            row = row.child(self.hint(self.l(match status.outcome {
+                CallRingOutcome::Pending => "Stummschaltung wird angefragt …",
+                CallRingOutcome::Requested => "Stummschaltung angefragt",
+                CallRingOutcome::Failed => "Stummschaltung nicht möglich",
+            })));
+        }
+        if p.call_can_mute {
+            row = row.child(self.icon_button(
+                gpui::SharedString::from(format!("mute-call-{}", p.local_id)),
+                ("mic-off", "Person stummschalten"),
+                ButtonStyle::Quiet,
+                Availability::available().hinted(),
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::MuteCallParticipant {
+                    call: call.scope,
+                    target: p.local_id,
+                }),
+                cx,
+            ));
         }
         row
     }

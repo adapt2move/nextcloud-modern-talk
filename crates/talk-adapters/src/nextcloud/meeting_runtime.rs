@@ -188,6 +188,7 @@ impl LiveCall {
             invitees_loaded: false,
             invitees: talk_core::bounded::Page::empty(),
             ring_status: None,
+            mute_status: None,
             can_end_everyone: false,
             end_pending: false,
             end_failed: false,
@@ -657,6 +658,7 @@ async fn media_loop(
     let mut latest_reaction: Option<calls::CallReaction> = None;
     let mut last_reaction: Option<Instant> = None;
     let mut ring_status: Option<calls::CallRingStatus> = None;
+    let mut mute_status: Option<calls::CallRingStatus> = None;
     let mut end_pending = false;
     let mut end_failed = false;
     let mut refreshes = 1u64;
@@ -670,8 +672,22 @@ async fn media_loop(
                     Command::Change { wishes, .. } if !end_pending => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
                     }
+                    Command::MuteParticipant { target, .. } if transport_ready && received_policy >= required_policy && bundle.mute_supported
+                        && call.phase() == Phase::Active && !end_pending
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if let Some(peer) = peers.iter().find(|peer| peer.local == target && peer.role != Role::Publisher)
+                            && bundle.peers.iter().any(|source| source.session == peer.session && source.microphone) {
+                            let outcome = if ring_tx.try_send(moderation::Request::Mute { target, peer: peer.session.clone() }).is_ok() {
+                                calls::RingOutcome::Pending
+                            } else { calls::RingOutcome::Failed };
+                            mute_status = Some(calls::CallRingStatus { target, outcome });
+                        }
+                    }
                     Command::Ring { target, .. } if transport_ready && received_policy >= required_policy && bundle.ring_supported
-                        && call.phase() == Phase::Active && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        && call.phase() == Phase::Active && !end_pending
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
                         if let Some((attendee, _)) = invitee_ids.iter().find(|(_, local)| *local == target)
                             && bundle.invitees.iter().any(|person| person.attendee == *attendee && person.ring_eligible) {
                             let outcome = if ring_tx.try_send(moderation::Request::Ring { target, attendee: *attendee }).is_ok() {
@@ -734,6 +750,12 @@ async fn media_loop(
                     moderation::Result::Ring { target, accepted } => {
                         if ring_status.is_some_and(|status| status.target == target && status.outcome == calls::RingOutcome::Pending) {
                             ring_status = Some(calls::CallRingStatus { target,
+                                outcome: if accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
+                        }
+                    }
+                    moderation::Result::Mute { target, accepted } => {
+                        if mute_status.is_some_and(|status| status.target == target && status.outcome == calls::RingOutcome::Pending) {
+                            mute_status = Some(calls::CallRingStatus { target,
                                 outcome: if accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
                         }
                     }
@@ -977,6 +999,9 @@ async fn media_loop(
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
                     participants.try_push(calls::Participant {
                         local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: peer.raised_hand.raised(), speaking: peer.speaking.active(Instant::now()),
+                        can_mute: policy_ready && bundle.mute_supported && source.microphone && !end_pending
+                            && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                            && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending),
                     }).map_err(|_| ())?;
                 }
             }
@@ -995,7 +1020,8 @@ async fn media_loop(
                         invitee_ids.push((person.attendee, local));
                         local
                     };
-                    let _ = invitees.try_push(calls::CallInvitee { local, ring_allowed: bundle.ring_supported && person.ring_eligible
+                    let _ = invitees.try_push(calls::CallInvitee { local, ring_allowed: bundle.ring_supported && person.ring_eligible && !end_pending
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
                         && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending), name: person.name.clone() });
                 }
             } else {
@@ -1027,6 +1053,7 @@ async fn media_loop(
                 snapshot.invitees_loaded = policy_ready;
                 snapshot.invitees = invitees;
                 snapshot.ring_status = ring_status;
+                snapshot.mute_status = mute_status;
                 snapshot.can_end_everyone = policy_ready && bundle.end_supported && call.phase() == Phase::Active && !end_failed;
                 snapshot.end_pending = end_pending;
                 snapshot.end_failed = end_failed;

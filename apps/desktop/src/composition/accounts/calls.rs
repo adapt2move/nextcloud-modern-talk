@@ -442,6 +442,29 @@ impl Accounts {
                         wishes: ui.wishes,
                     }
                 }
+                UiIntent::MuteCallParticipant { call, target } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || !view
+                            .participants
+                            .as_slice()
+                            .iter()
+                            .any(|person| person.local_id == *target && person.call_can_mute)
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::MuteParticipant {
+                        call: *call,
+                        target: *target,
+                    }
+                }
                 UiIntent::EndCallForEveryone(call) => {
                     let view = self
                         .snapshot
@@ -588,6 +611,7 @@ impl Accounts {
                 | UiIntent::DeclineDirect(_)
                 | UiIntent::SetMicrophone { .. }
                 | UiIntent::SetCamera { .. }
+                | UiIntent::MuteCallParticipant { .. }
                 | UiIntent::EndCallForEveryone(_)
                 | UiIntent::RingCallParticipant { .. }
                 | UiIntent::SetCallHand { .. }
@@ -689,6 +713,7 @@ impl Accounts {
             invitees_loaded: false,
             invitees: Page::empty(),
             ring_status: None,
+            mute_status: None,
             can_end_everyone: false,
             end_pending: false,
             end_failed: false,
@@ -911,6 +936,22 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     }
                 },
             }),
+        mute_status: value
+            .mute_status
+            .map(|status| talk_core::ui::presentation::CallRingStatus {
+                target: status.target,
+                outcome: match status.outcome {
+                    talk_core::calls::RingOutcome::Pending => {
+                        talk_core::ui::presentation::CallRingOutcome::Pending
+                    }
+                    talk_core::calls::RingOutcome::Requested => {
+                        talk_core::ui::presentation::CallRingOutcome::Requested
+                    }
+                    talk_core::calls::RingOutcome::Failed => {
+                        talk_core::ui::presentation::CallRingOutcome::Failed
+                    }
+                },
+            }),
         can_end_everyone: value.can_end_everyone,
         end_pending: value.end_pending,
         end_failed: value.end_failed,
@@ -928,6 +969,7 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     self_user: false,
                     raised_hand: p.raised_hand,
                     speaking: p.speaking,
+                    call_can_mute: p.can_mute,
                     call_microphone: Some(p.microphone),
                     call_camera: Some(p.camera),
                 }),
@@ -976,6 +1018,7 @@ mod action_tests {
                 invitees_loaded: false,
                 invitees: Page::empty(),
                 ring_status: None,
+                mute_status: None,
                 can_end_everyone: false,
                 end_pending: false,
                 end_failed: false,

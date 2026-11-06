@@ -425,6 +425,10 @@ pub enum Command {
         call: CallScope,
         target: u128,
     },
+    MuteParticipant {
+        call: CallScope,
+        target: u128,
+    },
     EndEveryone(CallScope),
     Consent(CallScope),
     Reconnect(CallScope),
@@ -438,7 +442,8 @@ impl Command {
             | Self::Change { call, .. }
             | Self::SetHand { call, .. }
             | Self::React { call, .. }
-            | Self::Ring { call, .. } => *call,
+            | Self::Ring { call, .. }
+            | Self::MuteParticipant { call, .. } => *call,
             Self::Consent(call)
             | Self::EndEveryone(call)
             | Self::Reconnect(call)
@@ -483,6 +488,7 @@ pub struct Snapshot {
     pub invitees_loaded: bool,
     pub invitees: crate::bounded::Page<CallInvitee, 100>,
     pub ring_status: Option<CallRingStatus>,
+    pub mute_status: Option<CallRingStatus>,
     pub can_end_everyone: bool,
     pub end_pending: bool,
     pub end_failed: bool,
@@ -526,6 +532,7 @@ pub struct Participant {
     pub camera: bool,
     pub raised_hand: bool,
     pub speaking: bool,
+    pub can_mute: bool,
 }
 
 #[cfg(test)]

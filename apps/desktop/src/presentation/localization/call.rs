@@ -104,9 +104,29 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Focus participant",
         "Destacar participante",
     ),
+    (
+        "Person stummschalten",
+        "Mute participant",
+        "Silenciar participante",
+    ),
     ("Raster", "Gallery", "Galería"),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
     ("Spricht", "Speaking", "Hablando"),
+    (
+        "Stummschaltung angefragt",
+        "Mute requested",
+        "Silencio solicitado",
+    ),
+    (
+        "Stummschaltung nicht möglich",
+        "Unable to request mute",
+        "No se puede solicitar el silencio",
+    ),
+    (
+        "Stummschaltung wird angefragt …",
+        "Requesting mute…",
+        "Solicitando silencio…",
+    ),
     (
         "Tastenkürzel: H",
         "Keyboard shortcut: H",

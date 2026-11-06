@@ -413,6 +413,7 @@ pub struct ParticipantView {
     pub raised_hand: bool,
     /// Recent decoded audio exceeds the local indication threshold.
     pub speaking: bool,
+    pub call_can_mute: bool,
     /// Last observed call flags, absent outside the call projection.
     pub call_microphone: Option<bool>,
     pub call_camera: Option<bool>,
@@ -527,6 +528,7 @@ pub struct CallView {
     pub invitees_loaded: bool,
     pub invitees: Page<CallInviteeView, 100>,
     pub ring_status: Option<CallRingStatus>,
+    pub mute_status: Option<CallRingStatus>,
     pub can_end_everyone: bool,
     pub end_pending: bool,
     pub end_failed: bool,
@@ -769,6 +771,10 @@ pub enum UiIntent {
         enabled: bool,
     },
     EndCallForEveryone(CallScope),
+    MuteCallParticipant {
+        call: CallScope,
+        target: u128,
+    },
     RingCallParticipant {
         call: CallScope,
         target: u128,

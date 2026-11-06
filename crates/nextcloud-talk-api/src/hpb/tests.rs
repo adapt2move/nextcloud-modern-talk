@@ -325,7 +325,7 @@ fn mapped_identity_cannot_change_and_media_queue_overflow_closes_route() {
     );
     let mut state = shared.state.lock().unwrap();
     let room = state.room.as_mut().unwrap();
-    for _ in 0..82 {
+    for _ in 0..83 {
         room.push(Event::PolicyChanged).unwrap();
     }
     assert_eq!(room.push(Event::PolicyChanged), Err(ErrorKind::Busy));
@@ -651,7 +651,7 @@ fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
     for i in 0..20 {
         room.push_activity(peer(&format!("peer-{i}")), Activity::Reaction("👍".into()));
     }
-    for _ in 0..83 {
+    for _ in 0..82 {
         room.push(Event::PolicyChanged).unwrap();
     }
     assert!(!room.cancellation.is_cancelled());
