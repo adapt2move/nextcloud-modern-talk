@@ -575,6 +575,14 @@ impl Desktop {
                             .focus(|style| style.opacity(1.)),
                         ),
                 );
+            let tile = self.reveal(
+                gpui::SharedString::from(format!(
+                    "call-tile-{}-{}",
+                    call.scope.call.as_local(),
+                    participant.local_id
+                )),
+                tile,
+            );
             if focused == Some(participant.local_id) {
                 feature = Some(tile);
             } else {
