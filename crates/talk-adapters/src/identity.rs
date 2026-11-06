@@ -20,7 +20,8 @@ pub use data::{
     CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory, CacheRoom, CacheRoomObservation,
     CacheThumbnail, CachedAttachment, CachedMessage, CachedNotificationLevel, CachedReaction,
     CachedReply, CachedRoomKind, DataCommand, DataError, DataResult, DataSnapshot, OUTBOX_LIMIT,
-    OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxRecord,
+    OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxPrivateReply,
+    OutboxRecord,
 };
 pub use error::{IdentityError, ProfileFailure};
 pub use runtime::{

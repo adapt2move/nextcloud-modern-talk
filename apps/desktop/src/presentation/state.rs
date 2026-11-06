@@ -567,7 +567,7 @@ impl Drafts {
                 // Never erase text the user changed while the operation was in flight.
                 if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
-                    if draft.target.reply_to.is_some() {
+                    if draft.target.reply_to.is_some() || draft.target.private_reply.is_some() {
                         completed_reply = Some((draft.context, draft.target.clone()));
                     }
                 }
@@ -594,6 +594,7 @@ impl Drafts {
                 // A quote belongs to one submission. Keep the current thread
                 // and delivery option, without retiring a newer reply target.
                 target.reply_to = None;
+                target.private_reply = None;
                 self.set_target(context, target);
             }
         }
@@ -738,7 +739,10 @@ fn same_draft_target(
     a: &talk_core::ui::messaging::ComposeTarget,
     b: &talk_core::ui::messaging::ComposeTarget,
 ) -> bool {
-    a.reply_to == b.reply_to && a.thread == b.thread
+    a.reply_to == b.reply_to
+        && a.thread == b.thread
+        && a.private_reply.as_ref().map(|p| (&p.source, p.message))
+            == b.private_reply.as_ref().map(|p| (&p.source, p.message))
 }
 
 pub(super) fn cached_draft_context(

@@ -2133,6 +2133,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
     Some(match f {
         W::React => V::React,
         W::Reply => V::Reply,
+        W::PrivateReply => V::PrivateReply,
         W::Edit => V::Edit,
         W::Delete => V::Delete,
         W::Threads => V::Threads,

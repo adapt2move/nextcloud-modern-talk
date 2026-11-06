@@ -20,7 +20,7 @@ use talk_core::{
 mod codec;
 mod intent;
 mod thumbnails;
-pub use intent::{OutboxIntent, OutboxOptions};
+pub use intent::{OutboxIntent, OutboxOptions, OutboxPrivateReply};
 
 pub const CACHE_ROOM_LIMIT: usize = 100;
 pub const CACHE_HISTORY_LIMIT: usize = 8;

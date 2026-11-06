@@ -9,6 +9,7 @@ fn queued(now: Instant) -> QueuedSend {
             reply_to: Some(7),
             thread: Some(3),
             silent: true,
+            private_reply: None,
         },
         deadline: now + Duration::from_secs(10),
     }

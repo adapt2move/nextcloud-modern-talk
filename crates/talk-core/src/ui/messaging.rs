@@ -7,6 +7,7 @@ use super::{Decision, Page, Text, UnavailableReason};
 pub enum MessageFeature {
     React,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     Threads,
@@ -347,8 +348,17 @@ impl MessagePanel {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeTarget {
     pub reply_to: Option<u128>,
+    pub private_reply: Option<PrivateReplyTarget>,
     pub thread: Option<u128>,
     pub silent: bool,
+}
+/// Displayed quote and durable lookup key; neither grants access to the source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateReplyTarget {
+    pub source: crate::preferences::navigation::NavigationRoomKey,
+    pub message: u128,
+    pub author: Text<128>,
+    pub body: Text<512>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {

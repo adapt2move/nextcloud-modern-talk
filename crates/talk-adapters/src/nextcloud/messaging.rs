@@ -82,6 +82,7 @@ fn support(f: MessagingFeature) -> &'static str {
     match f {
         F::Read | F::Send | F::Mentions => "chat-v2",
         F::Reply => "chat-replies",
+        F::PrivateReply => "private-reply",
         F::Edit => "edit-messages",
         F::Delete => "delete-messages",
         F::React => "react-permission",
@@ -110,8 +111,18 @@ fn availability(
     use MessagingFeature as F;
     let allowed = if room.unknown_restrictions {
         Decision::Unknown
-    } else if matches!(f, F::Forward | F::Translation | F::Summary) && room.classified {
+    } else if matches!(
+        f,
+        F::Forward | F::PrivateReply | F::Translation | F::Summary
+    ) && room.classified
+    {
         Decision::Denied
+    } else if f == F::PrivateReply {
+        if matches!(room.kind, RoomKind::Group | RoomKind::Public) && caps.has("chat-get-context") {
+            room.actions.read_messages
+        } else {
+            Decision::Denied
+        }
     } else if f == F::React {
         if room.actions.read_messages == Decision::Allowed
             && wire::integer(data.get("permissions")).is_some_and(|p| p & 256 != 0)
@@ -251,6 +262,7 @@ impl NextcloudClient {
             F::Read,
             F::Send,
             F::Reply,
+            F::PrivateReply,
             F::Edit,
             F::Delete,
             F::React,

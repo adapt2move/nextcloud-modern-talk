@@ -6,7 +6,7 @@ mod tests;
 use super::*;
 use talk_adapters::identity::{
     DataCommand, DataResult, OutboxEntry, OutboxIntent as Intent, OutboxOptions, OutboxPhase,
-    OutboxRecord,
+    OutboxPrivateReply, OutboxRecord,
 };
 use talk_core::preferences::navigation::NavigationRoomKey;
 use talk_core::protocol::messaging as wire;
@@ -397,7 +397,16 @@ impl Accounts {
             }
             let intent = converted?;
             let room = stable;
-            let durable = self.cache.persistable(context);
+            let durable = self.cache.persistable(context)
+                && match &intent {
+                    Intent::Send { options, .. } => {
+                        options.private_reply.as_ref().is_none_or(|p| {
+                            self.outbox_context(context.account.account, &p.source)
+                                .is_some_and(|source| self.cache.persistable(source))
+                        })
+                    }
+                    _ => true,
+                };
             if !durable {
                 self.current(context.account)?;
             }
@@ -489,6 +498,24 @@ impl Accounts {
         let options = |o: &view::ComposeTarget| {
             Ok(OutboxOptions {
                 reply_to: o.reply_to.map(id).transpose()?,
+                private_reply: o
+                    .private_reply
+                    .as_ref()
+                    .map(|private| {
+                        let source = self
+                            .outbox_context(context.account.account, &private.source)
+                            .ok_or(SubmitError::StaleScope)?;
+                        if source.account != context.account || source == context {
+                            return Err(SubmitError::StaleScope);
+                        }
+                        Ok(OutboxPrivateReply {
+                            source: private.source.clone(),
+                            message: id(private.message)?,
+                            author: private.author.clone(),
+                            body: private.body.clone(),
+                        })
+                    })
+                    .transpose()?,
                 thread: o.thread.map(id).transpose()?,
                 silent: o.silent,
             })
@@ -1131,6 +1158,15 @@ fn retain_failure(intent: &Intent) -> bool {
 fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
     let target = |o: &OutboxOptions| view::ComposeTarget {
         reply_to: o.reply_to.map(u128::from),
+        private_reply: o
+            .private_reply
+            .as_ref()
+            .map(|private| view::PrivateReplyTarget {
+                source: private.source.clone(),
+                message: u128::from(private.message),
+                author: private.author.clone(),
+                body: private.body.clone(),
+            }),
         thread: o.thread.map(u128::from),
         silent: o.silent,
     };
@@ -1234,18 +1270,32 @@ fn command(
         conversation: context.conversation,
         sequence,
     };
-    let opts = |o: &OutboxOptions| wire::ComposeOptions {
-        reply_to: o.reply_to.map(mid),
-        private_reply: None,
-        thread: o.thread.map(mid),
-        thread_title: None,
-        silent: o.silent,
+    let opts = |o: &OutboxOptions| {
+        Some(wire::ComposeOptions {
+            reply_to: o.reply_to.map(mid),
+            private_reply: match &o.private_reply {
+                Some(private) => {
+                    let source = resolve(&private.source)?;
+                    if source.account != context.account || source == context {
+                        return None;
+                    }
+                    Some(protocol::MessageId {
+                        conversation: source.conversation,
+                        sequence: private.message,
+                    })
+                }
+                None => None,
+            },
+            thread: o.thread.map(mid),
+            thread_title: None,
+            silent: o.silent,
+        })
     };
     Some(match intent {
         Intent::Send { body, options } => (
             C::Send {
                 text: text(body.as_str()),
-                options: opts(options),
+                options: opts(options)?,
             },
             W::Send,
         ),
@@ -1298,7 +1348,7 @@ fn command(
             C::Schedule {
                 text: text(body.as_str()),
                 send_at: *timestamp,
-                options: opts(options),
+                options: opts(options)?,
             },
             W::Action,
         ),

@@ -96,6 +96,7 @@ pub enum MessagingFeature {
     Read,
     Send,
     Reply,
+    PrivateReply,
     Edit,
     Delete,
     React,

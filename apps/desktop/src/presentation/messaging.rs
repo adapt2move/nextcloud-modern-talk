@@ -1314,6 +1314,7 @@ impl Desktop {
                             reply_to: Some(id),
                             thread: None,
                             silent: false,
+                            private_reply: None,
                         },
                     ) {
                         self.report_draft_error(talk_core::ui::SubmitError::Busy, context);

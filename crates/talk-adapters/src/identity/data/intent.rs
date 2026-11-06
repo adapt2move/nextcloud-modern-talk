@@ -8,8 +8,21 @@ use talk_core::{bounded::Text, ids::OperationId, preferences::navigation::Naviga
 #[serde(deny_unknown_fields)]
 pub struct OutboxOptions {
     pub reply_to: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_reply: Option<OutboxPrivateReply>,
     pub thread: Option<u64>,
     pub silent: bool,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutboxPrivateReply {
+    #[serde(with = "codec::room_key")]
+    pub source: NavigationRoomKey,
+    pub message: u64,
+    #[serde(with = "codec::text")]
+    pub author: Text<128>,
+    #[serde(with = "codec::text")]
+    pub body: Text<512>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -75,14 +88,25 @@ impl OutboxIntent {
         }
     }
     fn valid(&self) -> bool {
-        let options = |o: &OutboxOptions| o.reply_to != Some(0) && o.thread != Some(0);
+        let options = |o: &OutboxOptions| {
+            o.reply_to != Some(0)
+                && o.thread != Some(0)
+                && o.private_reply.as_ref().is_none_or(|private| {
+                    private.message > 0 && o.reply_to.is_none() && o.thread.is_none()
+                })
+        };
         match self {
             Self::Send { body, options: o } => !body.as_str().trim().is_empty() && options(o),
             Self::Schedule {
                 body,
                 timestamp,
                 options: o,
-            } => !body.as_str().trim().is_empty() && *timestamp > 0 && options(o),
+            } => {
+                !body.as_str().trim().is_empty()
+                    && *timestamp > 0
+                    && o.private_reply.is_none()
+                    && options(o)
+            }
             Self::Edit { message, body } => *message > 0 && !body.as_str().trim().is_empty(),
             Self::Reaction { message, emoji, .. } => {
                 *message > 0 && !emoji.as_str().trim().is_empty()
