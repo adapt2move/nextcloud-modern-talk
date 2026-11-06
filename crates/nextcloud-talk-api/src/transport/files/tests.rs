@@ -8,6 +8,59 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
 #[tokio::test]
+async fn existing_file_share_sends_room_path_and_caption() {
+    let server = Server::start(vec![reply(json!({"id": "42"}))]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/Documents/a file.txt").unwrap();
+    let id = owner
+        .share_existing_file(&context(&runtime), &room, &path, "A caption")
+        .await
+        .unwrap();
+    assert_eq!(id, "42");
+    let requests = server.requests();
+    let request = &requests[0];
+    assert!(request.starts_with("POST /ocs/v2.php/apps/files_sharing/api/v1/shares?format=json "));
+    let body = request.split_once("\r\n\r\n").unwrap().1;
+    let form: std::collections::HashMap<_, _> = url::form_urlencoded::parse(body.as_bytes())
+        .into_owned()
+        .collect();
+    assert_eq!(form.get("shareType").map(String::as_str), Some("10"));
+    assert_eq!(form.get("shareWith").map(String::as_str), Some("room1234"));
+    assert_eq!(form.get("path").map(String::as_str), Some("/Documents/a file.txt"));
+    let metadata: serde_json::Value = serde_json::from_str(&form["talkMetaData"]).unwrap();
+    assert_eq!(metadata["caption"], "A caption");
+}
+
+#[tokio::test]
+async fn existing_file_share_rejects_invalid_caption_before_dispatch() {
+    let server = Server::start(vec![]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/file.txt").unwrap();
+    let error = owner
+        .share_existing_file(&context(&runtime), &room, &path, "bad\0caption")
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Malformed);
+    assert_eq!(server.count(), 0);
+}
+
+#[tokio::test]
+async fn existing_file_share_with_missing_id_is_uncertain() {
+    let server = Server::start(vec![reply(json!({}))]).await;
+    let (mut owner, runtime) = client(&server);
+    let room = crate::models::RoomToken::parse("room1234").unwrap();
+    let path = crate::files::FilePath::parse("/file.txt").unwrap();
+    let error = owner
+        .share_existing_file(&context(&runtime), &room, &path, "")
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Uncertain);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
 async fn first_dav_upload_with_stored_body_and_lost_headers_is_uncertain() {
     const CONTENT: &[u8] = b"stored before response loss";
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
