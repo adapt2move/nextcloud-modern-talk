@@ -14,6 +14,7 @@ mod preview;
 mod reads;
 mod removal;
 mod startup;
+mod threads;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -70,6 +71,7 @@ enum Purpose {
     RestoreAutomatic(AccountId),
     Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
+    Threads(AccountScope),
     Mutation(RequestId, ConversationRef),
     Send(RequestId, ConversationRef, OperationId),
     Preferences(AccountScope, PreferenceRequest),
@@ -319,6 +321,10 @@ impl Accounts {
             return;
         }
         self.snapshot.active_account = scope;
+        self.snapshot.threads = talk_core::ui::presentation::ThreadList {
+            account: scope,
+            ..Default::default()
+        };
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -770,6 +776,7 @@ impl Accounts {
             }
             Purpose::Removal(request, account, step) => self.complete_removal(request, account, step, result),
             Purpose::Rooms(scope) => self.complete_rooms(scope, result),
+            Purpose::Threads(scope) => self.complete_threads(scope, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags))) if tags.scope == scope => {
@@ -975,6 +982,7 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::RefreshThreads(scope) => self.refresh_threads(scope)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }

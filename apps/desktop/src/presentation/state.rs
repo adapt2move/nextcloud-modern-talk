@@ -603,6 +603,18 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot
+        .threads
+        .account
+        .is_some_and(|account| Some(account) != snapshot.active_account)
+        || snapshot.threads.entries.as_slice().iter().any(|thread| {
+            Some(thread.context.account) != snapshot.threads.account
+                || !thread.context.is_consistent()
+                || thread.root == 0
+        })
+    {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -834,6 +846,7 @@ mod tests {
             account_removal: None,
             active_account: Some(context.account),
             conversations: test_page([row]),
+            threads: Default::default(),
             conversation_list: ConversationListState {
                 content: ContentState::Ready,
                 complete: true,

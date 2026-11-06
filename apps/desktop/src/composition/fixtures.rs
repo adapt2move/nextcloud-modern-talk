@@ -50,6 +50,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux-call",
     "chat-edit",
     "thread-error",
+    "thread-list",
     "chat-content",
     "chat-content-progress",
     "chat-content-loading",
@@ -196,6 +197,26 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("thread-list") {
+        let mut state = snapshot(Some("chat-edit"));
+        if let Some(context) = state.selected {
+            state.threads.account = Some(context.account);
+            state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
+            state.threads.content = ContentState::Ready;
+            state.threads.entries = page([talk_core::ui::presentation::ThreadView {
+                context,
+                root: state
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|message| message.reply_count > 0)
+                    .map_or(3, |message| message.local_id),
+                title: text("Design review"),
+                replies: 3,
+            }]);
+        }
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
@@ -511,6 +532,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         account_removal: None,
         active_account: None,
         conversations: Page::empty(),
+        threads: Default::default(),
         conversation_list: talk_core::ui::presentation::ConversationListState {
             content: ContentState::Unconfigured,
             complete: false,
@@ -1180,7 +1202,7 @@ impl DevelopmentPort {
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit" | "thread") => Some(false),
+                Some("chat-edit" | "thread" | "thread-list") => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },
@@ -1190,7 +1212,12 @@ impl DevelopmentPort {
             chat_ux: matches!(
                 scenario,
                 Some(
-                    "chat-ux" | "chat-ux-call" | "chat-edit" | "thread-error" | "chat-send-pending"
+                    "chat-ux"
+                        | "chat-ux-call"
+                        | "chat-edit"
+                        | "thread-error"
+                        | "thread-list"
+                        | "chat-send-pending"
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
@@ -1319,6 +1346,9 @@ impl NativeDesktopPort for DevelopmentPort {
             return Err(SubmitError::Busy);
         }
         match intent {
+            UiIntent::RefreshThreads(account) if self.snapshot.threads.account == Some(account) => {
+                self.snapshot.threads.content = ContentState::Ready;
+            }
             UiIntent::Message {
                 request,
                 context,

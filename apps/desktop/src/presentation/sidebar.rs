@@ -279,6 +279,18 @@ impl Desktop {
                 SidebarDestination::Inbox,
                 cx,
             ))
+            .when(
+                self.snapshot.threads.support == FeatureSupport::Supported,
+                |d| {
+                    d.child(self.sidebar_destination(
+                        "nav-threads",
+                        "Threads",
+                        "chat",
+                        SidebarDestination::Threads,
+                        cx,
+                    ))
+                },
+            )
             .child(self.sidebar_destination(
                 "nav-archive",
                 "Archiv",
@@ -701,7 +713,7 @@ impl Desktop {
         let t = self.theme;
         let context = row.context;
         let selected = Some(context) == self.snapshot.selected
-            && self.destination != SidebarDestination::Inbox;
+            && self.destination == SidebarDestination::Conversations;
         let id = scoped_id(namespace, context, 0, 0);
         let row_focus = self.control_focus(id.clone(), cx);
         let control = self
@@ -906,6 +918,81 @@ impl Desktop {
                 .child(rows),
         );
         self.content_card(page)
+    }
+
+    pub(super) fn threads_page(&self, cx: &Context<Self>) -> Div {
+        let mut rows = div().flex().flex_col().gap_1();
+        for thread in self.snapshot.threads.entries.as_slice() {
+            let Some(room) = self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|room| room.context == thread.context)
+            else {
+                continue;
+            };
+            rows = rows.child(
+                self.control(
+                    scoped_id("subscribed-thread", thread.context, thread.root, 0),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::OpenSubscribedThread(thread.context, thread.root),
+                    cx,
+                )
+                .w_full()
+                .justify_start()
+                .p_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(thread.title.as_str().to_owned()),
+                        )
+                        .child(self.hint(&format!(
+                            "{} · {}",
+                            room.title.as_str(),
+                            self.count(super::localization::Count::Replies, thread.replies.into())
+                        ))),
+                ),
+            );
+        }
+        if self.snapshot.threads.content == ContentState::Ready
+            && self.snapshot.threads.entries.as_slice().is_empty()
+        {
+            rows = rows.child(self.hint(self.l("Keine abonnierten Threads.")));
+        }
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .p_5()
+            .gap_3()
+            .child(self.title(self.l("Threads")));
+        if let Some(account) = self.snapshot.active_account {
+            page = page.child(self.button(
+                "refresh-threads",
+                "Threads aktualisieren",
+                ButtonStyle::Secondary,
+                self.snapshot.threads.content != ContentState::Loading,
+                LocalAction::Intent(talk_core::ui::presentation::UiIntent::RefreshThreads(
+                    account,
+                )),
+                cx,
+            ));
+        }
+        self.content_card(
+            page.child(
+                self.scroll_area(super::navigation::Region::Conversation)
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows),
+            ),
+        )
     }
 }
 

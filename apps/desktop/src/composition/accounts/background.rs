@@ -387,6 +387,7 @@ impl Purpose {
             | Self::MessageNotifications(s)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
+            | Self::Threads(s)
             | Self::Tags(s)
             | Self::TagMutation(_, s)
             | Self::Preferences(s, _) => Some(s),
@@ -542,6 +543,12 @@ impl Accounts {
             return;
         }
         self.apply_room_refresh(scope, result);
+        if self.snapshot.active_account == Some(scope)
+            && self.snapshot.conversation_list.content == ContentState::Ready
+            && self.snapshot.threads.support == FeatureSupport::Unknown
+        {
+            let _ = self.refresh_threads(scope);
+        }
     }
     pub(super) fn complete_live_events(
         &mut self,

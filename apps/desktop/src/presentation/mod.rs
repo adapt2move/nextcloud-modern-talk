@@ -67,6 +67,7 @@ pub enum Overlay {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
     Conversations,
+    Threads,
     Inbox,
     Archive,
 }
@@ -102,6 +103,7 @@ pub enum LocalAction {
     ToggleNavigation,
     ToggleCallChat,
     Navigate(ConversationRef),
+    OpenSubscribedThread(ConversationRef, u128),
     ResizeThread(bool),
     SendThread,
     Destination(SidebarDestination),
@@ -199,6 +201,7 @@ pub struct InitialView {
     pub overlay: Option<Overlay>,
     pub prejoin: bool,
     pub onboarding: bool,
+    pub threads_fixture: bool,
     pub scale: u16,
 }
 
@@ -312,6 +315,7 @@ pub struct Desktop {
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
     pub thread_parent: Option<(ConversationRef, u128)>,
+    pending_thread_open: Option<(ConversationRef, u128)>,
     thread_width: f32,
     drafts: Drafts,
     thread_drafts: Drafts,
@@ -350,6 +354,7 @@ impl Desktop {
             overlay: initial_overlay,
             prejoin,
             onboarding,
+            threads_fixture,
             scale,
         } = initial;
         let snapshot = port
@@ -525,7 +530,11 @@ impl Desktop {
             },
             overlay: initial_overlay,
             startup_account_dialog,
-            destination: SidebarDestination::Conversations,
+            destination: if development && threads_fixture {
+                SidebarDestination::Threads
+            } else {
+                SidebarDestination::Conversations
+            },
             collapsed_sections: [false; 5],
             archive_request: 0,
             navigation_open: false,
@@ -555,6 +564,7 @@ impl Desktop {
             search_kind: SearchKind::All,
             directory_query: None,
             thread_parent: None,
+            pending_thread_open: None,
             thread_width: 400.,
             drafts: Drafts::default(),
             thread_drafts: Drafts::thread_editor(),
@@ -836,6 +846,7 @@ impl Desktop {
                 cx.notify();
             });
             self.thread_parent = None;
+            self.pending_thread_open = None;
         }
         if previous != self.snapshot.selected && self.overlay == Some(Overlay::Thread) {
             self.overlay = None;
@@ -843,6 +854,7 @@ impl Desktop {
             self.return_focus = None;
             self.pending_modal_focus = false;
         }
+        self.open_pending_thread(cx);
         if (previous != self.snapshot.selected || reset_draft)
             && !(selected_rebind && self.message_ui.editing.is_some())
         {
@@ -1374,6 +1386,7 @@ impl Desktop {
                     && self.save_draft(cx)
                     && self.submit(UiIntent::OpenConversation(context))
                 {
+                    self.pending_thread_open = None;
                     self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
@@ -1383,6 +1396,32 @@ impl Desktop {
                     if self.overlay == Some(Overlay::Search) {
                         self.overlay = None;
                         self.root_focus.focus(window);
+                    }
+                }
+            }
+            LocalAction::OpenSubscribedThread(context, root) => {
+                if self
+                    .snapshot
+                    .threads
+                    .entries
+                    .as_slice()
+                    .iter()
+                    .any(|item| item.context == context && item.root == root)
+                    && self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == context)
+                    && self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                {
+                    self.return_focus = window.focused(cx);
+                    self.pending_thread_open = Some((context, root));
+                    if Some(context) == self.snapshot.selected {
+                        self.open_pending_thread(cx);
+                    } else if !self.submit(UiIntent::OpenConversation(context)) {
+                        self.pending_thread_open = None;
                     }
                 }
             }

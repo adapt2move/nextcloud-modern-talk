@@ -116,6 +116,7 @@ fn snapshot() -> PresentationSnapshot {
         account_removal: None,
         active_account: Some(source.account),
         conversations: page([row(source), row(room(2))]),
+        threads: Default::default(),
         conversation_list: ConversationListState {
             content: ContentState::Ready,
             complete: true,

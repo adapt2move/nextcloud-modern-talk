@@ -523,6 +523,7 @@ pub struct PresentationSnapshot {
     pub account_removal: Option<AccountRemovalResult>,
     pub active_account: Option<AccountScope>,
     pub conversations: Page<ConversationView, 100>,
+    pub threads: ThreadList,
     pub conversation_list: ConversationListState,
     pub tags: Page<TagView, 102>,
     pub tag_state: ContentState,
@@ -541,6 +542,33 @@ pub struct PresentationSnapshot {
     pub mutation: Option<ConversationMutationResult>,
 }
 
+/// Account-scoped, bounded subscribed-thread observation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadList {
+    pub account: Option<AccountScope>,
+    pub support: FeatureSupport,
+    pub content: ContentState,
+    pub entries: Page<ThreadView, 50>,
+}
+impl Default for ThreadList {
+    fn default() -> Self {
+        Self {
+            account: None,
+            support: FeatureSupport::Unknown,
+            content: ContentState::Unconfigured,
+            entries: Page::empty(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadView {
+    pub context: ConversationRef,
+    pub root: u128,
+    pub title: Text<256>,
+    pub replies: u32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConversationListState {
     pub content: ContentState,
@@ -550,6 +578,7 @@ pub struct ConversationListState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
+    RefreshThreads(AccountScope),
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {
         request: RequestId,

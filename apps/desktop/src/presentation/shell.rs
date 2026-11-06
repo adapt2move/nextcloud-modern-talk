@@ -95,13 +95,13 @@ impl Desktop {
                 .flex_col()
                 .gap_2()
                 .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
-                    if self.destination == super::SidebarDestination::Inbox {
-                        self.inbox(cx)
-                    } else {
-                        self.conversation(
+                    match self.destination {
+                        super::SidebarDestination::Inbox => self.inbox(cx),
+                        super::SidebarDestination::Threads => self.threads_page(cx),
+                        _ => self.conversation(
                             window.viewport_size().height < self.sp(160.) + px(210.),
                             cx,
-                        )
+                        ),
                     },
                 ))
         });

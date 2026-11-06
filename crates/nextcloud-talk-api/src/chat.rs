@@ -359,44 +359,6 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
     })
 }
 
-#[cfg(test)]
-mod thread_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn rejects_zero_thread_id_before_exposing_it_to_callers() {
-        let value = json!({"thread": {
-            "id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1
-        }});
-        assert!(matches!(thread(&value), Err(ErrorKind::Malformed)));
-        let mut valid = value;
-        valid["thread"]["id"] = json!(42);
-        assert_eq!(thread(&valid).unwrap().id, 42);
-    }
-
-    #[test]
-    fn subscribed_page_decodes_multiple_rooms_and_rejects_overflow() {
-        let item = |id, token| {
-            json!({"thread": {
-                "id": id, "roomToken": token, "title": "Topic", "numReplies": 2
-            }})
-        };
-        let data = json!([item(1, "room1234"), item(2, "room5678")]);
-        let crate::Reply::Chat(Response::Threads(threads)) =
-            decode(ResponseKind::Threads, &data).unwrap()
-        else {
-            panic!("threads")
-        };
-        assert_eq!(threads.len(), 2);
-        assert_ne!(threads[0].token, threads[1].token);
-        let overflow = Value::Array((1..=51).map(|id| item(id, "room1234")).collect());
-        assert!(matches!(
-            decode(ResponseKind::Threads, &overflow),
-            Err(ErrorKind::TooLarge)
-        ));
-    }
-}
 fn renames(v: &Value) -> Result<Vec<(String, String)>, ErrorKind> {
     let entries = v.as_array().ok_or(ErrorKind::Malformed)?;
     if entries.len() > 100 {
@@ -892,5 +854,44 @@ pub(crate) fn validate(room: &RoomToken, response: &Response) -> Result<(), Erro
         Err(ErrorKind::WrongScope)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod thread_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rejects_zero_thread_id_before_exposing_it_to_callers() {
+        let value = json!({"thread": {
+            "id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1
+        }});
+        assert!(matches!(thread(&value), Err(ErrorKind::Malformed)));
+        let mut valid = value;
+        valid["thread"]["id"] = json!(42);
+        assert_eq!(thread(&valid).unwrap().id, 42);
+    }
+
+    #[test]
+    fn subscribed_page_decodes_multiple_rooms_and_rejects_overflow() {
+        let item = |id, token| {
+            json!({"thread": {
+                "id": id, "roomToken": token, "title": "Topic", "numReplies": 2
+            }})
+        };
+        let data = json!([item(1, "room1234"), item(2, "room5678")]);
+        let crate::Reply::Chat(Response::Threads(threads)) =
+            decode(ResponseKind::Threads, &data).unwrap()
+        else {
+            panic!("threads")
+        };
+        assert_eq!(threads.len(), 2);
+        assert_ne!(threads[0].token, threads[1].token);
+        let overflow = Value::Array((1..=51).map(|id| item(id, "room1234")).collect());
+        assert!(matches!(
+            decode(ResponseKind::Threads, &overflow),
+            Err(ErrorKind::TooLarge)
+        ));
     }
 }

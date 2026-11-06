@@ -270,6 +270,45 @@ impl MessageUi {
     }
 }
 impl Desktop {
+    pub(super) fn open_pending_thread(&mut self, cx: &mut Context<Self>) {
+        let Some((context, root)) = self.pending_thread_open else {
+            return;
+        };
+        if self.snapshot.active_account != Some(context.account)
+            || !self
+                .snapshot
+                .threads
+                .entries
+                .as_slice()
+                .iter()
+                .any(|item| item.context == context && item.root == root)
+        {
+            self.pending_thread_open = None;
+            return;
+        }
+        if self.snapshot.selected != Some(context)
+            || !self.message_feature_enabled(MessageFeature::Threads)
+        {
+            return;
+        }
+        if !self.prepare_thread_draft(context, root, cx) {
+            self.pending_thread_open = None;
+            return;
+        }
+        if let Some(request) = self.submit_message(MessageAction::Thread(root)) {
+            self.thread_parent = Some((context, root));
+            self.message_ui.thread_load = Some(ThreadLoad {
+                context,
+                root,
+                request: Some(request),
+            });
+            self.pending_thread_open = None;
+            self.destination = super::SidebarDestination::Conversations;
+            self.overlay = Some(Overlay::Thread);
+            self.pending_modal_focus = true;
+            cx.notify();
+        }
+    }
     pub(super) fn save_thread_draft(&mut self, cx: &gpui::App) -> bool {
         let Some((context, _)) = self.thread_parent else {
             return true;
