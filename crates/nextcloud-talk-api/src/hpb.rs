@@ -144,6 +144,14 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    ForceMute {
+        generation: u64,
+        peer: PeerSession,
+        target: PeerSession,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Activity {
         generation: u64,
         peer: PeerSession,
@@ -165,7 +173,10 @@ enum Command {
 impl Command {
     fn reject(self, error: ErrorKind) {
         match self {
-            Self::Join { reply, .. } | Self::Send { reply, .. } | Self::Activity { reply, .. } => {
+            Self::Join { reply, .. }
+            | Self::Send { reply, .. }
+            | Self::Activity { reply, .. }
+            | Self::ForceMute { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
         }
@@ -506,6 +517,48 @@ impl Route {
         drop(guard.disarm());
         Ok(())
     }
+    pub(crate) async fn send_force_mute(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        target: &PeerSession,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if peer == &room.own
+                || target == &room.own
+                || !room.members.iter().any(|member| &member.talk == peer)
+                || !room.members.iter().any(|member| &member.talk == target)
+            {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::ForceMute {
+                generation: self.generation,
+                peer: peer.clone(),
+                target: target.clone(),
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
+        Ok(())
+    }
+
     /// Activity is ephemeral and never grants media authority. An abandoned
     /// command is dropped by the socket owner instead of retiring the call.
     pub(crate) async fn send_activity(
