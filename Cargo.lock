@@ -4364,6 +4364,7 @@ dependencies = [
  "cookie",
  "futures-lite 2.6.1",
  "futures-util",
+ "percent-encoding",
  "reqwest",
  "roxmltree",
  "rustls",

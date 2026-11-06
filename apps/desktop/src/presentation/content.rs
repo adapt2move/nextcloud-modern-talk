@@ -12,7 +12,8 @@ use super::{
     messaging::composer_menu,
 };
 use gpui::{
-    Context, Div, Entity, Focusable, ImageSource, ObjectFit, Window, div, img, prelude::*, px,
+    Context, Div, Entity, Focusable, ImageSource, ObjectFit, Subscription, Task, Window, div, img,
+    prelude::*, px,
 };
 use talk_core::ui::content::{
     AssetState, AssetTarget, AssetView, AttachmentRef, ContentAction, DownloadState, PollDraft,
@@ -31,6 +32,9 @@ pub(crate) enum Action {
     OpenCloudBrowser,
     BrowseDirectory(Text<16384>),
     BrowserPage(i8),
+    BrowserRecent,
+    BrowserFavorites,
+    BrowserRetry,
     Menu,
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
@@ -53,6 +57,10 @@ pub(super) struct ContentUi {
     request: u64,
     pub menu: bool,
     browser_page: usize,
+    pub(super) browser_search: Entity<TextInput>,
+    browser_search_value: String,
+    browser_search_task: Option<Task<()>>,
+    _browser_search_observer: Subscription,
     pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
     gallery: Vec<AttachmentRef>,
@@ -76,6 +84,41 @@ impl ContentUi {
         context: Option<ConversationRef>,
         cx: &mut Context<Desktop>,
     ) -> Self {
+        let browser_search = cx.new(|cx| TextInput::new("Dateien suchen …", 256, theme, cx));
+        let search_observer = cx.observe(&browser_search, |this, input, cx| {
+            let value = input.read(cx).content.to_string();
+            if this.content_ui.browser_search_value == value {
+                return;
+            }
+            this.content_ui.browser_search_value = value.clone();
+            this.content_ui.browser_search_task = None;
+            if this.overlay != Some(Overlay::CloudFiles) {
+                return;
+            }
+            let account = this.snapshot.active_account;
+            this.content_ui.browser_search_task = Some(cx.spawn(async move |desktop, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let _ = desktop.update(cx, |desktop, cx| {
+                    if desktop.overlay != Some(Overlay::CloudFiles)
+                        || desktop.snapshot.active_account != account
+                        || desktop.content_ui.browser_search_value != value
+                    {
+                        return;
+                    }
+                    desktop.content_ui.browser_page = 0;
+                    if value.trim().is_empty() {
+                        desktop.submit_content(ContentAction::ListFiles(
+                            Text::new("/").expect("constant"),
+                        ));
+                    } else if let Ok(query) = Text::new(value.trim()) {
+                        desktop.submit_content(ContentAction::SearchFiles(query));
+                    }
+                    cx.notify();
+                });
+            }));
+        });
         Self {
             account,
             context,
@@ -84,6 +127,10 @@ impl ContentUi {
             request: 0,
             menu: false,
             browser_page: 0,
+            browser_search,
+            browser_search_value: String::new(),
+            browser_search_task: None,
+            _browser_search_observer: search_observer,
             composer_menu: composer_menu::Menu::new(cx),
             preview: None,
             gallery: Vec::new(),
@@ -244,7 +291,7 @@ impl Desktop {
             self.content_ui.return_overlay = None;
             if matches!(
                 self.overlay,
-                Some(Overlay::ContentPreview | Overlay::CreatePoll)
+                Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
             ) {
                 self.overlay = None;
                 self.pending_modal_focus = false;
@@ -606,11 +653,13 @@ impl Desktop {
             Action::OpenCloudBrowser => {
                 self.content_ui.return_overlay = self.overlay;
                 self.content_ui.browser_page = 0;
+                self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
                 self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
             }
             Action::BrowseDirectory(path) => {
                 self.content_ui.browser_page = 0;
+                self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(path));
             }
             Action::BrowserPage(delta) => {
@@ -626,6 +675,33 @@ impl Desktop {
                 } else {
                     (self.content_ui.browser_page + 1).min(last)
                 };
+            }
+            Action::BrowserRecent | Action::BrowserFavorites => {
+                self.content_ui.browser_page = 0;
+                self.clear_cloud_search(cx);
+                self.submit_content(if matches!(action, Action::BrowserRecent) {
+                    ContentAction::RecentFiles
+                } else {
+                    ContentAction::FavoriteFiles
+                });
+            }
+            Action::BrowserRetry => {
+                use talk_core::ui::content::FileSection;
+                if let Some(browser) = self.snapshot.content_panel.file_browser.as_ref() {
+                    let retry = match browser.section {
+                        FileSection::All => Some(ContentAction::ListFiles(browser.path.clone())),
+                        FileSection::Recent => Some(ContentAction::RecentFiles),
+                        FileSection::Favorites => Some(ContentAction::FavoriteFiles),
+                        FileSection::Search => {
+                            Text::new(self.content_ui.browser_search_value.trim())
+                                .ok()
+                                .map(ContentAction::SearchFiles)
+                        }
+                    };
+                    if let Some(retry) = retry {
+                        self.submit_content(retry);
+                    }
+                }
             }
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {
@@ -701,6 +777,7 @@ impl Desktop {
             self.content_ui.preview = None;
         }
         if self.overlay == Some(Overlay::CloudFiles) {
+            self.content_ui.browser_search_task = None;
             self.submit_content(ContentAction::CloseFileBrowser);
         }
         self.overlay = self.content_ui.return_overlay.take();

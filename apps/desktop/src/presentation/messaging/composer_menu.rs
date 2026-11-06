@@ -131,12 +131,16 @@ impl Desktop {
                 "paperclip",
                 MessageFeature::Files,
             ),
-            message(
-                Choice::CloudFile,
-                "Aus NextCloud teilen",
-                "cloud",
-                MessageFeature::Files,
-            ),
+            Item {
+                choice: Choice::CloudFile,
+                label: "Aus NextCloud teilen",
+                icon: "cloud",
+                availability: Availability::when(
+                    self.message_feature_enabled(MessageFeature::Files)
+                        && self.composer_available(),
+                    "Dateien können in diesem Gespräch nicht gesendet werden.",
+                ),
+            },
             Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",

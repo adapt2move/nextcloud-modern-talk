@@ -126,6 +126,150 @@ fn raster(result: R) {
 
 #[tokio::test]
 #[ignore = "requires private disposable NC34/Talk24 or NC35/Talk25 fixtures"]
+async fn released_server_file_listing_and_existing_share() {
+    let directory = std::env::var_os("NMT_FIXTURE_DIR").expect("private fixture");
+    let root = Path::new(&directory);
+    let runtime = NetworkRuntime::new(ClockEpoch::from_local(740));
+    let account = scope(740);
+    let mut client = test_support::from_private_fixture(
+        &root.join("alice.json"),
+        account,
+        HostId::from_local(740),
+        runtime.clone(),
+    )
+    .unwrap();
+    client
+        .request(context(&runtime, account), ProtocolRequest::InspectAccount)
+        .await
+        .unwrap();
+    let room = client.fixture_conversation().unwrap();
+    let mut sequence = 7000;
+    let R::Files(files) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        C::ListFiles { path: text("/") },
+    )
+    .await
+    .unwrap() else {
+        panic!("directory reply");
+    };
+    assert!(files.as_slice().len() <= 1000);
+    assert!(matches!(
+        content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::FavoriteFiles
+        )
+        .await
+        .unwrap(),
+        R::Files(_)
+    ));
+    assert!(matches!(
+        content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::SearchFiles { query: None }
+        )
+        .await
+        .unwrap(),
+        R::Files(_)
+    ));
+    let local = root.join("file-browser-fixture.txt");
+    std::fs::write(&local, b"Fictional browser attachment\n").unwrap();
+    let MR::Uploaded { path, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::UploadFile {
+            local_path: text(local.to_str().unwrap()),
+            name: text("file-browser-fixture.txt"),
+            progress: TransferProgress::default(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("upload reply");
+    };
+    let parent = path.as_str().rsplit_once('/').unwrap().0;
+    let R::Files(folder) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        C::ListFiles { path: text(parent) },
+    )
+    .await
+    .unwrap() else {
+        panic!("uploaded directory reply");
+    };
+    assert!(
+        folder
+            .as_slice()
+            .iter()
+            .any(|entry| path.as_str().ends_with(entry.name.as_str()))
+    );
+    let basename = path.as_str().rsplit('/').next().unwrap();
+    let R::Files(search) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        C::SearchFiles {
+            query: Some(text(basename)),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("search reply");
+    };
+    assert!(search.as_slice().iter().any(|entry| entry.path == path));
+    let shared = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::ShareExistingFile {
+            path,
+            caption: text("Fixture caption"),
+            options: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(shared, MR::Changed));
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::SharedFiles { before: None },
+    )
+    .await
+    .unwrap() else {
+        panic!("shared items reply");
+    };
+    assert!(messages.as_slice().iter().any(|message| {
+        message
+            .rich
+            .as_slice()
+            .iter()
+            .any(|item| item.kind.as_str() == "file")
+    }));
+    println!("files-backend directory-and-existing-share: pass");
+}
+
+#[tokio::test]
+#[ignore = "requires private disposable NC34/Talk24 or NC35/Talk25 fixtures"]
 async fn released_server_polls_avatars_previews_and_downloads() {
     let directory = std::env::var_os("NMT_FIXTURE_DIR").expect("private fixture");
     let root = Path::new(&directory);

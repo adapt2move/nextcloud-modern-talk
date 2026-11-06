@@ -194,11 +194,12 @@ impl Accounts {
         }
         match action {
             A::ListFiles(path) => self.list_cloud_files(request, account, path),
-            A::StageCloudFile {
-                context,
-                directory,
-                name,
-            } => self.stage_cloud_file(context, directory, name),
+            A::RecentFiles => self.query_cloud_files(request, account, browser::Query::Recent),
+            A::FavoriteFiles => self.query_cloud_files(request, account, browser::Query::Favorites),
+            A::SearchFiles(query) => {
+                self.query_cloud_files(request, account, browser::Query::Search(query))
+            }
+            A::StageCloudFile { context, path } => self.stage_cloud_file(context, path),
             A::CloseFileBrowser => {
                 self.content_owner.browser.close();
                 self.snapshot.content_panel.file_browser = None;

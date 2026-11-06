@@ -72,15 +72,30 @@ impl NextcloudClient {
     ) -> Result<ContentResult, PortError> {
         let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
-            ContentCommand::ListFiles { path } => {
-                let path = api::files::DirectoryPath::parse(path.as_str())
-                    .map_err(|kind| self.error(transport::kind(kind)))?;
-                let entries = self.transport.list_files(c, path).await?;
+            ContentCommand::ListFiles { .. }
+            | ContentCommand::SearchFiles { .. }
+            | ContentCommand::FavoriteFiles => {
+                let entries = match command {
+                    ContentCommand::ListFiles { path } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        self.transport.list_files(c, path).await?
+                    }
+                    ContentCommand::SearchFiles { query } => {
+                        self.transport
+                            .search_files(c, query.as_ref().map(Text::as_str))
+                            .await?
+                    }
+                    ContentCommand::FavoriteFiles => self.transport.favorite_files(c).await?,
+                    _ => unreachable!(),
+                };
                 let mut files = Page::empty();
                 for entry in entries {
                     files
                         .try_push(CloudFile {
                             name: Text::new(&entry.name)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            path: Text::new(&entry.path)
                                 .map_err(|_| self.error(ErrorKind::TooLarge))?,
                             directory: entry.is_directory,
                             size: entry.size,

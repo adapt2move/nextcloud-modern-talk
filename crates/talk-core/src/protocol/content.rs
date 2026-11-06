@@ -111,6 +111,7 @@ pub struct PollDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CloudFile {
     pub name: Text<255>,
+    pub path: Text<16384>,
     pub directory: bool,
     pub size: Option<u64>,
     pub modified: Option<Text<256>>,
@@ -156,6 +157,10 @@ pub enum ContentCommand {
     ListFiles {
         path: Text<16384>,
     },
+    SearchFiles {
+        query: Option<Text<256>>,
+    },
+    FavoriteFiles,
     SelfProfile,
     RevalidateProfile,
     Asset(AssetRequest),

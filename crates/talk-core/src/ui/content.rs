@@ -135,6 +135,7 @@ pub struct PlaybackView {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CloudFileView {
     pub name: Text<255>,
+    pub path: Text<16384>,
     pub directory: bool,
     pub size: Option<u64>,
     pub modified: Option<Text<256>>,
@@ -145,10 +146,18 @@ pub struct CloudFileView {
 pub struct FileBrowserView {
     pub account: AccountScope,
     pub path: Text<16384>,
+    pub section: FileSection,
     pub entries: Page<CloudFileView, 1000>,
     pub loading: bool,
     pub offline: bool,
     pub error: Option<UnavailableReason>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSection {
+    All,
+    Recent,
+    Favorites,
+    Search,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
@@ -192,11 +201,13 @@ impl Default for ContentPanel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
     ListFiles(Text<16384>),
+    RecentFiles,
+    FavoriteFiles,
+    SearchFiles(Text<256>),
     CloseFileBrowser,
     StageCloudFile {
         context: ConversationRef,
-        directory: Text<16384>,
-        name: Text<255>,
+        path: Text<16384>,
     },
     DismissDownload,
     Load(AssetTarget),

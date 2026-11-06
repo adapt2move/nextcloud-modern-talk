@@ -2,12 +2,31 @@
 use super::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 const FILE_LIMIT: Duration = Duration::from_secs(60);
+fn xml_escape(input: &str) -> String {
+    let mut escaped = String::new();
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
 pub(super) enum StreamRead<'a> {
     File(Option<&'a (dyn Fn(u64, Option<u64>) + Send + Sync)>),
-    Listing,
+    Dav(DavRead),
     Image,
     Pdf,
     Video(crate::content::VideoFormat),
+}
+pub(super) enum DavRead {
+    Listing,
+    Search(String),
+    Favorites,
 }
 impl Transport {
     pub(super) fn file_endpoint(
@@ -45,9 +64,74 @@ impl Transport {
         self.request_dispatched = false;
         let url = self.dav_endpoint(path.as_str())?;
         let mut sink = Vec::new();
-        self.stream(c, url.clone(), None, &mut sink, StreamRead::Listing)
-            .await?;
+        self.stream(
+            c,
+            url.clone(),
+            None,
+            &mut sink,
+            StreamRead::Dav(DavRead::Listing),
+        )
+        .await?;
         Ok((url, sink))
+    }
+    pub(crate) async fn search_files(
+        &mut self,
+        c: &OperationContext,
+        term: Option<&str>,
+    ) -> Result<(url::Url, Vec<u8>), PortError> {
+        self.request_dispatched = false;
+        let root = self.dav_endpoint("/")?;
+        let user = root
+            .path_segments()
+            .and_then(|mut parts| parts.next_back())
+            .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+        let condition = if let Some(term) = term {
+            if term.is_empty() || term.len() > 256 || term.chars().any(char::is_control) {
+                return Err(self.error(ErrorKind::Malformed));
+            }
+            format!(
+                "<d:like><d:prop><d:displayname/></d:prop><d:literal>%{}%</d:literal></d:like>",
+                xml_escape(term)
+            )
+        } else {
+            "<d:not><d:is-collection/></d:not>".to_owned()
+        };
+        let body = format!(
+            "<?xml version=\"1.0\"?><d:searchrequest xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:basicsearch><d:select><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><oc:fileid/></d:prop></d:select><d:from><d:scope><d:href>/files/{}</d:href><d:depth>infinity</d:depth></d:scope></d:from><d:where>{condition}</d:where><d:orderby><d:order><d:prop><d:getlastmodified/></d:prop><d:descending/></d:order></d:orderby><d:limit><d:nresults>200</d:nresults></d:limit></d:basicsearch></d:searchrequest>",
+            xml_escape(user)
+        );
+        let endpoint = self
+            .binding
+            .origin
+            .endpoint("remote.php/dav/")
+            .map_err(|kind| self.error(kind))?;
+        let mut sink = Vec::new();
+        self.stream(
+            c,
+            endpoint,
+            None,
+            &mut sink,
+            StreamRead::Dav(DavRead::Search(body)),
+        )
+        .await?;
+        Ok((root, sink))
+    }
+    pub(crate) async fn favorite_files(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<(url::Url, Vec<u8>), PortError> {
+        self.request_dispatched = false;
+        let root = self.dav_endpoint("/")?;
+        let mut sink = Vec::new();
+        self.stream(
+            c,
+            root.clone(),
+            None,
+            &mut sink,
+            StreamRead::Dav(DavRead::Favorites),
+        )
+        .await?;
+        Ok((root, sink))
     }
     pub(crate) async fn file<W: AsyncWrite + Unpin + Send>(
         &mut self,
@@ -83,15 +167,15 @@ impl Transport {
         read: StreamRead<'_>,
     ) -> Result<u64, PortError> {
         self.request_dispatched = false;
-        let listing = matches!(read, StreamRead::Listing);
+        let listing = matches!(&read, StreamRead::Dav(_));
         let pdf = matches!(read, StreamRead::Pdf);
         let video = match &read {
             StreamRead::Video(format) => Some(*format),
             _ => None,
         };
-        let (read_limit, progress, image) = match read {
-            StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
-            StreamRead::Listing => (BODY_LIMIT as u64, None, false),
+        let (read_limit, progress, image) = match &read {
+            StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, *progress, false),
+            StreamRead::Dav(_) => (BODY_LIMIT as u64, None, false),
             StreamRead::Image => (crate::content::MAX_IMAGE_BYTES as u64, None, true),
             StreamRead::Pdf => (crate::content::MAX_IMAGE_BYTES as u64, None, false),
             StreamRead::Video(_) => (crate::content::MAX_VIDEO_BYTES as u64, None, false),
@@ -109,8 +193,13 @@ impl Transport {
         let mut request = self
             .client
             .request(
-                if listing {
-                    Method::from_bytes(b"PROPFIND").map_err(|_| self.error(ErrorKind::Malformed))?
+                if let StreamRead::Dav(dav) = &read {
+                    Method::from_bytes(match dav {
+                        DavRead::Listing => b"PROPFIND",
+                        DavRead::Search(_) => b"SEARCH",
+                        DavRead::Favorites => b"REPORT",
+                    })
+                    .map_err(|_| self.error(ErrorKind::Malformed))?
                 } else if writing {
                     Method::PUT
                 } else {
@@ -125,11 +214,22 @@ impl Transport {
                 self.binding.login_name.as_str(),
                 Some(self.binding.password.as_str()),
             );
-        if listing {
+        if let StreamRead::Dav(dav) = &read {
+            let body = match dav {
+                DavRead::Listing => {
+                    "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><oc:fileid/></d:prop></d:propfind>"
+                }
+                DavRead::Search(body) => body.as_str(),
+                DavRead::Favorites => {
+                    "<?xml version=\"1.0\"?><oc:filter-files xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><oc:fileid/></d:prop><oc:filter-rules><oc:favorite>1</oc:favorite></oc:filter-rules></oc:filter-files>"
+                }
+            };
             request = request
-                .header("Depth", "1")
                 .header(CONTENT_TYPE, "application/xml; charset=utf-8")
-                .body("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><oc:fileid/></d:prop></d:propfind>");
+                .body(body.to_owned());
+            if matches!(dav, DavRead::Listing) {
+                request = request.header("Depth", "1");
+            }
         }
         self.cookies
             .retain(|cookie| cookie.expires.is_none_or(|time| time > Instant::now()));

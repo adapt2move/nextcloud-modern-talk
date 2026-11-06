@@ -2032,6 +2032,13 @@ impl Render for Desktop {
                     && !incoming;
             });
         }
+        self.content_ui.browser_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.clipboard_export_allowed = true;
+            input.interactive = self.overlay == Some(Overlay::CloudFiles) && !incoming;
+            input.set_placeholder(self.l("Dateien suchen …"));
+        });
         self.content_ui
             .question
             .update(cx, |i, _| i.set_placeholder(self.l("Frage der Umfrage")));

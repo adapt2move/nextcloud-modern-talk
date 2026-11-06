@@ -15,8 +15,10 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
     model.snapshot.content_panel.file_browser = Some(talk_core::ui::content::FileBrowserView {
         account: context.account,
         path: text("/Plans"),
+        section: talk_core::ui::content::FileSection::All,
         entries: page([talk_core::ui::content::CloudFileView {
             name: text("plan.pdf"),
+            path: text("/Plans/plan.pdf"),
             directory: false,
             size: Some(42),
             modified: None,
@@ -28,14 +30,14 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
         error: None,
     });
     assert_eq!(
-        model.stage_cloud_file(context, text("/old"), text("plan.pdf")),
+        model.stage_cloud_file(context, text("/old/plan.pdf")),
         Err(SubmitError::StaleScope)
     );
     model
-        .stage_cloud_file(context, text("/Plans"), text("plan.pdf"))
+        .stage_cloud_file(context, text("/Plans/plan.pdf"))
         .unwrap();
     model
-        .stage_cloud_file(context, text("/Plans"), text("plan.pdf"))
+        .stage_cloud_file(context, text("/Plans/plan.pdf"))
         .unwrap();
     assert_eq!(
         model

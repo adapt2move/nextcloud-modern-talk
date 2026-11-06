@@ -4,17 +4,6 @@ use gpui::{FontWeight, SharedString};
 
 pub(super) const PAGE_SIZE: usize = 40;
 
-fn child_path(parent: &str, name: &str) -> Option<Text<16384>> {
-    if name.is_empty() || name.contains(['/', '\\']) || matches!(name, "." | "..") {
-        return None;
-    }
-    let path = if parent == "/" {
-        format!("/{name}")
-    } else {
-        format!("{parent}/{name}")
-    };
-    Text::new(&path).ok()
-}
 fn parent_path(path: &str) -> Option<Text<16384>> {
     if path == "/" {
         return None;
@@ -31,6 +20,13 @@ fn size_label(size: Option<u64>) -> String {
     }
 }
 impl Desktop {
+    pub(super) fn clear_cloud_search(&mut self, cx: &mut Context<Self>) {
+        self.content_ui.browser_search_task = None;
+        self.content_ui.browser_search_value.clear();
+        self.content_ui
+            .browser_search
+            .update(cx, |input, _| input.reset());
+    }
     pub(in crate::presentation) fn cloud_files_body(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_3();
         let Some(browser) = self
@@ -43,6 +39,40 @@ impl Desktop {
             return body.child(self.hint(self.l("Dateien werden geladen …")));
         };
         let path = browser.path.as_str();
+        use talk_core::ui::content::FileSection;
+        body = body.child(
+            self.input_surface(&self.content_ui.browser_search, cx)
+                .child(self.content_ui.browser_search.clone()),
+        );
+        body = body.child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_2()
+                .child(self.chip(
+                    "cloud-all",
+                    "Alle Dateien",
+                    (browser.section == FileSection::All, 0, 3),
+                    LocalAction::Content(Action::BrowseDirectory(
+                        Text::new("/").expect("constant"),
+                    )),
+                    cx,
+                ))
+                .child(self.chip(
+                    "cloud-recent",
+                    "Zuletzt",
+                    (browser.section == FileSection::Recent, 1, 3),
+                    LocalAction::Content(Action::BrowserRecent),
+                    cx,
+                ))
+                .child(self.chip(
+                    "cloud-favorites",
+                    "Favoriten",
+                    (browser.section == FileSection::Favorites, 2, 3),
+                    LocalAction::Content(Action::BrowserFavorites),
+                    cx,
+                )),
+        );
         let parent = parent_path(path);
         let root = Text::new("/").expect("constant");
         let mut crumbs = div()
@@ -83,7 +113,9 @@ impl Desktop {
                     .child((*part).to_owned()),
                 );
         }
-        body = body.child(crumbs);
+        if browser.section == FileSection::All {
+            body = body.child(crumbs);
+        }
         if browser.offline {
             body = body.child(self.hint(self.l("Offline · gespeicherte Dateien")));
         } else if browser.loading {
@@ -101,12 +133,12 @@ impl Desktop {
                         "Erneut versuchen",
                         ButtonStyle::Quiet,
                         true,
-                        LocalAction::Content(Action::BrowseDirectory(browser.path.clone())),
+                        LocalAction::Content(Action::BrowserRetry),
                         cx,
                     )),
             );
         }
-        if let Some(parent) = parent {
+        if let Some(parent) = parent.filter(|_| browser.section == FileSection::All) {
             body = body.child(self.button(
                 "cloud-parent",
                 "Eine Ebene nach oben",
@@ -140,7 +172,8 @@ impl Desktop {
                     self.theme.muted,
                 ));
             if entry.directory {
-                if let Some(path) = child_path(path, entry.name.as_str()) {
+                {
+                    let path = entry.path.clone();
                     let id: SharedString = format!("cloud-dir-{}", path.as_str()).into();
                     row = row.child(
                         self.control(
@@ -197,11 +230,11 @@ impl Desktop {
                     "Zur Auswahl hinzufügen",
                     ButtonStyle::Quiet,
                     self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Files)
+                        && self.composer_available()
                         && !browser.offline,
                     LocalAction::Content(Action::Command(ContentAction::StageCloudFile {
                         context,
-                        directory: browser.path.clone(),
-                        name: entry.name.clone(),
+                        path: entry.path.clone(),
                     })),
                     cx,
                 ));

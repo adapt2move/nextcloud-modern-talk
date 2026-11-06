@@ -108,6 +108,11 @@ fn allowed(snapshot: &PresentationSnapshot, context: ConversationRef) -> bool {
     snapshot.selected == Some(context)
         && snapshot.active_account == Some(context.account)
         && snapshot.content == ContentState::Ready
+        && snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|room| room.context == context && room.send == Decision::Allowed)
         && snapshot.message_panel.as_ref().is_some_and(|panel| {
             panel.context == context && panel.availability(MessageFeature::Files).enabled()
         })
@@ -289,8 +294,7 @@ impl Accounts {
     pub(in crate::composition::accounts) fn stage_cloud_file(
         &mut self,
         context: ConversationRef,
-        directory: Text<16384>,
-        name: Text<255>,
+        path: Text<16384>,
     ) -> Result<(), SubmitError> {
         if !allowed(&self.snapshot, context) {
             return Err(SubmitError::Unavailable(
@@ -302,22 +306,16 @@ impl Accounts {
             .content_panel
             .file_browser
             .as_ref()
-            .filter(|browser| browser.account == context.account && browser.path == directory)
+            .filter(|browser| browser.account == context.account)
             .ok_or(SubmitError::StaleScope)?;
         let entry = browser
             .entries
             .as_slice()
             .iter()
-            .find(|entry| entry.name == name && !entry.directory)
+            .find(|entry| entry.path == path && !entry.directory)
             .ok_or(SubmitError::StaleScope)?;
         let bytes = entry.size;
-        let path = if directory.as_str() == "/" {
-            format!("/{}", name.as_str())
-        } else {
-            format!("{}/{}", directory.as_str(), name.as_str())
-        };
-        let path = Text::new(&path)
-            .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+        let name = entry.name.clone();
         if self
             .attachment_owner
             .batch

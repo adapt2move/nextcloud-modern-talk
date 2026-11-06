@@ -232,29 +232,40 @@ pub(super) fn action(
             cloud_files(snapshot, path.as_str());
             Ok(())
         }
+        ContentAction::RecentFiles
+        | ContentAction::FavoriteFiles
+        | ContentAction::SearchFiles(_) => {
+            let section = match action {
+                ContentAction::RecentFiles => talk_core::ui::content::FileSection::Recent,
+                ContentAction::FavoriteFiles => talk_core::ui::content::FileSection::Favorites,
+                _ => talk_core::ui::content::FileSection::Search,
+            };
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = section;
+            }
+            Ok(())
+        }
         ContentAction::CloseFileBrowser => {
             snapshot.content_panel.file_browser = None;
             Ok(())
         }
-        ContentAction::StageCloudFile {
-            context,
-            directory,
-            name,
-        } => {
+        ContentAction::StageCloudFile { context, path } => {
             let entry = snapshot
                 .content_panel
                 .file_browser
                 .as_ref()
-                .filter(|browser| browser.account == context.account && browser.path == directory)
+                .filter(|browser| browser.account == context.account)
                 .and_then(|browser| {
                     browser
                         .entries
                         .as_slice()
                         .iter()
-                        .find(|item| item.name == name && !item.directory)
+                        .find(|item| item.path == path && !item.directory)
                 })
                 .ok_or(SubmitError::StaleScope)?;
             let size = entry.size;
+            let name = entry.name.clone();
             let panel = snapshot
                 .message_panel
                 .as_mut()
@@ -362,11 +373,18 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
     snapshot.content_panel.file_browser = Some(FileBrowserView {
         account,
         path: text(path),
+        section: talk_core::ui::content::FileSection::All,
         loading: false,
         offline: false,
         error: None,
         entries: page(names.iter().map(|(name, directory, size)| CloudFileView {
             name: text(name),
+            path: text(&format!(
+                "{}{}{}",
+                if path == "/" { "" } else { path },
+                "/",
+                name
+            )),
             directory: *directory,
             size: *size,
             modified: Some(text("04 Nov 2026")),

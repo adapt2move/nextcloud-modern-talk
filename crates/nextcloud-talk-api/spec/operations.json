@@ -472,6 +472,22 @@
       "scope": "Create-only filename probing; no replace-existing mode."
     },
     {
+      "operation_id": "files-dav-search",
+      "method": "SEARCH",
+      "path": "/remote.php/dav/",
+      "status": "partial",
+      "api": "Client::search_files",
+      "scope": "Account-scoped name search or recent files, limited to 200 results and bounded response bytes. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/search.html"
+    },
+    {
+      "operation_id": "files-dav-favorites",
+      "method": "REPORT",
+      "path": "/remote.php/dav/files/{user}",
+      "status": "partial",
+      "api": "Client::favorite_files",
+      "scope": "Account-scoped recursive favorites with bounded response and entry count. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html#listing-favorites"
+    },
+    {
       "operation_id": "files-dav-list-directory",
       "method": "PROPFIND",
       "path": "/remote.php/dav/files/{user}/{path}",

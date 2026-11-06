@@ -9,6 +9,8 @@ const MAX_DIRECTORY_ENTRIES: usize = 1000;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryEntry {
     pub name: String,
+    /// Validated path relative to the authenticated user's files root.
+    pub path: String,
     pub is_directory: bool,
     pub size: Option<u64>,
     pub modified: Option<String>,
@@ -16,7 +18,11 @@ pub struct DirectoryEntry {
     pub file_id: Option<String>,
 }
 
-fn parse_listing(bytes: &[u8], base: &url::Url) -> Result<Vec<DirectoryEntry>, ErrorKind> {
+fn parse_listing(
+    bytes: &[u8],
+    base: &url::Url,
+    recursive: bool,
+) -> Result<Vec<DirectoryEntry>, ErrorKind> {
     let xml = std::str::from_utf8(bytes).map_err(|_| ErrorKind::Malformed)?;
     let doc = roxmltree::Document::parse(xml).map_err(|_| ErrorKind::Malformed)?;
     let root = doc.root_element();
@@ -64,21 +70,44 @@ fn parse_listing(bytes: &[u8], base: &url::Url) -> Result<Vec<DirectoryEntry>, E
         if !valid_child_name(name) {
             return Err(ErrorKind::Malformed);
         }
-        let mut expected = base.clone();
-        expected
-            .path_segments_mut()
-            .map_err(|_| ErrorKind::Malformed)?
-            .pop_if_empty()
-            .push(name);
-        if href.path().trim_end_matches('/') != expected.path().trim_end_matches('/') {
+        let prefix = format!("{}/", base.path().trim_end_matches('/'));
+        let relative = href
+            .path()
+            .strip_prefix(&prefix)
+            .ok_or(ErrorKind::WrongScope)?;
+        let relative = relative.trim_end_matches('/');
+        let segments: Vec<_> = relative
+            .split('/')
+            .map(|segment| {
+                percent_encoding::percent_decode_str(segment)
+                    .decode_utf8()
+                    .map_err(|_| ErrorKind::Malformed)
+            })
+            .collect::<Result<_, _>>()?;
+        if segments.is_empty()
+            || segments.iter().any(|segment| !valid_child_name(segment))
+            || segments.last().is_none_or(|last| last.as_ref() != name)
+            || (!recursive && segments.len() != 1)
+        {
             return Err(ErrorKind::WrongScope);
+        }
+        let path = format!(
+            "/{}",
+            segments
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join("/")
+        );
+        if path.len() > 16384 {
+            return Err(ErrorKind::TooLarge);
         }
         if entries.len() == MAX_DIRECTORY_ENTRIES {
             return Err(ErrorKind::TooLarge);
         }
         if entries
             .iter()
-            .any(|entry: &DirectoryEntry| entry.name == name)
+            .any(|entry: &DirectoryEntry| entry.path == path)
         {
             return Err(ErrorKind::Malformed);
         }
@@ -92,6 +121,7 @@ fn parse_listing(bytes: &[u8], base: &url::Url) -> Result<Vec<DirectoryEntry>, E
             .transpose()?;
         entries.push(DirectoryEntry {
             name: name.to_owned(),
+            path,
             is_directory,
             size,
             modified: bounded(value("DAV:", "getlastmodified")),
@@ -182,13 +212,36 @@ pub struct ShareOptions {
     pub silent: bool,
 }
 impl Client {
+    /// Search is bounded by both server result count and response bytes.
+    pub async fn search_files(
+        &mut self,
+        c: &OperationContext,
+        term: Option<&str>,
+    ) -> Result<Vec<DirectoryEntry>, Error> {
+        let (base, body) = self.transport.search_files(c, term).await?;
+        parse_listing(&body, &base, true).map_err(|kind| self.error(kind))
+    }
+    pub async fn favorite_files(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<DirectoryEntry>, Error> {
+        let (base, body) = self.transport.favorite_files(c).await?;
+        parse_listing(&body, &base, true).map_err(|kind| self.error(kind))
+    }
     pub async fn list_directory(
         &mut self,
         c: &OperationContext,
         path: &DirectoryPath,
     ) -> Result<Vec<DirectoryEntry>, Error> {
         let (base, body) = self.transport.directory_listing(c, path).await?;
-        parse_listing(&body, &base).map_err(|kind| self.error(kind))
+        let mut entries = parse_listing(&body, &base, false).map_err(|kind| self.error(kind))?;
+        if path.as_str() != "/" {
+            for entry in &mut entries {
+                entry.path.insert_str(0, path.as_str());
+                FilePath::parse(&entry.path).map_err(|kind| self.error(kind))?;
+            }
+        }
+        Ok(entries)
     }
     /// Share an existing file into a room. Policy and capability checks belong to
     /// the caller; an interrupted mutation must be reconciled, never replayed.
@@ -349,18 +402,18 @@ mod directory_tests {
     fn listing_extracts_bounded_metadata_and_checks_child_scope() {
         let base = url::Url::parse("https://example.test/remote.php/dav/files/user/Docs").unwrap();
         let xml = listing("/remote.php/dav/files/user/Docs/file.txt", "file.txt");
-        let entries = parse_listing(xml.as_bytes(), &base).unwrap();
+        let entries = parse_listing(xml.as_bytes(), &base, false).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "file.txt");
         assert_eq!(entries[0].size, Some(123));
         assert_eq!(entries[0].file_id.as_deref(), Some("42"));
         let escaped = listing("/remote.php/dav/files/user/Other/file.txt", "file.txt");
-        assert!(parse_listing(escaped.as_bytes(), &base).is_err());
+        assert!(parse_listing(escaped.as_bytes(), &base, false).is_err());
         let foreign = listing(
             "https://other.test/remote.php/dav/files/user/Docs/file.txt",
             "file.txt",
         );
-        assert!(parse_listing(foreign.as_bytes(), &base).is_err());
+        assert!(parse_listing(foreign.as_bytes(), &base, false).is_err());
     }
 
     #[test]
@@ -369,11 +422,12 @@ mod directory_tests {
         assert!(
             parse_listing(
                 listing("/remote.php/dav/files/user/x", "..").as_bytes(),
-                &base
+                &base,
+                false,
             )
             .is_err()
         );
-        assert!(parse_listing(b"<not-xml", &base).is_err());
+        assert!(parse_listing(b"<not-xml", &base, false).is_err());
     }
 
     #[test]
@@ -381,7 +435,18 @@ mod directory_tests {
         let base = url::Url::parse("https://example.test/remote.php/dav/files/user").unwrap();
         let response = r#"<d:response><d:href>/remote.php/dav/files/user/a</d:href><d:propstat><d:prop><d:displayname>a</d:displayname></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"#;
         let xml = format!("<d:multistatus xmlns:d=\"DAV:\">{response}{response}</d:multistatus>");
-        assert!(parse_listing(xml.as_bytes(), &base).is_err());
+        assert!(parse_listing(xml.as_bytes(), &base, false).is_err());
+    }
+
+    #[test]
+    fn recursive_results_keep_validated_relative_paths() {
+        let base = url::Url::parse("https://example.test/remote.php/dav/files/user").unwrap();
+        let xml = listing("/remote.php/dav/files/user/Plans/a%20b.txt", "a b.txt");
+        let entries = parse_listing(xml.as_bytes(), &base, true).unwrap();
+        assert_eq!(entries[0].path, "/Plans/a b.txt");
+        assert!(parse_listing(xml.as_bytes(), &base, false).is_err());
+        let invalid = listing("/remote.php/dav/files/user/Plans%2Fsecret", "Plans/secret");
+        assert!(parse_listing(invalid.as_bytes(), &base, true).is_err());
     }
 
     #[test]

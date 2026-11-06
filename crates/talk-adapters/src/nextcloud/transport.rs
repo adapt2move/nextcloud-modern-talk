@@ -311,6 +311,22 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) async fn search_files(
+        &mut self,
+        c: &OperationContext,
+        term: Option<&str>,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .search_files(&context(c), term)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn favorite_files(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api.favorite_files(&context(c)).await.map_err(error)
+    }
     pub(super) async fn share_existing_file(
         &mut self,
         c: &OperationContext,

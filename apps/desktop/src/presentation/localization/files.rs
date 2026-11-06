@@ -17,6 +17,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudieron cargar los archivos.",
     ),
     (
+        "Dateien können in diesem Gespräch nicht gesendet werden.",
+        "Files cannot be sent in this conversation.",
+        "No se pueden enviar archivos en esta conversación.",
+    ),
+    ("Dateien suchen …", "Search files…", "Buscar archivos…"),
+    (
         "Dateien werden geladen …",
         "Loading files…",
         "Cargando archivos…",
@@ -37,6 +43,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Offline · saved files",
         "Sin conexión · archivos guardados",
     ),
+    ("Zuletzt", "Recent", "Recientes"),
     (
         "Zur Auswahl hinzufügen",
         "Add to selection",

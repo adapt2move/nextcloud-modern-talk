@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 reqwest.workspace = true
+percent-encoding = "=2.3.2"
 roxmltree = "=0.20.0"
 tokio.workspace = true
 serde.workspace = true
