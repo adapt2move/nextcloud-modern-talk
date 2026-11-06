@@ -404,7 +404,7 @@ impl Desktop {
         let stage_width =
             f32::from(window.viewport_size().width) - if show_chat { 300. } else { 0. } - 32.;
         let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
-        let focused = self.call_focus.and_then(|(scope, id)| {
+        let pinned = self.call_focus.and_then(|(scope, id)| {
             (scope == call.scope
                 && call
                     .participants
@@ -412,6 +412,17 @@ impl Desktop {
                     .iter()
                     .any(|p| p.local_id == id))
             .then_some(id)
+        });
+        let focused = pinned.or_else(|| {
+            if self.call_speaker != Some(call.scope) || call.screen_stage.is_some() {
+                return None;
+            }
+            call.participants
+                .as_slice()
+                .iter()
+                .find(|participant| participant.speaking)
+                .or_else(|| call.participants.as_slice().first())
+                .map(|participant| participant.local_id)
         });
         let mut feature = None;
         let mut tiles = div()
@@ -506,6 +517,7 @@ impl Desktop {
                         .when(participant.call_camera == Some(false), |row| {
                             row.child(self.scaled_icon("video-off", 14., t.stage_muted))
                         })
+                        .when(participant.speaking, |row| row.child(self.l("Spricht")))
                         .when(participant.raised_hand, |row| {
                             row.child(self.scaled_icon("hand", 14., t.stage_muted))
                                 .child(self.l("Hand gehoben"))
@@ -799,6 +811,25 @@ impl Desktop {
                                             )),
                                     ),
                             )
+                            .when(call.participants.as_slice().len() > 1, |header| {
+                                let speaker_mode =
+                                    self.call_speaker == Some(call.scope) && pinned.is_none();
+                                header.child(self.icon_button(
+                                    "call-layout",
+                                    (
+                                        if speaker_mode { "grid" } else { "speaker" },
+                                        if speaker_mode {
+                                            "Raster"
+                                        } else {
+                                            "Sprecheransicht"
+                                        },
+                                    ),
+                                    ButtonStyle::Stage,
+                                    Availability::available().hinted(),
+                                    LocalAction::SpeakerCallLayout(call.scope, !speaker_mode),
+                                    cx,
+                                ))
+                            })
                             .when_some(recording_label(call.recording), |header, label| {
                                 header.child(
                                     div()

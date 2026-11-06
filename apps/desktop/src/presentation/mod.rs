@@ -108,6 +108,7 @@ pub enum LocalAction {
     AcceptCallWithVideo,
     StartDirectWithVideo,
     FocusCallParticipant(CallScope, Option<u128>),
+    SpeakerCallLayout(CallScope, bool),
     Navigate(ConversationRef),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
@@ -300,6 +301,7 @@ pub struct Desktop {
     sidebar_hidden: bool,
     pub call_chat_open: bool,
     call_focus: Option<(CallScope, u128)>,
+    call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
     onboarding_open: bool,
@@ -459,13 +461,8 @@ impl Desktop {
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
-        let call_focus = if development && focus_first_call_participant {
-            snapshot.call.as_ref().and_then(|call| {
-                call.participants
-                    .as_slice()
-                    .first()
-                    .map(|p| (call.scope, p.local_id))
-            })
+        let call_speaker = if development && focus_first_call_participant {
+            snapshot.call.as_ref().map(|call| call.scope)
         } else {
             None
         };
@@ -553,7 +550,8 @@ impl Desktop {
             navigation_open: false,
             sidebar_hidden: false,
             call_chat_open: true,
-            call_focus,
+            call_focus: None,
+            call_speaker,
             call_minimized,
             call_started,
             onboarding_open: onboarding,
@@ -1376,6 +1374,17 @@ impl Desktop {
                     }
                 }
             }
+            LocalAction::SpeakerCallLayout(scope, enabled) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_focus = None;
+                    self.call_speaker = enabled.then_some(scope);
+                }
+            }
             LocalAction::FocusCallParticipant(scope, participant) => {
                 if self.snapshot.call.as_ref().is_some_and(|call| {
                     call.scope == scope
@@ -1387,6 +1396,7 @@ impl Desktop {
                         })
                 }) {
                     self.call_focus = participant.map(|id| (scope, id));
+                    self.call_speaker = None;
                 }
             }
             LocalAction::ToggleCallChat => {

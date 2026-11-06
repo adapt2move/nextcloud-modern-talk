@@ -49,6 +49,8 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Destacar participante",
     ),
     ("Raster", "Gallery", "Galería"),
+    ("Sprecheransicht", "Speaker view", "Vista de orador"),
+    ("Spricht", "Speaking", "Hablando"),
     (
         "Tastenkürzel: M",
         "Keyboard shortcut: M",

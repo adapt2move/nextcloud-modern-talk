@@ -190,6 +190,7 @@ impl Desktop {
                     .font_weight(FontWeight::MEDIUM)
                     .child(p.name.as_str().to_owned()),
             )
+            .when(p.speaking, |row| row.child(self.hint(self.l("Spricht"))))
             .when(p.raised_hand, |row| {
                 row.child(self.hint(self.l("Hand gehoben")))
             });
