@@ -608,7 +608,7 @@ impl Accounts {
             camera: MediaState::Off,
             share: MediaState::Unavailable,
             screen_stage: None,
-            recording: talk_core::policy::RecordingState::Unknown,
+            recording: talk_core::ui::presentation::CallRecordingState::Unknown,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -773,7 +773,26 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         camera: device(value.camera),
         share: device(value.screen),
         screen_stage: None,
-        recording: value.recording,
+        recording: match value.recording {
+            talk_core::policy::RecordingState::Inactive => {
+                talk_core::ui::presentation::CallRecordingState::Inactive
+            }
+            talk_core::policy::RecordingState::Starting => {
+                talk_core::ui::presentation::CallRecordingState::Starting
+            }
+            talk_core::policy::RecordingState::Active => {
+                talk_core::ui::presentation::CallRecordingState::Active
+            }
+            talk_core::policy::RecordingState::Stopping => {
+                talk_core::ui::presentation::CallRecordingState::Stopping
+            }
+            talk_core::policy::RecordingState::Failed => {
+                talk_core::ui::presentation::CallRecordingState::Failed
+            }
+            talk_core::policy::RecordingState::Unknown => {
+                talk_core::ui::presentation::CallRecordingState::Unknown
+            }
+        },
         participants: page(
             value
                 .participants

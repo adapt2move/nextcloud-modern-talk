@@ -1029,14 +1029,14 @@ mod gallery_tests {
     }
 }
 
-fn recording_label(state: talk_core::policy::RecordingState) -> Option<&'static str> {
-    use talk_core::policy::RecordingState;
+fn recording_label(state: talk_core::ui::presentation::CallRecordingState) -> Option<&'static str> {
+    use talk_core::ui::presentation::CallRecordingState;
     match state {
-        RecordingState::Inactive => None,
-        RecordingState::Starting => Some("Aufzeichnung startet …"),
-        RecordingState::Active => Some("Aufzeichnung läuft"),
-        RecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
-        RecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
-        RecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
+        CallRecordingState::Inactive => None,
+        CallRecordingState::Starting => Some("Aufzeichnung startet …"),
+        CallRecordingState::Active => Some("Aufzeichnung läuft"),
+        CallRecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
+        CallRecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
+        CallRecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
     }
 }

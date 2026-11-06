@@ -860,9 +860,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 None
             },
             recording: if scenario == "call-recording" {
-                talk_core::policy::RecordingState::Active
+                talk_core::ui::presentation::CallRecordingState::Active
             } else {
-                talk_core::policy::RecordingState::Unknown
+                talk_core::ui::presentation::CallRecordingState::Unknown
             },
             participants: page(
                 if matches!(
@@ -1868,7 +1868,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     camera: MediaState::Unavailable,
                     share: MediaState::Unavailable,
                     screen_stage: None,
-                    recording: talk_core::policy::RecordingState::Unknown,
+                    recording: talk_core::ui::presentation::CallRecordingState::Unknown,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

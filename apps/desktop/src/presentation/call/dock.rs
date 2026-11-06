@@ -1,5 +1,5 @@
 //! A call remains owned by the call runtime while this window shows other content.
-use super::super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
+use crate::presentation::{ButtonStyle, Desktop, LocalAction, controls::Availability};
 use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::ui::{
     UserIntent,

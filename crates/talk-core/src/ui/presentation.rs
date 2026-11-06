@@ -469,6 +469,16 @@ pub struct CallScreenStage {
     pub name: Text<128>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRecordingState {
+    Inactive,
+    Starting,
+    Active,
+    Stopping,
+    Failed,
+    Unknown,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
@@ -481,7 +491,7 @@ pub struct CallView {
     pub share: MediaState,
     /// Screen metadata only; frames remain in the scoped media image owner.
     pub screen_stage: Option<CallScreenStage>,
-    pub recording: crate::policy::RecordingState,
+    pub recording: CallRecordingState,
     pub participants: Page<ParticipantView, 16>,
 }
 
