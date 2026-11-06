@@ -346,14 +346,32 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
     let t = &v["thread"];
     let token = required(t, "roomToken", 30)?;
     RoomToken::parse(&token)?;
+    let id = number(t, "id")?;
+    // A thread ID is also a message ID and cannot be used in routes when zero.
+    positive(id)?;
     Ok(Thread {
-        id: number(t, "id")?,
+        id,
         token,
         title: required(t, "title", 256)?,
         replies: u32::try_from(number(t, "numReplies")?).map_err(|_| ErrorKind::TooLarge)?,
         notification_level: integer(v.get("attendee").and_then(|a| a.get("notificationLevel")))
             .and_then(|n| u8::try_from(n).ok()),
     })
+}
+
+#[cfg(test)]
+mod thread_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rejects_zero_thread_id_before_exposing_it_to_callers() {
+        let value = json!({"thread": {"id": 0, "roomToken": "room1234", "title": "Topic", "numReplies": 1}});
+        assert!(matches!(thread(&value), Err(ErrorKind::Malformed)));
+        let mut valid = value;
+        valid["thread"]["id"] = json!(42);
+        assert_eq!(thread(&valid).unwrap().id, 42);
+    }
 }
 fn renames(v: &Value) -> Result<Vec<(String, String)>, ErrorKind> {
     let entries = v.as_array().ok_or(ErrorKind::Malformed)?;
