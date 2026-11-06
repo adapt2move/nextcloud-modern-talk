@@ -203,6 +203,73 @@ impl MeetingModerationWriter {
         crate::decode(kind, response).map_err(|kind| self.binding.error(kind))
     }
 
+    /// End the current call for everyone after a fresh role and session check.
+    /// This is distinct from an ordinary local leave and is never replayed.
+    pub async fn end_for_everyone(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol() || caps.call_enabled != Some(true) {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || room.object_type.as_deref() == Some("room")
+            || !matches!(room.participant_type, Some(1 | 2 | 6))
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v4/call/{}",
+            self.binding.room.as_str()
+        );
+        self.transport
+            .ocs(
+                &context,
+                Method::DELETE,
+                &route,
+                &[],
+                &[("all", "true".to_owned())],
+                false,
+            )
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
     /// One deliberate ring request. Fresh room, capability and session facts
     /// are checked on this lane immediately before dispatch; success is only a
     /// server receipt and never proves a notification was delivered or heard.
