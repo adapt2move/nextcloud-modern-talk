@@ -6,6 +6,22 @@
     "not-client": 23,
     "partial": 13
   },
+  "external_operations": [
+    {
+      "method": "GET",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status",
+      "api": "Client::own_user_status",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v34.0.5/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/status",
+      "api": "Client::set_own_user_status",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    }
+  ],
   "operations": [
     {
       "operation_id": "avatar-upload-avatar",

@@ -29,9 +29,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   in the Cloud web view; poll drafts remain server-managed.
 - Direct-conversation presence and custom status are refreshed with the room
   list when the server enables `user_status`. They remain session-local and are
-  unknown after restart until refreshed. Member and message-author status,
-  the status editor, and people cards are not yet implemented. Actual server
-  and native accessibility qualification remain separate from UI fixtures.
+  unknown after restart until refreshed. The account menu can change availability;
+  custom and predefined status editing, member and message-author status, and
+  people cards are not yet implemented. Native accessibility qualification
+  remains separate from UI fixtures.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms

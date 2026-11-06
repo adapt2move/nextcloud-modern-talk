@@ -135,6 +135,12 @@ pub struct Accounts {
     load_rooms: Option<AccountScope>,
     load_tags: Option<AccountScope>,
     preferences: Vec<AccountPreferenceSnapshot>,
+    // Keep a DND intent until a scoped server observation resolves an uncertain write.
+    status_pending: Vec<(
+        AccountScope,
+        PreferenceRequest,
+        talk_core::preferences::account::StatusChoice,
+    )>,
     failures: Vec<(AccountId, LoginFailure)>,
     unresolved: Vec<Unresolved>,
     queued_send: Option<messaging::QueuedSend>,
@@ -181,6 +187,7 @@ impl Accounts {
             load_rooms: None,
             load_tags: None,
             preferences: Vec::new(),
+            status_pending: Vec::new(),
             failures: Vec::new(),
             unresolved: Vec::new(),
             queued_send: None,
@@ -480,6 +487,8 @@ impl Accounts {
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
+        self.status_pending
+            .retain(|(scope, _, _)| admitted.iter().any(|a| a.scope == *scope));
         self.unresolved
             .retain(|u| admitted.iter().any(|a| a.scope == u.context.account));
         if self.snapshot.active_account.is_none()
@@ -815,8 +824,29 @@ impl Accounts {
             Purpose::Preferences(scope, request) => {
                 if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope && matches!(p.state, AccountPreferenceState::Loading { request: r } | AccountPreferenceState::Saving { request: r } if r == request)) {
                     match result {
-                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => { cache.values = Some(reply.values); cache.state = AccountPreferenceState::Ready; }
-                        Err(error) => cache.state = AccountPreferenceState::Failed { request, error: preference_error(error) },
+                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => {
+                            let status_resolved = reply.values.user_status_observed || reply.values.user_status_enabled != Some(true);
+                            let awaiting_status = self.status_pending.iter().any(|(pending_scope, _, _)| *pending_scope == scope);
+                            if status_resolved { self.status_pending.retain(|(pending_scope, _, _)| *pending_scope != scope); }
+                            let mut values = reply.values;
+                            if values.user_status_enabled == Some(true) && !values.user_status_observed
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true) && v.user_status_observed)
+                            {
+                                values.user_presence = previous.user_presence;
+                                values.user_status_observed = true;
+                            }
+                            cache.values = Some(values);
+                            cache.state = if awaiting_status && !status_resolved {
+                                AccountPreferenceState::Failed { request, error: AccountPreferenceError::Uncertain }
+                            } else { AccountPreferenceState::Ready };
+                        }
+                        Err(error) => {
+                            let error = preference_error(error);
+                            if !matches!(error, AccountPreferenceError::Network | AccountPreferenceError::Uncertain) {
+                                self.status_pending.retain(|(pending_scope, pending_request, _)| *pending_scope != scope || *pending_request != request);
+                            }
+                            cache.state = AccountPreferenceState::Failed { request, error };
+                        },
                         _ => cache.state = AccountPreferenceState::Failed { request, error: AccountPreferenceError::Unavailable },
                     }
                 }
@@ -839,6 +869,14 @@ impl Accounts {
         &mut self,
         command: AccountPreferenceCommand,
     ) -> Result<(), AccountPreferenceError> {
+        let status_choice = match &command {
+            AccountPreferenceCommand::Set {
+                change:
+                    talk_core::preferences::account::AccountPreferenceChange::UserPresence(choice),
+                ..
+            } => Some(*choice),
+            _ => None,
+        };
         let (scope, request, protocol, state) = match command {
             AccountPreferenceCommand::Load { scope, request } => (
                 scope,
@@ -861,10 +899,9 @@ impl Accounts {
             .map_err(|_| AccountPreferenceError::Stale)?;
         if self.preferences.iter().any(|p| {
             p.scope == scope
-                && matches!(
-                    p.state,
-                    AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. }
-                )
+                && (matches!(p.state, AccountPreferenceState::Saving { .. })
+                    || matches!(p.state, AccountPreferenceState::Loading { .. })
+                        && status_choice.is_none())
         }) {
             return Err(AccountPreferenceError::Busy);
         }
@@ -879,6 +916,11 @@ impl Accounts {
             Purpose::Preferences(scope, request),
         )
         .map_err(preference_error)?;
+        if let Some(choice) = status_choice {
+            self.status_pending
+                .retain(|(pending_scope, _, _)| *pending_scope != scope);
+            self.status_pending.push((scope, request, choice));
+        }
         if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope) {
             cache.state = state;
         } else {
@@ -890,6 +932,23 @@ impl Accounts {
         }
         Ok(())
     }
+    fn suppress_account_notifications(&self, scope: AccountScope) -> bool {
+        use talk_core::preferences::account::StatusChoice;
+        self.status_pending
+            .iter()
+            .any(|(pending_scope, _, choice)| {
+                *pending_scope == scope && *choice == StatusChoice::DoNotDisturb
+            })
+            || self.preferences.iter().any(|snapshot| {
+                snapshot.scope == scope
+                    && snapshot.values.as_ref().is_some_and(|values| {
+                        values.user_status_enabled == Some(true)
+                            && values.user_status_observed
+                            && values.user_presence == Some(StatusChoice::DoNotDisturb)
+                    })
+            })
+    }
+
     fn cancel_login(&mut self) {
         self.login_retry_server = None;
         if let Some(login) = self.login.take()
@@ -1406,6 +1465,8 @@ impl Accounts {
                     .logout(account)
                     .map_err(submit_error)?;
                 self.preferences.retain(|p| p.scope.account != account);
+                self.status_pending
+                    .retain(|(scope, _, _)| scope.account != account);
                 self.history.remove_account(account);
                 self.outbox.retire_account(account);
                 if self

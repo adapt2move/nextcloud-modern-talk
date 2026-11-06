@@ -19,6 +19,7 @@ mod navigation;
 mod onboarding;
 mod organization;
 mod overlays;
+mod own_status;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
@@ -141,6 +142,8 @@ pub enum LocalAction {
     NotificationAccess(talk_core::preferences::notifications::NotificationAccessAction),
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
+    ToggleOwnStatus,
+    SetOwnStatus(talk_core::preferences::account::StatusChoice),
     SaveUploadFolder,
     RefreshDevice(talk_core::preferences::devices::DeviceKind),
     Permission(
@@ -304,6 +307,15 @@ pub struct Desktop {
     account_preferences: Option<talk_core::preferences::account::AccountPreferenceSnapshot>,
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
+    own_status_open: bool,
+    own_status_focus: bool,
+    own_status_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        talk_core::preferences::account::StatusChoice,
+    )>,
+    own_status_reconcile: Option<(talk_core::ui::AccountScope, std::time::Instant)>,
+    own_status_loaded: Option<talk_core::ui::AccountScope>,
     account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
@@ -533,6 +545,11 @@ impl Desktop {
             account_preferences: None,
             account_preference_request: 0,
             account_preference_error: None,
+            own_status_open: development && probe == Probe::Status,
+            own_status_focus: false,
+            own_status_optimistic: None,
+            own_status_reconcile: None,
+            own_status_loaded: None,
             account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
@@ -557,6 +574,9 @@ impl Desktop {
             pending_ack: None,
             theme,
         };
+        if development && probe == Probe::Status {
+            desktop.account_preferences = desktop.fixture_own_status();
+        }
         if development && initial_overlay == Some(Overlay::Thread) {
             desktop.thread_parent = desktop.snapshot.selected.and_then(|c| {
                 desktop
@@ -1082,6 +1102,7 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                self.own_status_open = false;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1283,6 +1304,7 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
+                self.own_status_open = false;
                 if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
                     self.retire_emoji_picker();
                     self.navigation_open = false;
@@ -1604,6 +1626,8 @@ impl Desktop {
             }
             LocalAction::StartDevice(kind) => self.start_device_preview(kind),
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
+            LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
+            LocalAction::SetOwnStatus(choice) => self.set_own_status(choice, cx),
             LocalAction::ReloadAccountPreferences => self.load_account_preferences(cx),
             LocalAction::AccountPreference(change) => self.change_account_preference(change, cx),
             LocalAction::SaveUploadFolder => {
@@ -1813,6 +1837,15 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.own_status_open {
+                self.own_status_open = false;
+                if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
+                    focus.focus(window);
+                }
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.conversation_search_open() && self.composer_available() {
                 self.handle(
                     LocalAction::Message(messaging::Action::CloseSearch),
@@ -2370,6 +2403,15 @@ impl Render for Desktop {
                 reveal.request();
                 window.refresh();
             });
+        }
+        if self.own_status_focus
+            && self.own_status_open
+            && let Some(focus) = self
+                .control_focus
+                .current(&("own-status-choice", 0usize).into())
+        {
+            self.own_status_focus = false;
+            focus.focus(window);
         }
         if let Some(id) = self.pending_device_focus.take()
             && self.devices_open()

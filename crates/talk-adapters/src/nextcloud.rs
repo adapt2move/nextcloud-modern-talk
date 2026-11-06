@@ -874,7 +874,7 @@ impl NextcloudClient {
             ProtocolRequest::ReadPreferences { request } => Ok(ProtocolReply::Preferences(
                 talk_core::preferences::account::AccountPreferenceResult {
                     request,
-                    values: caps.account_preferences(context.scope),
+                    values: self.read_account_preferences(context, &caps).await?,
                 },
             )),
             ProtocolRequest::SetPreference { request, change } => {

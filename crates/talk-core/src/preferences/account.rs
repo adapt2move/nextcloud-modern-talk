@@ -37,6 +37,11 @@ pub struct AccountPreferences {
     pub attachments_allowed: Option<bool>,
     /// The server may derive conversation subfolders below the selected base folder.
     pub conversation_subfolders: Option<bool>,
+    /// Missing capability or status never implies online.
+    pub user_status_enabled: Option<bool>,
+    pub user_presence: Option<StatusChoice>,
+    /// False means this response did not observe status and cannot clear a cached value.
+    pub user_status_observed: bool,
 }
 impl AccountPreferences {
     pub fn show_read_indicators(&self) -> bool {
@@ -49,11 +54,23 @@ impl AccountPreferences {
         self.share_typing_status == Some(true)
     }
 }
+/// Bounded own-status values; offline is an observation, not a picker choice.
+/// Unknown status is represented by None.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatusChoice {
+    Online,
+    Away,
+    DoNotDisturb,
+    Invisible,
+    /// Server observation only; the picker does not offer this choice.
+    Offline,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AccountPreferenceChange {
     SendReadReceipts(bool),
     ShareTypingStatus(bool),
     AttachmentFolder(NextcloudFolder),
+    UserPresence(StatusChoice),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountPreferenceResult {

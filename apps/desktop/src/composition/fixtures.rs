@@ -48,6 +48,7 @@ pub const SCENARIOS: &[&str] = &[
     "accounts-server-denied",
     "chat-ux",
     "chat-presence",
+    "status-picker",
     "chat-ux-call",
     "chat-edit",
     "thread-error",
@@ -197,6 +198,22 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("status-picker") {
+        let mut state = snapshot(Some("chat-presence"));
+        state.accounts = page(
+            state
+                .accounts
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut account| {
+                    account.connection =
+                        talk_core::ui::presentation::AccountConnectionState::Connected;
+                    account
+                }),
+        );
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")

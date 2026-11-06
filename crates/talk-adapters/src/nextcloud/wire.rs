@@ -153,19 +153,26 @@ impl Capabilities {
     }
 }
 
+pub(super) fn presence(value: nextcloud_talk_api::presence::UserStatus) -> UserPresence {
+    use nextcloud_talk_api::presence::UserStatus as S;
+    match value {
+        S::Online => UserPresence::Online,
+        S::Away => UserPresence::Away,
+        S::DoNotDisturb => UserPresence::DoNotDisturb,
+        S::Offline => UserPresence::Offline,
+        S::Invisible => UserPresence::Invisible,
+        S::Unknown => UserPresence::Unknown,
+    }
+}
+
 fn user_status(data: &Value, kind: RoomKind, caps: &Capabilities) -> Option<UserStatus> {
     if kind != RoomKind::Direct || caps.user_status_enabled != Some(true) || !caps.supported() {
         return None;
     }
     let raw = data.get("status")?.as_str()?;
-    let presence = match nextcloud_talk_api::presence::UserStatus::from_wire(Some(raw)) {
-        nextcloud_talk_api::presence::UserStatus::Online => UserPresence::Online,
-        nextcloud_talk_api::presence::UserStatus::Away => UserPresence::Away,
-        nextcloud_talk_api::presence::UserStatus::DoNotDisturb => UserPresence::DoNotDisturb,
-        nextcloud_talk_api::presence::UserStatus::Offline => UserPresence::Offline,
-        nextcloud_talk_api::presence::UserStatus::Invisible => UserPresence::Invisible,
-        nextcloud_talk_api::presence::UserStatus::Unknown => UserPresence::Unknown,
-    };
+    let presence = presence(nextcloud_talk_api::presence::UserStatus::from_wire(Some(
+        raw,
+    )));
     Some(UserStatus {
         presence,
         icon: data

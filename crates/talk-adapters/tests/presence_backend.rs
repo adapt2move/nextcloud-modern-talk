@@ -7,6 +7,10 @@ use talk_core::{
     ids::{AccountId, AccountScope, ClockEpoch, HostId, RuntimeGeneration},
     lifecycle::Cancellation,
     ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest},
+    preferences::{
+        RequestId,
+        account::{AccountPreferenceChange, StatusChoice},
+    },
     protocol::{RoomKind, UserPresence},
 };
 
@@ -59,6 +63,35 @@ async fn direct_room_list_exposes_server_status() {
         status.message.as_ref().map(|v| v.as_str()),
         Some("Presence fixture")
     );
+    for (number, choice) in [
+        (1, StatusChoice::Away),
+        (2, StatusChoice::DoNotDisturb),
+        (3, StatusChoice::Invisible),
+        (4, StatusChoice::Online),
+    ] {
+        let mut deadline = runtime.now();
+        deadline.millis += 60_000;
+        let context = OperationContext {
+            scope,
+            deadline,
+            cancellation: Cancellation::default(),
+        };
+        let ProtocolReply::Preferences(updated) = client
+            .request(
+                context,
+                ProtocolRequest::SetPreference {
+                    request: RequestId(number),
+                    change: AccountPreferenceChange::UserPresence(choice),
+                },
+            )
+            .await
+            .expect("set and reconcile own status")
+        else {
+            panic!("preferences reply")
+        };
+        assert_eq!(updated.values.scope, scope);
+        assert_eq!(updated.values.user_presence, Some(choice));
+    }
     assert!(
         list.rooms
             .as_slice()

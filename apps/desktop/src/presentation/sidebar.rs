@@ -586,8 +586,82 @@ impl Desktop {
                     .child(list),
             )
         };
+        let profile = self
+            .button(
+                "own-status-menu",
+                "",
+                ButtonStyle::Quiet,
+                account.is_some(),
+                LocalAction::ToggleOwnStatus,
+                cx,
+            )
+            .flex_1()
+            .min_w_0()
+            .justify_start()
+            .gap_2()
+            .p_0()
+            .when_some(account, |d, a| {
+                let avatar = self.content_avatar(
+                    talk_core::ui::content::AssetTarget::SelfAvatar,
+                    a.initials.as_str(),
+                    32.,
+                );
+                d.child(self.avatar_with_presence(avatar, self.own_presence(), 10., t.sidebar))
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .child(
+                        div()
+                            .w_full()
+                            .text_size(self.sp(13.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_ellipsis()
+                            .child(account.map_or_else(
+                                || self.l("Noch kein Konto verbunden.").to_owned(),
+                                |a| {
+                                    self.snapshot
+                                        .content_panel
+                                        .self_name
+                                        .as_ref()
+                                        .filter(|name| {
+                                            self.snapshot.content_panel.account == Some(a.scope)
+                                                && !name.as_str().trim().is_empty()
+                                        })
+                                        .map_or(a.self_name.as_str(), |name| name.as_str())
+                                        .to_owned()
+                                },
+                            )),
+                    )
+                    .when_some(account, |d, a| {
+                        d.child(
+                            div()
+                                .w_full()
+                                .text_size(self.sp(11.))
+                                .text_color(t.sidebar_secondary)
+                                .text_ellipsis()
+                                .child(
+                                    self.snapshot
+                                        .content_panel
+                                        .organization
+                                        .as_ref()
+                                        .filter(|name| {
+                                            self.snapshot.content_panel.account == Some(a.scope)
+                                                && !name.as_str().trim().is_empty()
+                                        })
+                                        .map_or(a.server_label.as_str(), |name| name.as_str())
+                                        .to_owned(),
+                                ),
+                        )
+                    }),
+            );
         sidebar.child(
             div()
+                .relative()
                 .flex_none()
                 .flex()
                 .items_center()
@@ -596,61 +670,7 @@ impl Desktop {
                 .mt_2()
                 .border_t_1()
                 .border_color(t.border)
-                .when_some(account, |d, a| {
-                    d.child(self.content_avatar(
-                        talk_core::ui::content::AssetTarget::SelfAvatar,
-                        a.initials.as_str(),
-                        32.,
-                    ))
-                })
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .text_size(self.sp(13.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_ellipsis()
-                                .child(account.map_or_else(
-                                    || self.l("Noch kein Konto verbunden.").to_owned(),
-                                    |a| {
-                                        self.snapshot
-                                            .content_panel
-                                            .self_name
-                                            .as_ref()
-                                            .filter(|name| {
-                                                self.snapshot.content_panel.account == Some(a.scope)
-                                                    && !name.as_str().trim().is_empty()
-                                            })
-                                            .map_or(a.self_name.as_str(), |name| name.as_str())
-                                            .to_owned()
-                                    },
-                                )),
-                        )
-                        .when_some(account, |d, a| {
-                            d.child(
-                                div()
-                                    .text_size(self.sp(11.))
-                                    .text_color(t.sidebar_secondary)
-                                    .text_ellipsis()
-                                    .child(
-                                        self.snapshot
-                                            .content_panel
-                                            .organization
-                                            .as_ref()
-                                            .filter(|name| {
-                                                self.snapshot.content_panel.account == Some(a.scope)
-                                                    && !name.as_str().trim().is_empty()
-                                            })
-                                            .map_or(a.server_label.as_str(), |name| name.as_str())
-                                            .to_owned(),
-                                    ),
-                            )
-                        }),
-                )
+                .child(profile)
                 .child(self.icon_button(
                     "settings",
                     ("settings", "Einstellungen"),
@@ -658,7 +678,8 @@ impl Desktop {
                     Availability::available(),
                     LocalAction::Open(Overlay::Settings),
                     cx,
-                )),
+                ))
+                .when(self.own_status_open, |d| d.child(self.own_status_menu(cx))),
         )
     }
 

@@ -177,6 +177,8 @@ impl Accounts {
             None,
         ));
         self.preferences.retain(|p| p.scope.account != account);
+        self.status_pending
+            .retain(|(scope, _, _)| scope.account != account);
         self.history.remove_account(account);
         self.outbox.retire_account(account);
         if self

@@ -392,6 +392,16 @@ impl Transport {
     ) -> Result<api::Reply, PortError> {
         self.api.request(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn set_own_user_status(
+        &mut self,
+        c: &OperationContext,
+        choice: api::presence::StatusChoice,
+    ) -> Result<api::presence::UserStatus, PortError> {
+        self.api
+            .set_own_user_status(&context(c), choice)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn own_user_status(
         &mut self,
         c: &OperationContext,

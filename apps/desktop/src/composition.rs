@@ -237,6 +237,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("focus-accounts") => Probe::Accounts,
         Some("focus-rooms" | "focus-files") => Probe::Focus,
         Some("chat-motion") => Probe::Messages,
+        Some("status-picker") => Probe::Status,
         _ => Probe::None,
     };
     let fixture_images = if services.accounts.is_none() {

@@ -122,6 +122,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('native editing replaces selection and deletes one grapheme', ['eplacement.example.test'], ['probe.example.test'])
         key('Tab')
         expect('keyboard focus can leave input')
+    elif scenario == 'status-picker':
+        expect('status picker is visible', ['Status festlegen', 'Abwesend', 'Unsichtbar'])
+        key('Escape')
+        expect('Escape closes the account status picker', absent=['Status festlegen'])
+        click('Alex')
+        expect('account control reopens the status picker', ['Status festlegen', 'Unsichtbar'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
         click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
