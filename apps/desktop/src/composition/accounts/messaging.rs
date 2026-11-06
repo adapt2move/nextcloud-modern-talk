@@ -323,6 +323,7 @@ impl Accounts {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
+            self.forget_poll_room(context);
             self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }

@@ -29,7 +29,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Poll drafts are server-managed and require moderator rights and the advertised
   capabilities. Using a draft to create a poll keeps the draft. Voter details
   are shown only when the server supplies them; avatar initials are local fallbacks.
-  Native semantic accessibility and full platform behavior remain unqualified.
+  Recently viewed poll results are retained in memory for up to five minutes
+  across four rooms, subject to room policy; they do not survive restart and
+  cannot authorize voting or closure. Native semantic accessibility and full
+  platform behavior remain unqualified.
 - Voice recording is explicitly started, limited to two minutes, and encoded as
   16 kHz mono PCM WAV in memory. Recordings and original audio are not retained
   across restart or available offline; unsent recordings retire on scope or

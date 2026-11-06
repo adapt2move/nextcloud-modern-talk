@@ -2077,6 +2077,9 @@ impl Desktop {
                     .child(poll.question.as_str().to_owned()),
             )
             .child(self.hint(&format!("{} · {}", self.l(meta), self.l(privacy))));
+        if self.media_offline() {
+            body = body.child(self.hint(self.l("Gespeicherter Stand")));
+        }
         if let Some(count) = poll.voters {
             body = body.child(
                 self.hint(&self.lf("{n} Teilnehmende abgestimmt", &[("n", &count.to_string())])),

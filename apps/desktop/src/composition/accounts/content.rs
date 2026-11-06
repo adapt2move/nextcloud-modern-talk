@@ -3,6 +3,7 @@
 //! Every completion is checked against current account and room.
 mod avatars;
 mod links;
+mod poll_cache;
 mod poll_discovery;
 mod thumbnails;
 mod voice;
@@ -77,6 +78,7 @@ pub(super) struct ContentOwner {
     capabilities_at: Option<Instant>,
     poll_index: usize,
     poll_discovery: poll_discovery::Discovery,
+    poll_cache: poll_cache::Cache,
 }
 #[derive(Clone)]
 pub(crate) struct ImageJob {
@@ -148,6 +150,9 @@ impl Accounts {
         self.content_owner.refresh_next = None;
         self.content_owner.poll_discovery.clear();
         self.content_owner.poll_at = None;
+        self.content_owner
+            .poll_cache
+            .retain_account(self.snapshot.active_account);
         self.content_owner.capabilities_at = None;
         let account = self.snapshot.active_account;
         let old = &self.snapshot.content_panel;
@@ -1772,6 +1777,9 @@ impl Accounts {
             self.touch();
         }
         if self.snapshot.content == ContentState::Denied {
+            if let Some(context) = self.snapshot.selected {
+                self.content_owner.poll_cache.forget(context);
+            }
             self.snapshot.content_panel.polls = Page::empty();
             self.snapshot.content_panel.poll_drafts = Page::empty();
             self.snapshot.content_panel.poll_create = Availability::UNKNOWN;
@@ -1780,6 +1788,13 @@ impl Accounts {
         }
     }
     pub(super) fn tick_content(&mut self) {
+        self.content_owner.poll_cache.prune(Instant::now());
+        self.content_owner
+            .poll_cache
+            .retain_rooms(self.snapshot.conversations.as_slice());
+        if let Some(context) = self.snapshot.selected {
+            self.restore_poll_room(context);
+        }
         self.tick_voice_player();
         self.hydrate_thumbnails();
         self.tick_video();
@@ -1847,6 +1862,7 @@ impl Accounts {
         self.retry_thumbnail_assets(Instant::now());
         self.revalidate_avatar();
         if self.snapshot.selected.is_some()
+            && self.snapshot.content == ContentState::Ready
             && self.content_owner.refresh_poll.is_none()
             && self
                 .content_owner
@@ -1864,10 +1880,11 @@ impl Accounts {
                 self.content_owner.refresh_poll = None;
                 self.content_owner.refresh_uncertain = None;
                 self.content_owner.refresh_next = None;
-            } else if self
-                .content_owner
-                .refresh_next
-                .is_some_and(|at| at <= Instant::now())
+            } else if self.snapshot.content == ContentState::Ready
+                && self
+                    .content_owner
+                    .refresh_next
+                    .is_some_and(|at| at <= Instant::now())
                 && self
                     .start_poll(RequestId(0), wire::PollCommand::Read(poll))
                     .is_ok()
@@ -1903,7 +1920,8 @@ impl Accounts {
                 .poll_discovery
                 .started(id, Instant::now());
         }
-        if self.content_owner.refresh_poll.is_none()
+        if self.snapshot.content == ContentState::Ready
+            && self.content_owner.refresh_poll.is_none()
             && !self.snapshot.content_panel.poll_state.pending()
             && self
                 .content_owner

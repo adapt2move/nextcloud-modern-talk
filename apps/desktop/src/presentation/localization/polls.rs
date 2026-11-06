@@ -84,6 +84,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Use for a new poll",
         "Usar para una encuesta nueva",
     ),
+    ("Gespeicherter Stand", "Saved state", "Estado guardado"),
     (
         "Höchstens {n} Stimmen",
         "At most {n} votes",

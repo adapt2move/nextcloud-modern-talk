@@ -963,10 +963,13 @@ impl Accounts {
         if self.snapshot.selected == Some(context) {
             return Ok(false);
         }
+        self.remember_poll_room();
         self.clear_content();
         self.snapshot.selected = Some(context);
         self.restore_room_metadata(context);
         self.restore_messages(context);
+        self.snapshot.content_panel.context = Some(context);
+        self.restore_poll_room(context);
         self.touch();
         Ok(true)
     }
