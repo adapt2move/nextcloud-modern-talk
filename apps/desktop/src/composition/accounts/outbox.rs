@@ -1236,6 +1236,7 @@ fn command(
     };
     let opts = |o: &OutboxOptions| wire::ComposeOptions {
         reply_to: o.reply_to.map(mid),
+        private_reply: None,
         thread: o.thread.map(mid),
         thread_title: None,
         silent: o.silent,

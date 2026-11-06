@@ -484,6 +484,11 @@ impl NextcloudClient {
         data: &Value,
         caps: &Capabilities,
     ) -> Result<api::chat::ComposeOptions, PortError> {
+        if o.private_reply.is_some()
+            && (o.reply_to.is_some() || o.thread.is_some() || o.thread_title.is_some())
+        {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         if o.silent {
             self.message_action(MessagingFeature::Silent, room, data, caps)?
         }
@@ -497,6 +502,44 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
         }
+        let private_token = if let Some(parent) = o.private_reply {
+            if !caps.has("private-reply") || !caps.has("chat-get-context") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if parent.conversation.account != id.account
+                || parent.conversation == id
+                || parent.sequence == 0
+                || room.kind != RoomKind::Direct
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            let source_data = self.room_data(c, parent.conversation).await?;
+            let source_room = wire::room(&source_data, parent.conversation, caps)
+                .map_err(|kind| self.error(kind))?;
+            if !matches!(source_room.kind, RoomKind::Group | RoomKind::Public)
+                || source_room.classified
+                || source_room.unknown_restrictions
+                || source_room.actions.read_messages != Decision::Allowed
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            let original = self.target(c, parent).await?;
+            if original.replyable != Some(true)
+                || original.actor_type.as_deref() != Some("users")
+                || original
+                    .actor_id
+                    .as_deref()
+                    .is_none_or(|actor| actor.is_empty() || actor == self.transport.user())
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            Some(
+                api::models::RoomToken::parse(self.check_room(parent.conversation)?)
+                    .map_err(|kind| self.error(transport::kind(kind)))?,
+            )
+        } else {
+            None
+        };
         if let Some(thread) = o.thread {
             self.message_scope(thread, id)?;
             let token = api::models::RoomToken::parse(self.check_room(id)?)
@@ -512,8 +555,8 @@ impl NextcloudClient {
                 .await?;
         }
         Ok(api::chat::ComposeOptions {
-            reply_to: o.reply_to.map(|m| m.sequence),
-            reply_to_token: None,
+            reply_to: o.reply_to.or(o.private_reply).map(|m| m.sequence),
+            reply_to_token: private_token,
             thread: o.thread.map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),
             silent: o.silent,
@@ -1592,6 +1635,7 @@ impl NextcloudClient {
             send_at: s.send_at,
             options: ComposeOptions {
                 reply_to: s.options.reply_to.map(mid),
+                private_reply: None,
                 thread: s.options.thread.map(mid),
                 thread_title: s
                     .options

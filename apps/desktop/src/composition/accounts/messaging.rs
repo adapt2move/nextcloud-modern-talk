@@ -1949,6 +1949,7 @@ fn options(
             .reply_to
             .map(|id| message_id(context, id))
             .transpose()?,
+        private_reply: None,
         thread: target
             .thread
             .map(|id| message_id(context, id))

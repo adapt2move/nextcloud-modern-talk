@@ -53,6 +53,8 @@ pub struct MessageDetails {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeOptions {
     pub reply_to: Option<MessageId>,
+    /// Original message in another conversation for a private reply.
+    pub private_reply: Option<MessageId>,
     pub thread: Option<MessageId>,
     pub thread_title: Option<Text<256>>,
     pub silent: bool,

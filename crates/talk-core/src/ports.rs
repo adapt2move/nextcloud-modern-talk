@@ -172,6 +172,12 @@ pub enum ProtocolRequest {
         operation: OperationId,
         recipient: crate::protocol::conversation::RecipientId,
     },
+    /// Create or open the direct conversation of an observed message's author.
+    /// The adapter resolves and rechecks the author; the view supplies no user ID.
+    CreatePrivateReply {
+        operation: OperationId,
+        source: MessageId,
+    },
     LeaveConversation(ConversationId),
     ActivateConversation(ConversationId),
     DeactivateConversation(ConversationId),
