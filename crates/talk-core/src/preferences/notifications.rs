@@ -173,6 +173,58 @@ pub enum NotificationError {
     Coalesced,
     Cancelled,
 }
+
+/// OS authorization is separate from local preferences and authenticated sources.
+/// This observation never grants account, call or capture authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NotificationAuthorization {
+    Unknown,
+    NotRequired,
+    NotDetermined,
+    Granted,
+    Denied,
+    Unavailable,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NotificationAccessAction {
+    Check,
+    Request,
+    OpenSystemSettings,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NotificationAccessOperation {
+    Idle,
+    Pending {
+        request: RequestId,
+        action: NotificationAccessAction,
+    },
+    Finished {
+        request: RequestId,
+    },
+    Failed {
+        request: RequestId,
+        error: NotificationError,
+    },
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NotificationAccessSnapshot {
+    pub authorization: NotificationAuthorization,
+    pub operation: NotificationAccessOperation,
+}
+impl NotificationAccessSnapshot {
+    pub const fn unknown() -> Self {
+        Self {
+            authorization: NotificationAuthorization::Unknown,
+            operation: NotificationAccessOperation::Idle,
+        }
+    }
+    pub const fn unavailable() -> Self {
+        Self {
+            authorization: NotificationAuthorization::Unavailable,
+            operation: NotificationAccessOperation::Idle,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeliveryOutcome {
     Suppressed,

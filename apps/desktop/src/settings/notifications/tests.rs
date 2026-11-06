@@ -61,6 +61,48 @@ fn message(scope: AccountScope, id: u64) -> NotificationKind {
         id: NotificationId(id),
     }
 }
+
+#[test]
+fn expired_alerts_and_foreground_messages_do_not_replay_after_a_busy_helper() {
+    let now = Instant::now();
+    let a = scope(1, 1);
+    let mut state = State::new(NotificationPreferences::default());
+    state.update_sources(None, sources(a, 1)).unwrap();
+    state
+        .admit(event(1, message(a, 1)), now - Duration::from_secs(6))
+        .unwrap();
+    assert!(state.next().is_none());
+    assert_eq!(
+        state.completions.pop_front().unwrap().banner,
+        DeliveryOutcome::Cancelled
+    );
+    state.admit(event(2, message(a, 2)), now).unwrap();
+    assert!(state.enter_foreground());
+    assert!(
+        !state.enter_foreground(),
+        "an idle foreground poll must not wake the worker"
+    );
+    assert!(state.next().is_none());
+    state
+        .admit(test(3, NotificationCategory::Messages), now)
+        .unwrap();
+    assert!(
+        !state.enter_foreground(),
+        "an explicit test is independent of foreground visibility"
+    );
+    assert_eq!(finish_next(&mut state).request, RequestId(3));
+    state
+        .admit(
+            event(4, NotificationKind::IncomingCall { call: call(a, 1) }),
+            now,
+        )
+        .unwrap();
+    assert!(
+        !state.enter_foreground(),
+        "foreground visibility cannot dismiss a current call"
+    );
+    assert_eq!(finish_next(&mut state).request, RequestId(4));
+}
 fn join(scope: AccountScope, id: u64, is_self: bool) -> NotificationKind {
     NotificationKind::ConferenceParticipantJoined {
         call: call(scope, 1),

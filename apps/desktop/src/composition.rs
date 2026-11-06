@@ -366,6 +366,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                     }
                     let (requested, devices_open, background) =
                         match window.update(cx, |view, window, cx| {
+                            if was_background && window.is_window_active() {
+                                view.refresh_notification_access(cx);
+                            }
                             view.refresh(cx);
                             view.observe_message_visibility(window);
                             (

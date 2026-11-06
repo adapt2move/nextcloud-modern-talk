@@ -41,9 +41,33 @@ impl NextcloudClient {
         &mut self,
         context: &OperationContext,
     ) -> Result<ProtocolReply, PortError> {
+        let result = self.incoming_calls_inner(context).await;
+        let Some(source) = result
+            .as_ref()
+            .err()
+            .and_then(super::notifications::source_failure)
+        else {
+            return result;
+        };
+        self.transport.validate(context)?;
+        Ok(ProtocolReply::IncomingCalls(
+            talk_core::calls::IncomingCalls {
+                scope: context.scope,
+                source,
+                call: None,
+                title: None,
+                eligible: false,
+            },
+        ))
+    }
+    async fn incoming_calls_inner(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<ProtocolReply, PortError> {
         self.transport.validate(context)?;
         let empty = || talk_core::calls::IncomingCalls {
             scope: context.scope,
+            source: talk_core::protocol::NotificationSourceState::Available,
             call: None,
             title: None,
             eligible: false,
@@ -112,6 +136,7 @@ impl NextcloudClient {
                 .map_err(|_| self.error(ErrorKind::WrongScope))?;
             let value = talk_core::calls::IncomingCalls {
                 scope: context.scope,
+                source: talk_core::protocol::NotificationSourceState::Available,
                 call: Some(pending_snapshot(&call)),
                 title: Some(
                     talk_core::bounded::Text::new(&room.name)

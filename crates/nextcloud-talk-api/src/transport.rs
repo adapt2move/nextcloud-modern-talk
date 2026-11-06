@@ -185,7 +185,13 @@ pub(crate) struct Response {
 struct RequestOptions {
     account_probe: bool,
     limit: Duration,
-    empty_history: bool,
+    empty_response: EmptyResponse,
+}
+#[derive(Clone, Copy)]
+enum EmptyResponse {
+    Reject,
+    History,
+    NotificationList,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -490,7 +496,7 @@ impl Transport {
             RequestOptions {
                 account_probe,
                 limit: REQUEST_LIMIT,
-                empty_history: false,
+                empty_response: EmptyResponse::Reject,
             },
         )
         .await
@@ -510,7 +516,7 @@ impl Transport {
             RequestOptions {
                 account_probe: false,
                 limit: REQUEST_LIMIT,
-                empty_history: true,
+                empty_response: EmptyResponse::History,
             },
         )
         .await
@@ -529,7 +535,25 @@ impl Transport {
             RequestOptions {
                 account_probe: false,
                 limit: Duration::from_secs(35),
-                empty_history: false,
+                empty_response: EmptyResponse::Reject,
+            },
+        )
+        .await
+    }
+    pub(crate) async fn notification_list(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<Response, PortError> {
+        self.perform(
+            context,
+            Method::GET,
+            "ocs/v2.php/apps/notifications/api/v2/notifications",
+            &[],
+            &[],
+            RequestOptions {
+                account_probe: false,
+                limit: REQUEST_LIMIT,
+                empty_response: EmptyResponse::NotificationList,
             },
         )
         .await
@@ -648,7 +672,7 @@ impl Transport {
             let status = response.status().as_u16();
             // Talk chat explicitly uses a bodyless 304 for an exhausted history page.
             // No other operation interprets 304 as success or follows its Location.
-            if status == 304 && options.empty_history {
+            if status == 304 && matches!(options.empty_response, EmptyResponse::History) {
                 return Ok((
                     Response {
                         status,
@@ -657,6 +681,20 @@ impl Transport {
                         last_given: None,
                         common_read: header_number(response.headers(), "X-Chat-Last-Common-Read")
                             .map_err(|k| self.error(k))?,
+                    },
+                    self.cookies.clone(),
+                ));
+            }
+            // Notifications v2 uses 204 when no notifier is registered, not an
+            // empty successful list. Only this read can expose that bodyless state.
+            if status == 204 && matches!(options.empty_response, EmptyResponse::NotificationList) {
+                return Ok((
+                    Response {
+                        status,
+                        notification_allowed: None,
+                        data: serde_json::Value::Null,
+                        last_given: None,
+                        common_read: None,
                     },
                     self.cookies.clone(),
                 ));

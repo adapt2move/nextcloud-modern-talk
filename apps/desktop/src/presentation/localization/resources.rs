@@ -246,6 +246,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mostrar notificaciones del sistema cuando Talk está minimizado.",
     ),
     (
+        "Benachrichtigungen erlauben",
+        "Allow notifications",
+        "Permitir notificaciones",
+    ),
+    (
         "Benachrichtigungen für euren Arbeitsplatz.",
         "Notifications for your workspace.",
         "Notificaciones para vuestro espacio de trabajo.",
@@ -259,6 +264,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Benachrichtigungen sind noch nicht verfügbar.",
         "Notifications are not available yet.",
         "Las notificaciones aún no están disponibles.",
+    ),
+    (
+        "Benachrichtigungsfreigabe wird geprüft.",
+        "Checking notification permission.",
+        "Comprobando el permiso de notificaciones.",
     ),
     (
         "Berechtigungen · {step} von 3",
@@ -538,6 +548,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Beitritt wird erst fortgesetzt, wenn diese Voraussetzung erfüllt ist.",
         "Joining continues only after this requirement is met.",
         "La entrada continuará cuando se cumpla este requisito.",
+    ),
+    (
+        "Der Benachrichtigungsdienst ist gerade beschäftigt. Versuche es erneut.",
+        "The notification service is busy. Try again.",
+        "El servicio de notificaciones está ocupado. Vuelve a intentarlo.",
     ),
     (
         "Der Browser kann hier noch nicht erneut geöffnet werden.",
@@ -1163,6 +1178,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Erlaube den Mikrofonzugriff für Desktop-Apps.",
         "Allow desktop apps to access your microphone.",
         "Permite que las aplicaciones de escritorio accedan al micrófono.",
+    ),
+    (
+        "Erlaube zuerst Benachrichtigungen in macOS.",
+        "Allow notifications in macOS first.",
+        "Primero permite las notificaciones en macOS.",
     ),
     (
         "Erneut anmelden",
@@ -2373,6 +2393,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "macOS denied access to the keychain. Allow this app to access its saved sign-in, then try removing the account again.",
         "macOS ha denegado el acceso al llavero. Permite que esta app acceda a su inicio de sesión guardado y vuelve a eliminar la cuenta.",
     ),
+    ("macOS-Freigabe", "macOS permission", "Permiso de macOS"),
     ("{n} Antwort", "{n} reply", "{n} respuesta"),
     (
         "{n} Antwort angekündigt",
@@ -2415,6 +2436,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Öffne „Datenschutz & Sicherheit“ in den Systemeinstellungen.",
         "Open “Privacy & Security” in System Settings.",
         "Abre «Privacidad y seguridad» en Ajustes del Sistema.",
+    ),
+    (
+        "Öffne „Mitteilungen“ in den Systemeinstellungen und erlaube NextCloud Modern Talk. Wähle danach „Erneut prüfen“.",
+        "Open Notifications in System Settings and allow NextCloud Modern Talk. Then choose Check again.",
+        "Abre Notificaciones en Ajustes del Sistema y permite NextCloud Modern Talk. Después selecciona Comprobar de nuevo.",
     ),
     ("Öffnen", "Open", "Abrir"),
     ("Übersicht", "Overview", "Resumen"),

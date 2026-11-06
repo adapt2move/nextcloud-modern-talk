@@ -2,7 +2,6 @@
 //! become routes or event types. Notifications v2 exposes a bounded recent window,
 //! not a delivery log; periodic room reconciliation remains authoritative.
 use crate::{Client, Error, ErrorKind, Reply, Request, models::RoomToken, scope::OperationContext};
-use reqwest::Method;
 use serde_json::Value;
 
 #[derive(Clone, Debug)]
@@ -36,17 +35,10 @@ impl Client {
         if !caps.supported_protocol() || !caps.notification_endpoints.iter().any(|s| s == "list") {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        let response = self
-            .transport
-            .ocs(
-                context,
-                Method::GET,
-                "ocs/v2.php/apps/notifications/api/v2/notifications",
-                &[],
-                &[],
-                false,
-            )
-            .await?;
+        let response = self.transport.notification_list(context).await?;
+        if response.status == 204 {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
         if response.status != 200 {
             return Err(self.error(ErrorKind::Malformed));
         }

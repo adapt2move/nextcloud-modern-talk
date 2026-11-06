@@ -5,7 +5,8 @@ use crate::settings::{SettingsRuntime, notifications::NotificationRuntime};
 use std::rc::Rc;
 use talk_core::preferences::devices::{DeviceError, DeviceIntent, DeviceSnapshot};
 use talk_core::preferences::notifications::{
-    NotificationCategory, NotificationError, NotificationEvent, NotificationState,
+    NotificationAccessAction, NotificationAccessSnapshot, NotificationCategory, NotificationError,
+    NotificationEvent, NotificationState,
 };
 use talk_core::preferences::{
     Locale, PreferenceCommand, PreferenceError, PreferenceSnapshot, RequestId,
@@ -87,6 +88,7 @@ impl Services {
         let (Some(accounts), Ok(runtime)) = (&self.accounts, &self.notifications) else {
             return;
         };
+        runtime.update_visibility(background);
         let mut accounts = accounts.borrow_mut();
         let observations = accounts.notification_observations();
         let mut previous = self.notification_sources.borrow_mut();
@@ -492,6 +494,25 @@ impl ComputerSettingsPort for Bridge {
             },
             |runtime| runtime.native_capabilities(),
         )
+    }
+    fn notification_access(&self) -> NotificationAccessSnapshot {
+        self.services
+            .notifications
+            .as_ref()
+            .map_or(NotificationAccessSnapshot::unavailable(), |runtime| {
+                runtime.access_snapshot()
+            })
+    }
+    fn submit_notification_access(
+        &self,
+        request: RequestId,
+        action: NotificationAccessAction,
+    ) -> Result<(), NotificationError> {
+        self.services
+            .notifications
+            .as_ref()
+            .map_err(|error| *error)?
+            .submit_access(request, action)
     }
     fn notification_source(
         &self,

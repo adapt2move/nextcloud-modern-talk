@@ -205,6 +205,22 @@ impl Accounts {
                 return;
             }
         };
+        if let Err(IdentityError::Request(kind)) = &result {
+            let source = if *kind == ErrorKind::Unsupported {
+                protocol::NotificationSourceState::Unsupported
+            } else {
+                protocol::NotificationSourceState::Paused {
+                    reason: *kind,
+                    retry_after_millis: None,
+                }
+            };
+            self.background.notification_source(
+                scope,
+                background::Observation::Calls,
+                source,
+                Instant::now(),
+            );
+        }
         let Ok(RuntimeReply::Protocol(ProtocolReply::IncomingCalls(value))) = result else {
             self.invalidate_incoming(scope);
             return;
@@ -225,8 +241,16 @@ impl Accounts {
             self.invalidate_incoming(scope);
             return;
         }
-        self.background
-            .observed(scope, background::Observation::Calls, true);
+        self.background.notification_source(
+            scope,
+            background::Observation::Calls,
+            value.source,
+            Instant::now(),
+        );
+        if value.source != protocol::NotificationSourceState::Available {
+            self.invalidate_incoming(scope);
+            return;
+        }
         if let (Some(call), Some(title)) = (value.call, value.title) {
             if call.call.account != scope
                 || !call.call.is_consistent()
@@ -755,6 +779,7 @@ mod action_tests {
     fn invitation(call: CallScope) -> talk_core::calls::IncomingCalls {
         talk_core::calls::IncomingCalls {
             scope: call.account,
+            source: protocol::NotificationSourceState::Available,
             call: Some(Snapshot {
                 call,
                 entry: Entry::IncomingDirect,

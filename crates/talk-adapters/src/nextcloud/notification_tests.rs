@@ -89,7 +89,74 @@ async fn poll(
     else {
         panic!("message observation");
     };
+    assert_eq!(
+        value.source,
+        talk_core::protocol::NotificationSourceState::Available
+    );
     value
+}
+
+#[tokio::test]
+async fn notification_source_failures_retain_server_retry_hints_without_revoking_the_account() {
+    use talk_core::protocol::NotificationSourceState;
+    for (status, expected) in [
+        (204, NotificationSourceState::Unsupported),
+        (
+            429,
+            NotificationSourceState::Paused {
+                reason: ErrorKind::RateLimited,
+                retry_after_millis: Some(300_000),
+            },
+        ),
+        (
+            503,
+            NotificationSourceState::Paused {
+                reason: ErrorKind::ServerUnavailable,
+                retry_after_millis: None,
+            },
+        ),
+    ] {
+        for calls in [false, true] {
+            let mut responses = notifications(json!([]), "online");
+            let mut capabilities = notification_caps();
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("call-notification-state-api"));
+            responses[1] = Reply::data(capabilities);
+            let last = responses.last_mut().unwrap();
+            last.status = status;
+            last.body.clear();
+            if status == 429 {
+                last.headers.push_str("Retry-After: 300\r\n");
+            }
+            let server = Server::start(responses).await;
+            let r = runtime();
+            let mut c = client(&server.origin, r.clone());
+            c.set_media_service(Some(crate::media::MediaService::new()));
+            let request = if calls {
+                ProtocolRequest::PollIncomingCalls
+            } else {
+                ProtocolRequest::PollMessageNotifications
+            };
+            match c.request(context(&r), request).await.unwrap() {
+                ProtocolReply::MessageNotifications(value) => {
+                    assert!(!calls);
+                    assert_eq!(value.source, expected);
+                    assert!(value.notices.as_slice().is_empty());
+                    assert!(!value.changed);
+                }
+                ProtocolReply::IncomingCalls(value) => {
+                    assert!(calls);
+                    assert_eq!(value.source, expected);
+                    assert!(value.call.is_none() && value.title.is_none() && !value.eligible);
+                }
+                _ => panic!("source observation"),
+            }
+            assert_eq!(server.seen.lock().unwrap().len(), 3);
+            assert!(!c.cancellation().is_cancelled());
+        }
+    }
 }
 
 #[tokio::test]

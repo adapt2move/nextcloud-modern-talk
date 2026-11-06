@@ -53,6 +53,12 @@ states again. You can change permissions later in Settings.
 
 ### Closing the window and quitting
 
+On macOS, open **Settings → Notifications → Allow notifications** to request the
+system permission. Opening that page only checks the current state. If permission
+was denied, open macOS **System Settings → Notifications**, allow NextCloud Modern
+Talk, then return to the settings page or choose **Check again**. Banner/Sound
+choices in Talk are local preferences and cannot override a system denial or Focus.
+
 On macOS, the red close button or **Command-W** hides the window and keeps Talk
 running for permitted notifications. Click the Dock icon to return to the same
 conversation and draft. Choose **Talk → Quit app** or **Command-Q** to stop the

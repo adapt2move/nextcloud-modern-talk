@@ -10,6 +10,28 @@ use std::time::{Duration, Instant};
 const BATCH: usize = 4;
 const FRESH: Duration = Duration::from_secs(60);
 
+/// Retain safe retry observations for both account notification channels. These
+/// states cannot renew source freshness and never swallow cancellation/auth loss.
+pub(super) fn source_failure(
+    error: &PortError,
+) -> Option<talk_core::protocol::NotificationSourceState> {
+    use talk_core::{ports::Retry, protocol::NotificationSourceState};
+    match error.kind {
+        ErrorKind::Unsupported => Some(NotificationSourceState::Unsupported),
+        ErrorKind::Transport
+        | ErrorKind::Deadline
+        | ErrorKind::RateLimited
+        | ErrorKind::ServerUnavailable => Some(NotificationSourceState::Paused {
+            reason: error.kind,
+            retry_after_millis: match error.retry {
+                Retry::AfterDelay { millis } => Some(millis.min(300_000)),
+                _ => None,
+            },
+        }),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct Observation {
     cursor: Option<u64>,
@@ -53,10 +75,30 @@ impl NextcloudClient {
         &mut self,
         context: &OperationContext,
     ) -> Result<ProtocolReply, PortError> {
+        let result = self.message_notifications_inner(context).await;
+        let Some(source) = result.as_ref().err().and_then(source_failure) else {
+            return result;
+        };
+        self.transport.validate(context)?;
+        Ok(ProtocolReply::MessageNotifications(
+            talk_core::protocol::MessageNotifications {
+                scope: context.scope,
+                source,
+                notices: Page::empty(),
+                changed: false,
+            },
+        ))
+    }
+
+    async fn message_notifications_inner(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<ProtocolReply, PortError> {
         self.transport.validate(context)?;
         let list = self.transport.message_notifications(context).await?;
         let mut result = talk_core::protocol::MessageNotifications {
             scope: context.scope,
+            source: talk_core::protocol::NotificationSourceState::Available,
             notices: Page::empty(),
             changed: false,
         };

@@ -764,6 +764,7 @@ mod tests {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IncomingCalls {
     pub scope: crate::ids::AccountScope,
+    pub source: crate::protocol::NotificationSourceState,
     pub call: Option<Snapshot>,
     pub title: Option<crate::bounded::Text<256>>,
     pub eligible: bool,

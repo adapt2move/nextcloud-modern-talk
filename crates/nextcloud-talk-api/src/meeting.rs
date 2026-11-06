@@ -604,17 +604,13 @@ impl Client {
         {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        let response = self
-            .transport
-            .ocs(
-                c,
-                Method::GET,
-                "ocs/v2.php/apps/notifications/api/v2/notifications",
-                &[],
-                &[],
-                false,
-            )
-            .await?;
+        let response = self.transport.notification_list(c).await?;
+        if response.status == 204 {
+            return Err(self.error(ErrorKind::Unsupported));
+        }
+        if response.status != 200 {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         let rows = response
             .data
             .as_array()

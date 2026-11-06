@@ -10,6 +10,75 @@ use tokio::{
 };
 
 #[tokio::test]
+async fn notification_204_is_scoped_unsupported_and_empty_lists_remain_successful() {
+    let account = || reply(json!({"id":"synthetic-user","display-name":"Fixture"}));
+    let capabilities = || {
+        reply(json!({"version":{"major":34},"capabilities":{
+        "spreed":{"features":["conversation-v4","call-notification-state-api"]},
+        "notifications":{"ocs-endpoints":["list","user-status"]}}}))
+    };
+    for calls in [false, true] {
+        let server = Server::start(vec![
+            account(),
+            capabilities(),
+            (204, String::new(), Duration::ZERO),
+            account(),
+        ])
+        .await;
+        let (mut owner, clock) = client(&server);
+        let error = if calls {
+            owner
+                .call_invitations(&context(&clock))
+                .await
+                .err()
+                .unwrap()
+        } else {
+            owner
+                .message_notifications(&context(&clock))
+                .await
+                .err()
+                .unwrap()
+        };
+        assert_eq!(error.kind, ErrorKind::Unsupported);
+        assert_eq!(server.count(), 3);
+        assert!(matches!(
+            owner.request(&context(&clock), Request::Account).await,
+            Ok(Reply::Account(_))
+        ));
+    }
+    let server = Server::start(vec![account(), capabilities(), reply(json!([]))]).await;
+    let (mut owner, clock) = client(&server);
+    let list = owner.message_notifications(&context(&clock)).await.unwrap();
+    assert!(list.messages.is_empty());
+    assert_eq!(list.high_water, 0);
+    for calls in [false, true] {
+        let mut unexpected = reply(json!([]));
+        unexpected.0 = 201;
+        let server = Server::start(vec![account(), capabilities(), unexpected]).await;
+        let (mut owner, clock) = client(&server);
+        let error = if calls {
+            owner
+                .call_invitations(&context(&clock))
+                .await
+                .err()
+                .unwrap()
+        } else {
+            owner
+                .message_notifications(&context(&clock))
+                .await
+                .err()
+                .unwrap()
+        };
+        assert_eq!(error.kind, ErrorKind::Malformed);
+    }
+    let server = Server::start(vec![(204, String::new(), Duration::ZERO)]).await;
+    let (mut owner, clock) = client(&server);
+    assert!(
+        matches!(owner.request(&context(&clock), Request::Account).await, Err(error) if error.kind == ErrorKind::Malformed)
+    );
+}
+
+#[tokio::test]
 async fn normal_call_invitation_is_owner_bound_and_checks_current_status() {
     let mut missed = reply(json!([]));
     missed.0 = 201;

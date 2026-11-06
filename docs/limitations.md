@@ -50,6 +50,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
+  macOS Notifications settings now separate local choices from observed OS
+  authorization and offer an explicit first request or denial guidance. The
+  packaged permission prompt and its identity in System Settings still require
+  native Mac qualification; Linux fixtures and macOS compilation do not prove it.
   macOS window closing keeps the application services alive; native close/reopen
   and notification reception with a hidden window still need Mac qualification.
   Explicit quit stops background reception.
