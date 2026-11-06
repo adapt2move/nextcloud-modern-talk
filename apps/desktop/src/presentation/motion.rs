@@ -106,6 +106,25 @@ impl MotionTrigger {
 }
 
 impl Desktop {
+    /// The live recording indicator is the only repeating motion here; it is
+    /// mounted only during capture and becomes static under Reduce Motion.
+    pub(super) fn recording_dot(&self) -> AnyElement {
+        let dot = div()
+            .size(gpui::px(8.))
+            .rounded_full()
+            .bg(self.theme.danger);
+        if self.reduced_motion {
+            dot.into_any_element()
+        } else {
+            dot.with_animation(
+                "voice-recording-dot",
+                Animation::new(Duration::from_millis(1_200)).repeat(),
+                |dot, progress| dot.opacity(0.55 + 0.45 * (1. - (2. * progress - 1.).abs())),
+            )
+            .into_any_element()
+        }
+    }
+
     /// All application dialog panels share the same finite entrance. Relative
     /// positioning moves paint and native hit geometry together; focus and
     /// actions are live from the first frame. Closing remains immediate.

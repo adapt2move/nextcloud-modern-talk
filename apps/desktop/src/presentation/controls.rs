@@ -1284,6 +1284,17 @@ impl Desktop {
     ) -> Stateful<Div> {
         self.styled_icon_button(id, symbol, (style, 52., 26.), availability, action, cx)
     }
+    pub(super) fn compact_round_icon_button(
+        &self,
+        id: impl Into<ElementId>,
+        symbol: (&'static str, &'static str),
+        style: ButtonStyle,
+        availability: Availability,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        self.styled_icon_button(id, symbol, (style, 34., 17.), availability, action, cx)
+    }
     fn styled_icon_button(
         &self,
         id: impl Into<ElementId>,

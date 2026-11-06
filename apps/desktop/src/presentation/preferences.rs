@@ -74,13 +74,6 @@ pub trait ComputerSettingsPort {
     ) -> Result<(), DeviceError> {
         Err(DeviceError::Unavailable)
     }
-    fn voice_review_seek(
-        &self,
-        _context: talk_core::ui::presentation::ConversationRef,
-        _position_ms: u64,
-    ) -> Result<(), DeviceError> {
-        Err(DeviceError::Unavailable)
-    }
     fn voice_review_speed(
         &self,
         _context: talk_core::ui::presentation::ConversationRef,

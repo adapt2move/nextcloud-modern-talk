@@ -62,15 +62,12 @@ pub(crate) enum Action {
     PollDetails(u64),
     VoiceStart(ConversationRef),
     VoiceStop(ConversationRef),
+    VoiceFinishAndSend(ConversationRef),
     VoiceCancel(ConversationRef),
     VoiceSend(ConversationRef),
     VoiceReviewPlay {
         context: ConversationRef,
         play: bool,
-    },
-    VoiceReviewSeek {
-        context: ConversationRef,
-        position_ms: u64,
     },
     VoiceReviewSpeed {
         context: ConversationRef,
@@ -121,6 +118,7 @@ pub(super) struct ContentUi {
     pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub(super) voice_levels: Vec<u16>,
     pub(super) voice_error: Option<&'static str>,
+    voice_auto_send: Option<ConversationRef>,
     voice_playback: Option<talk_core::ui::content::VoiceReviewPlayback>,
     voice_scrub: Option<voice_scrub::Scrub>,
 }
@@ -169,6 +167,7 @@ impl ContentUi {
             voice: None,
             voice_levels: Vec::new(),
             voice_error: None,
+            voice_auto_send: None,
             voice_playback: None,
             voice_scrub: None,
         }
@@ -313,7 +312,7 @@ impl Desktop {
     /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
         self.refresh_attachment_send(cx);
-        let voice = self.settings_port.voice_snapshot();
+        let mut voice = self.settings_port.voice_snapshot();
         if let Some(voice) = voice
             && voice_session_retired(
                 Some(voice.context) == self.snapshot.selected,
@@ -323,6 +322,36 @@ impl Desktop {
             )
         {
             let _ = self.settings_port.stop_voice(voice.context, true);
+            self.content_ui.voice_auto_send = None;
+        }
+        if let Some(context) = self.content_ui.voice_auto_send
+            && let Some(current) = voice.filter(|voice| voice.context == context)
+        {
+            match current.phase {
+                talk_core::ui::content::VoicePhase::Review => {
+                    self.content_ui.voice_auto_send = None;
+                    if self.media_offline() || self.snapshot.content != ContentState::Ready {
+                        self.content_ui.voice_error =
+                            Some("Verbinde dich erneut, um die Aufnahme zu senden.");
+                    } else if let Err(error) = self.settings_port.send_voice(context) {
+                        self.content_ui.voice_error = Some(voice_error(error));
+                    } else {
+                        self.content_ui.voice_error = None;
+                        voice = None;
+                    }
+                }
+                talk_core::ui::content::VoicePhase::Failed(_) => {
+                    self.content_ui.voice_auto_send = None
+                }
+                _ => {}
+            }
+        }
+        if self
+            .content_ui
+            .voice_auto_send
+            .is_some_and(|context| !voice.is_some_and(|current| current.context == context))
+        {
+            self.content_ui.voice_auto_send = None;
         }
         let voice = voice.filter(|voice| Some(voice.context) == self.snapshot.selected);
         if self.content_ui.voice != voice {
@@ -377,6 +406,7 @@ impl Desktop {
             self.content_ui.details_poll = None;
             self.content_ui.return_overlay = None;
             self.content_ui.voice_scrub = None;
+            self.content_ui.voice_auto_send = None;
             if matches!(
                 self.overlay,
                 Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::PollDetails)
@@ -745,33 +775,23 @@ impl Desktop {
             voice.elapsed_ms / 60_000,
             (voice.elapsed_ms / 1_000) % 60
         );
-        let label = match voice.phase {
-            VoicePhase::Starting => "Mikrofon wird vorbereitet …",
-            VoicePhase::Recording => "Aufnahme läuft",
-            VoicePhase::Stopping => "Aufnahme wird abgeschlossen …",
-            VoicePhase::Review => "Aufnahme bereit zum Senden",
-            VoicePhase::Failed(_) => "Aufnahme fehlgeschlagen",
-        };
         let mut body = div()
             .flex()
             .items_center()
             .gap_3()
             .child(self.icon_button(
                 "voice-cancel",
-                ("x", "Aufnahme verwerfen"),
+                ("trash-2", "Aufnahme verwerfen"),
                 ButtonStyle::Quiet,
                 true.into(),
                 LocalAction::Content(Action::VoiceCancel(context)),
                 cx,
             ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(self.l(label))
-                    .child(self.hint(&time)),
+            .when(
+                matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording),
+                |d| d.child(self.recording_dot()),
             )
+            .child(self.hint(&time))
             .child(
                 div()
                     .flex_1()
@@ -788,32 +808,46 @@ impl Desktop {
                             .bg(self.theme.accent)
                     })),
             );
-        body = match voice.phase {
-            VoicePhase::Starting | VoicePhase::Recording => body.child(self.button(
-                "voice-stop",
-                "Aufnahme prüfen",
-                ButtonStyle::Secondary,
-                true,
-                LocalAction::Content(Action::VoiceStop(context)),
-                cx,
-            )),
-            VoicePhase::Review => body.child(self.button(
+        let can_send = Availability::when(
+            !self.media_offline()
+                && self.snapshot.content == ContentState::Ready
+                && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice),
+            "Verbinde dich erneut, um die Aufnahme zu senden.",
+        );
+        if matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording) {
+            body = body
+                .child(self.icon_button(
+                    "voice-stop",
+                    ("square", "Aufnahme prüfen"),
+                    ButtonStyle::Quiet,
+                    (self.content_ui.voice_auto_send.is_none()).into(),
+                    LocalAction::Content(Action::VoiceStop(context)),
+                    cx,
+                ))
+                .child(self.compact_round_icon_button(
+                    "voice-send-recording",
+                    ("arrow-up", "Sprachnachricht senden"),
+                    ButtonStyle::Primary,
+                    if self.content_ui.voice_auto_send.is_some() {
+                        Availability::pending()
+                    } else {
+                        can_send
+                    },
+                    LocalAction::Content(Action::VoiceFinishAndSend(context)),
+                    cx,
+                ));
+        } else if voice.phase == VoicePhase::Review {
+            body = body.child(self.compact_round_icon_button(
                 "voice-send",
-                "Sprachnachricht senden",
+                ("arrow-up", "Sprachnachricht senden"),
                 ButtonStyle::Primary,
-                Availability::when(
-                    !self.media_offline()
-                        && self.snapshot.content == ContentState::Ready
-                        && self.message_feature_enabled(
-                            talk_core::ui::messaging::MessageFeature::Voice,
-                        ),
-                    "Verbinde dich erneut, um die Aufnahme zu senden.",
-                ),
+                can_send,
                 LocalAction::Content(Action::VoiceSend(context)),
                 cx,
-            )),
-            VoicePhase::Stopping | VoicePhase::Failed(_) => body,
-        };
+            ));
+        } else if voice.phase == VoicePhase::Stopping {
+            body = body.child(self.hint(self.l("Aufnahme wird abgeschlossen …")));
+        }
         let mut review = div().flex().items_center().gap_2();
         if voice.phase == VoicePhase::Review {
             let playback = self
@@ -852,7 +886,7 @@ impl Desktop {
                 ))
                 .child(self.button(
                     "voice-review-speed",
-                    format!("{}x", f32::from(speed) / 2.0),
+                    format!("{}×", f32::from(speed) / 2.0),
                     ButtonStyle::Quiet,
                     controllable,
                     LocalAction::Content(Action::VoiceReviewSpeed {
@@ -862,26 +896,13 @@ impl Desktop {
                     cx,
                 ));
             if let Some(playback) = playback
-                && let Some(duration) = playback.duration_ms
+                && playback.duration_ms.is_some()
             {
                 review = review.child(self.hint(&format!(
                     "{:02}:{:02} / {time}",
                     playback.position_ms / 60_000,
                     playback.position_ms / 1_000 % 60
                 )));
-                for step in 0..=4usize {
-                    review = review.child(self.button(
-                        ("voice-review-seek", step),
-                        format!("{}%", step * 25),
-                        ButtonStyle::Quiet,
-                        controllable,
-                        LocalAction::Content(Action::VoiceReviewSeek {
-                            context,
-                            position_ms: duration.saturating_mul(step as u64) / 4,
-                        }),
-                        cx,
-                    ));
-                }
             }
             if playback.is_some_and(|p| {
                 matches!(p.state, talk_core::ui::content::PlaybackState::Failed(_))
@@ -927,7 +948,7 @@ impl Desktop {
         reference: AttachmentRef,
         object: &talk_core::ui::messaging::RichObject,
         cx: &Context<Self>,
-    ) -> Div {
+    ) -> gpui::Stateful<Div> {
         use talk_core::ui::content::PlaybackState;
         let playback = self
             .snapshot
@@ -950,12 +971,40 @@ impl Desktop {
         } else {
             ContentAction::PlayVoice(reference.clone())
         };
-        let mut row = div()
+        let position = self
+            .content_ui
+            .voice_scrub
+            .as_ref()
+            .filter(|scrub| scrub.reference == reference)
+            .map_or_else(
+                || playback.map_or(0, |p| p.position_ms),
+                |scrub| scrub.position_ms,
+            );
+        let duration = playback.and_then(|p| p.duration_ms).unwrap_or(0);
+        let failed = playback.is_some_and(|p| matches!(p.state, PlaybackState::Failed(_)));
+        let source = object
+            .id
+            .as_ref()
+            .map_or(reference.placeholder.as_str(), |id| id.as_str());
+        let group: gpui::SharedString = scoped_id(
+            "voice-card",
+            reference.context,
+            reference.message,
+            placeholder_key(reference.placeholder.as_str()),
+        )
+        .to_string()
+        .into();
+        let row = div()
             .flex()
             .items_center()
             .gap_2()
-            .child(self.icon_button(
-                ("voice-play", reference.message as usize),
+            .child(self.compact_round_icon_button(
+                scoped_id(
+                    "voice-play",
+                    reference.context,
+                    reference.message,
+                    placeholder_key(reference.placeholder.as_str()),
+                ),
                 (
                     if playing { "pause" } else { "play" },
                     if playing {
@@ -964,7 +1013,7 @@ impl Desktop {
                         "Sprachnachricht abspielen"
                     },
                 ),
-                ButtonStyle::Quiet,
+                ButtonStyle::Primary,
                 Availability::when(
                     self.snapshot.content == ContentState::Ready
                         && !self.media_offline()
@@ -975,102 +1024,83 @@ impl Desktop {
                 LocalAction::Content(Action::Command(play)),
                 cx,
             ))
-            .child(self.hint(self.l(if loading {
-                "Sprachnachricht wird geladen …"
-            } else {
-                "Sprachnachricht"
-            })))
-            .child(self.button(
-                ("voice-speed", reference.message as usize),
-                format!("{}x", f32::from(speed) / 2.0),
-                ButtonStyle::Quiet,
-                controllable,
-                LocalAction::Content(Action::Command(ContentAction::SpeedVoice {
-                    attachment: reference.clone(),
-                    speed_half_steps: if speed >= 4 { 2 } else { speed + 1 },
-                })),
-                cx,
-            ))
-            .child(self.icon_button(
-                ("voice-download", reference.message as usize),
-                ("download", "Herunterladen"),
-                ButtonStyle::Quiet,
-                if self.media_offline() {
-                    Availability::when(false, "Die Verbindung ist derzeit nicht bereit.")
-                } else {
-                    self.download_available()
-                },
-                LocalAction::Content(Action::Download(reference.clone())),
-                cx,
-            ));
-        if let Some(playback) = playback {
-            if let Some(duration) = playback.duration_ms {
-                row = row.child(self.hint(&format!(
-                    "{:02}:{:02} / {:02}:{:02}",
-                    playback.position_ms / 60_000,
-                    playback.position_ms / 1000 % 60,
-                    duration / 60_000,
-                    duration / 1000 % 60
-                )));
-            }
-            if matches!(playback.state, PlaybackState::Failed(_)) {
-                row = row.child(
-                    self.hint(self.l("Wiedergabe nicht verfügbar. Lade die Datei herunter.")),
-                );
-            }
-        }
-        let mut card = div()
-            .flex()
-            .flex_col()
-            .w_full()
-            .max_w(px(560.))
-            .gap_2()
-            .p_3()
-            .rounded(px(8.))
-            .bg(self.theme.subtle)
-            .child(row);
-        if let Some(duration) = playback.and_then(|p| p.duration_ms) {
-            let position = self
-                .content_ui
-                .voice_scrub
-                .as_ref()
-                .filter(|scrub| scrub.reference == reference)
-                .map_or_else(
-                    || playback.map_or(0, |p| p.position_ms),
-                    |scrub| scrub.position_ms,
-                );
-            card = card.child(self.voice_scrub_bar(
+            .child(self.voice_scrub_bar(
                 reference.clone(),
                 position,
                 duration,
+                source,
                 controllable,
                 cx,
-            ));
-            let mut controls = div().flex().items_center().gap_1();
-            for step in 0..=4usize {
-                controls = controls.child(
-                    self.button(
-                        (
-                            "voice-seek",
-                            (reference.message as usize)
-                                .wrapping_mul(5)
-                                .wrapping_add(step),
-                        ),
-                        format!("{}%", step * 25),
-                        ButtonStyle::Quiet,
-                        controllable,
-                        LocalAction::Content(Action::Command(ContentAction::SeekVoice {
-                            attachment: reference.clone(),
-                            position_ms: duration.saturating_mul(step as u64) / 4,
-                        })),
-                        cx,
+            ))
+            .child(self.hint(if loading {
+                "…"
+            } else {
+                &format!("{:02}:{:02}", position / 60_000, position / 1_000 % 60)
+            }))
+            .child(
+                self.button(
+                    scoped_id(
+                        "voice-speed",
+                        reference.context,
+                        reference.message,
+                        placeholder_key(reference.placeholder.as_str()),
                     ),
-                );
-            }
-            card = card.child(controls);
-        }
-        let _ = object;
-        card
+                    format!("{}×", f32::from(speed) / 2.0),
+                    ButtonStyle::Quiet,
+                    controllable,
+                    LocalAction::Content(Action::Command(ContentAction::SpeedVoice {
+                        attachment: reference.clone(),
+                        speed_half_steps: if speed >= 4 { 2 } else { speed + 1 },
+                    })),
+                    cx,
+                )
+                .min_h(px(28.))
+                .h(px(28.))
+                .px_2()
+                .rounded(px(8.)),
+            )
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        "voice-download",
+                        reference.context,
+                        reference.message,
+                        placeholder_key(reference.placeholder.as_str()),
+                    ),
+                    ("download", "Herunterladen"),
+                    ButtonStyle::Quiet,
+                    if self.media_offline() {
+                        Availability::when(false, "Die Verbindung ist derzeit nicht bereit.")
+                    } else {
+                        self.download_available()
+                    },
+                    LocalAction::Content(Action::Download(reference.clone())),
+                    cx,
+                )
+                .opacity(if failed { 1. } else { 0. })
+                .group_hover(group.clone(), |s| s.opacity(1.))
+                .focus(|s| s.opacity(1.)),
+            );
+        div()
+            .id(scoped_id(
+                "voice-card",
+                reference.context,
+                reference.message,
+                placeholder_key(reference.placeholder.as_str()),
+            ))
+            .group(group)
+            .flex()
+            .flex_col()
+            .w_full()
+            .max_w(px(360.))
+            .gap_1()
+            .p_2()
+            .rounded(px(8.))
+            .bg(self.theme.subtle)
+            .child(row)
+            .when(failed, |d| {
+                d.child(self.hint(self.l("Wiedergabe nicht verfügbar. Lade die Datei herunter.")))
+            })
     }
     pub(in crate::presentation) fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
         let AssetState::Ready { key } = self.asset(target)?.state else {
@@ -1421,6 +1451,7 @@ impl Desktop {
             }
             Action::VoiceStart(context) => {
                 self.content_ui.voice_error = None;
+                self.content_ui.voice_auto_send = None;
                 if Some(context) == self.snapshot.selected
                     && self.composer.read(cx).content.is_empty()
                     && !self.has_staged_attachments()
@@ -1435,7 +1466,24 @@ impl Desktop {
                     self.content_ui.voice_error = Some(voice_error(error));
                 }
             }
+            Action::VoiceFinishAndSend(context) => {
+                if Some(context) == self.snapshot.selected
+                    && self.content_ui.voice_auto_send.is_none()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice)
+                {
+                    match self.settings_port.stop_voice(context, false) {
+                        Ok(()) => {
+                            self.content_ui.voice_auto_send = Some(context);
+                            self.content_ui.voice_error = None;
+                        }
+                        Err(error) => self.content_ui.voice_error = Some(voice_error(error)),
+                    }
+                }
+            }
             Action::VoiceCancel(context) => {
+                self.content_ui.voice_auto_send = None;
                 let _ = self.settings_port.stop_voice(context, true);
                 self.content_ui.voice_error = None;
             }
@@ -1451,14 +1499,6 @@ impl Desktop {
                     self.content_ui.voice_error = Some(voice_error(error));
                 } else {
                     self.content_ui.voice_error = None;
-                }
-            }
-            Action::VoiceReviewSeek {
-                context,
-                position_ms,
-            } => {
-                if let Err(error) = self.settings_port.voice_review_seek(context, position_ms) {
-                    self.content_ui.voice_error = Some(voice_error(error));
                 }
             }
             Action::VoiceReviewSpeed { context, speed } => {

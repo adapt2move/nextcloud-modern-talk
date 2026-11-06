@@ -340,20 +340,6 @@ impl ComputerSettingsPort for Bridge {
         *slot = Some((context, player, 2));
         Ok(())
     }
-    fn voice_review_seek(
-        &self,
-        context: talk_core::ui::presentation::ConversationRef,
-        position_ms: u64,
-    ) -> Result<(), DeviceError> {
-        let slot = self.services.voice_player.borrow();
-        let (_, player, _) = slot
-            .as_ref()
-            .filter(|(scope, _, _)| *scope == context)
-            .ok_or(DeviceError::Stale)?;
-        player
-            .seek_ms(position_ms)
-            .map_err(|_| DeviceError::Unavailable)
-    }
     fn voice_review_speed(
         &self,
         context: talk_core::ui::presentation::ConversationRef,
