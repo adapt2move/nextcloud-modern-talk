@@ -455,11 +455,16 @@ pub enum CallTileKind {
     Screen,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallTileId {
+    pub participant: u128,
+    pub kind: CallTileKind,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallScreenStage {
-    pub participant: u128,
+    pub tile: CallTileId,
     pub name: Text<128>,
-    pub kind: CallTileKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

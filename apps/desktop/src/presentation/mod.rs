@@ -282,7 +282,12 @@ pub struct Desktop {
         talk_core::preferences::devices::DevicePreferences,
     )>,
     camera_image: Option<gpui::ImageSource>,
-    call_images: Vec<(CallScope, u128, std::time::Instant, gpui::ImageSource)>,
+    call_images: Vec<(
+        CallScope,
+        talk_core::ui::presentation::CallTileId,
+        std::time::Instant,
+        gpui::ImageSource,
+    )>,
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
     pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
@@ -531,7 +536,7 @@ impl Desktop {
             device_session: None,
             applied_devices: None,
             camera_image: None,
-            call_images: Vec::with_capacity(16),
+            call_images: Vec::with_capacity(17),
             device_picker: None,
             pending_device_focus: None,
             settings_tab: if development {

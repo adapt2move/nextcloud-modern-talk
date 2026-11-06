@@ -4,34 +4,68 @@ use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
 use talk_core::ui::UserIntent;
-use talk_core::ui::presentation::{CallStage, MediaState, RequiredGate, UiIntent};
+use talk_core::ui::presentation::{
+    CallStage, CallTileId, CallTileKind, MediaState, RequiredGate, UiIntent,
+};
 
 impl Desktop {
+    /// Existing camera-frame producer. Screen producers can pass typed tile
+    /// identities to `set_call_tiles` once their scoped snapshot is connected.
     pub fn set_call_images(
         &mut self,
         scope: Option<talk_core::ui::CallScope>,
         images: Vec<(u128, ImageSource)>,
         cx: &mut Context<Self>,
     ) {
-        let admitted = scope.is_some_and(|s| {
-            self.snapshot.call.as_ref().is_some_and(|c| {
-                c.scope == s && matches!(c.stage, CallStage::Active | CallStage::Connecting)
-            })
+        self.set_call_tiles(
+            scope,
+            images
+                .into_iter()
+                .map(|(participant, image)| {
+                    (
+                        CallTileId {
+                            participant,
+                            kind: CallTileKind::Camera,
+                        },
+                        image,
+                    )
+                })
+                .collect(),
+            cx,
+        );
+    }
+
+    pub fn set_call_tiles(
+        &mut self,
+        scope: Option<talk_core::ui::CallScope>,
+        images: Vec<(CallTileId, ImageSource)>,
+        cx: &mut Context<Self>,
+    ) {
+        let call = self.snapshot.call.as_ref().filter(|call| {
+            Some(call.scope) == scope
+                && matches!(call.stage, CallStage::Active | CallStage::Connecting)
         });
+        let valid = |tile: CallTileId| {
+            call.is_some_and(|call| match tile.kind {
+                CallTileKind::Camera => call
+                    .participants
+                    .as_slice()
+                    .iter()
+                    .any(|p| p.local_id == tile.participant),
+                CallTileKind::Screen => call
+                    .screen_stage
+                    .as_ref()
+                    .is_some_and(|screen| screen.tile == tile),
+            })
+        };
         let mut changed = false;
         let mut index = 0;
         while index < self.call_images.len() {
-            let (old_scope, participant, at, _) = &self.call_images[index];
-            let retain = admitted
-                && Some(*old_scope) == scope
+            let (old_scope, tile, at, _) = &self.call_images[index];
+            if Some(*old_scope) == scope
                 && at.elapsed() < std::time::Duration::from_secs(2)
-                && self.snapshot.call.as_ref().is_some_and(|c| {
-                    c.participants
-                        .as_slice()
-                        .iter()
-                        .any(|p| p.local_id == *participant)
-                });
-            if retain {
+                && valid(*tile)
+            {
                 index += 1;
             } else {
                 let (_, _, _, image) = self.call_images.remove(index);
@@ -41,29 +75,24 @@ impl Desktop {
                 changed = true;
             }
         }
-        if let Some(scope) = scope.filter(|_| admitted) {
-            for (participant, image) in images.into_iter().take(16) {
-                if !self.snapshot.call.as_ref().is_some_and(|c| {
-                    c.participants
-                        .as_slice()
-                        .iter()
-                        .any(|p| p.local_id == participant)
-                }) {
+        if let Some(scope) = scope {
+            for (tile, image) in images.into_iter().take(17) {
+                if !valid(tile) {
                     continue;
                 }
                 if let Some(index) = self
                     .call_images
                     .iter()
-                    .position(|(s, p, _, _)| *s == scope && *p == participant)
+                    .position(|(s, id, _, _)| *s == scope && *id == tile)
                 {
                     let (_, _, _, old) = self.call_images.remove(index);
                     if let ImageSource::Render(old) = old {
                         cx.drop_image(old, None);
                     }
                 }
-                if self.call_images.len() < 16 {
+                if self.call_images.len() < 17 {
                     self.call_images
-                        .push((scope, participant, std::time::Instant::now(), image));
+                        .push((scope, tile, std::time::Instant::now(), image));
                     changed = true;
                 }
             }
@@ -313,8 +342,31 @@ impl Desktop {
         if let Some(screen) = call
             .screen_stage
             .as_ref()
-            .filter(|screen| screen.kind == talk_core::ui::presentation::CallTileKind::Screen)
+            .filter(|screen| screen.tile.kind == CallTileKind::Screen)
         {
+            let image = self
+                .call_images
+                .iter()
+                .find(|(scope, tile, _, _)| *scope == call.scope && *tile == screen.tile)
+                .map(|(_, _, _, image)| image);
+            let visual = if let Some(image) = image {
+                div().w_full().h(px(320.)).child(
+                    img(image.clone())
+                        .w_full()
+                        .h_full()
+                        .object_fit(gpui::ObjectFit::Contain),
+                )
+            } else {
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_4()
+                    .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
+                    .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar.")))
+            };
             stage = stage.child(
                 div()
                     .w_full()
@@ -324,14 +376,13 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .justify_center()
                     .gap_4()
-                    .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
+                    .p_4()
+                    .child(visual)
                     .child(self.lf(
                         "{name} teilt den Bildschirm",
                         &[("name", screen.name.as_str())],
-                    ))
-                    .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."))),
+                    )),
             );
         } else if call.share == MediaState::Active {
             stage = stage.child(
@@ -376,7 +427,14 @@ impl Desktop {
             let image = self
                 .call_images
                 .iter()
-                .find(|(scope, local, _, _)| *scope == call.scope && *local == participant.local_id)
+                .find(|(scope, local, _, _)| {
+                    *scope == call.scope
+                        && *local
+                            == CallTileId {
+                                participant: participant.local_id,
+                                kind: CallTileKind::Camera,
+                            }
+                })
                 .map(|(_, _, _, image)| image);
             let visual = if let Some(image) = image {
                 div().w_full().flex_1().min_h_0().child(

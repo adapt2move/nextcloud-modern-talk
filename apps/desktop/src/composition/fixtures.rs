@@ -849,9 +849,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             },
             screen_stage: if scenario == "call-screen-stage" {
                 Some(talk_core::ui::presentation::CallScreenStage {
-                    participant: 1,
+                    tile: talk_core::ui::presentation::CallTileId {
+                        participant: 1,
+                        kind: talk_core::ui::presentation::CallTileKind::Screen,
+                    },
                     name: text("Mara Fischer"),
-                    kind: talk_core::ui::presentation::CallTileKind::Screen,
                 })
             } else {
                 None
