@@ -75,7 +75,6 @@ struct PolicyUpdate {
 struct Peer {
     local: u128,
     status: StatusSnapshot,
-    raised_hand: activity::RaisedHand,
     speaking: speaking::Speaking,
     session: PeerSession,
     negotiation: Option<Negotiation>,
@@ -495,6 +494,25 @@ fn sid() -> Result<Negotiation, ()> {
 fn send(tx: &mpsc::Sender<Write>, value: Write) -> Result<(), ()> {
     tx.try_send(value).map_err(|_| ())
 }
+fn reconcile_participants(
+    participants: &mut activity::Participants,
+    bundle: &Bundle,
+    invitees: &[(u64, u128)],
+) -> Result<(), ()> {
+    let sessions: Vec<_> = bundle
+        .peers
+        .iter()
+        .map(|peer| peer.session.clone())
+        .collect();
+    let reserved: Vec<_> = invitees.iter().map(|(_, local)| *local).collect();
+    participants.reconcile(&sessions, &reserved, || {
+        let mut bytes = [0; 16];
+        getrandom::fill(&mut bytes).map_err(|_| ())?;
+        Ok(u128::from_le_bytes(bytes))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn reconcile(
     peers: &mut Vec<Peer>,
     bundle: &Bundle,
@@ -503,6 +521,7 @@ async fn reconcile(
     local_media: bool,
     topology: Topology,
     sfu_members: &[PeerSession],
+    participants: &activity::Participants,
 ) -> Result<(), ()> {
     let mut i = 0;
     while i < peers.len() {
@@ -538,7 +557,6 @@ async fn reconcile(
         peers.push(Peer {
             local: 0,
             status: StatusSnapshot::default(),
-            raised_hand: activity::RaisedHand::default(),
             speaking: speaking::Speaking::default(),
             session: own.clone(),
             negotiation: Some(negotiation),
@@ -600,12 +618,15 @@ async fn reconcile(
             }
             None
         };
-        let mut identity = [0; 16];
-        getrandom::fill(&mut identity).map_err(|_| ())?;
+        let local = participants
+            .0
+            .iter()
+            .find(|person| person.session == incoming.session)
+            .ok_or(())?
+            .local;
         peers.push(Peer {
-            local: u128::from_le_bytes(identity),
+            local,
             status: StatusSnapshot::default(),
-            raised_hand: activity::RaisedHand::default(),
             speaking: speaking::Speaking::default(),
             session: incoming.session.clone(),
             negotiation,
@@ -641,6 +662,7 @@ async fn media_loop(
     let scope = call.scope();
     let started = Instant::now();
     let mut peers: Vec<Peer> = Vec::with_capacity(17);
+    let mut participants = activity::Participants::default();
     let mut sfu_members = Vec::with_capacity(100);
     // Opaque identities live only for this call generation and are retired as
     // soon as the authoritative attendee leaves the bounded projection.
@@ -664,6 +686,7 @@ async fn media_loop(
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
+        reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
         while session.live() && !stop.is_closed() && !cancel.is_cancelled() {
             tick.tick().await;
             let mut refresh_needed = false;
@@ -676,9 +699,9 @@ async fn media_loop(
                         && call.phase() == Phase::Active && !end_pending
                         && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
                         && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
-                        if let Some(peer) = peers.iter().find(|peer| peer.local == target && peer.role != Role::Publisher)
-                            && bundle.peers.iter().any(|source| source.session == peer.session && source.microphone) {
-                            let outcome = if ring_tx.try_send(moderation::Request::Mute { target, peer: peer.session.clone() }).is_ok() {
+                        if let Some(person) = participants.0.iter().find(|person| person.local == target)
+                            && bundle.peers.iter().any(|source| source.session == person.session && source.microphone) {
+                            let outcome = if ring_tx.try_send(moderation::Request::Mute { target, peer: person.session.clone() }).is_ok() {
                                 calls::RingOutcome::Pending
                             } else { calls::RingOutcome::Failed };
                             mute_status = Some(calls::CallRingStatus { target, outcome });
@@ -847,13 +870,13 @@ async fn media_loop(
                         // Membership reconciliation owns peer identity; unsolicited activity
                         // cannot create a peer or change media authority.
                         SignalEvent::Activity { from, activity } => {
-                            if let Some(peer) = peers.iter_mut().find(|peer| peer.session == from && peer.role != Role::Publisher) {
+                            if let Some(person) = participants.0.iter_mut().find(|person| person.session == from) {
                                 match activity {
-                                    api::signaling::activity::Activity::RaisedHand { state, timestamp } => peer.raised_hand.update(state, timestamp),
+                                    api::signaling::activity::Activity::RaisedHand { state, timestamp } => person.hand.update(state, timestamp),
                                     api::signaling::activity::Activity::Reaction(value) => {
                                         if let (Ok(emoji), Some(next)) = (talk_core::bounded::Text::new(&value), reaction_sequence.checked_add(1)) {
                                             reaction_sequence = next;
-                                            latest_reaction = Some(calls::CallReaction { sequence: next, participant: Some(peer.local), emoji });
+                                            latest_reaction = Some(calls::CallReaction { sequence: next, participant: Some(person.local), emoji });
                                         }
                                     }
                                 }
@@ -876,6 +899,7 @@ async fn media_loop(
                     refreshes = refreshes.saturating_add(1);
                     received_policy = next.after;
                     bundle = next.bundle;
+                    reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
@@ -893,7 +917,7 @@ async fn media_loop(
                 session.grant(grant, network.now());
                 reconcile(&mut peers, &bundle, &own, &writes,
                     session.publication().microphone || session.publication().camera,
-                    topology, &sfu_members).await?;
+                    topology, &sfu_members, &participants).await?;
                 limit
             } else {
                 session.suspend();
@@ -994,11 +1018,13 @@ async fn media_loop(
                 totals.answers_sent += c.answers_sent;
             }
             totals.policy_refreshes = refreshes;
-            let mut participants = talk_core::bounded::Page::empty();
-            for peer in peers.iter().filter(|p| p.role != Role::Publisher) {
-                if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
-                    participants.try_push(calls::Participant {
-                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: peer.raised_hand.raised(), speaking: peer.speaking.active(Instant::now()),
+            let mut participant_snapshot = talk_core::bounded::Page::empty();
+            for person in &participants.0 {
+                if let Some(source) = bundle.peers.iter().find(|p| p.session == person.session) {
+                    let speaking = peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
+                        .is_some_and(|peer| peer.speaking.active(Instant::now()));
+                    participant_snapshot.try_push(calls::Participant {
+                        local: person.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: person.hand.raised(), speaking,
                         can_mute: policy_ready && bundle.mute_supported && source.microphone && !end_pending
                             && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
                             && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending),
@@ -1016,7 +1042,7 @@ async fn media_loop(
                         if getrandom::fill(&mut bytes).is_err() { continue; }
                         let local = u128::from_le_bytes(bytes);
                         if local == 0 || invitee_ids.iter().any(|(_, existing)| *existing == local)
-                            || peers.iter().any(|peer| peer.local == local) { continue; }
+                            || participants.0.iter().any(|person| person.local == local) { continue; }
                         invitee_ids.push((person.attendee, local));
                         local
                     };
@@ -1044,8 +1070,8 @@ async fn media_loop(
                 snapshot.phase = call.phase();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
-                snapshot.peers = peers.iter().filter(|p| p.role != Role::Publisher).count() as u16;
-                snapshot.participants = participants;
+                snapshot.peers = participants.0.len() as u16;
+                snapshot.participants = participant_snapshot;
                 snapshot.hand_supported = policy_ready && bundle.hand_supported && call.phase() == Phase::Active;
                 snapshot.hand_raised = hand_raised;
                 snapshot.reactions = if policy_ready && call.phase() == Phase::Active { bundle.reactions.clone() } else { talk_core::bounded::Page::empty() };
