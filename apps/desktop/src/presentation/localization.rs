@@ -1,5 +1,6 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
+mod call;
 mod chat;
 mod connection;
 mod content;
@@ -16,6 +17,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         return key;
     }
     for catalog in [
+        call::MESSAGES,
         chat::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
@@ -80,6 +82,7 @@ mod tests {
             resources::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,
+            call::MESSAGES,
             chat::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,

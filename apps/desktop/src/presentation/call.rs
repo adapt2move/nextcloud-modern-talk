@@ -396,6 +396,7 @@ impl Desktop {
                             .items_center()
                             .gap_2()
                             .child(self.scaled_icon("user", 14., t.stage_muted))
+                            .when(participant.raised_hand, |row| row.child(self.scaled_icon("hand", 14., t.stage_muted)).child(self.l("Hand gehoben")))
                             .child(
                                 div()
                                     .flex_1()

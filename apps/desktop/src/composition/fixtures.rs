@@ -156,6 +156,7 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         role_label: text(if me { "Du" } else { "Teilnehmend" }),
         presence: Presence::Available,
         self_user: me,
+        raised_hand: false,
     }
 }
 fn participants() -> [ParticipantView; 4] {

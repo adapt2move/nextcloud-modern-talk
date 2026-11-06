@@ -408,6 +408,7 @@ pub struct ParticipantView {
     pub role_label: Text<64>,
     pub presence: Presence,
     pub self_user: bool,
+    pub raised_hand: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

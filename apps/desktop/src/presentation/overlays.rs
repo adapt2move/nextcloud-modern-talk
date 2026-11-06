@@ -53,8 +53,10 @@ impl Desktop {
                 let mut body = div().flex().flex_col().gap_3();
                 if let Some(call) = &self.snapshot.call {
                     body = body.child(self.hint(call.title.as_str()));
-                    for p in call.participants.as_slice() {
-                        body = body.child(self.participant_row(p));
+                    for raised in [true, false] {
+                        for p in call.participants.as_slice().iter().filter(|p| p.raised_hand == raised) {
+                            body = body.child(self.participant_row(p));
+                        }
                     }
                 }
                 body
@@ -191,6 +193,7 @@ impl Desktop {
                     )
                     .child(self.hint(p.role_label.as_str())),
             )
+            .when(p.raised_hand, |row| row.child(self.hint(self.l("Hand gehoben"))))
             .child(
                 div()
                     .text_size(self.sp(12.))

@@ -751,6 +751,7 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                     role_label: text("Teilnehmend"),
                     presence: Presence::Unknown,
                     self_user: false,
+                    raised_hand: p.raised_hand,
                 }),
         ),
     }
