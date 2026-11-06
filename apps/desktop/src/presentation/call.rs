@@ -255,8 +255,8 @@ impl Desktop {
             return self.call_outcome(call.stage == CallStage::Failed, cx);
         }
         let show_chat = super::docked_call_chat(wide, self.call_chat_open, self.overlay);
-        let stage_height = (f32::from(window.viewport_size().height) - 260.).max(180.);
-        let feature_height = (stage_height - 176.).clamp(220., 360.);
+        let (stage_height, feature_height, filmstrip_height) =
+            stage_metrics(f32::from(window.viewport_size().height));
         let status = match call.stage {
             CallStage::Incoming => "Eingehender Anruf",
             CallStage::Outgoing => "Anruf wird angefragt …",
@@ -438,7 +438,7 @@ impl Desktop {
         let strip_count = count.saturating_sub(usize::from(focused.is_some())).max(1);
         let rows = count.max(1).div_ceil(usize::from(columns));
         let tile_height = if filmstrip {
-            160.
+            filmstrip_height
         } else if count <= 2 {
             330.
         } else {
@@ -1206,6 +1206,13 @@ fn media_label(microphone: bool, state: MediaState) -> &'static str {
     }
 }
 
+fn stage_metrics(window_height: f32) -> (f32, f32, f32) {
+    let available = (window_height - 250.).max(180.);
+    let filmstrip = (available * 0.30).clamp(120., 160.);
+    let feature = (available - filmstrip - 16.).clamp(180., 360.);
+    (available, feature, filmstrip)
+}
+
 // The stage remains dark in both app appearances. Lift the existing success
 // token for that surface instead of using its light-surface foreground unchanged.
 fn stage_speaking_color(theme: super::Theme) -> gpui::Hsla {
@@ -1231,7 +1238,16 @@ fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
 
 #[cfg(test)]
 mod gallery_tests {
-    use super::{gallery_columns, stage_speaking_color};
+    use super::{gallery_columns, stage_metrics, stage_speaking_color};
+
+    #[test]
+    fn shared_stage_and_filmstrip_fit_at_minimum_window_height() {
+        for height in [580., 800.] {
+            let (available, feature, filmstrip) = stage_metrics(height);
+            assert!(feature + filmstrip + 16. <= available);
+            assert!(filmstrip >= 120.);
+        }
+    }
 
     #[test]
     fn speaking_ring_contrasts_with_the_stage_in_both_appearances() {
