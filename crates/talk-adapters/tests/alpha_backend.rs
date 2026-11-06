@@ -15,7 +15,7 @@ use talk_core::protocol::conversation::{
 use talk_core::protocol::messaging::{
     ComposeOptions, MessagingCommand as M, MessagingResult as MR,
 };
-use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, SendState};
+use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, RoomKind, SendState};
 fn scope() -> AccountScope {
     AccountScope {
         account: AccountId::from_local(700),
@@ -136,6 +136,70 @@ async fn released_server_messaging_and_room_controls() {
         .await
         .unwrap();
     let id = client.fixture_conversation().unwrap();
+    let mut bob = test_support::from_private_fixture(
+        &root.join("bob.json"),
+        scope(),
+        HostId::from_local(700),
+        runtime.clone(),
+    )
+    .expect("second private synthetic fixture");
+    bob.request(context(&runtime), ProtocolRequest::InspectAccount)
+        .await
+        .unwrap();
+    let bob_room = bob.fixture_conversation().unwrap();
+    let bob_message = m(
+        &mut bob,
+        &runtime,
+        bob_room,
+        201,
+        "private-reply-source",
+        M::Send {
+            text: text("A group message from Bob"),
+            options: ComposeOptions::default(),
+        },
+    )
+    .await;
+    let source = MessageId {
+        conversation: id,
+        sequence: canonical_accepted_id(bob_message, OperationId::from_local(201)).sequence,
+    };
+    let ProtocolReply::Conversation(direct) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::CreatePrivateReply {
+                operation: OperationId::from_local(202),
+                source,
+            },
+        )
+        .await
+        .expect("resolve the observed author to a direct conversation")
+    else {
+        panic!("private reply direct conversation")
+    };
+    assert_eq!(direct.kind, RoomKind::Direct);
+    let reply = m(
+        &mut client,
+        &runtime,
+        direct.id,
+        203,
+        "private-reply-send",
+        M::Send {
+            text: text("A private response"),
+            options: ComposeOptions {
+                private_reply: Some(source),
+                ..Default::default()
+            },
+        },
+    )
+    .await;
+    if let MR::Message(message) = reply {
+        assert!(
+            message.parent.is_some(),
+            "private reply keeps the copied parent"
+        );
+    } else {
+        panic!("private reply returned no canonical message");
+    }
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {

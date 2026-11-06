@@ -86,6 +86,8 @@ class RecoveryLab(Lab):
         directory.mkdir(mode=0o700)
         save(directory / "alice.json", {"origin": f"http://127.0.0.1:{port}",
              "user": "lab_alice", "password": self.passwords["lab_alice"], "room": room})
+        save(directory / "bob.json", {"origin": f"http://127.0.0.1:{port}",
+             "user": "lab_bob", "password": self.passwords["lab_bob"], "room": room})
         target = self.output / key
         target.mkdir(mode=0o700)
         result, injected = asyncio.run(self.client(directory, port, target))
