@@ -4,6 +4,35 @@ use crate::{Client, Error, ErrorKind, scope::OperationContext};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 pub const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
+/// A DAV directory relative to the authenticated user's files root.
+/// Root is represented by `/`; other paths have no trailing slash.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryPath(String);
+impl DirectoryPath {
+    pub fn parse(path: &str) -> Result<Self, ErrorKind> {
+        if path == "/" {
+            return Ok(Self(path.to_owned()));
+        }
+        FilePath::parse(path).map(|path| Self(path.0))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Return the parent without allowing navigation above the user's root.
+    pub fn parent(&self) -> Option<Self> {
+        if self.0 == "/" {
+            return None;
+        }
+        let end = self.0.rfind('/')?;
+        Some(Self(if end == 0 {
+            "/".to_owned()
+        } else {
+            self.0[..end].to_owned()
+        }))
+    }
+}
 #[derive(Clone, Debug)]
 pub struct FilePath(String);
 impl FilePath {
@@ -148,5 +177,30 @@ impl Client {
         sink: &mut W,
     ) -> Result<u64, Error> {
         self.transport.file(c, path, None, sink).await
+    }
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use super::DirectoryPath;
+
+    #[test]
+    fn directory_navigation_stays_within_root() {
+        let nested = DirectoryPath::parse("/Documents/Plans").unwrap();
+        let parent = nested.parent().unwrap();
+        assert_eq!(parent.as_str(), "/Documents");
+        let root = parent.parent().unwrap();
+        assert_eq!(root.as_str(), "/");
+        assert!(root.parent().is_none());
+    }
+
+    #[test]
+    fn directory_paths_reject_ambiguous_segments() {
+        for path in [
+            "", "relative", "//", "/a/", "/a//b", "/a/../b", "/a/./b", "/a\\b", "/a\0b",
+        ] {
+            assert!(DirectoryPath::parse(path).is_err(), "{path:?}");
+        }
+        assert!(DirectoryPath::parse("/日本語/plan #1").is_ok());
     }
 }
