@@ -959,7 +959,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             },
             ring_status: None,
             mute_status: None,
-            can_end_everyone: scenario == "call-end-confirm",
+            can_end_everyone: matches!(scenario, "call-end-confirm" | "call-participants-raised"),
             end_pending: false,
             end_failed: false,
             participants: page(
@@ -980,12 +980,14 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     people[1].call_can_mute = scenario == "call-participants-raised";
                     people[1].call_camera = Some(false);
                     people[3].raised_hand = true;
-                    people.extend([
-                        participant(5, "Nora Beck", "NB", false),
-                        participant(6, "Emil Hartmann", "EH", false),
-                        participant(7, "Samira Wolf", "SW", false),
-                        participant(8, "Luis Berger", "LB", false),
-                    ]);
+                    if scenario != "call-participants-raised" {
+                        people.extend([
+                            participant(5, "Nora Beck", "NB", false),
+                            participant(6, "Emil Hartmann", "EH", false),
+                            participant(7, "Samira Wolf", "SW", false),
+                            participant(8, "Luis Berger", "LB", false),
+                        ]);
+                    }
                     people
                 } else if direct || id == 2 {
                     vec![participants()[0].clone(), participants()[2].clone()]

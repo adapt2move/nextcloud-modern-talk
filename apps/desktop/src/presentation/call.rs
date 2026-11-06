@@ -591,7 +591,11 @@ impl Desktop {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(self.scaled_icon("hand", 16., t.warning)),
+                                .child(self.scaled_icon(
+                                    "hand",
+                                    16.,
+                                    if t.dark { t.warning } else { t.warning_bg },
+                                )),
                         ),
                     )
                 })
@@ -768,7 +772,7 @@ impl Desktop {
                         .left(px(34.))
                         .size(px(9.))
                         .rounded_full()
-                        .bg(t.warning)
+                        .bg(if t.dark { t.warning } else { t.warning_bg })
                         .border_1()
                         .border_color(t.stage),
                 );
@@ -1008,8 +1012,9 @@ impl Desktop {
                                 ))
                             })
                             .when(call.recording == talk_core::ui::presentation::CallRecordingState::Active, |header| {
-                                header.child(div().px_3().py_1().rounded_full().bg(t.danger)
-                                    .text_color(t.danger_bg).text_size(self.sp(12.))
+                                header.child(div().px_3().py_1().rounded_full()
+                                    .bg(if t.dark { t.danger_bg } else { t.danger })
+                                    .text_color(if t.dark { t.danger } else { t.danger_bg }).text_size(self.sp(12.))
                                     .font_weight(FontWeight::BOLD).child(self.l("REC")))
                             })
                             .child(self.icon_button(
