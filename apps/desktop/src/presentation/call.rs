@@ -1126,6 +1126,18 @@ fn gallery_columns(width: f32, scale: u16, participants: usize) -> u16 {
     capacity.min(participants.clamp(1, 3) as u16)
 }
 
+fn recording_label(state: talk_core::ui::presentation::CallRecordingState) -> Option<&'static str> {
+    use talk_core::ui::presentation::CallRecordingState;
+    match state {
+        CallRecordingState::Inactive => None,
+        CallRecordingState::Starting => Some("Aufzeichnung startet …"),
+        CallRecordingState::Active => Some("Aufzeichnung läuft"),
+        CallRecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
+        CallRecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
+        CallRecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
+    }
+}
+
 #[cfg(test)]
 mod gallery_tests {
     use super::gallery_columns;
@@ -1137,17 +1149,5 @@ mod gallery_tests {
         assert_eq!(gallery_columns(700., 150, 8), 1);
         assert_eq!(gallery_columns(1200., 100, 1), 1);
         assert_eq!(gallery_columns(0., 100, 0), 1);
-    }
-}
-
-fn recording_label(state: talk_core::ui::presentation::CallRecordingState) -> Option<&'static str> {
-    use talk_core::ui::presentation::CallRecordingState;
-    match state {
-        CallRecordingState::Inactive => None,
-        CallRecordingState::Starting => Some("Aufzeichnung startet …"),
-        CallRecordingState::Active => Some("Aufzeichnung läuft"),
-        CallRecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
-        CallRecordingState::Failed => Some("Aufzeichnung fehlgeschlagen"),
-        CallRecordingState::Unknown => Some("Aufzeichnungsstatus unbekannt"),
     }
 }

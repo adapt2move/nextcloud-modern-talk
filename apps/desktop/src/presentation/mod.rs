@@ -819,14 +819,13 @@ impl Desktop {
             self.call_device_picker = None;
             self.device_picker = None;
         }
-        if self.call_started.is_none() {
-            if let Some(call) = next
+        if self.call_started.is_none()
+            && let Some(call) = next
                 .call
                 .as_ref()
                 .filter(|call| call.stage == CallStage::Active)
-            {
-                self.call_started = Some((call.scope, std::time::Instant::now()));
-            }
+        {
+            self.call_started = Some((call.scope, std::time::Instant::now()));
         }
         if self
             .recent_call_reaction
