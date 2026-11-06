@@ -34,9 +34,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   cannot authorize voting or closure. Native semantic accessibility and full
   platform behavior remain unqualified.
 - Voice recording is explicitly started, limited to two minutes, and encoded as
-  16 kHz mono PCM WAV in memory. Recordings and original audio are not retained
-  across restart or available offline; unsent recordings retire on scope or
-  permission loss. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
+  16 kHz mono PCM WAV in memory. An unsent recording remains available during
+  a temporary disconnection, but retires on scope or permission loss and does
+  not survive restart. Incoming originals are retained only for their player and
+  are not available offline. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
   MP4/WebM audio codecs up to 32 MiB. AAC needs an installed native decoder;
   unsupported or unavailable codecs offer download. The deterministic waveform
   placeholder supports pointer scrubbing and five-second arrow-key seeking;
