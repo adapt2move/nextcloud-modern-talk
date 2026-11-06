@@ -385,6 +385,16 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
         assert_eq!(activity["message"]["data"]["type"], "raiseHand");
         assert_eq!(activity["message"]["data"]["payload"]["state"], true);
         assert!(activity["message"]["data"].get("sid").is_none());
+        let force_mute = receive(&mut socket).await;
+        assert_eq!(force_mute["message"]["recipient"]["sessionid"], "hpb-other");
+        assert_eq!(
+            force_mute["message"]["data"]["payload"]["action"],
+            "forceMute"
+        );
+        assert_eq!(
+            force_mute["message"]["data"]["payload"]["peerId"],
+            "hpb-other"
+        );
         let bye = receive(&mut socket).await;
         assert_eq!(bye["type"], "bye");
         send(&mut socket, json!({"id":bye["id"],"type":"bye","bye":{}})).await;
@@ -450,6 +460,14 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
             .await,
         Err(ErrorKind::WrongScope)
     );
+    route
+        .send_force_mute(
+            &context(&runtime, &handle.shared),
+            &peer("talk-other"),
+            &peer("talk-other"),
+        )
+        .await
+        .unwrap();
     route.close();
     assert!(route.is_closed());
     server.await.unwrap();

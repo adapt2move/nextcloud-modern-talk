@@ -615,6 +615,45 @@ async fn ringing_requires_fresh_call_permission_and_absent_local_user() {
     }
 }
 #[tokio::test]
+async fn moderator_mute_targets_only_current_other_call_sessions() {
+    for case in ["allowed", "member", "target-left", "caller-left"] {
+        let mut replies = join_replies();
+        replies.push(reply(
+            json!({"version":{"major":35},"capabilities":{"spreed":{
+                "features":["conversation-v4","force-mute"],"config":{"call":{"enabled":true}}
+            }}}),
+        ));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"participantType":if case == "member" {3} else {2}}),
+        ));
+        let mut participants = Vec::new();
+        if case != "caller-left" {
+            participants.push(json!({"sessionId":"own-session"}));
+        }
+        if case != "target-left" {
+            participants.push(json!({"sessionId":"other-session"}));
+        }
+        replies.push(reply(json!(participants)));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let target = signaling::PeerSession::parse("other-session").unwrap();
+        let result = moderation
+            .mute_participant(&context(&runtime), &target)
+            .await;
+        let sent = server.seen.lock().unwrap().iter().any(|request| {
+            request.starts_with("POST /ocs/v2.php/apps/spreed/api/v3/signaling/testroom?")
+                && request.contains("forceMute")
+        });
+        assert_eq!(result.is_ok(), case == "allowed", "{case}");
+        assert_eq!(sent, case == "allowed", "{case}");
+    }
+}
+#[tokio::test]
 async fn end_for_everyone_requires_fresh_moderator_and_current_session() {
     for case in ["allowed", "member", "breakout", "caller-left"] {
         let mut replies = join_replies();
