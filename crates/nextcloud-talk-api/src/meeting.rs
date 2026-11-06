@@ -476,7 +476,14 @@ impl MeetingWriter {
             self.binding.room.as_str()
         );
         self.transport
-            .ocs(&context, Method::POST, &route, &[], &[("messages", messages)], false)
+            .ocs(
+                &context,
+                Method::POST,
+                &route,
+                &[],
+                &[("messages", messages)],
+                false,
+            )
             .await
             .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
         self.binding.lifetime.validate(&context)?;
