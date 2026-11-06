@@ -7,6 +7,7 @@ bodies remain in the private lab process and are never written to the result.
 import argparse
 import json
 import sys
+import urllib.request
 
 sys.dont_write_bytecode = True
 from dev import owned_state, restore
@@ -77,8 +78,12 @@ def check(state):
             members = lab.request("lab_alice", "GET", room_path + "/participants",
                                   name="call-activity-member-session")
             observed = [p for p in members if p.get("actorId") == "lab_bob"]
+            cookie_counts = {actor: sum(len(handler.cookiejar) for handler in lab.clients[actor].handlers
+                                        if isinstance(handler, urllib.request.HTTPCookieProcessor))
+                             for actor in ("lab_alice", "lab_bob")}
             print(json.dumps({"member_session_observed": len(observed) == 1
-                              and sessions["lab_bob"] in (observed[0].get("sessionIds") or [])}), flush=True)
+                              and sessions["lab_bob"] in (observed[0].get("sessionIds") or []),
+                              "cookie_counts": cookie_counts}), flush=True)
             lab.request("lab_bob", "POST", call_path, body={"flags": 1, "silent": True},
                         name="call-activity-join-call")
             # The released server may acknowledge a no-op rather than returning
