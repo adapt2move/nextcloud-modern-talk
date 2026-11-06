@@ -1162,6 +1162,16 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                if matches!(overlay, Overlay::Settings | Overlay::Accounts)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                    })
+                {
+                    self.call_minimized = Some(call.scope);
+                }
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
