@@ -1,5 +1,5 @@
 //! Published polls from the pinned Talk 24.0.6 / 25.0.6 v1 contract.
-//! Draft deletion is deliberately a separate, unsupported operation here.
+//! Draft mutations and published poll mutations have distinct response shapes.
 use crate::{
     Client, Error, ErrorKind,
     models::{RoomToken, integer, string},
@@ -13,6 +13,19 @@ pub const MAX_OPTIONS: usize = 100;
 pub enum Command {
     Read(u64),
     Create {
+        question: String,
+        options: Vec<String>,
+        hidden_results: bool,
+        max_votes: u16,
+    },
+    CreateDraft {
+        question: String,
+        options: Vec<String>,
+        hidden_results: bool,
+        max_votes: u16,
+    },
+    UpdateDraft {
+        poll: u64,
         question: String,
         options: Vec<String>,
         hidden_results: bool,
@@ -124,10 +137,11 @@ fn plan(room: &RoomToken, command: &Command) -> Result<PollPlan, ErrorKind> {
             (Method::POST, format!("{route}/{}", id(*poll)?), form)
         }
         Command::Create {
-            question,
-            options,
-            hidden_results,
-            max_votes,
+            question, options, hidden_results, max_votes,
+        } | Command::CreateDraft {
+            question, options, hidden_results, max_votes,
+        } | Command::UpdateDraft {
+            question, options, hidden_results, max_votes, ..
         } => {
             if question.trim().is_empty()
                 || question.len() > 4000
@@ -147,9 +161,13 @@ fn plan(room: &RoomToken, command: &Command) -> Result<PollPlan, ErrorKind> {
                 ("question", question.clone()),
                 ("resultMode", u8::from(*hidden_results).to_string()),
                 ("maxVotes", max_votes.to_string()),
-                ("draft", "false".into()),
+                ("draft", matches!(command, Command::CreateDraft { .. }).to_string()),
             ];
             form.extend(options.iter().map(|s| ("options[]", s.clone())));
+            let route = match command {
+                Command::UpdateDraft { poll, .. } => format!("{route}/draft/{}", id(*poll)?),
+                _ => route,
+            };
             (Method::POST, route, form)
         }
     })
@@ -249,6 +267,44 @@ impl Poll {
     }
 }
 impl Client {
+    /// Create or edit a draft; callers must enforce the relevant capability and authority.
+    pub async fn poll_draft_mutation(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        command: Command,
+    ) -> Result<Draft, Error> {
+        let create = matches!(command, Command::CreateDraft { .. });
+        let expected = match &command {
+            Command::CreateDraft { .. } => None,
+            Command::UpdateDraft { poll, .. } => Some(*poll),
+            _ => return Err(self.error(ErrorKind::Malformed)),
+        };
+        self.validate(c)?;
+        let (method, route, form) = plan(room, &command).map_err(|kind| self.error(kind))?;
+        if create {
+            if self.poll_creation_uncertain.contains(room) {
+                return Err(self.error(ErrorKind::Uncertain));
+            }
+            if self.poll_creation_uncertain.len() >= 100 {
+                return Err(self.error(ErrorKind::Busy));
+            }
+            self.poll_creation_uncertain.push(room.clone());
+        }
+        let result = async {
+            let response = self.transport.ocs(c, method, &route, &[], &form, false).await?;
+            let draft = Draft::decode(&response.data).map_err(|kind| self.error(kind))?;
+            if expected.is_some_and(|id| id != draft.id) {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            self.validate(c)?;
+            Ok(draft)
+        }.await.map_err(|error| self.mutation_error(error));
+        if create && result.as_ref().err().is_none_or(|e| e.kind != ErrorKind::Uncertain) {
+            self.poll_creation_uncertain.retain(|r| r != room);
+        }
+        result
+    }
     /// Fetch a bounded moderator draft list for this room.
     pub async fn poll_drafts(
         &mut self,
@@ -274,6 +330,9 @@ impl Client {
         command: Command,
     ) -> Result<Poll, Error> {
         self.validate(c)?;
+        if matches!(command, Command::CreateDraft { .. } | Command::UpdateDraft { .. }) {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         let (method, route, form) = plan(room, &command).map_err(|k| self.error(k))?;
         let mutation = method != Method::GET;
         let create = matches!(command, Command::Create { .. });
