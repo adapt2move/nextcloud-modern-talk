@@ -147,6 +147,34 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     };
 }
 
+pub(super) fn polls(snapshot: &mut PresentationSnapshot) {
+    let available = Availability {
+        implemented: true,
+        server: FeatureSupport::Supported,
+        allowed: Decision::Allowed,
+    };
+    snapshot.messages = page(
+        snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .filter(|message| message.local_id == 103)
+            .cloned(),
+    );
+    snapshot.content_panel.poll_drafts_manage = available;
+    snapshot.content_panel.poll_drafts_edit = available;
+    snapshot.content_panel.poll_drafts = page([PollDraftEntry {
+        id: 9002,
+        draft: PollDraft {
+            question: text("Fiktiver Entwurf: Wo treffen wir uns?"),
+            options: page([text("Im Studio"), text("Im Garten")]),
+            max_votes: 1,
+            hidden_results: false,
+        },
+        max_votes: 1,
+    }]);
+}
+
 pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
     use talk_core::ui::messaging::{UploadState, UploadView};
     let mut file = snapshot.messages.as_slice()[1].clone();
