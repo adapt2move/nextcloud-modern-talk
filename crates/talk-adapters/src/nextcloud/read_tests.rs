@@ -40,6 +40,34 @@ async fn act(
 }
 
 #[tokio::test]
+async fn mark_unread_availability_tracks_the_server_capability() {
+    use talk_core::protocol::messaging::MessagingFeature;
+    for enabled in [false, true] {
+        let server = Server::start(vec![
+            Reply::data(if enabled { capabilities() } else { caps(35) }),
+            Reply::data(room()),
+        ])
+        .await;
+        let rt = runtime();
+        let mut client = client(&server.origin, rt.clone());
+        let room = bind(&mut client);
+        let R::Capabilities(caps) = act(&mut client, &rt, room, 1, C::Capabilities).await else {
+            panic!("capabilities")
+        };
+        let (_, availability) = caps
+            .actions
+            .as_slice()
+            .iter()
+            .find(|(feature, _)| *feature == MessagingFeature::MarkUnread)
+            .unwrap();
+        assert_eq!(
+            availability.server == talk_core::protocol::FeatureSupport::Supported,
+            enabled
+        );
+    }
+}
+
+#[tokio::test]
 async fn old_visible_messages_cannot_rewind_server_or_runtime_read_progress() {
     let server = Server::start(vec![
         Reply::data(capabilities()),

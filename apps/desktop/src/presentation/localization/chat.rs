@@ -1,6 +1,11 @@
 //! Chat controls and native picker guidance; never user content.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Gespräch als ungelesen markieren",
+        "Mark conversation as unread",
+        "Marcar conversación como no leída",
+    ),
+    (
         "Als Entwurf bearbeiten",
         "Edit as draft",
         "Editar como borrador",

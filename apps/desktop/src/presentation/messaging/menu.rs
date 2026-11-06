@@ -20,6 +20,7 @@ pub(crate) enum Choice {
     Unpin,
     Remind,
     Forward,
+    MarkUnread,
     Thread,
     Back,
 }
@@ -160,6 +161,7 @@ impl Choice {
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
             Self::Forward => "arrow-right",
+            Self::MarkUnread => "inbox",
             Self::Thread => "chat",
             Self::Back => "arrow-left",
         }
@@ -175,6 +177,7 @@ impl Choice {
             Self::Unpin => 10,
             Self::Remind => 5,
             Self::Forward => 6,
+            Self::MarkUnread => 11,
             Self::Thread => 8,
             Self::Back => 9,
         }
@@ -280,6 +283,14 @@ impl Desktop {
                         "Weiterleiten ist derzeit nicht verfügbar.",
                     ),
                 ];
+                if self.message_feature_enabled(MessageFeature::MarkUnread) {
+                    items.push(Item::new(
+                        Choice::MarkUnread,
+                        "Gespräch als ungelesen markieren",
+                        idle,
+                        "",
+                    ));
+                }
                 if message.metadata.replyable {
                     items.push(Item::new(
                         Choice::Thread,
@@ -494,6 +505,9 @@ impl Desktop {
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
+                    }
+                    Choice::MarkUnread => {
+                        self.submit_message(MessageAction::MarkUnread);
                     }
                     _ => {}
                 }

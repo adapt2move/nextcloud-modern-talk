@@ -106,6 +106,7 @@ pub enum MessagingFeature {
     Files,
     Typing,
     ReadReceipts,
+    MarkUnread,
     Translation,
     Summary,
 }

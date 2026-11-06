@@ -53,7 +53,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Edit { .. } => F::Edit,
         C::Delete(_) => F::Delete,
         C::React { .. } | C::ReactionAuthors { .. } => F::React,
-        C::MarkUnread => F::Read,
+        C::MarkUnread => F::MarkUnread,
         C::MarkRead(_) => F::ReadReceipts,
         C::Typing(_) => F::Typing,
         C::Mentions(_) => F::Mentions,
@@ -94,6 +94,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Files => "rich-object-sharing",
         F::Typing => "typing-privacy",
         F::ReadReceipts => "chat-read-marker",
+        F::MarkUnread => "chat-unread",
         F::Translation => "translation",
         F::Summary => "chat-summary",
     }
@@ -262,6 +263,7 @@ impl NextcloudClient {
             F::Files,
             F::Typing,
             F::ReadReceipts,
+            F::MarkUnread,
             F::Translation,
             F::Summary,
         ] {

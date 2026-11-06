@@ -1000,6 +1000,7 @@ fn configure_chat_ux(snapshot: &mut PresentationSnapshot) {
             MessageFeature::Search,
             MessageFeature::Files,
             MessageFeature::Pins,
+            MessageFeature::MarkUnread,
         ]
         .map(|feature| {
             (

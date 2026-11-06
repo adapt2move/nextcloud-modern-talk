@@ -20,6 +20,7 @@ pub enum MessageFeature {
     Files,
     Typing,
     ReadReceipts,
+    MarkUnread,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {

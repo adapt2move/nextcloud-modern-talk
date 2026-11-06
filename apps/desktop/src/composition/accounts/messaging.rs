@@ -1904,6 +1904,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Files => V::Files,
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
+        W::MarkUnread => V::MarkUnread,
         _ => return None,
     })
 }
