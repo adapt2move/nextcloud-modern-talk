@@ -82,6 +82,22 @@ class RecoveryLab(Lab):
                             expected=(201,), name="recovery.create-room")
         self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"] + "/participants",
                      body={"newParticipant": "lab_bob", "source": "users"}, name="recovery.add-member")
+        source = self.request("lab_bob", "POST", "/ocs/v2.php/apps/spreed/api/v1/chat/" + room["token"],
+                              body={"message": "Synthetic private reply source"}, expected=(201,), name="recovery.private-source")
+        direct = self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room",
+                              body={"roomType": 1, "invite": "lab_bob"}, expected=(200, 201), name="recovery.private-direct")
+        private = self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v1/chat/" + direct["token"],
+                               body={"message": "Synthetic private reply", "replyTo": source["id"],
+                                     "replyToToken": room["token"], "referenceId": "synthetic-private-reply"},
+                               expected=(201,), name="recovery.private-reply")
+        parent = private.get("parent") or {}
+        self.current["private_reply_shape"] = {
+            "keys": sorted(private.keys()), "parent_keys": sorted(parent.keys()),
+            "parent_token_matches_destination": parent.get("token") == direct["token"],
+            "parent_token_matches_source": parent.get("token") == room["token"],
+            "parent_has_nested_parent": "parent" in parent,
+            "parent_id_positive": isinstance(parent.get("id"), int) and parent["id"] > 0,
+        }
         directory = self.runtime / f"{key}-recovery"
         directory.mkdir(mode=0o700)
         save(directory / "alice.json", {"origin": f"http://127.0.0.1:{port}",
