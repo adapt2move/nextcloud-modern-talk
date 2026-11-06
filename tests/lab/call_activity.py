@@ -74,6 +74,11 @@ def check(state):
                                  body={}, name="call-activity-join-member-room")
             sessions["lab_bob"] = result["sessionId"]
             lab.sensitive.append(sessions["lab_bob"])
+            members = lab.request("lab_alice", "GET", room_path + "/participants",
+                                  name="call-activity-member-session")
+            observed = [p for p in members if p.get("actorId") == "lab_bob"]
+            print(json.dumps({"member_session_observed": len(observed) == 1
+                              and sessions["lab_bob"] in (observed[0].get("sessionIds") or [])}), flush=True)
             lab.request("lab_bob", "POST", call_path, body={"flags": 1, "silent": True},
                         name="call-activity-join-call")
             # The released server may acknowledge a no-op rather than returning
