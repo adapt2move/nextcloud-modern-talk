@@ -71,7 +71,6 @@ impl Desktop {
         if presence == Presence::Unknown {
             return avatar;
         }
-        let t = self.theme;
         div().flex_none().relative().child(avatar).child(
             div()
                 .absolute()
@@ -82,12 +81,7 @@ impl Desktop {
                 .when(dot_size < 10., |dot| dot.border_1())
                 .when(dot_size >= 10., |dot| dot.border_2())
                 .border_color(background)
-                .bg(match presence {
-                    Presence::Available => t.success,
-                    Presence::DoNotDisturb => t.danger,
-                    Presence::Away => t.warning,
-                    _ => t.muted,
-                }),
+                .bg(self.theme.presence_dot(presence)),
         )
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {

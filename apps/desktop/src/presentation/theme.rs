@@ -42,6 +42,21 @@ fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
 impl Theme {
+    /// Small presence marks use distinct, saturated colors, independent of the
+    /// darker warning/error text colors used on light surfaces.
+    pub fn presence_dot(self, presence: talk_core::ui::presentation::Presence) -> Hsla {
+        use talk_core::ui::presentation::Presence;
+        match (presence, self.dark) {
+            (Presence::Available, false) => color(0x268a58),
+            (Presence::Available, true) => color(0x60c98d),
+            (Presence::Away, false) => color(0xe5a31a),
+            (Presence::Away, true) => color(0xf0b840),
+            (Presence::DoNotDisturb, false) => color(0xd94848),
+            (Presence::DoNotDisturb, true) => color(0xf07878),
+            _ => self.muted,
+        }
+    }
+
     fn chat_header_tints(self) -> [Hsla; 2] {
         [0.92, 0.86].map(|a| Hsla { a, ..self.surface })
     }

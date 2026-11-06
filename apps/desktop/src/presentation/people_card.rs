@@ -45,7 +45,6 @@ pub(crate) struct Target {
 #[derive(Clone)]
 pub(crate) enum Action {
     Open(Source),
-    Close(Target),
     Direct(Target),
     Compose(Target),
     Call(Target),
@@ -273,11 +272,6 @@ impl Desktop {
                     });
                 }
             }
-            Action::Close(target) => {
-                if self.people_card.accepts(target, self.snapshot.selected) {
-                    self.dismiss_person(true, window);
-                }
-            }
             Action::Direct(target) => {
                 if !self.people_card.accepts(target, self.snapshot.selected) {
                     return;
@@ -479,35 +473,93 @@ impl Desktop {
                         div()
                             .flex()
                             .flex_col()
+                            .flex_1()
                             .min_w_0()
+                            .gap_1()
                             .child(
                                 div()
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .child(name.to_owned()),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_ellipsis()
+                                            .font_weight(gpui::FontWeight::BOLD)
+                                            .child(name.to_owned()),
+                                    )
+                                    .when_some(member, |d, member| {
+                                        d.child(
+                                            div()
+                                                .flex_none()
+                                                .rounded(px(5.))
+                                                .bg(self.theme.subtle)
+                                                .px_1()
+                                                .text_size(self.sp(11.))
+                                                .text_color(self.theme.muted)
+                                                .child(self.l(role(member.role))),
+                                        )
+                                    }),
                             )
-                            .child(self.hint(self.l(presence(state))))
-                            .when_some(member, |d, member| {
-                                d.child(self.hint(self.l(role(member.role))))
-                            }),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .when(state != Presence::Unknown, |d| {
+                                        d.child(
+                                            div()
+                                                .size(px(8.))
+                                                .rounded_full()
+                                                .bg(self.theme.presence_dot(state)),
+                                        )
+                                    })
+                                    .child(self.hint(self.l(presence(state)))),
+                            ),
                     ),
             )
             .when(icon.is_some() || message_text.is_some(), |d| {
-                d.child(div().px_3().pb_3().text_size(self.sp(13.)).child(format!(
-                    "{}{}{}",
-                    icon.map_or("", |v| v.as_str()),
-                    if icon.is_some() && message_text.is_some() {
-                        " "
-                    } else {
-                        ""
-                    },
-                    message_text.map_or("", |v| v.as_str())
-                )))
+                d.child(
+                    div().px_3().pb_2().child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .rounded(px(8.))
+                            .bg(self.theme.subtle)
+                            .px_3()
+                            .py_2()
+                            .when_some(icon, |d, icon| {
+                                let mut value = icon.as_str().to_owned();
+                                if value.chars().count() == 1 {
+                                    value.push('\u{fe0f}');
+                                }
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .font_family(emoji_font())
+                                        .text_size(self.sp(18.))
+                                        .child(value),
+                                )
+                            })
+                            .when_some(message_text, |d, message| {
+                                d.child(
+                                    div()
+                                        .min_w_0()
+                                        .text_size(self.sp(13.))
+                                        .child(message.as_str().to_owned()),
+                                )
+                            }),
+                    ),
+                )
             });
         if direct && self.composer_available() {
             card = card.child(
-                self.button(
+                self.button_with_leading_icon(
                     "person-compose",
-                    "Nachricht senden",
+                    ("Nachricht senden", "chat"),
                     ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Compose(target)),
@@ -518,9 +570,9 @@ impl Desktop {
             );
         } else if can_direct {
             card = card.child(
-                self.button(
+                self.button_with_leading_icon(
                     "person-direct",
-                    "Nachricht senden",
+                    ("Nachricht senden", "chat"),
                     ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Direct(target)),
@@ -530,25 +582,11 @@ impl Desktop {
                 .justify_start(),
             );
         }
-        if self.person_can_mention(source) {
-            card = card.child(
-                self.button(
-                    "person-mention",
-                    "Erwähnen",
-                    ButtonStyle::Quiet,
-                    true,
-                    LocalAction::Person(Action::Mention(target)),
-                    cx,
-                )
-                .w_full()
-                .justify_start(),
-            );
-        }
         if direct && row.is_some_and(|r| r.call == Decision::Allowed) {
             card = card.child(
-                self.button(
+                self.button_with_leading_icon(
                     "person-call",
-                    "Anrufen",
+                    ("Anrufen", "phone"),
                     ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Call(target)),
@@ -558,19 +596,30 @@ impl Desktop {
                 .justify_start(),
             );
         }
-        div().child(
-            card.child(
-                self.button(
-                    "person-close",
-                    "Schließen",
+        if self.person_can_mention(source) {
+            card = card.child(
+                self.button_with_leading_icon(
+                    "person-mention",
+                    ("Erwähnen", "at"),
                     ButtonStyle::Quiet,
                     true,
-                    LocalAction::Person(Action::Close(target)),
+                    LocalAction::Person(Action::Mention(target)),
                     cx,
                 )
                 .w_full()
                 .justify_start(),
-            ),
-        )
+            );
+        }
+        div().child(card)
+    }
+}
+
+fn emoji_font() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Apple Color Emoji"
+    } else if cfg!(target_os = "windows") {
+        "Segoe UI Emoji"
+    } else {
+        "Noto Color Emoji"
     }
 }
