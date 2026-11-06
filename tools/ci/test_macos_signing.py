@@ -7,11 +7,35 @@ import tempfile
 import unittest
 import subprocess
 import importlib.util
+import json
 from unittest.mock import patch
 import macos_signing
 
 
 class SigningTests(unittest.TestCase):
+    def fake_keychains(self, initial, *, reject_append=False):
+        current = list(initial)
+        calls = []
+        def run(command):
+            calls.append(command)
+            if command[1] == "create-keychain":
+                Path(command[-1]).touch()
+            if command[1] == "find-identity":
+                return '1) ' + 'A' * 40 + ' "Developer ID Application: Synthetic (ABCDEFGHIJ)"\n'
+            if command[1] == "list-keychains":
+                if "-s" not in command:
+                    return "\n".join(json.dumps(path, ensure_ascii=False) for path in current)
+                current[:] = command[5:]
+                if reject_append and len(current) > len(initial):
+                    raise ValueError("synthetic lost search-list acknowledgement")
+            return ""
+        return run, current, calls
+
+    def fixture_env(self, temp):
+        return {"RUNNER_TEMP": temp, "GITHUB_ENV": str(Path(temp) / "env"),
+                "MACOS_CERTIFICATE_P12_BASE64": base64.b64encode(b"synthetic-p12").decode(),
+                "MACOS_CERTIFICATE_PASSWORD": "synthetic-password", "MACOS_SIGNING_TEAM": "ABCDEFGHIJ"}
+
     def test_missing_or_malformed_credentials_do_not_start_a_provider(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(macos_signing, "run") as run:
             with self.assertRaisesRegex(ValueError, "Publishing needs"):
@@ -41,7 +65,7 @@ class SigningTests(unittest.TestCase):
                 self.assertNotIn("synthetic-password", output)
                 self.assertNotIn(env["MACOS_CERTIFICATE_P12_BASE64"], output)
                 self.assertFalse(list(root.rglob("*.p12")))
-                self.assertFalse(any("list-keychains" in c or "default-keychain" in c for c in commands))
+                self.assertFalse(any("default-keychain" in c for c in commands))
                 directory = next(p for p in root.iterdir() if p.is_dir())
                 self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
                 macos_signing.cleanup(directory)
@@ -69,7 +93,7 @@ class SigningTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "matching persistent"):
                             macos_signing.prepare()
                         self.assertFalse(list(root.glob("nmt-signing-*")))
-                self.assertFalse(any("add-trusted-cert" in c or "default-keychain" in c or "list-keychains" in c for c in commands))
+                self.assertFalse(any("add-trusted-cert" in c or "default-keychain" in c for c in commands))
 
     def test_internal_conversion_preserves_the_actual_certificate_and_private_key(self):
         spec = importlib.util.spec_from_file_location("internal_identity", Path(__file__).parents[1] / "release/internal_identity.py")
@@ -132,6 +156,49 @@ class SigningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"RUNNER_TEMP": temp}):
             with self.assertRaises(ValueError):
                 macos_signing.cleanup(Path(temp))
+
+    def test_search_list_restores_exact_order_and_paths_without_default_or_trust_changes(self):
+        initial = ["/Synthetic/Login with spaces.keychain-db", "/Synthetic/既存.keychain-db"]
+        run, current, calls = self.fake_keychains(initial)
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.fixture_env(temp), clear=True), patch.object(macos_signing, "run", side_effect=run):
+            macos_signing.prepare()
+            directory = next(p for p in Path(temp).iterdir() if p.is_dir())
+            self.assertEqual(current, [*initial, str(directory / "release.keychain-db")])
+            self.assertEqual((directory / "search-list.json").stat().st_mode & 0o777, 0o600)
+            macos_signing.cleanup(directory)
+            self.assertEqual(current, initial)
+            self.assertFalse(directory.exists())
+        self.assertFalse(any("default-keychain" in c or "add-trusted-cert" in c for c in calls))
+
+    def test_failed_search_list_admission_restores_an_effect_applied_before_the_failure(self):
+        initial = ["/Synthetic/Login.keychain-db"]
+        run, current, calls = self.fake_keychains(initial, reject_append=True)
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.fixture_env(temp), clear=True), patch.object(macos_signing, "run", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "lost search-list"):
+                macos_signing.prepare()
+            self.assertEqual(current, initial)
+            self.assertFalse(list(Path(temp).iterdir()))
+        self.assertTrue(any(c[1] == "delete-keychain" for c in calls))
+
+    def test_failed_search_list_restore_still_deletes_the_keychain_and_keeps_retry_state(self):
+        initial = ["/Synthetic/Login.keychain-db"]
+        run, current, calls = self.fake_keychains(initial)
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.fixture_env(temp), clear=True):
+            with patch.object(macos_signing, "run", side_effect=run):
+                macos_signing.prepare()
+            directory = next(p for p in Path(temp).iterdir() if p.is_dir())
+            def failure(command):
+                if command[1] == "list-keychains":
+                    raise ValueError("synthetic restore refused")
+                return run(command)
+            with patch.object(macos_signing, "run", side_effect=failure), self.assertRaisesRegex(ValueError, "cleanup failed"):
+                macos_signing.cleanup(directory)
+            self.assertTrue(any(c[1] == "delete-keychain" for c in calls))
+            self.assertTrue((directory / "search-list.json").is_file())
+            with patch.object(macos_signing, "run", side_effect=run):
+                macos_signing.cleanup(directory)
+            self.assertEqual(current, initial)
+            self.assertFalse(directory.exists())
 
 
 if __name__ == "__main__":

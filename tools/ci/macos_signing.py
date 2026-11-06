@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Import a persistent release identity into one disposable runner keychain.
 
-No default keychain/search-list changes, credential output or generated release
-identity. Missing credentials fail a publishing build before compilation.
+The disposable keychain is appended to the runner's search list and the exact
+original list is restored on cleanup. No default keychain/trust changes,
+credential output or generated release identity.
 """
 import argparse
 import base64
@@ -13,6 +14,23 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import json
+import shlex
+
+
+def checked_search_list(value):
+    if (not isinstance(value, list) or len(value) > 32
+            or any(not isinstance(path, str) or not Path(path).is_absolute()
+                   or len(path) > 4096 or any(c in path for c in "\r\n\0") for path in value)):
+        raise ValueError("Invalid macOS keychain search list")
+    return value
+
+
+def search_list():
+    value = run(["security", "list-keychains", "-d", "user"])
+    if len(value.encode()) > 16384:
+        raise ValueError("macOS keychain search list exceeds its size limit")
+    return checked_search_list(shlex.split(value))
 
 
 def run(arguments):
@@ -98,8 +116,25 @@ def cleanup(directory):
             or directory.parent.resolve() != root or not directory.name.startswith("nmt-signing-")):
         raise ValueError("Invalid temporary signing directory")
     keychain = directory / "release.keychain-db"
-    if keychain.exists():
-        run(["security", "delete-keychain", str(keychain)])
+    failure = None
+    snapshot = directory / "search-list.json"
+    try:
+        if snapshot.exists():
+            if snapshot.is_symlink() or snapshot.stat().st_size > 16384:
+                raise ValueError("Invalid keychain search-list snapshot")
+            previous = checked_search_list(json.loads(snapshot.read_text()))
+            run(["security", "list-keychains", "-d", "user", "-s", *previous])
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        failure = error
+    try:
+        if keychain.exists():
+            run(["security", "delete-keychain", str(keychain)])
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        failure = failure or error
+    if failure:
+        # Keep the private snapshot for a later cleanup retry, but never claim
+        # success or skip keychain deletion because list restoration failed.
+        raise ValueError("Temporary macOS signing cleanup failed") from failure
     shutil.rmtree(directory)
 
 
@@ -110,6 +145,13 @@ def prepare():
     keychain = directory / "release.keychain-db"
     certificate = directory / "identity.p12"
     try:
+        previous = search_list()
+        snapshot = json.dumps(previous, ensure_ascii=False)
+        if len(snapshot.encode()) > 16384:
+            raise ValueError("macOS keychain search-list snapshot exceeds its size limit")
+        with (directory / "search-list.json").open("x") as output:
+            (directory / "search-list.json").chmod(0o600)
+            output.write(snapshot)
         with certificate.open("xb") as output:
             certificate.chmod(0o600)
             output.write(data)
@@ -131,6 +173,9 @@ def prepare():
             fingerprints = list(set(re.findall(r'\b([A-F0-9]{40}) "[^"\r\n]+"', identities)))
         if len(fingerprints) != 1 or mode == "internal" and fingerprints[0] != pin:
             raise ValueError("Exactly one matching persistent code-signing identity is required")
+        # --keychain alone does not make an otherwise hidden identity available
+        # to codesign. Keep the original order/default and add only our own lane.
+        run(["security", "list-keychains", "-d", "user", "-s", *previous, str(keychain)])
         with Path(os.environ["GITHUB_ENV"]).open("a") as output:
             output.write("NMT_MACOS_REQUIRE_SIGNED=1\nNMT_MACOS_SIGNING_IDENTITY=" + fingerprints[0]
                          + "\nNMT_MACOS_SIGNING_TEAM=" + team + "\nNMT_MACOS_SIGNING_KEYCHAIN=" + str(keychain)

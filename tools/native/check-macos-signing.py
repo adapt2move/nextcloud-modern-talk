@@ -50,7 +50,7 @@ def check():
         os.environ.update({"MACOS_CERTIFICATE_P12_BASE64": base64.b64encode((backup / "identity.p12").read_bytes()).decode(),
             "MACOS_CERTIFICATE_PASSWORD": (backup / "password").read_text(), "MACOS_SIGNING_MODE": "internal",
             "MACOS_SIGNING_CERTIFICATE": fingerprint, "MACOS_SIGNING_TEAM": "", "GITHUB_ENV": str(root / "env")})
-        search = shlex.split(ci.run(["security", "list-keychains", "-d", "user"]))
+        search = ci.search_list()
         try:
             ci.prepare()
             for line in (root / "env").read_text().splitlines():
@@ -58,9 +58,8 @@ def check():
                 os.environ[name] = value
             current = shlex.split(ci.run(["security", "list-keychains", "-d", "user"]))
             keychain = os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]
-            print("Temporary keychain in search list before signing: " + str(keychain in current), flush=True)
             if keychain not in current:
-                ci.run(["security", "list-keychains", "-d", "user", "-s", *current, keychain])
+                raise ValueError("Prepared keychain is missing from the code-signing search list")
             valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
             print("Fixture has system-trusted code-signing identity: " + str(fingerprint in valid), flush=True)
             requirements = []
@@ -93,10 +92,15 @@ def check():
                     ci.cleanup(Path(directory))
             finally:
                 try:
-                    ci.run(["security", "list-keychains", "-d", "user", "-s", *search])
+                    if ci.search_list() != search:
+                        raise ValueError("Signing teardown did not restore the original keychain search list")
                 finally:
                     for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):
                         os.environ.pop(name, None)
+        # Verification of delivered code must not depend on keeping the build's
+        # private keychain searchable or installing a certificate trust entry.
+        for version in (1, 2):
+            macos_signing.verify_application(root / ("Version" + str(version) + ".app"), code_command)
     print("Native internal-signing import, version continuity and wrong-signer rejection passed; no OS permission qualification.")
 
 
