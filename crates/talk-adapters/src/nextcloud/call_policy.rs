@@ -19,9 +19,11 @@ pub(crate) struct Bundle {
     pub invitees: Vec<Invitee>,
     pub hand_supported: bool,
     pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
+    pub ring_supported: bool,
 }
 pub(crate) struct Invitee {
     pub attendee: u64,
+    pub ring_eligible: bool,
     pub name: talk_core::bounded::Text<256>,
 }
 pub(crate) struct Peer {
@@ -235,7 +237,13 @@ impl Sources {
             let Ok(name) = talk_core::bounded::Text::new(name) else {
                 continue;
             };
-            invitees.push(Invitee { attendee, name });
+            let ring_eligible = person.actor_type.as_deref() == Some("users")
+                && person.actor_id.as_deref().is_some_and(|id| !id.is_empty());
+            invitees.push(Invitee {
+                attendee,
+                ring_eligible,
+                name,
+            });
         }
         let mut peers = Vec::with_capacity(16);
         let mut connected = own_connected;
@@ -325,6 +333,10 @@ impl Sources {
             settings,
             peers,
             invitees,
+            ring_supported: has("send-call-notification")
+                && permissions & 2 != 0
+                && r.has_call == Some(true)
+                && connected,
             hand_supported,
             reactions,
         })

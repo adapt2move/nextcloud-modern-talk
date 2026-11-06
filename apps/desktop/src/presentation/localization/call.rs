@@ -37,10 +37,27 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Changing devices stops the current stream. Enable the device again afterwards.",
         "Cambiar de dispositivo detiene la transmisión actual. Vuelve a activarlo después.",
     ),
+    (
+        "Eine Anfrage wird bereits bearbeitet.",
+        "A request is already in progress.",
+        "Ya hay una solicitud en curso.",
+    ),
+    ("Erneut klingeln", "Ring again", "Volver a llamar"),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
     ("Hand senken", "Lower hand", "Bajar la mano"),
     ("Kamera auswählen", "Choose camera", "Elegir cámara"),
+    ("Klingeln angefragt", "Ring requested", "Llamada solicitada"),
+    (
+        "Klingeln nicht möglich",
+        "Unable to ring",
+        "No se puede llamar",
+    ),
+    (
+        "Klingeln wird angefragt …",
+        "Requesting ring…",
+        "Solicitando llamada…",
+    ),
     (
         "Mikrofon auswählen",
         "Choose microphone",

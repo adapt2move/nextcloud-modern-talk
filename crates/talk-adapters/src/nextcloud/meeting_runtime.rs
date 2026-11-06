@@ -1,6 +1,7 @@
 //! Autonomous normal-call owner. Signaling polling, policy/HTTP writes and media
 //! have separate bounded lanes; none is driven by GPUI rendering or chat polling.
 mod activity;
+mod moderation;
 mod outgoing;
 mod speaking;
 mod status;
@@ -180,6 +181,7 @@ impl LiveCall {
             latest_reaction: None,
             invitees_loaded: false,
             invitees: talk_core::bounded::Page::empty(),
+            ring_status: None,
             counters: MediaCounters::default(),
             revision: 0,
         };
@@ -193,6 +195,19 @@ impl LiveCall {
         let (policy_tx, policy) = mpsc::channel(2);
         let (hand_tx, hands) = watch::channel(None);
         let (reaction_tx, reactions) = mpsc::channel(4);
+        let (ring_tx, ring_requests) = mpsc::channel(1);
+        let (ring_result_tx, ring_results) = mpsc::channel(2);
+        let moderation_writer = writer
+            .take_moderation_writer()
+            .ok_or(api::ErrorKind::Uncertain)?;
+        tokio::spawn(moderation::run(
+            moderation_writer,
+            ring_requests,
+            ring_result_tx,
+            session.clone(),
+            network.clone(),
+            cancel.clone(),
+        ));
         let activity_writer = writer
             .take_activity_writer()
             .ok_or(api::ErrorKind::Uncertain)?;
@@ -232,6 +247,8 @@ impl LiveCall {
             policy,
             hand_tx,
             reaction_tx,
+            ring_tx,
+            ring_results,
             session.clone(),
             network,
             cancel,
@@ -603,6 +620,8 @@ async fn media_loop(
     mut policies: mpsc::Receiver<PolicyUpdate>,
     hand_tx: watch::Sender<Option<outgoing::Message>>,
     reaction_tx: mpsc::Sender<outgoing::Message>,
+    ring_tx: mpsc::Sender<moderation::Ring>,
+    mut ring_results: mpsc::Receiver<moderation::RingResult>,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
@@ -628,6 +647,7 @@ async fn media_loop(
     let mut reaction_sequence = 0u64;
     let mut latest_reaction: Option<calls::CallReaction> = None;
     let mut last_reaction: Option<Instant> = None;
+    let mut ring_status: Option<calls::CallRingStatus> = None;
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
@@ -638,6 +658,16 @@ async fn media_loop(
                 match command {
                     Command::Change { wishes, .. } => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
+                    }
+                    Command::Ring { target, .. } if transport_ready && received_policy >= required_policy && bundle.ring_supported
+                        && call.phase() == Phase::Active && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if let Some((attendee, _)) = invitee_ids.iter().find(|(_, local)| *local == target)
+                            && bundle.invitees.iter().any(|person| person.attendee == *attendee && person.ring_eligible) {
+                            let outcome = if ring_tx.try_send(moderation::Ring { target, attendee: *attendee }).is_ok() {
+                                calls::RingOutcome::Pending
+                            } else { calls::RingOutcome::Failed };
+                            ring_status = Some(calls::CallRingStatus { target, outcome });
+                        }
                     }
                     Command::Consent(_) => { call.consent(scope).map_err(|_| ())?; }
                     Command::SetHand { raised, .. } if transport_ready && received_policy >= required_policy && bundle.hand_supported && call.phase() == Phase::Active => {
@@ -672,6 +702,12 @@ async fn media_loop(
                     }
                     Command::Stop(_) => { session.close(); break; }
                     _ => {}
+                }
+            }
+            while let Ok(result) = ring_results.try_recv() {
+                if ring_status.is_some_and(|status| status.target == result.target && status.outcome == calls::RingOutcome::Pending) {
+                    ring_status = Some(calls::CallRingStatus { target: result.target,
+                        outcome: if result.accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
                 }
             }
             stage = "remote signaling";
@@ -913,7 +949,8 @@ async fn media_loop(
                         invitee_ids.push((person.attendee, local));
                         local
                     };
-                    let _ = invitees.try_push(calls::CallInvitee { local, name: person.name.clone() });
+                    let _ = invitees.try_push(calls::CallInvitee { local, ring_allowed: bundle.ring_supported && person.ring_eligible
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending), name: person.name.clone() });
                 }
             } else {
                 invitee_ids.clear();
@@ -943,6 +980,7 @@ async fn media_loop(
                 snapshot.latest_reaction = latest_reaction.clone();
                 snapshot.invitees_loaded = policy_ready;
                 snapshot.invitees = invitees;
+                snapshot.ring_status = ring_status;
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
                 snapshot.revision = snapshot.revision.saturating_add(1);

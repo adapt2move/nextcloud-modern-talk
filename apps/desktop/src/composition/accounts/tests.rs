@@ -709,6 +709,7 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             latest_reaction: None,
             invitees_loaded: false,
             invitees: Page::empty(),
+            ring_status: None,
             participants: Page::empty(),
         });
         assert_eq!(m.seal_for_update(), Err(UpdateError::ActiveCall));

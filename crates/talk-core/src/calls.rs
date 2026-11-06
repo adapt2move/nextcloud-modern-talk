@@ -421,6 +421,10 @@ pub enum Command {
         call: CallScope,
         emoji: crate::bounded::Text<64>,
     },
+    Ring {
+        call: CallScope,
+        target: u128,
+    },
     Consent(CallScope),
     Reconnect(CallScope),
     Stop(CallScope),
@@ -432,7 +436,8 @@ impl Command {
             Self::Start { call, .. }
             | Self::Change { call, .. }
             | Self::SetHand { call, .. }
-            | Self::React { call, .. } => *call,
+            | Self::React { call, .. }
+            | Self::Ring { call, .. } => *call,
             Self::Consent(call)
             | Self::Reconnect(call)
             | Self::Stop(call)
@@ -475,6 +480,7 @@ pub struct Snapshot {
     pub latest_reaction: Option<CallReaction>,
     pub invitees_loaded: bool,
     pub invitees: crate::bounded::Page<CallInvitee, 100>,
+    pub ring_status: Option<CallRingStatus>,
     pub counters: MediaCounters,
     pub revision: u64,
 }
@@ -487,9 +493,23 @@ pub struct CallReaction {
     pub emoji: crate::bounded::Text<64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RingOutcome {
+    Pending,
+    Requested,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallRingStatus {
+    pub target: u128,
+    pub outcome: RingOutcome,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallInvitee {
     pub local: u128,
+    pub ring_allowed: bool,
     pub name: crate::bounded::Text<256>,
 }
 

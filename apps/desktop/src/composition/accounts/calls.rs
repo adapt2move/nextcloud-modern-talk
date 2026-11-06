@@ -442,6 +442,29 @@ impl Accounts {
                         wishes: ui.wishes,
                     }
                 }
+                UiIntent::RingCallParticipant { call, target } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || !view
+                            .invitees
+                            .as_slice()
+                            .iter()
+                            .any(|person| person.local_id == *target && person.ring_allowed)
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::Ring {
+                        call: *call,
+                        target: *target,
+                    }
+                }
                 UiIntent::SetCallHand { call, raised } => {
                     let view = self
                         .snapshot
@@ -550,6 +573,7 @@ impl Accounts {
                 | UiIntent::DeclineDirect(_)
                 | UiIntent::SetMicrophone { .. }
                 | UiIntent::SetCamera { .. }
+                | UiIntent::RingCallParticipant { .. }
                 | UiIntent::SetCallHand { .. }
                 | UiIntent::SendCallReaction { .. }
                 | UiIntent::ShareScreen(_)
@@ -648,6 +672,7 @@ impl Accounts {
             latest_reaction: None,
             invitees_loaded: false,
             invitees: Page::empty(),
+            ring_status: None,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -846,10 +871,27 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         invitees: page(value.invitees.as_slice().iter().map(|person| {
             talk_core::ui::presentation::CallInviteeView {
                 local_id: person.local,
+                ring_allowed: person.ring_allowed,
                 name: text(person.name.as_str()),
                 initials: initials(person.name.as_str()),
             }
         })),
+        ring_status: value
+            .ring_status
+            .map(|status| talk_core::ui::presentation::CallRingStatus {
+                target: status.target,
+                outcome: match status.outcome {
+                    talk_core::calls::RingOutcome::Pending => {
+                        talk_core::ui::presentation::CallRingOutcome::Pending
+                    }
+                    talk_core::calls::RingOutcome::Requested => {
+                        talk_core::ui::presentation::CallRingOutcome::Requested
+                    }
+                    talk_core::calls::RingOutcome::Failed => {
+                        talk_core::ui::presentation::CallRingOutcome::Failed
+                    }
+                },
+            }),
         participants: page(
             value
                 .participants
@@ -911,6 +953,7 @@ mod action_tests {
                 latest_reaction: None,
                 invitees_loaded: false,
                 invitees: Page::empty(),
+                ring_status: None,
                 counters: Default::default(),
                 revision: 1,
             }),

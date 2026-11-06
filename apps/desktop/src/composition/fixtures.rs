@@ -895,11 +895,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 page([
                     talk_core::ui::presentation::CallInviteeView {
                         local_id: 1001,
+                        ring_allowed: true,
                         name: text("Robin Winter"),
                         initials: text("RW"),
                     },
                     talk_core::ui::presentation::CallInviteeView {
                         local_id: 1002,
+                        ring_allowed: false,
                         name: text("Mina Roth"),
                         initials: text("MR"),
                     },
@@ -907,6 +909,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 Page::empty()
             },
+            ring_status: None,
             participants: page(
                 if matches!(
                     scenario,
@@ -1919,11 +1922,31 @@ impl NativeDesktopPort for DevelopmentPort {
                     latest_reaction: None,
                     invitees_loaded: false,
                     invitees: Page::empty(),
+                    ring_status: None,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {
                         page(participants())
                     },
+                });
+            }
+            UiIntent::RingCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .invitees
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.ring_allowed)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.ring_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
                 });
             }
             UiIntent::SetCallHand { call, raised } => {

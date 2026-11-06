@@ -67,6 +67,18 @@ impl Desktop {
                     if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
                         body = body.child(self.hint(self.l("Nicht im Anruf")));
                         for person in call.invitees.as_slice() {
+                            use talk_core::ui::presentation::{CallRingOutcome, UiIntent};
+                            let status = call
+                                .ring_status
+                                .filter(|status| status.target == person.local_id);
+                            let label = status.map(|status| match status.outcome {
+                                CallRingOutcome::Pending => "Klingeln wird angefragt …",
+                                CallRingOutcome::Requested => "Klingeln angefragt",
+                                CallRingOutcome::Failed => "Klingeln nicht möglich",
+                            });
+                            let pending = call
+                                .ring_status
+                                .is_some_and(|status| status.outcome == CallRingOutcome::Pending);
                             body = body.child(
                                 div()
                                     .flex()
@@ -76,10 +88,43 @@ impl Desktop {
                                     .child(self.person_avatar(person.initials.as_str(), 36.))
                                     .child(
                                         div()
+                                            .flex_1()
                                             .min_w_0()
-                                            .text_ellipsis()
-                                            .child(person.name.as_str().to_owned()),
-                                    ),
+                                            .flex()
+                                            .flex_col()
+                                            .child(
+                                                div()
+                                                    .text_ellipsis()
+                                                    .child(person.name.as_str().to_owned()),
+                                            )
+                                            .when_some(label, |row, label| {
+                                                row.child(self.hint(self.l(label)))
+                                            }),
+                                    )
+                                    .when(person.ring_allowed, |row| {
+                                        row.child(
+                                            self.icon_button(
+                                                gpui::SharedString::from(format!(
+                                                    "ring-call-{}",
+                                                    person.local_id
+                                                )),
+                                                ("phone-outgoing", "Erneut klingeln"),
+                                                ButtonStyle::Quiet,
+                                                Availability::when(
+                                                    !pending,
+                                                    "Eine Anfrage wird bereits bearbeitet.",
+                                                )
+                                                .hinted(),
+                                                LocalAction::Intent(
+                                                    UiIntent::RingCallParticipant {
+                                                        call: call.scope,
+                                                        target: person.local_id,
+                                                    },
+                                                ),
+                                                cx,
+                                            ),
+                                        )
+                                    }),
                             );
                         }
                     }

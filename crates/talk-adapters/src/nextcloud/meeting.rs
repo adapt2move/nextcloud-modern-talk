@@ -566,7 +566,7 @@ impl NextcloudClient {
                             }
                             prepare = true;
                         }
-                        Command::SetHand { .. } | Command::React { .. } => {
+                        Command::SetHand { .. } | Command::React { .. } | Command::Ring { .. } => {
                             self.meeting_owner = Some(CallOwner::Pending { call, last });
                             return Err(self.error(ErrorKind::PermissionDenied));
                         }
@@ -640,7 +640,10 @@ impl NextcloudClient {
                     cleanup,
                     mut restart,
                 } => {
-                    if matches!(command, Command::SetHand { .. } | Command::React { .. }) {
+                    if matches!(
+                        command,
+                        Command::SetHand { .. } | Command::React { .. } | Command::Ring { .. }
+                    ) {
                         self.meeting_owner = Some(CallOwner::Ended {
                             snapshot,
                             cleanup,
@@ -721,6 +724,7 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         latest_reaction: None,
         invitees_loaded: false,
         invitees: talk_core::bounded::Page::empty(),
+        ring_status: None,
         counters: MediaCounters::default(),
         revision: 0,
     }

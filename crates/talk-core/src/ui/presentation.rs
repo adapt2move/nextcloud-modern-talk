@@ -489,8 +489,22 @@ pub struct CallReactionView {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallInviteeView {
     pub local_id: u128,
+    pub ring_allowed: bool,
     pub name: Text<128>,
     pub initials: Text<16>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRingOutcome {
+    Pending,
+    Requested,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallRingStatus {
+    pub target: u128,
+    pub outcome: CallRingOutcome,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -512,6 +526,7 @@ pub struct CallView {
     pub latest_reaction: Option<CallReactionView>,
     pub invitees_loaded: bool,
     pub invitees: Page<CallInviteeView, 100>,
+    pub ring_status: Option<CallRingStatus>,
     pub participants: Page<ParticipantView, 16>,
 }
 
@@ -749,6 +764,10 @@ pub enum UiIntent {
     SetCamera {
         call: CallScope,
         enabled: bool,
+    },
+    RingCallParticipant {
+        call: CallScope,
+        target: u128,
     },
     SetCallHand {
         call: CallScope,
