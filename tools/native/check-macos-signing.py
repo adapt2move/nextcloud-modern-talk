@@ -28,7 +28,13 @@ def code_command(arguments):
     # decrypted keys; credential-bearing setup keeps its redacted error route.
     phase = "sign" if "--sign" in arguments else "verify"
     print("Native signing contract: " + phase, flush=True)
-    return macos_runtime.run(arguments, timeout=30)
+    try:
+        return macos_runtime.run(arguments, timeout=30)
+    except (ValueError, subprocess.SubprocessError) as error:
+        # Preserve the primary public fixture failure if a later native cleanup
+        # also fails or times out.
+        print("Native " + phase + " failure: " + str(error), flush=True)
+        raise
 
 
 def check():
@@ -87,7 +93,7 @@ def check():
         finally:
             try:
                 if trusted:
-                    macos_runtime.run(["sudo", "-n", "security", "remove-trusted-cert", "-d", str(backup / "certificate.pem")])
+                    macos_runtime.run(["sudo", "-n", "security", "remove-trusted-cert", "-d", str(backup / "certificate.pem")], timeout=30)
             finally:
                 try:
                     if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
