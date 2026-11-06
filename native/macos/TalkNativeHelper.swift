@@ -67,16 +67,15 @@ func notificationStatus(_ settings: UNNotificationSettings) -> String {
 func checkNotificationPermission(request: Bool) {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    let center = UNUserNotificationCenter.current()
-    let finish: (UNNotificationSettings) -> Void = { settings in
+    let finish: @Sendable (UNNotificationSettings) -> Void = { settings in
         emit(notificationStatus(settings))
         exit(0)
     }
-    center.getNotificationSettings { settings in
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
         if request && settings.authorizationStatus == .notDetermined {
-            center.requestAuthorization(options: [.alert, .sound]) { _, error in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
                 guard error == nil else { exit(2) }
-                center.getNotificationSettings(completionHandler: finish)
+                UNUserNotificationCenter.current().getNotificationSettings(completionHandler: finish)
             }
         } else {
             finish(settings)
@@ -290,17 +289,24 @@ func previewPDF(large: Bool) {
     FileHandle.standardOutput.write(png)
 }
 
-let arguments = CommandLine.arguments
-guard Bundle.main.bundleIdentifier == "org.adapt2move.nextcloud-modern-talk" else { exit(2) }
-if arguments.count == 3 && arguments[1] == "pdf-preview" && ["large", "thumbnail"].contains(arguments[2]) {
-    previewPDF(large: arguments[2] == "large")
-} else if arguments.count == 2 && arguments[1] == "reduce-motion" {
-    emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
-} else if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
-    checkPermission(kind: arguments[2], request: arguments[3] == "request")
-} else if arguments.count == 12 && arguments[1] == "notify", let delegate = NotificationDelegate(arguments: arguments) {
-    let app = NSApplication.shared
-    app.setActivationPolicy(.accessory)
-    delegate.begin()
-    withExtendedLifetime(delegate) { app.run() }
-} else { exit(2) }
+@main
+struct TalkNativeHelper {
+    // AppKit and permission entry stay on the main actor, including Swift 5 builds.
+    @MainActor
+    static func main() {
+        let arguments = CommandLine.arguments
+        guard Bundle.main.bundleIdentifier == "org.adapt2move.nextcloud-modern-talk" else { exit(2) }
+        if arguments.count == 3 && arguments[1] == "pdf-preview" && ["large", "thumbnail"].contains(arguments[2]) {
+            previewPDF(large: arguments[2] == "large")
+        } else if arguments.count == 2 && arguments[1] == "reduce-motion" {
+            emit(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? "true" : "false")
+        } else if arguments.count == 4 && arguments[1] == "permission" && ["check", "request"].contains(arguments[3]) {
+            checkPermission(kind: arguments[2], request: arguments[3] == "request")
+        } else if arguments.count == 12 && arguments[1] == "notify", let delegate = NotificationDelegate(arguments: arguments) {
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            delegate.begin()
+            withExtendedLifetime(delegate) { app.run() }
+        } else { exit(2) }
+    }
+}
