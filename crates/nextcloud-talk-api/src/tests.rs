@@ -547,6 +547,29 @@ fn typed_models_preserve_unknowns_and_strict_canonical_identity() {
         assert_eq!(caps.encryption_required, None);
     }
 }
+#[test]
+fn call_reactions_follow_bounded_server_configuration() {
+    let value = |reactions| {
+        json!({"version":{"major":35},"capabilities":{"spreed":{
+            "features":["conversation-v4"],"config":{"call":{"supported-reactions":reactions}}
+        }}})
+    };
+    let caps = models::Capabilities::decode(&value(json!(["👍", "🎉"]))).unwrap();
+    assert_eq!(
+        caps.call_reactions,
+        Some(vec!["👍".to_owned(), "🎉".to_owned()])
+    );
+    for invalid in [
+        json!([""]),
+        json!(["x".repeat(65)]),
+        json!(vec!["👍"; 33]),
+        json!(["\n"]),
+    ] {
+        let caps = models::Capabilities::decode(&value(invalid)).unwrap();
+        assert_eq!(caps.call_reactions, None);
+        assert!(caps.supported_protocol());
+    }
+}
 #[tokio::test]
 async fn call_handle_cannot_cross_clients_even_with_equal_caller_keys() {
     let server_a = Server::start(join_replies()).await;
