@@ -26,21 +26,26 @@ def send(lab, token, actor, source, target, messages):
                 body={"messages": json.dumps(rows)}, name="call-activity-send")
 
 
-def receive(lab, token, actor, source, target):
-    events = lab.request(actor, "GET", API + "v3/signaling/" + token,
-                         name="call-activity-pull")
-    if not isinstance(events, list) or len(events) > 128:
-        raise LabError("Unexpected bounded signaling response")
+def receive(lab, token, actor, source, target, marker):
     result = []
-    for event in events:
-        if not isinstance(event, dict) or event.get("type") != "message":
-            continue
-        raw = event.get("data")
-        if not isinstance(raw, str) or len(raw) > 4096:
-            raise LabError("Unexpected signaling message")
-        message = json.loads(raw)
-        if message.get("from") == source and message.get("to") == target:
-            result.append((message.get("type"), message.get("payload")))
+    # Room membership events may precede the messages. Every poll is consumed
+    # once, and a small fixed bound prevents waiting indefinitely for a marker.
+    for _ in range(3):
+        events = lab.request(actor, "GET", API + "v3/signaling/" + token,
+                             name="call-activity-pull")
+        if not isinstance(events, list) or len(events) > 128:
+            raise LabError("Unexpected bounded signaling response")
+        for event in events:
+            if not isinstance(event, dict) or event.get("type") != "message":
+                continue
+            raw = event.get("data")
+            if not isinstance(raw, str) or len(raw) > 4096:
+                raise LabError("Unexpected signaling message")
+            message = json.loads(raw)
+            if message.get("from") == source and message.get("to") == target:
+                result.append((message.get("type"), message.get("payload")))
+        if marker in result:
+            break
     return result
 
 
@@ -123,7 +128,7 @@ def exercise(lab, record):
         mute = {"action": "forceMute", "peerId": bob_session}
         send(lab, token, "lab_alice", alice, bob_session,
              [("raiseHand", hand), ("reaction", reaction), ("control", mute)])
-        received = receive(lab, token, "lab_bob", alice, bob_session)
+        received = receive(lab, token, "lab_bob", alice, bob_session, ("reaction", reaction))
         for label, pair in (("hand", ("raiseHand", hand)),
                             ("reaction", ("reaction", reaction)),
                             ("moderator-mute", ("control", mute))):
@@ -133,7 +138,7 @@ def exercise(lab, record):
         forbidden = {"action": "forceMute", "peerId": alice}
         send(lab, token, "lab_bob", bob_session, alice,
              [("control", forbidden), ("reaction", reaction)])
-        received = receive(lab, token, "lab_alice", bob_session, alice)
+        received = receive(lab, token, "lab_alice", bob_session, alice, ("reaction", reaction))
         lab.require("call-activity-member-marker", ("reaction", reaction) in received)
         lab.require("call-activity-member-mute-denied", ("control", forbidden) not in received)
         lab.request("lab_alice", "DELETE", call_path, body={"all": True},
