@@ -710,6 +710,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 } else {
                     Decision::Allowed
                 },
+                call_active: Some(id == 2 && matches!(scenario, "call-dock" | "chat-ux-call")),
                 call_scope: if kind == ConversationKind::NoteToSelf {
                     None
                 } else {
@@ -781,7 +782,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         let direct = matches!(scenario, "incoming" | "outgoing" | "direct-call");
         let id = if direct {
             3
-        } else if scenario == "voice" {
+        } else if matches!(scenario, "voice" | "call-dock") {
             2
         } else {
             1

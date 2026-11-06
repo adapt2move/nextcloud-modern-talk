@@ -104,6 +104,7 @@ pub enum LocalAction {
     MinimizeCall(CallScope),
     ExpandCall(CallScope),
     ToggleCallFullscreen(CallScope),
+    JoinRoomCall(CallScope),
     AcceptCallWithVideo,
     FocusCallParticipant(CallScope, Option<u128>),
     Navigate(ConversationRef),
@@ -1319,6 +1320,44 @@ impl Desktop {
                     .is_some_and(|call| call.scope == scope)
                 {
                     window.toggle_fullscreen();
+                }
+            }
+            LocalAction::JoinRoomCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = None;
+                    self.root_focus.focus(window);
+                } else if let Some(row) = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| row.call_scope == Some(scope) && row.call_active == Some(true))
+                {
+                    let context = row.context;
+                    match call_entry(row, self.snapshot.content) {
+                        Some(CallEntry::Direct(_)) => {
+                            self.submit(UiIntent::StartDirect {
+                                call: scope,
+                                media: MediaIntent::MicrophoneOnCameraOff,
+                            });
+                        }
+                        Some(CallEntry::Conference(_)) => {
+                            if self.snapshot.selected == Some(context) {
+                                self.handle(LocalAction::Call, window, cx);
+                            } else {
+                                // Conference prejoin must use the newly selected room's
+                                // current snapshot; navigation alone never opens capture.
+                                self.handle(LocalAction::Navigate(context), window, cx);
+                            }
+                        }
+                        None => {}
+                    }
                 }
             }
             LocalAction::FocusCallParticipant(scope, participant) => {

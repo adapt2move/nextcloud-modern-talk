@@ -380,6 +380,36 @@ impl Accounts {
                     )?;
                     return Ok(());
                 }
+                UiIntent::Legacy(UserIntent::PrepareConference(call)) => {
+                    let row = self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .find(|row| {
+                            row.call_scope == Some(*call)
+                                && self.snapshot.selected == Some(row.context)
+                        })
+                        .ok_or(SubmitError::StaleScope)?;
+                    if row.call != Decision::Allowed
+                        || !matches!(
+                            row.organization.category,
+                            talk_core::ui::presentation::ConversationCategory::Conference(_)
+                        )
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    if self.call_ui.as_ref().is_some_and(|ui| ui.scope != *call)
+                        && self.snapshot.call.as_ref().is_some_and(|active| {
+                            !matches!(active.stage, CallStage::Ended | CallStage::Failed)
+                        })
+                    {
+                        return Err(SubmitError::Busy);
+                    }
+                    return Ok(());
+                }
                 UiIntent::Legacy(UserIntent::AcceptDirect { call, media }) => {
                     self.start_call(*call, Entry::IncomingDirect, wishes(*media), true)?;
                     return Ok(());
@@ -494,7 +524,8 @@ impl Accounts {
                 | UiIntent::ReconnectCall(_)
                 | UiIntent::ResolveRequiredGate { .. }
                 | UiIntent::Legacy(
-                    UserIntent::AcceptDirect { .. }
+                    UserIntent::PrepareConference(_)
+                        | UserIntent::AcceptDirect { .. }
                         | UserIntent::JoinPrepared { .. }
                         | UserIntent::Leave(_)
                 )

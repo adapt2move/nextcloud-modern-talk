@@ -775,6 +775,15 @@ impl Desktop {
                 row.kind == ConversationKind::Direct && row.organization.classified == Some(true),
                 |d| d.child(self.scaled_icon("lock", 12., t.muted)),
             )
+            .when(row.call_active == Some(true), |d| {
+                d.child(self.status_icon(
+                    scoped_id(namespace, context, 0, 2),
+                    ("headphones", "Anruf läuft"),
+                    (13., t.success),
+                    row_focus.clone(),
+                    cx,
+                ))
+            })
             .when(self.favorite_value(row) == Some(true), |d| {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 1),
@@ -818,10 +827,39 @@ impl Desktop {
             });
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.
+        let entry = super::state::call_entry(row, self.snapshot.content);
+        let can_join = row.call_active == Some(true) && entry.is_some();
         div()
             .flex_none()
+            .group("room-call-row")
+            .flex()
+            .items_center()
             .when(namespace == "room", |d| d.pl(px(4.)))
-            .child(control)
+            .child(control.flex_1().min_w_0())
+            .when_some(row.call_scope.filter(|_| can_join), |d, scope| {
+                let needs_navigation =
+                    matches!(entry, Some(super::state::CallEntry::Conference(_)))
+                        && self.snapshot.selected != Some(context);
+                d.child(
+                    self.button(
+                        scoped_id(namespace, context, 0, 3),
+                        if needs_navigation {
+                            "Öffnen"
+                        } else {
+                            "Beitreten"
+                        },
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::JoinRoomCall(scope),
+                        cx,
+                    )
+                    .text_size(self.sp(11.))
+                    .px_1()
+                    .opacity(0.)
+                    .group_hover("room-call-row", |s| s.opacity(1.))
+                    .focus(|s| s.opacity(1.)),
+                )
+            })
     }
 
     pub(super) fn inbox(&self, cx: &Context<Self>) -> Div {

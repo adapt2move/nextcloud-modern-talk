@@ -363,6 +363,8 @@ pub struct ConversationView {
     /// Classified/unknown restrictions MUST project Denied/Unknown; never infer from send.
     pub draft_clipboard: Decision,
     pub call: Decision,
+    /// Server observation; unknown does not imply that a call is active.
+    pub call_active: Option<bool>,
     /// Allocated/revalidated by the call owner; a row click never creates a call.
     pub call_scope: Option<CallScope>,
 }

@@ -74,6 +74,7 @@ fn snapshot() -> PresentationSnapshot {
         attach: Decision::Denied,
         draft_clipboard: Decision::Allowed,
         call: Decision::Denied,
+        call_active: None,
         call_scope: None,
     };
     let mut panel = MessagePanel::new(source);

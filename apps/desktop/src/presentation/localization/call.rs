@@ -1,4 +1,5 @@
 pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
+    ("Anruf läuft", "Call in progress", "Llamada en curso"),
     ("Anruf minimieren", "Minimize call", "Minimizar llamada"),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
     ("Hand gehoben", "Hand raised", "Mano levantada"),

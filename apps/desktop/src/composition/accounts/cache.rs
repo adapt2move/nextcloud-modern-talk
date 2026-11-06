@@ -590,6 +590,7 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
         attach: Decision::Unknown,
         draft_clipboard: Decision::Unknown,
         call: Decision::Unknown,
+        call_active: None,
         call_scope: None,
     }
 }
