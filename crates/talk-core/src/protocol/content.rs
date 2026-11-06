@@ -104,7 +104,8 @@ pub enum AssetRequest {
 pub struct PollDraft {
     pub question: Text<4000>,
     pub options: Page<Text<1000>, 100>,
-    pub multiple: bool,
+    /// Zero permits any number of options; one is single choice.
+    pub max_votes: u16,
     pub hidden_results: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,6 +146,9 @@ pub enum PollCommand {
     ListDrafts,
     Read(u64),
     Create(PollDraft),
+    SaveDraft(PollDraft),
+    UpdateDraft { poll: u64, draft: PollDraft },
+    DeleteDraft(u64),
     Vote { poll: u64, options: Page<u16, 100> },
     Close(u64),
 }
@@ -186,7 +190,13 @@ pub enum ContentResult {
     /// An installation-relative file route constructed by the protocol owner; no credentials.
     CloudLink(Text<2048>),
     PollDrafts(Page<PollDraftEntry, 100>),
-    PollCapabilities(ActionAvailability),
+    PollCapabilities {
+        create: ActionAvailability,
+        drafts: ActionAvailability,
+        edit_draft: ActionAvailability,
+    },
+    PollDraftSaved(Box<PollDraftEntry>),
+    PollDraftDeleted(u64),
     Poll(Box<Poll>),
 }
 #[derive(Default)]

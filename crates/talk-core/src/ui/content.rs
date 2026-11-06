@@ -100,7 +100,7 @@ pub struct PollView {
 pub struct PollDraft {
     pub question: Text<4000>,
     pub options: Page<Text<1000>, 100>,
-    pub multiple: bool,
+    pub max_votes: u16,
     pub hidden_results: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -151,6 +151,8 @@ pub struct ContentPanel {
     pub polls: Page<PollView, 20>,
     pub poll_drafts: Page<PollDraftEntry, 100>,
     pub poll_create: Availability,
+    pub poll_drafts_manage: Availability,
+    pub poll_drafts_edit: Availability,
     pub poll_state: RemoteState,
     pub preview: Option<AttachmentRef>,
     pub playback: Option<PlaybackView>,
@@ -169,6 +171,8 @@ impl Default for ContentPanel {
             polls: Page::empty(),
             poll_drafts: Page::empty(),
             poll_create: Availability::UNKNOWN,
+            poll_drafts_manage: Availability::UNKNOWN,
+            poll_drafts_edit: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,
             preview: None,
             playback: None,
@@ -200,6 +204,12 @@ pub enum ContentAction {
     RefreshPollDrafts,
     RefreshPoll(u64),
     CreatePoll(PollDraft),
+    SavePollDraft(PollDraft),
+    UpdatePollDraft {
+        poll: u64,
+        draft: PollDraft,
+    },
+    DeletePollDraft(u64),
     Vote {
         poll: u64,
         options: Page<u16, 100>,

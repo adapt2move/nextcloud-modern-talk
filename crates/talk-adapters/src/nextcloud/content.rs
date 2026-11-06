@@ -10,7 +10,12 @@ pub(super) fn is_mutation(command: &ContentCommand) -> bool {
     matches!(
         command,
         ContentCommand::Poll {
-            command: PollCommand::Create(_) | PollCommand::Vote { .. } | PollCommand::Close(_),
+            command: PollCommand::Create(_)
+                | PollCommand::SaveDraft(_)
+                | PollCommand::UpdateDraft { .. }
+                | PollCommand::DeleteDraft(_)
+                | PollCommand::Vote { .. }
+                | PollCommand::Close(_),
             ..
         }
     )
@@ -449,8 +454,28 @@ impl NextcloudClient {
         use api::poll::Command as W;
         let room = self.content_room(c, id, caps).await?;
         let create = poll_availability(&room, caps, true);
+        let manage = ActionAvailability {
+            implemented: true,
+            server: caps.feature("talk-polls-drafts"),
+            allowed: if matches!(
+                room.role,
+                Role::Owner | Role::Moderator | Role::GuestModerator
+            ) {
+                create.allowed
+            } else {
+                Decision::Denied
+            },
+        };
+        let edit = ActionAvailability {
+            server: caps.feature("edit-draft-poll"),
+            ..manage
+        };
         if command == PollCommand::Capabilities {
-            return Ok(ContentResult::PollCapabilities(create));
+            return Ok(ContentResult::PollCapabilities {
+                create,
+                drafts: manage,
+                edit_draft: edit,
+            });
         }
         if !caps.has("talk-polls") {
             return Err(self.error(ErrorKind::Unsupported));
@@ -461,32 +486,76 @@ impl NextcloudClient {
             if !caps.has("talk-polls-drafts") {
                 return Err(self.error(ErrorKind::Unsupported));
             }
-            if !matches!(room.role, Role::Owner | Role::Moderator | Role::GuestModerator) {
-                return Err(self.error(ErrorKind::PermissionDenied));
-            }
+            self.allowed(manage.allowed)?;
             let drafts = self.transport.poll_drafts(c, &token).await?;
             let mut result = Page::empty();
             for draft in drafts {
-                let mut options = Page::empty();
-                for option in draft.options {
-                    options.try_push(Text::new(&option).map_err(|_| self.error(ErrorKind::TooLarge))?)
-                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
-                }
-                result.try_push(PollDraftEntry {
-                    id: draft.id,
-                    draft: PollDraft {
-                        question: Text::new(&draft.question).map_err(|_| self.error(ErrorKind::TooLarge))?,
-                        options,
-                        multiple: draft.max_votes != 1,
-                        hidden_results: draft.hidden_results,
-                    },
-                    max_votes: draft.max_votes,
-                }).map_err(|_| self.error(ErrorKind::TooLarge))?;
+                result
+                    .try_push(self.project_poll_draft(draft)?)
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?;
             }
             return Ok(ContentResult::PollDrafts(result));
         }
+        if matches!(
+            command,
+            PollCommand::SaveDraft(_)
+                | PollCommand::UpdateDraft { .. }
+                | PollCommand::DeleteDraft(_)
+        ) {
+            if !caps.has("talk-polls-drafts") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            self.allowed(manage.allowed)?;
+            if matches!(command, PollCommand::UpdateDraft { .. }) && !caps.has("edit-draft-poll") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            self.admit_action(id, operation)?;
+            let result = match &command {
+                PollCommand::DeleteDraft(poll) => self
+                    .transport
+                    .delete_poll_draft(c, &token, *poll)
+                    .await
+                    .map(|()| ContentResult::PollDraftDeleted(*poll)),
+                PollCommand::SaveDraft(draft) | PollCommand::UpdateDraft { draft, .. } => {
+                    let question = draft.question.as_str().to_owned();
+                    let options = draft
+                        .options
+                        .as_slice()
+                        .iter()
+                        .map(|s| s.as_str().to_owned())
+                        .collect();
+                    let wire = match &command {
+                        PollCommand::UpdateDraft { poll, .. } => W::UpdateDraft {
+                            poll: *poll,
+                            question,
+                            options,
+                            hidden_results: draft.hidden_results,
+                            max_votes: draft.max_votes,
+                        },
+                        _ => W::CreateDraft {
+                            question,
+                            options,
+                            hidden_results: draft.hidden_results,
+                            max_votes: draft.max_votes,
+                        },
+                    };
+                    self.transport
+                        .poll_draft_mutation(c, &token, wire)
+                        .await
+                        .and_then(|draft| self.project_poll_draft(draft))
+                        .map(|draft| ContentResult::PollDraftSaved(Box::new(draft)))
+                }
+                _ => Err(self.error(ErrorKind::Malformed)),
+            };
+            self.settle_action(operation, result.as_ref().err());
+            return result;
+        }
         let wire = match &command {
-            PollCommand::Capabilities | PollCommand::ListDrafts => return Err(self.error(ErrorKind::Malformed)),
+            PollCommand::Capabilities
+            | PollCommand::ListDrafts
+            | PollCommand::SaveDraft(_)
+            | PollCommand::UpdateDraft { .. }
+            | PollCommand::DeleteDraft(_) => return Err(self.error(ErrorKind::Malformed)),
             PollCommand::Read(n) => W::Read(*n),
             PollCommand::Create(draft) => {
                 self.allowed(create.allowed)?;
@@ -499,7 +568,7 @@ impl NextcloudClient {
                         .map(|s| s.as_str().into())
                         .collect(),
                     hidden_results: draft.hidden_results,
-                    max_votes: if draft.multiple { 0 } else { 1 },
+                    max_votes: draft.max_votes,
                 }
             }
             PollCommand::Vote { poll, options } => {
@@ -546,6 +615,25 @@ impl NextcloudClient {
             self.settle_action(operation, result.as_ref().err());
         }
         result
+    }
+    fn project_poll_draft(&self, draft: api::poll::Draft) -> Result<PollDraftEntry, PortError> {
+        let mut options = Page::empty();
+        for option in draft.options {
+            options
+                .try_push(Text::new(&option).map_err(|_| self.error(ErrorKind::TooLarge))?)
+                .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        }
+        Ok(PollDraftEntry {
+            id: draft.id,
+            draft: PollDraft {
+                question: Text::new(&draft.question)
+                    .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                options,
+                max_votes: draft.max_votes,
+                hidden_results: draft.hidden_results,
+            },
+            max_votes: draft.max_votes,
+        })
     }
     fn poll_close(&self, poll: &api::poll::Poll, room: &Conversation) -> Decision {
         if poll.status == 0

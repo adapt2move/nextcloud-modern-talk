@@ -315,10 +315,34 @@ impl Accounts {
                 wire::PollCommand::Create(wire::PollDraft {
                     question: draft.question,
                     options: draft.options,
-                    multiple: draft.multiple,
+                    max_votes: draft.max_votes,
                     hidden_results: draft.hidden_results,
                 }),
             ),
+            A::SavePollDraft(draft) => self.start_poll(
+                request,
+                wire::PollCommand::SaveDraft(wire::PollDraft {
+                    question: draft.question,
+                    options: draft.options,
+                    max_votes: draft.max_votes,
+                    hidden_results: draft.hidden_results,
+                }),
+            ),
+            A::UpdatePollDraft { poll, draft } => self.start_poll(
+                request,
+                wire::PollCommand::UpdateDraft {
+                    poll,
+                    draft: wire::PollDraft {
+                        question: draft.question,
+                        options: draft.options,
+                        max_votes: draft.max_votes,
+                        hidden_results: draft.hidden_results,
+                    },
+                },
+            ),
+            A::DeletePollDraft(poll) => {
+                self.start_poll(request, wire::PollCommand::DeleteDraft(poll))
+            }
             A::Vote { poll, options } => {
                 self.start_poll(request, wire::PollCommand::Vote { poll, options })
             }
@@ -678,6 +702,9 @@ impl Accounts {
         }
         let context = self.snapshot.selected.ok_or(SubmitError::StaleScope)?;
         let poll = match command {
+            // Zero is not a valid poll ID; distinguish this read from a
+            // capability refresh when applying scoped failure handling.
+            wire::PollCommand::ListDrafts => Some(0),
             wire::PollCommand::Read(id)
             | wire::PollCommand::Close(id)
             | wire::PollCommand::Vote { poll: id, .. } => Some(id),
@@ -686,6 +713,9 @@ impl Accounts {
         let mutation = matches!(
             command,
             wire::PollCommand::Create(_)
+                | wire::PollCommand::SaveDraft(_)
+                | wire::PollCommand::UpdateDraft { .. }
+                | wire::PollCommand::DeleteDraft(_)
                 | wire::PollCommand::Vote { .. }
                 | wire::PollCommand::Close(_)
         );
@@ -871,23 +901,71 @@ impl Accounts {
                     Some((job.request, Completion::ServerAccepted));
             }
             Ok(wire::ContentResult::PollDrafts(drafts)) => {
-                let entries = drafts.as_slice().iter().map(|entry| view::PollDraftEntry {
-                    id: entry.id,
-                    draft: view::PollDraft {
-                        question: entry.draft.question.clone(),
-                        options: entry.draft.options.clone(),
-                        multiple: entry.draft.multiple,
-                        hidden_results: entry.draft.hidden_results,
-                    },
-                    max_votes: entry.max_votes,
-                }).collect::<Vec<_>>();
+                let entries = drafts
+                    .as_slice()
+                    .iter()
+                    .map(|entry| view::PollDraftEntry {
+                        id: entry.id,
+                        draft: view::PollDraft {
+                            question: entry.draft.question.clone(),
+                            options: entry.draft.options.clone(),
+                            max_votes: entry.draft.max_votes,
+                            hidden_results: entry.draft.hidden_results,
+                        },
+                        max_votes: entry.max_votes,
+                    })
+                    .collect::<Vec<_>>();
                 self.snapshot.content_panel.poll_drafts = page(entries);
                 self.snapshot.content_panel.poll_state = RemoteState::Idle;
             }
-            Ok(wire::ContentResult::PollCapabilities(availability)) => {
-                self.snapshot.content_panel.poll_create = availability_view(availability);
+            Ok(wire::ContentResult::PollCapabilities {
+                create,
+                drafts,
+                edit_draft,
+            }) => {
+                self.snapshot.content_panel.poll_create = availability_view(create);
+                self.snapshot.content_panel.poll_drafts_manage = availability_view(drafts);
+                self.snapshot.content_panel.poll_drafts_edit = availability_view(edit_draft);
+                if !self.snapshot.content_panel.poll_drafts_manage.enabled() {
+                    self.snapshot.content_panel.poll_drafts = Page::empty();
+                }
                 self.snapshot.content_panel.poll_state = RemoteState::Idle;
                 self.content_owner.capabilities_at = Some(Instant::now() + Duration::from_secs(30));
+            }
+            Ok(wire::ContentResult::PollDraftSaved(draft)) => {
+                let mut entries = self.snapshot.content_panel.poll_drafts.as_slice().to_vec();
+                entries.retain(|entry| entry.id != draft.id);
+                if entries.len() == 100 {
+                    entries.remove(0);
+                }
+                entries.push(view::PollDraftEntry {
+                    id: draft.id,
+                    draft: view::PollDraft {
+                        question: draft.draft.question,
+                        options: draft.draft.options,
+                        max_votes: draft.draft.max_votes,
+                        hidden_results: draft.draft.hidden_results,
+                    },
+                    max_votes: draft.max_votes,
+                });
+                self.snapshot.content_panel.poll_drafts = page(entries);
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
+                self.snapshot.content_panel.result =
+                    Some((job.request, Completion::ServerAccepted));
+            }
+            Ok(wire::ContentResult::PollDraftDeleted(id)) => {
+                self.snapshot.content_panel.poll_drafts = page(
+                    self.snapshot
+                        .content_panel
+                        .poll_drafts
+                        .as_slice()
+                        .iter()
+                        .filter(|d| d.id != id)
+                        .cloned(),
+                );
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
+                self.snapshot.content_panel.result =
+                    Some((job.request, Completion::ServerAccepted));
             }
             Ok(wire::ContentResult::Poll(poll)) => {
                 let mut values = self.snapshot.content_panel.polls.as_slice().to_vec();
@@ -1118,6 +1196,8 @@ impl Accounts {
             }
             if job.poll.is_none() && !job.mutation {
                 self.snapshot.content_panel.poll_create = Availability::UNKNOWN;
+                self.snapshot.content_panel.poll_drafts_manage = Availability::UNKNOWN;
+                self.snapshot.content_panel.poll_drafts_edit = Availability::UNKNOWN;
                 self.content_owner.capabilities_at = Some(Instant::now() + Duration::from_secs(30));
             }
             self.snapshot.content_panel.poll_state = if completion == Completion::Uncertain {
@@ -1616,7 +1696,10 @@ impl Accounts {
         }
         if self.snapshot.content == ContentState::Denied {
             self.snapshot.content_panel.polls = Page::empty();
+            self.snapshot.content_panel.poll_drafts = Page::empty();
             self.snapshot.content_panel.poll_create = Availability::UNKNOWN;
+            self.snapshot.content_panel.poll_drafts_manage = Availability::UNKNOWN;
+            self.snapshot.content_panel.poll_drafts_edit = Availability::UNKNOWN;
         }
     }
     pub(super) fn tick_content(&mut self) {

@@ -109,7 +109,7 @@ fn draft(hidden: bool) -> PollDraft {
             "Public content fixture"
         }),
         options: page([text("One"), text("Two"), text("Three")]),
-        multiple: true,
+        max_votes: 0,
         hidden_results: hidden,
     }
 }
@@ -204,7 +204,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     };
     assert_eq!(emoji.as_str(), "🌿");
     println!("content-backend server-room-emoji: pass");
-    let R::PollCapabilities(create) = content(
+    let R::PollCapabilities { create, .. } = content(
         &mut alice,
         &runtime,
         a,

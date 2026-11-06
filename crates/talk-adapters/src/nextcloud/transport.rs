@@ -391,23 +391,27 @@ impl Transport {
     ) -> Result<Vec<api::poll::Draft>, PortError> {
         self.api.poll_drafts(&context(c), room).await.map_err(error)
     }
-    #[allow(dead_code)]
     pub(super) async fn poll_draft_mutation(
         &mut self,
         c: &OperationContext,
         room: &api::models::RoomToken,
         command: api::poll::Command,
     ) -> Result<api::poll::Draft, PortError> {
-        self.api.poll_draft_mutation(&context(c), room, command).await.map_err(error)
+        self.api
+            .poll_draft_mutation(&context(c), room, command)
+            .await
+            .map_err(error)
     }
-    #[allow(dead_code)]
     pub(super) async fn delete_poll_draft(
         &mut self,
         c: &OperationContext,
         room: &api::models::RoomToken,
         poll: u64,
     ) -> Result<(), PortError> {
-        self.api.delete_poll_draft(&context(c), room, poll).await.map_err(error)
+        self.api
+            .delete_poll_draft(&context(c), room, poll)
+            .await
+            .map_err(error)
     }
     pub(super) fn file_link(&self, file: u64) -> Result<String, PortError> {
         self.api.file_link(file).map_err(error)
