@@ -76,8 +76,9 @@ pub struct MessageMetadata {
     pub deleted: bool,
     pub system: bool,
     pub system_event: SystemEvent,
-    /// Redundant pin/unpin activity, classified from the untranslated system
-    /// tag. Canonical history retains it; the visible timeline omits it.
+    /// Quiet pin and poll activity, classified from the untranslated system
+    /// tag. Canonical history retains it; the visible timeline omits it. The
+    /// field name is retained for compatibility with stored history.
     pub pin_notice: bool,
     /// Effective receipt target for this painted row, extending only through
     /// adjacent hidden pin activity with observed server-page continuity.

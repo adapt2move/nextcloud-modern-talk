@@ -42,6 +42,12 @@ pub(crate) enum Action {
     LoadDraft { id: u64, edit: bool },
     ConfirmDeleteDraft(u64),
     DeleteDraft(u64),
+    SelectPollOption { poll: u64, option: u16 },
+    SubmitVote(u64),
+    ConfirmClosePoll(u64),
+    CancelClosePoll,
+    ClosePoll(u64),
+    PollDetails(u64),
     Preview(AttachmentRef),
     GalleryMove { from: AttachmentRef, offset: i8 },
     Download(AttachmentRef),
@@ -74,6 +80,11 @@ pub(super) struct ContentUi {
     pending_poll: Option<(ConversationRef, RequestId)>,
     acknowledged_result: Option<RequestId>,
     observed_polls: Vec<PollView>,
+    selections: Vec<(u64, Page<u16, 100>)>,
+    pending_vote: Option<(ConversationRef, RequestId, u64)>,
+    vote_error: Option<u64>,
+    confirm_close: Option<u64>,
+    details_poll: Option<u64>,
 }
 impl ContentUi {
     pub fn new(
@@ -110,6 +121,11 @@ impl ContentUi {
             pending_poll: None,
             acknowledged_result: None,
             observed_polls: Vec::new(),
+            selections: Vec::new(),
+            pending_vote: None,
+            vote_error: None,
+            confirm_close: None,
+            details_poll: None,
         }
     }
     pub fn inputs(&self) -> impl Iterator<Item = &Entity<TextInput>> {
@@ -254,10 +270,15 @@ impl Desktop {
             self.content_ui.drafts_open = false;
             self.content_ui.editing_draft = None;
             self.content_ui.delete_draft = None;
+            self.content_ui.selections.clear();
+            self.content_ui.pending_vote = None;
+            self.content_ui.vote_error = None;
+            self.content_ui.confirm_close = None;
+            self.content_ui.details_poll = None;
             self.content_ui.return_overlay = None;
             if matches!(
                 self.overlay,
-                Some(Overlay::ContentPreview | Overlay::CreatePoll)
+                Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::PollDetails)
             ) {
                 self.overlay = None;
                 self.pending_modal_focus = false;
@@ -311,6 +332,22 @@ impl Desktop {
             self.content_ui.observed_polls = self.snapshot.content_panel.polls.as_slice().to_vec();
         }
         if let Some((request, completion)) = self.snapshot.content_panel.result {
+            let vote = self
+                .content_ui
+                .pending_vote
+                .filter(|(context, pending, _)| {
+                    self.snapshot.selected == Some(*context) && *pending == request
+                });
+            if let Some((_, _, poll)) = vote {
+                self.content_ui.pending_vote = None;
+                if completion == Completion::ServerAccepted {
+                    self.content_ui.selections.retain(|(id, _)| *id != poll);
+                    self.content_ui.vote_error = None;
+                    self.begin_surface_reveal(("poll-results", poll as usize).into());
+                } else {
+                    self.content_ui.vote_error = Some(poll);
+                }
+            }
             if self
                 .content_ui
                 .pending_poll
@@ -338,6 +375,7 @@ impl Desktop {
             if self.content_ui.acknowledged_result != Some(request) {
                 if let Completion::Failed(_) = completion
                     && !matches!(self.overlay, Some(Overlay::CreatePoll))
+                    && vote.is_none()
                 {
                     self.feedback = Some(super::feedback::Feedback::error(
                         "Die Inhaltsaktion ist fehlgeschlagen. Erneut versuchen.",
@@ -770,6 +808,86 @@ impl Desktop {
                     self.content_ui.delete_draft = None;
                 }
             }
+            Action::SelectPollOption { poll, option } => {
+                if let Some(current) = self
+                    .snapshot
+                    .content_panel
+                    .polls
+                    .as_slice()
+                    .iter()
+                    .find(|p| p.id == poll)
+                    && self.content_scope_current()
+                    && current.vote.enabled()
+                    && !current.closed
+                    && !self.poll_submission_blocked()
+                {
+                    let selected = self
+                        .content_ui
+                        .selections
+                        .iter()
+                        .find(|(id, _)| *id == poll)
+                        .map(|(_, values)| values.as_slice().to_vec())
+                        .unwrap_or_else(|| {
+                            current
+                                .options
+                                .as_slice()
+                                .iter()
+                                .filter(|o| o.own)
+                                .map(|o| o.id)
+                                .collect()
+                        });
+                    if let Some(next) = toggled_poll_votes(current.max_votes, selected, option) {
+                        self.content_ui.selections.retain(|(id, _)| *id != poll);
+                        if self.content_ui.selections.len() >= 20 {
+                            self.content_ui.selections.remove(0);
+                        }
+                        self.content_ui.selections.push((poll, next));
+                        self.content_ui.vote_error = None;
+                    }
+                }
+            }
+            Action::SubmitVote(poll) => {
+                if self.content_scope_current()
+                    && !self.poll_submission_blocked()
+                    && let Some((_, options)) = self
+                        .content_ui
+                        .selections
+                        .iter()
+                        .find(|(id, _)| *id == poll)
+                    && let Some(context) = self.snapshot.selected
+                {
+                    let options = options.clone();
+                    if let Some(request) =
+                        self.submit_content(ContentAction::Vote { poll, options })
+                    {
+                        self.content_ui.pending_vote = Some((context, request, poll));
+                        self.content_ui.vote_error = None;
+                    }
+                }
+            }
+            Action::ConfirmClosePoll(poll) => self.content_ui.confirm_close = Some(poll),
+            Action::CancelClosePoll => self.content_ui.confirm_close = None,
+            Action::ClosePoll(poll) => {
+                if self.content_ui.confirm_close == Some(poll) && !self.poll_submission_blocked() {
+                    self.submit_content(ContentAction::ClosePoll(poll));
+                    self.content_ui.confirm_close = None;
+                }
+            }
+            Action::PollDetails(poll) => {
+                if self.content_scope_current()
+                    && self
+                        .snapshot
+                        .content_panel
+                        .polls
+                        .as_slice()
+                        .iter()
+                        .any(|p| p.id == poll)
+                {
+                    self.content_ui.details_poll = Some(poll);
+                    self.content_ui.return_overlay = self.overlay;
+                    self.handle(LocalAction::Open(Overlay::PollDetails), window, cx);
+                }
+            }
             Action::Preview(reference) => self.open_media_preview(reference, window, cx),
             Action::GalleryMove { from, offset } => {
                 if self.content_ui.preview.as_ref() == Some(&from)
@@ -799,7 +917,7 @@ impl Desktop {
     pub(super) fn close_content_overlay(&mut self) -> bool {
         if !matches!(
             self.overlay,
-            Some(Overlay::ContentPreview | Overlay::CreatePoll)
+            Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::PollDetails)
         ) {
             return false;
         }
@@ -811,6 +929,7 @@ impl Desktop {
             }
             self.content_ui.preview = None;
         }
+        self.content_ui.details_poll = None;
         self.overlay = self.content_ui.return_overlay.take();
         self.pending_modal_focus = self.overlay.is_some();
         true
@@ -973,13 +1092,17 @@ impl Desktop {
     }
 
     fn poll_draft(&self, cx: &Context<Self>) -> Option<PollDraft> {
+        let question = self.content_ui.question.read(cx).submitted_value()?;
+        let options = self
+            .content_ui
+            .options
+            .iter()
+            .take(self.content_ui.option_count)
+            .map(|input| input.read(cx).submitted_value())
+            .collect::<Option<Vec<_>>>()?;
         poll_draft_values(
-            self.content_ui.question.read(cx).content.as_ref(),
-            self.content_ui
-                .options
-                .iter()
-                .take(self.content_ui.option_count)
-                .map(|input| input.read(cx).content.as_ref()),
+            question,
+            options,
             self.content_ui.max_votes,
             self.content_ui.hidden_results,
         )
@@ -1261,6 +1384,53 @@ impl Desktop {
         self.loaded_poll(poll, cx)
     }
     fn loaded_poll(&self, poll: &PollView, cx: &Context<Self>) -> Div {
+        self.poll_card_contents(poll, false, cx)
+    }
+
+    pub(super) fn poll_details_body(&self, cx: &Context<Self>) -> Div {
+        self.content_ui
+            .details_poll
+            .and_then(|id| {
+                self.snapshot
+                    .content_panel
+                    .polls
+                    .as_slice()
+                    .iter()
+                    .find(|poll| poll.id == id)
+            })
+            .filter(|_| self.content_scope_current())
+            .map_or_else(div, |poll| self.poll_card_contents(poll, true, cx))
+    }
+
+    fn poll_card_contents(&self, poll: &PollView, full: bool, cx: &Context<Self>) -> Div {
+        let selection = self
+            .content_ui
+            .selections
+            .iter()
+            .find(|(id, _)| *id == poll.id)
+            .map(|(_, selection)| selection.as_slice().to_vec())
+            .unwrap_or_else(|| {
+                poll.options
+                    .as_slice()
+                    .iter()
+                    .filter(|o| o.own)
+                    .map(|o| o.id)
+                    .collect()
+            });
+        let pending = self
+            .content_ui
+            .pending_vote
+            .is_some_and(|(_, _, id)| id == poll.id);
+        let meta = if poll.max_votes == 1 {
+            "Eine Antwort"
+        } else {
+            "Mehrere Antworten"
+        };
+        let privacy = if poll.hidden_results {
+            "Anonym"
+        } else {
+            "Öffentlich"
+        };
         let mut body = div()
             .flex()
             .flex_col()
@@ -1268,22 +1438,31 @@ impl Desktop {
             .p_3()
             .bg(self.theme.subtle)
             .rounded(px(8.))
-            .child(self.title(poll.question.as_str()));
-        for option in poll.options.as_slice() {
-            let choices = toggled_poll_votes(
-                poll.max_votes,
-                poll.options
-                    .as_slice()
-                    .iter()
-                    .filter(|o| o.own)
-                    .map(|o| o.id),
-                option.id,
+            .child(
+                div()
+                    .text_size(self.sp(16.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(poll.question.as_str().to_owned()),
+            )
+            .child(self.hint(&format!("{} · {}", self.l(meta), self.l(privacy))));
+        if let Some(count) = poll.voters {
+            body = body.child(
+                self.hint(&self.lf("{n} Teilnehmende abgestimmt", &[("n", &count.to_string())])),
             );
+        }
+        let count = if full {
+            poll.options.as_slice().len()
+        } else {
+            5
+        };
+        for (index, option) in poll.options.as_slice().iter().take(count).enumerate() {
+            let selected = selection.contains(&option.id);
             let enabled = poll.vote.enabled()
                 && !poll.closed
                 && !self.poll_submission_blocked()
-                && choices.is_some();
-            body = body.child(
+                && toggled_poll_votes(poll.max_votes, selection.iter().copied(), option.id)
+                    .is_some();
+            let mut row = div().flex().flex_col().gap_1().child(
                 self.button(
                     (
                         "poll-option",
@@ -1292,32 +1471,88 @@ impl Desktop {
                     "",
                     ButtonStyle::Quiet,
                     enabled,
-                    LocalAction::Content(Action::Command(ContentAction::Vote {
+                    LocalAction::Content(Action::SelectPollOption {
                         poll: poll.id,
-                        options: choices.unwrap_or_else(Page::empty),
-                    })),
+                        option: option.id,
+                    }),
                     cx,
                 )
                 .w_full()
                 .justify_start()
                 .child(self.scaled_icon(
-                    if option.own { "check-circle" } else { "plus" },
+                    if selected { "check-circle" } else { "circle" },
                     16.,
                     self.theme.accent,
                 ))
                 .child(div().flex_1().child(option.label.as_str().to_owned()))
-                .when_some(option.votes, |d, votes| {
-                    d.child(self.hint(&votes.to_string()))
+                .when(option.own, |d| d.child(self.hint(self.l("Deine Stimme"))))
+                .when(pending && selected, |d| {
+                    d.child(self.hint(self.l("Wird gesendet …")))
                 }),
             );
+            if let Some(votes) = option.votes {
+                let percent = poll.voters.filter(|n| *n > 0).map_or(0, |n| {
+                    ((u64::from(votes) * 100) / u64::from(n)).min(100) as u32
+                });
+                let bar = div()
+                    .w_full()
+                    .h(px(5.))
+                    .rounded(px(3.))
+                    .bg(self.theme.border)
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded(px(3.))
+                            .bg(self.theme.accent)
+                            .w(gpui::relative(percent as f32 / 100.)),
+                    );
+                row = row
+                    .child(if index == 0 {
+                        self.reveal_from_action(("poll-results", poll.id as usize).into(), bar)
+                    } else {
+                        bar.into_any_element()
+                    })
+                    .child(self.hint(&format!("{percent}% · {votes}")));
+            }
+            body = body.child(row);
+        }
+        if !poll.closed && poll.vote.enabled() {
+            body = body.child(
+                self.button(
+                    ("poll-vote-submit", poll.id as usize),
+                    if self.content_ui.vote_error == Some(poll.id) {
+                        "Erneut abstimmen"
+                    } else {
+                        "Stimme abgeben"
+                    },
+                    ButtonStyle::Secondary,
+                    !self.poll_submission_blocked()
+                        && self
+                            .content_ui
+                            .selections
+                            .iter()
+                            .any(|(id, _)| *id == poll.id),
+                    LocalAction::Content(Action::SubmitVote(poll.id)),
+                    cx,
+                ),
+            );
+        }
+        if self.content_ui.vote_error == Some(poll.id) {
+            body = body
+                .child(self.hint(self.l("Deine Auswahl bleibt erhalten. Bitte erneut versuchen.")));
         }
         if poll.closed {
             body = body.child(self.hint(self.l("Umfrage beendet.")));
         } else if poll.hidden_results {
             body = body.child(self.hint(self.l("Ergebnisse werden nach Abschluss angezeigt.")));
         }
-        if poll.closed && !poll.hidden_results {
-            for voter in poll.details.as_slice() {
+        if !poll.hidden_results {
+            for voter in poll
+                .details
+                .as_slice()
+                .iter()
+                .take(if full { 100 } else { 4 })
+            {
                 if let Some(option) = poll
                     .options
                     .as_slice()
@@ -1332,16 +1567,48 @@ impl Desktop {
                 }
             }
         }
-        body.when(!poll.closed && poll.close.enabled(), |d| {
-            d.child(self.button(
-                ("close-poll", poll.id as usize),
-                "Umfrage beenden",
+        if !full {
+            body = body.child(self.button(
+                ("poll-details", poll.id as usize),
+                "Details und Ergebnisse",
                 ButtonStyle::Quiet,
-                !self.poll_submission_blocked(),
-                LocalAction::Content(Action::Command(ContentAction::ClosePoll(poll.id))),
+                true,
+                LocalAction::Content(Action::PollDetails(poll.id)),
                 cx,
-            ))
-        })
+            ));
+        }
+        if !poll.closed && poll.close.enabled() {
+            if self.content_ui.confirm_close == Some(poll.id) {
+                body = body
+                    .child(self.hint(self.l("Umfrage wirklich beenden?")))
+                    .child(self.button(
+                        ("poll-close-confirm", poll.id as usize),
+                        "Jetzt beenden",
+                        ButtonStyle::Secondary,
+                        !self.poll_submission_blocked(),
+                        LocalAction::Content(Action::ClosePoll(poll.id)),
+                        cx,
+                    ))
+                    .child(self.button(
+                        ("poll-close-cancel", poll.id as usize),
+                        "Abbrechen",
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Content(Action::CancelClosePoll),
+                        cx,
+                    ));
+            } else {
+                body = body.child(self.button(
+                    ("close-poll", poll.id as usize),
+                    "Umfrage beenden",
+                    ButtonStyle::Quiet,
+                    !self.poll_submission_blocked(),
+                    LocalAction::Content(Action::ConfirmClosePoll(poll.id)),
+                    cx,
+                ));
+            }
+        }
+        body
     }
 }
 

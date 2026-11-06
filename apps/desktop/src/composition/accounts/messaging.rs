@@ -1767,7 +1767,10 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             system_event: system_event(m),
             pin_notice: m.message.kind == protocol::MessageKind::System
                 && m.system.as_ref().is_some_and(|kind| {
-                    matches!(kind.as_str(), "message_pinned" | "message_unpinned")
+                    matches!(
+                        kind.as_str(),
+                        "message_pinned" | "message_unpinned" | "poll_voted" | "poll_closed"
+                    )
                 }),
             read_through: None,
             replyable: m.replyable == Some(true) && !deleted,
