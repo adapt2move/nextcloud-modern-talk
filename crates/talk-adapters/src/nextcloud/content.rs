@@ -457,8 +457,36 @@ impl NextcloudClient {
         }
         let token = api::models::RoomToken::parse(self.check_room(id)?)
             .map_err(|k| self.error(transport::kind(k)))?;
+        if command == PollCommand::ListDrafts {
+            if !caps.has("talk-polls-drafts") {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if !matches!(room.role, Role::Owner | Role::Moderator | Role::GuestModerator) {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            let drafts = self.transport.poll_drafts(c, &token).await?;
+            let mut result = Page::empty();
+            for draft in drafts {
+                let mut options = Page::empty();
+                for option in draft.options {
+                    options.try_push(Text::new(&option).map_err(|_| self.error(ErrorKind::TooLarge))?)
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+                result.try_push(PollDraftEntry {
+                    id: draft.id,
+                    draft: PollDraft {
+                        question: Text::new(&draft.question).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        options,
+                        multiple: draft.max_votes != 1,
+                        hidden_results: draft.hidden_results,
+                    },
+                    max_votes: draft.max_votes,
+                }).map_err(|_| self.error(ErrorKind::TooLarge))?;
+            }
+            return Ok(ContentResult::PollDrafts(result));
+        }
         let wire = match &command {
-            PollCommand::Capabilities => return Err(self.error(ErrorKind::Malformed)),
+            PollCommand::Capabilities | PollCommand::ListDrafts => return Err(self.error(ErrorKind::Malformed)),
             PollCommand::Read(n) => W::Read(*n),
             PollCommand::Create(draft) => {
                 self.allowed(create.allowed)?;

@@ -384,7 +384,6 @@ impl Transport {
     }
     // Draft operations stay behind this transport owner; the content owner applies
     // room capability and moderator checks before exposing them to presentation.
-    #[allow(dead_code)]
     pub(super) async fn poll_drafts(
         &mut self,
         c: &OperationContext,

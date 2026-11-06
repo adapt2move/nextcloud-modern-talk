@@ -108,6 +108,12 @@ pub struct PollDraft {
     pub hidden_results: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PollDraftEntry {
+    pub id: u64,
+    pub draft: PollDraft,
+    pub max_votes: u16,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {
     pub id: u16,
     pub label: Text<1000>,
@@ -136,6 +142,7 @@ pub struct Poll {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PollCommand {
     Capabilities,
+    ListDrafts,
     Read(u64),
     Create(PollDraft),
     Vote { poll: u64, options: Page<u16, 100> },
@@ -178,6 +185,7 @@ pub enum ContentResult {
     },
     /// An installation-relative file route constructed by the protocol owner; no credentials.
     CloudLink(Text<2048>),
+    PollDrafts(Page<PollDraftEntry, 100>),
     PollCapabilities(ActionAvailability),
     Poll(Box<Poll>),
 }
