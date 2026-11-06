@@ -2,7 +2,7 @@
 """Real macOS signing contract: two app versions, one disposable internal signer.
 
 Does not run the app, request OS permissions or change the default keychain.
-Only the newly generated fixture certificate can receive temporary user-level
+Only the newly generated fixture certificate can receive temporary runner-local
 code-signing trust; teardown removes it. This does not qualify TCC behavior.
 """
 import base64
@@ -52,7 +52,10 @@ def check():
             valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
             print("Fixture identity valid for code signing before trust: " + str(fingerprint in valid), flush=True)
             if fingerprint not in valid:
-                ci.run(["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign",
+                if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "macOS":
+                    raise ValueError("Temporary fixture trust requires an isolated macOS Actions runner")
+                print("Adding temporary code-signing-only trust for the disposable fixture", flush=True)
+                macos_runtime.run(["sudo", "-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "codeSign",
                     "-k", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"], str(backup / "certificate.pem")])
                 trusted = True
                 valid = ci.run(["security", "find-identity", "-v", "-p", "codesigning", os.environ["NMT_MACOS_SIGNING_KEYCHAIN"]])
@@ -82,12 +85,16 @@ def check():
             if requirements[0] != requirements[1]:
                 raise ValueError("The designated requirement changed between application versions")
         finally:
-            if trusted:
-                ci.run(["security", "remove-trusted-cert", str(backup / "certificate.pem")])
-            if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
-                ci.cleanup(Path(directory))
-            for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):
-                os.environ.pop(name, None)
+            try:
+                if trusted:
+                    macos_runtime.run(["sudo", "-n", "security", "remove-trusted-cert", "-d", str(backup / "certificate.pem")])
+            finally:
+                try:
+                    if directory := os.environ.get("NMT_MACOS_SIGNING_TEMP"):
+                        ci.cleanup(Path(directory))
+                finally:
+                    for name in ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "NMT_MACOS_SIGNING_TEMP"):
+                        os.environ.pop(name, None)
     print("Native internal-signing import, version continuity and wrong-signer rejection passed; no OS permission qualification.")
 
 
