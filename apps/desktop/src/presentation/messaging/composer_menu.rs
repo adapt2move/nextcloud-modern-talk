@@ -142,12 +142,16 @@ impl Desktop {
                     ),
                 ),
             },
-            message(
-                Choice::Schedule,
-                "Nachricht planen",
-                "clock",
-                MessageFeature::Schedules,
-            ),
+            Item {
+                choice: Choice::Schedule,
+                label: "Nachricht planen",
+                icon: "clock",
+                availability: if self.drafts.target(target.context).private_reply.is_some() {
+                    Availability::when(false, "Private Antworten können nicht geplant werden.")
+                } else {
+                    self.message_available(MessageFeature::Schedules)
+                },
+            },
             message(
                 Choice::Scheduled,
                 "Geplante Nachrichten",

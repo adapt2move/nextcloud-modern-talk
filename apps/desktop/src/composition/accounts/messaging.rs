@@ -1944,6 +1944,11 @@ fn options(
     context: ConversationRef,
     target: view::ComposeTarget,
 ) -> Result<wire::ComposeOptions, SubmitError> {
+    // Cross-room replies require the outbox's stable-key resolution. Never
+    // degrade to an unquoted direct message when that owner is unavailable.
+    if target.private_reply.is_some() {
+        return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+    }
     Ok(wire::ComposeOptions {
         reply_to: target
             .reply_to

@@ -825,6 +825,7 @@ impl Desktop {
         self.refresh_offline_notice(cx);
         self.refresh_action_toast(cx);
         self.refresh_content_ui(cx);
+        self.refresh_private_reply();
         self.refresh_creation(cx);
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
@@ -2627,6 +2628,14 @@ impl Render for Desktop {
         {
             focus.focus(window);
             self.navigation.reveal.request();
+        }
+        if let Some(context) = self.message_ui.private_reply_focus {
+            if self.snapshot.selected != Some(context) {
+                self.message_ui.private_reply_focus = None;
+            } else if self.composer_available() && self.overlay.is_none() {
+                self.message_ui.private_reply_focus = None;
+                self.composer.focus_handle(cx).focus(window);
+            }
         }
         if self.account_removal.focus_cancel && !incoming && !self.update_restart_pending {
             self.account_removal.focus_cancel = false;

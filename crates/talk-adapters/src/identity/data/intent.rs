@@ -152,6 +152,50 @@ impl OutboxRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_reply_survives_restart_and_cannot_be_combined_or_scheduled() {
+        let room = |id| NavigationRoomKey::new(&format!("r1:{id:032x}")).unwrap();
+        let private = OutboxPrivateReply {
+            source: room(2),
+            message: 17,
+            author: Text::new("Mara").unwrap(),
+            body: Text::new("A quoted message").unwrap(),
+        };
+        let options = OutboxOptions {
+            private_reply: Some(private.clone()),
+            ..Default::default()
+        };
+        let send = OutboxIntent::Send {
+            body: Text::new("Thanks!").unwrap(),
+            options: options.clone(),
+        };
+        let record = OutboxRecord::from_intent(OperationId::from_local(7), room(1), &send).unwrap();
+        assert_eq!(record.intent(), Ok(send));
+        let mixed = OutboxIntent::Send {
+            body: Text::new("Thanks!").unwrap(),
+            options: OutboxOptions {
+                reply_to: Some(3),
+                ..options.clone()
+            },
+        };
+        assert_eq!(
+            OutboxRecord::from_intent(OperationId::from_local(8), room(1), &mixed),
+            Err(DataError::InvalidInput)
+        );
+        let scheduled = OutboxIntent::Schedule {
+            body: Text::new("Thanks!").unwrap(),
+            timestamp: 123,
+            options,
+        };
+        assert_eq!(
+            OutboxRecord::from_intent(OperationId::from_local(9), room(1), &scheduled),
+            Err(DataError::InvalidInput)
+        );
+        let legacy: OutboxOptions =
+            serde_json::from_str(r#"{"reply_to":null,"thread":null,"silent":false}"#).unwrap();
+        assert!(legacy.private_reply.is_none());
+    }
     #[test]
     fn restart_roundtrip_and_worst_case_body_remain_bounded() {
         let intent = OutboxIntent::Send {

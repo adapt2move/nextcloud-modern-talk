@@ -6,6 +6,7 @@ pub(super) mod forward;
 mod history;
 mod menu;
 mod pins;
+mod private_reply;
 mod reactions;
 mod recovery;
 mod row;
@@ -42,6 +43,7 @@ pub(crate) enum Action {
     RetryHistory,
     RetryContext { request: RequestId, target: u128 },
     Reply(u128),
+    PrivateReply(u128),
     Edit(u128),
     CancelCompose,
     Command(MessageAction),
@@ -61,6 +63,8 @@ pub(crate) enum Action {
 pub(super) struct MessageUi {
     pub thread_load: Option<ThreadLoad>,
     thread_info_retry: Option<(ConversationRef, u128, Instant)>,
+    private_reply_pending: Option<private_reply::Pending>,
+    pub(super) private_reply_focus: Option<ConversationRef>,
     pub list: ListState,
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
@@ -242,6 +246,8 @@ impl MessageUi {
         Self {
             thread_load: None,
             thread_info_retry: None,
+            private_reply_pending: None,
+            private_reply_focus: None,
             list,
             arrival,
             geometry: Rc::new(RefCell::new(MessageGeometry::default())),
@@ -1329,6 +1335,7 @@ impl Desktop {
                     self.composer.focus_handle(cx).focus(window);
                 }
             }
+            Action::PrivateReply(id) => self.begin_private_reply(context, id, cx),
             Action::Edit(id) => {
                 if self.save_draft(cx)
                     && let Some(message) = self.snapshot.messages.as_slice().iter().find(|m| {
@@ -2316,6 +2323,12 @@ impl Desktop {
                     .reply_to
                     .map(|id| scoped_id("compose-mode", context, 2, id))
             })
+            .or_else(|| {
+                target
+                    .private_reply
+                    .as_ref()
+                    .map(|private| scoped_id("compose-mode", context, 3, private.message))
+            })
     }
     pub(super) fn composer_context(&self, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
         // The composer owns row spacing; absent context must not leave empty flex items.
@@ -2327,7 +2340,9 @@ impl Desktop {
         // Explicit reply/edit context and silent sending are the only persistent
         // composer states; each is one slim strip with its own dismissal.
         if let Some(motion_id) = self.compose_motion_id(context) {
-            let strip = if self.message_ui.editing.is_none()
+            let strip = if let Some(private) = target.private_reply.as_ref() {
+                self.private_reply_preview(context, private, cx)
+            } else if self.message_ui.editing.is_none()
                 && target.thread.is_none()
                 && let Some(reply) = target.reply_to
             {
@@ -2678,7 +2693,10 @@ fn message_actions_allowed(message: &MessageView) -> bool {
         )
 }
 fn may_replace_composer(action: &Action, editing: Option<u128>, pending_edit: bool) -> bool {
-    !matches!(action, Action::Reply(_) | Action::Edit(_)) || (editing.is_none() && !pending_edit)
+    !matches!(
+        action,
+        Action::Reply(_) | Action::PrivateReply(_) | Action::Edit(_)
+    ) || (editing.is_none() && !pending_edit)
 }
 
 fn reply_allowed(
