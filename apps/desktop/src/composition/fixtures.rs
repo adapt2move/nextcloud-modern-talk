@@ -198,7 +198,7 @@ fn message(
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     if scenario == Some("thread-list") {
-        let mut state = snapshot(Some("chat-edit"));
+        let mut state = snapshot(Some("thread"));
         if let Some(context) = state.selected {
             state.threads.account = Some(context.account);
             state.threads.support = talk_core::ui::presentation::FeatureSupport::Supported;
@@ -212,7 +212,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     .find(|message| message.reply_count > 0)
                     .map_or(3, |message| message.local_id),
                 title: text("Design review"),
-                replies: 3,
+                replies: 2,
             }]);
         }
         return state;
@@ -361,12 +361,21 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     if scenario == Some("thread") {
         let mut state = snapshot(Some("chat-edit"));
-        let root = state
-            .messages
-            .as_slice()
-            .iter()
-            .find(|message| message.reply_count > 0)
-            .map(|message| message.local_id);
+        state.messages = page(
+            state
+                .messages
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut message| {
+                    message.reply_count = if message.local_id == 1 { 2 } else { 0 };
+                    if message.local_id == 1 {
+                        message.metadata.thread = Some(1);
+                    }
+                    message
+                }),
+        );
+        let root = Some(1);
         if let (Some(root), Some(panel)) = (root, state.message_panel.as_mut()) {
             panel.thread_root = Some(root);
             let mut reply = message(
@@ -378,7 +387,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 false,
             );
             reply.metadata.thread = Some(root);
-            panel.thread_messages = page([reply]);
+            reply.metadata.author_key = Some(text("users:mara"));
+            let mut second = message(
+                41,
+                "Alex Sommer",
+                "AS",
+                "10:02",
+                "I'll update the final details.",
+                false,
+            );
+            second.metadata.thread = Some(root);
+            second.metadata.author_key = Some(text("users:alex"));
+            panel.thread_messages = page([reply, second]);
         }
         return state;
     }
