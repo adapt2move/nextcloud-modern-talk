@@ -71,6 +71,9 @@ def check(state):
             attendee = bob[0]["attendeeId"]
             lab.request("lab_alice", "POST", call_path + "/ring/" + str(attendee),
                         body={}, name="call-activity-ring-absent")
+            # Establish the authenticated browser session before binding it
+            # to a room, as the ordinary account owner does during inspection.
+            lab.request("lab_bob", "GET", "/ocs/v2.php/cloud/user", name="call-activity-inspect-member")
             result = lab.request("lab_bob", "POST", room_path + "/participants/active",
                                  body={}, name="call-activity-join-member-room")
             sessions["lab_bob"] = result["sessionId"]
