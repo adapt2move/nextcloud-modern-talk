@@ -92,20 +92,31 @@ impl NextcloudClient {
                 ))
             }
             ContentCommand::ListFiles { .. }
+            | ContentCommand::ListFilesPage { .. }
             | ContentCommand::SearchFiles { .. }
             | ContentCommand::FavoriteFiles => {
-                let entries = match command {
+                let (entries, pagination, folder_page) = match command {
                     ContentCommand::ListFiles { path } => {
                         let path = api::files::DirectoryPath::parse(path.as_str())
                             .map_err(|kind| self.error(transport::kind(kind)))?;
-                        self.transport.list_files(c, path).await?
+                        (self.transport.list_files(c, path).await?, None, false)
                     }
-                    ContentCommand::SearchFiles { query } => {
+                    ContentCommand::ListFilesPage { path, offset } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        let page = self.transport.list_files_page(c, path, offset).await?;
+                        (page.entries, page.pagination, true)
+                    }
+                    ContentCommand::SearchFiles { query } => (
                         self.transport
                             .search_files(c, query.as_ref().map(Text::as_str))
-                            .await?
+                            .await?,
+                        None,
+                        false,
+                    ),
+                    ContentCommand::FavoriteFiles => {
+                        (self.transport.favorite_files(c).await?, None, false)
                     }
-                    ContentCommand::FavoriteFiles => self.transport.favorite_files(c).await?,
                     _ => unreachable!(),
                 };
                 let mut files = Page::empty();
@@ -140,7 +151,11 @@ impl NextcloudClient {
                         })
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
-                Ok(ContentResult::Files(files))
+                if folder_page {
+                    Ok(ContentResult::FilePage { files, pagination })
+                } else {
+                    Ok(ContentResult::Files(files))
+                }
             }
             ContentCommand::Video {
                 message,

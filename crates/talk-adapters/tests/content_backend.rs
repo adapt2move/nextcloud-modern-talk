@@ -162,6 +162,43 @@ async fn released_server_file_listing_and_existing_share() {
             .iter()
             .any(|entry| entry.path.as_str() == "/nmt-files-fixture.txt")
     );
+    let mut listed = std::collections::HashSet::new();
+    for offset in [0, 40, 80] {
+        let R::FilePage { files, pagination } = content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::ListFilesPage {
+                path: text("/nmt-files-pages"),
+                offset,
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("folder page reply");
+        };
+        assert_eq!(pagination, Some((offset, 86)));
+        assert_eq!(
+            files.as_slice().len(),
+            if offset == 0 {
+                39
+            } else if offset == 40 {
+                40
+            } else {
+                6
+            }
+        );
+        for file in files.as_slice() {
+            assert!(!file.directory);
+            assert!(file.path.as_str().starts_with("/nmt-files-pages/page-"));
+            assert!(
+                listed.insert(file.path.as_str().to_owned()),
+                "DAV pages must not overlap"
+            );
+        }
+    }
+    assert_eq!(listed.len(), 85);
     assert!(matches!(
         content(
             &mut client,

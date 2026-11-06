@@ -202,6 +202,9 @@ impl Accounts {
         }
         match action {
             A::ListFiles(path) => self.list_cloud_files(request, account, path),
+            A::ListFilesPage { path, offset } => {
+                self.page_cloud_files(request, account, path, offset)
+            }
             A::RecentFiles => self.query_cloud_files(request, account, browser::Query::Recent),
             A::FavoriteFiles => self.query_cloud_files(request, account, browser::Query::Favorites),
             A::SearchFiles(query) => {

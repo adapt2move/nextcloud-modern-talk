@@ -749,6 +749,25 @@ impl Desktop {
                 self.submit_content(ContentAction::ListFiles(path));
             }
             Action::BrowserPage(delta) => {
+                if let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && let Some((offset, total)) = browser.pagination
+                {
+                    let next = if delta < 0 {
+                        offset.saturating_sub(40)
+                    } else {
+                        offset.saturating_add(40)
+                    };
+                    if next != offset && next < total && !browser.loading {
+                        let path = browser.path.clone();
+                        self.content_ui.browser_page = 0;
+                        self.content_ui.browser_cursor = None;
+                        self.content_ui.browser_selection.clear();
+                        self.content_ui.browser_anchor = None;
+                        self.submit_content(ContentAction::ListFilesPage { path, offset: next });
+                    }
+                    cx.notify();
+                    return;
+                }
                 let count = self
                     .snapshot
                     .content_panel

@@ -159,6 +159,12 @@ pub enum ContentCommand {
     ListFiles {
         path: Text<16384>,
     },
+    /// A DAV page offset counts the directory itself as the first result.
+    /// The transport, not this value, owns the server's opaque page token.
+    ListFilesPage {
+        path: Text<16384>,
+        offset: u64,
+    },
     SearchFiles {
         query: Option<Text<256>>,
     },
@@ -191,6 +197,10 @@ pub enum ContentCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentResult {
     Files(Page<CloudFile, 1000>),
+    FilePage {
+        files: Page<CloudFile, 1000>,
+        pagination: Option<(u64, u64)>,
+    },
     CloudFileSaved(u64),
     SelfProfile {
         name: Option<Text<256>>,

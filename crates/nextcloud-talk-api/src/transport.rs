@@ -21,6 +21,7 @@ use zeroize::Zeroizing;
 use crate::json;
 mod content;
 mod files;
+pub(crate) use files::DavPageRequest;
 mod meeting;
 pub(crate) use meeting::MeetingLifetime;
 

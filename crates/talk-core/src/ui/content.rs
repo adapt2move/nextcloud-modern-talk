@@ -154,6 +154,8 @@ pub struct FileBrowserView {
     pub section: FileSection,
     pub sort: FileSort,
     pub entries: Page<CloudFileView, 1000>,
+    /// DAV page offset and total, including the folder itself. No server token.
+    pub pagination: Option<(u64, u64)>,
     pub loading: bool,
     pub offline: bool,
     pub error: Option<UnavailableReason>,
@@ -223,6 +225,10 @@ impl Default for ContentPanel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
     ListFiles(Text<16384>),
+    ListFilesPage {
+        path: Text<16384>,
+        offset: u64,
+    },
     RecentFiles,
     FavoriteFiles,
     SearchFiles(Text<256>),

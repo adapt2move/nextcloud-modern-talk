@@ -17,6 +17,7 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
         path: text("/Plans"),
         section: talk_core::ui::content::FileSection::All,
         sort: talk_core::ui::content::FileSort::Name,
+        pagination: None,
         entries: page([talk_core::ui::content::CloudFileView {
             name: text("plan.pdf"),
             path: text("/Plans/plan.pdf"),
@@ -75,6 +76,7 @@ fn cloud_multi_selection_rejects_stale_entries_without_partial_staging() {
         path: text("/"),
         section: talk_core::ui::content::FileSection::All,
         sort: talk_core::ui::content::FileSort::Name,
+        pagination: None,
         entries: page([talk_core::ui::content::CloudFileView {
             name: text("one"),
             path: text("/one"),

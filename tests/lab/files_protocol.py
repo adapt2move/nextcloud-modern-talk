@@ -36,14 +36,27 @@ async def run(state, output):
         env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), RUST_BACKTRACE="0")
         env["PATH"] = "/root/.cargo/bin:" + env.get("PATH", "")
         file_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-fixture.txt"
+        folder_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-pages"
         auth = base64.b64encode(("lab_alice:" + lab.passwords["lab_alice"]).encode()).decode()
         headers = {"Authorization": "Basic " + auth, "Host": lab.http_host, "If-None-Match": "*"}
-        with lab.clients["lab_alice"].open(urllib.request.Request(file_url, data=b"Fictional file browser fixture\n", headers=headers, method="PUT"), timeout=20) as response:
-            if response.status != 201:
-                raise RuntimeError("Could not create the disposable DAV fixture")
         target = Path(output)
-        target.mkdir(mode=0o700, parents=True, exist_ok=False)
+        file_created = False
+        folder_created = False
         try:
+            target.mkdir(mode=0o700, parents=True, exist_ok=False)
+            with lab.clients["lab_alice"].open(urllib.request.Request(file_url, data=b"Fictional file browser fixture\n", headers=headers, method="PUT"), timeout=20) as response:
+                if response.status != 201:
+                    raise RuntimeError("Could not create the disposable DAV fixture")
+                file_created = True
+            with lab.clients["lab_alice"].open(urllib.request.Request(folder_url, headers=headers, method="MKCOL"), timeout=20) as response:
+                if response.status != 201:
+                    raise RuntimeError("Could not create the disposable DAV folder")
+                folder_created = True
+            for number in range(85):
+                url = f"{folder_url}/page-{number:03}.txt"
+                with lab.clients["lab_alice"].open(urllib.request.Request(url, data=b"fixture", headers=headers, method="PUT"), timeout=20) as response:
+                    if response.status != 201:
+                        raise RuntimeError("Could not create a disposable DAV page item")
             async with Relay(host, client.port):
                 with (target / "backend.log").open("w") as log:
                     process = await asyncio.create_subprocess_exec(
@@ -60,12 +73,22 @@ async def run(state, output):
             print(json.dumps({"profile": record["development"]["profile"], "exit_code": code}), flush=True)
             return code
         finally:
-            shutil.rmtree(directory)
-            with lab.clients["lab_alice"].open(urllib.request.Request(file_url, headers={"Authorization": "Basic " + auth, "Host": lab.http_host}, method="DELETE"), timeout=20) as response:
-                if response.status not in (200, 204):
-                    raise RuntimeError("Could not delete the disposable DAV fixture")
-            lab.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"],
-                        expected=(200, 404), name="files-cleanup-room")
+            shutil.rmtree(directory, ignore_errors=True)
+            cleanup_headers = {"Authorization": "Basic " + auth, "Host": lab.http_host}
+            try:
+                if folder_created:
+                    with lab.clients["lab_alice"].open(urllib.request.Request(folder_url, headers=cleanup_headers, method="DELETE"), timeout=20) as response:
+                        if response.status not in (200, 204):
+                            raise RuntimeError("Could not delete the disposable DAV folder")
+            finally:
+                try:
+                    if file_created:
+                        with lab.clients["lab_alice"].open(urllib.request.Request(file_url, headers=cleanup_headers, method="DELETE"), timeout=20) as response:
+                            if response.status not in (200, 204):
+                                raise RuntimeError("Could not delete the disposable DAV fixture")
+                finally:
+                    lab.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"],
+                                expected=(200, 404), name="files-cleanup-room")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,21 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 pub const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 1000;
+/// DAV pagination counts the folder itself as the first result.
+pub const DIRECTORY_PAGE_SIZE: u64 = 40;
+
+pub(crate) struct DirectoryCursor {
+    path: DirectoryPath,
+    token: String,
+    total: u64,
+    saved: std::time::Instant,
+}
+pub struct DirectoryPage {
+    pub entries: Vec<DirectoryEntry>,
+    /// The server's raw offset and total include the folder itself.
+    /// `None` means that the server did not advertise DAV pagination.
+    pub pagination: Option<(u64, u64)>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryEntry {
@@ -222,6 +237,86 @@ pub struct ShareOptions {
     pub silent: bool,
 }
 impl Client {
+    /// Read one server page. The short-lived opaque token is owned by this
+    /// authenticated client and is never exposed to the presentation layer.
+    pub async fn list_directory_page(
+        &mut self,
+        c: &OperationContext,
+        path: &DirectoryPath,
+        offset: u64,
+    ) -> Result<DirectoryPage, Error> {
+        self.validate(c)?;
+        let token = if offset == 0 {
+            self.directory_cursor = None;
+            None
+        } else {
+            let cursor = self
+                .directory_cursor
+                .as_ref()
+                .filter(|cursor| {
+                    cursor.path == *path
+                        && offset < cursor.total
+                        && offset % DIRECTORY_PAGE_SIZE == 0
+                        && cursor.saved.elapsed() < std::time::Duration::from_secs(120)
+                })
+                .ok_or_else(|| self.error(ErrorKind::Conflict))?;
+            Some(cursor.token.clone())
+        };
+        let (base, body, response) = self
+            .transport
+            .directory_listing_page(c, path, crate::transport::DavPageRequest { offset, token })
+            .await?;
+        let mut entries = parse_listing(&body, &base, false).map_err(|kind| self.error(kind))?;
+        if path.as_str() != "/" {
+            for entry in &mut entries {
+                entry.path.insert_str(0, path.as_str());
+                FilePath::parse(&entry.path).map_err(|kind| self.error(kind))?;
+            }
+        }
+        let pagination = match response {
+            Some(response) if offset == 0 => {
+                let total = response
+                    .total
+                    .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+                let token = response
+                    .token
+                    .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+                if entries.len() as u64 + 1 > total || entries.len() as u64 >= DIRECTORY_PAGE_SIZE {
+                    return Err(self.error(ErrorKind::Malformed));
+                }
+                self.directory_cursor = Some(DirectoryCursor {
+                    path: path.clone(),
+                    token,
+                    total,
+                    saved: std::time::Instant::now(),
+                });
+                Some((offset, total))
+            }
+            Some(response) => {
+                let cursor = self
+                    .directory_cursor
+                    .as_ref()
+                    .ok_or_else(|| self.error(ErrorKind::Conflict))?;
+                if response.total.is_some_and(|total| total != cursor.total)
+                    || response
+                        .token
+                        .as_ref()
+                        .is_some_and(|token| *token != cursor.token)
+                    || entries.len() as u64 > DIRECTORY_PAGE_SIZE
+                    || offset.saturating_add(entries.len() as u64) > cursor.total
+                {
+                    return Err(self.error(ErrorKind::Malformed));
+                }
+                Some((offset, cursor.total))
+            }
+            None if offset == 0 => None,
+            None => return Err(self.error(ErrorKind::Conflict)),
+        };
+        Ok(DirectoryPage {
+            entries,
+            pagination,
+        })
+    }
     /// Search is bounded by both server result count and response bytes.
     pub async fn search_files(
         &mut self,

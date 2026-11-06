@@ -321,6 +321,17 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) async fn list_files_page(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+        offset: u64,
+    ) -> Result<api::files::DirectoryPage, PortError> {
+        self.api
+            .list_directory_page(&context(c), &path, offset)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn favorite_files(
         &mut self,
         c: &OperationContext,

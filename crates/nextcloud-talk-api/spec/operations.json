@@ -492,8 +492,8 @@
       "method": "PROPFIND",
       "path": "/remote.php/dav/files/{user}/{path}",
       "status": "partial",
-      "api": "Client::list_directory",
-      "scope": "Depth-one listings bounded by response bytes and entry count; oversized directories fail explicitly. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html"
+      "api": "Client::list_directory / Client::list_directory_page",
+      "scope": "Depth-one listings support the NC31+ DAV pagination headers, with a short-lived account-owned token and bounded page size. Servers without pagination fall back to bounded complete listings. Sources: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html and https://docs.nextcloud.com/server/stable/developer_manual/release_notes/previous/upgrade_to_31.html"
     },
     {
       "operation_id": "files-sharing-share-to-room",

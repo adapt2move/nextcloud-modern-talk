@@ -448,6 +448,12 @@ impl Desktop {
                     cx,
                 )),
         );
+        if browser
+            .pagination
+            .is_some_and(|(_, total)| total > PAGE_SIZE as u64)
+        {
+            body = body.child(self.hint(self.l("Sortierung gilt für diese Seite.")));
+        }
         if entries.is_empty() && !browser.loading && browser.error.is_none() {
             body = body.child(self.hint(self.l("Dieser Ordner ist leer.")));
         }
@@ -673,7 +679,41 @@ impl Desktop {
                     ))),
             );
         }
-        if entries.len() > PAGE_SIZE {
+        if let Some((offset, total)) = browser.pagination {
+            if total > PAGE_SIZE as u64 {
+                let start = if offset == 0 { 1 } else { offset };
+                let end = start.saturating_add(entries.len() as u64).saturating_sub(1);
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(self.button(
+                            "cloud-prev",
+                            "Zurück",
+                            ButtonStyle::Quiet,
+                            offset > 0 && !browser.loading,
+                            LocalAction::Content(Action::BrowserPage(-1)),
+                            cx,
+                        ))
+                        .child(div().text_color(self.theme.muted).child(format!(
+                            "{}–{} / {}",
+                            start,
+                            end,
+                            total.saturating_sub(1)
+                        )))
+                        .child(self.button(
+                            "cloud-next",
+                            "Weiter",
+                            ButtonStyle::Quiet,
+                            offset.saturating_add(PAGE_SIZE as u64) < total && !browser.loading,
+                            LocalAction::Content(Action::BrowserPage(1)),
+                            cx,
+                        )),
+                );
+            }
+        } else if entries.len() > PAGE_SIZE {
             body = body.child(
                 div()
                     .flex()

@@ -235,6 +235,10 @@ pub(super) fn action(
             cloud_files(snapshot, path.as_str());
             Ok(())
         }
+        ContentAction::ListFilesPage { path, .. } => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
         ContentAction::RecentFiles
         | ContentAction::FavoriteFiles
         | ContentAction::SearchFiles(_) => {
@@ -396,6 +400,7 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
         path: text(path),
         section: talk_core::ui::content::FileSection::All,
         sort: talk_core::ui::content::FileSort::Name,
+        pagination: None,
         loading: false,
         offline: false,
         error: None,

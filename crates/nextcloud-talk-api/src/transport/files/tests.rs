@@ -53,6 +53,30 @@ async fn client_lists_root_and_projects_only_direct_children() {
 }
 
 #[tokio::test]
+async fn directory_page_falls_back_only_for_the_initial_request() {
+    let body = "<d:multistatus xmlns:d=\"DAV:\"/>";
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let path = crate::files::DirectoryPath::parse("/").unwrap();
+    let first = owner
+        .list_directory_page(&context(&runtime), &path, 0)
+        .await
+        .unwrap();
+    assert!(first.entries.is_empty());
+    assert!(first.pagination.is_none());
+    let request = &server.requests()[0].to_ascii_lowercase();
+    assert!(request.contains("x-nc-paginate: true\r\n"));
+    assert!(request.contains("x-nc-paginate-count: 40\r\n"));
+    let error = owner
+        .list_directory_page(&context(&runtime), &path, 40)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
 async fn directory_listing_rejects_non_multistatus_success() {
     let server = Server::start(vec![(200, "not a listing".into(), Duration::ZERO)]).await;
     let (mut owner, runtime) = client(&server);

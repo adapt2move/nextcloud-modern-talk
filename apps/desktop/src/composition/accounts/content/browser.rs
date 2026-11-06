@@ -6,7 +6,7 @@ const CACHE_LIFETIME: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum Query {
-    Folder(Text<16384>),
+    Folder(Text<16384>, u64),
     Recent,
     Favorites,
     Search(Text<256>),
@@ -14,7 +14,7 @@ pub(super) enum Query {
 impl Query {
     fn section(&self) -> view::FileSection {
         match self {
-            Self::Folder(_) => view::FileSection::All,
+            Self::Folder(_, _) => view::FileSection::All,
             Self::Recent => view::FileSection::Recent,
             Self::Favorites => view::FileSection::Favorites,
             Self::Search(_) => view::FileSection::Search,
@@ -22,7 +22,10 @@ impl Query {
     }
     fn command(&self) -> wire::ContentCommand {
         match self {
-            Self::Folder(path) => wire::ContentCommand::ListFiles { path: path.clone() },
+            Self::Folder(path, offset) => wire::ContentCommand::ListFilesPage {
+                path: path.clone(),
+                offset: *offset,
+            },
             Self::Recent => wire::ContentCommand::SearchFiles { query: None },
             Self::Favorites => wire::ContentCommand::FavoriteFiles,
             Self::Search(term) => wire::ContentCommand::SearchFiles {
@@ -32,7 +35,7 @@ impl Query {
     }
     fn path(&self) -> Text<16384> {
         match self {
-            Self::Folder(path) => path.clone(),
+            Self::Folder(path, _) => path.clone(),
             _ => text("/"),
         }
     }
@@ -59,6 +62,7 @@ struct Cached {
     account: AccountScope,
     query: Query,
     entries: Page<view::CloudFileView, 1000>,
+    pagination: Option<(u64, u64)>,
     saved: Instant,
 }
 struct Retry {
@@ -322,7 +326,31 @@ impl Accounts {
         account: AccountScope,
         path: Text<16384>,
     ) -> Result<(), SubmitError> {
-        self.query_cloud_files(request, account, Query::Folder(path))
+        self.query_cloud_files(request, account, Query::Folder(path, 0))
+    }
+    pub(super) fn page_cloud_files(
+        &mut self,
+        request: RequestId,
+        account: AccountScope,
+        path: Text<16384>,
+        offset: u64,
+    ) -> Result<(), SubmitError> {
+        let current = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| {
+                browser.account == account && browser.path == path && !browser.loading
+            })
+            .and_then(|browser| browser.pagination)
+            .ok_or(SubmitError::StaleScope)?;
+        if offset != current.0.saturating_sub(40) && offset != current.0.saturating_add(40)
+            || offset >= current.1
+        {
+            return Err(SubmitError::StaleScope);
+        }
+        self.query_cloud_files(request, account, Query::Folder(path, offset))
     }
     pub(super) fn query_cloud_files(
         &mut self,
@@ -358,7 +386,7 @@ impl Accounts {
             .map(|item| {
                 let mut entries = item.entries.as_slice().to_vec();
                 sort_entries(&mut entries, sort);
-                page(entries)
+                (page(entries), item.pagination)
             });
         self.content_owner.browser.current = Some((account, request, query.clone()));
         self.snapshot.content_panel.file_browser = Some(view::FileBrowserView {
@@ -366,7 +394,10 @@ impl Accounts {
             path: query.path(),
             section: query.section(),
             sort,
-            entries: cached.clone().unwrap_or_else(Page::empty),
+            entries: cached
+                .as_ref()
+                .map_or_else(Page::empty, |(entries, _)| entries.clone()),
+            pagination: cached.as_ref().and_then(|(_, pagination)| *pagination),
             loading: true,
             offline: false,
             error: None,
@@ -461,11 +492,24 @@ impl Accounts {
             return;
         };
         browser.loading = false;
-        match result {
+        let result = match result {
+            Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                operation: actual,
+                result: wire::ContentResult::FilePage { files, pagination },
+            })) if actual == operation && matches!(query, Query::Folder(_, _)) => {
+                Ok((files, pagination))
+            }
             Ok(RuntimeReply::Protocol(ProtocolReply::Content {
                 operation: actual,
                 result: wire::ContentResult::Files(files),
-            })) if actual == operation => {
+            })) if actual == operation && !matches!(query, Query::Folder(_, _)) => {
+                Ok((files, None))
+            }
+            Err(error) => Err(error),
+            _ => Err(IdentityError::Request(ErrorKind::Malformed)),
+        };
+        match result {
+            Ok((files, pagination)) => {
                 let mut entries: Vec<_> = files
                     .as_slice()
                     .iter()
@@ -482,6 +526,7 @@ impl Accounts {
                     .collect();
                 sort_entries(&mut entries, browser.sort);
                 browser.entries = page(entries);
+                browser.pagination = pagination;
                 browser.offline = false;
                 browser.error = None;
                 self.content_owner
@@ -495,14 +540,11 @@ impl Accounts {
                     account,
                     query,
                     entries: browser.entries.clone(),
+                    pagination,
                     saved: Instant::now(),
                 });
             }
-            other => {
-                let error = match other {
-                    Err(error) => error,
-                    Ok(_) => IdentityError::Request(ErrorKind::Malformed),
-                };
+            Err(error) => {
                 let transient = matches!(
                     error,
                     IdentityError::Request(
@@ -643,17 +685,19 @@ mod tests {
     fn closing_retires_query_authority_without_reusing_an_old_completion() {
         let mut owner = Owner::default();
         let operation = OperationId::from_local(7);
-        owner.jobs.push((operation, Query::Folder(text("/old")), 0));
+        owner
+            .jobs
+            .push((operation, Query::Folder(text("/old"), 0), 0));
         owner.current = Some((
             crate::composition::fixtures::scope(),
             RequestId(2),
-            Query::Folder(text("/old")),
+            Query::Folder(text("/old"), 0),
         ));
         owner.close();
         assert!(owner.current.is_none());
         assert_eq!(
             owner.take_job(operation),
-            Some((Query::Folder(text("/old")), 0))
+            Some((Query::Folder(text("/old"), 0), 0))
         );
         assert!(owner.take_job(operation).is_none());
     }
