@@ -1575,6 +1575,35 @@ impl NextcloudClient {
             },
         })
     }
+    pub(super) async fn subscribed_threads(
+        &mut self,
+        context: &OperationContext,
+        offset: u32,
+    ) -> Result<Page<Thread, 50>, PortError> {
+        let reply = self
+            .transport
+            .api_request(context, api::Request::SubscribedThreads { offset })
+            .await?;
+        let api::Reply::Chat(WireResponse::Threads(threads)) = reply else {
+            return Err(self.error(ErrorKind::Malformed));
+        };
+        let mut result = Page::empty();
+        for thread in threads {
+            // A server token alone does not grant room authority. Only use bindings
+            // established by the account's conversation owner.
+            let id = self
+                .rooms
+                .iter()
+                .find(|room| room.token == thread.token)
+                .map(|room| room.id)
+                .ok_or_else(|| self.error(ErrorKind::NotFound))?;
+            result
+                .try_push(self.thread(thread, id)?)
+                .map_err(|_| self.error(ErrorKind::TooLarge))?;
+        }
+        Ok(result)
+    }
+
     fn thread(&self, t: api::chat::Thread, id: ConversationId) -> Result<Thread, PortError> {
         Ok(Thread {
             root: MessageId {

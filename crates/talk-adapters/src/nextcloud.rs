@@ -783,6 +783,14 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::SubscribedThreads { offset } => {
+                if !caps.has("threads") {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                self.subscribed_threads(context, offset)
+                    .await
+                    .map(ProtocolReply::SubscribedThreads)
+            }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,
                 result: self.content(context, operation, command, &caps).await?,
