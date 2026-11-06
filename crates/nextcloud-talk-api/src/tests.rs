@@ -615,6 +615,40 @@ async fn ringing_requires_fresh_call_permission_and_absent_local_user() {
     }
 }
 #[tokio::test]
+async fn end_for_everyone_requires_fresh_moderator_and_current_session() {
+    for case in ["allowed", "member", "breakout", "caller-left"] {
+        let mut replies = join_replies();
+        replies.push(reply(
+            json!({"version":{"major":35},"capabilities":{"spreed":{
+                "features":["conversation-v4"],"config":{"call":{"enabled":true}}
+            }}}),
+        ));
+        replies.push(reply(
+            json!({"id":7,"token":"testroom","displayName":"Fixture","readOnly":0,
+            "hasCall":true,"participantType":if case == "member" {3} else {2},
+            "objectType":if case == "breakout" {"room"} else {""}}),
+        ));
+        replies.push(reply(if case == "caller-left" {
+            json!([])
+        } else {
+            json!([{"sessionId":"own-session"}])
+        }));
+        replies.push(reply(json!([])));
+        let server = Server::start(replies).await;
+        let (mut client, runtime) = client(&server);
+        let handle = join(&mut client, &runtime).await;
+        let (_reader, mut writer, _stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+        let mut moderation = writer.take_moderation_writer().unwrap();
+        let result = moderation.end_for_everyone(&context(&runtime)).await;
+        let sent = server.seen.lock().unwrap().iter().any(|request| {
+            request.starts_with("DELETE /ocs/v2.php/apps/spreed/api/v4/call/testroom?")
+                && request.contains("all=true")
+        });
+        assert_eq!(result.is_ok(), case == "allowed", "{case}");
+        assert_eq!(sent, case == "allowed", "{case}");
+    }
+}
+#[tokio::test]
 async fn call_handle_cannot_cross_clients_even_with_equal_caller_keys() {
     let server_a = Server::start(join_replies()).await;
     let server_b = Server::start(join_replies()).await;
