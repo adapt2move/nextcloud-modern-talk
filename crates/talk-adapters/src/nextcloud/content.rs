@@ -72,6 +72,41 @@ impl NextcloudClient {
     ) -> Result<ContentResult, PortError> {
         let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
+            ContentCommand::ListFiles { path } => {
+                let path = api::files::DirectoryPath::parse(path.as_str())
+                    .map_err(|kind| self.error(transport::kind(kind)))?;
+                let entries = self.transport.list_files(c, path).await?;
+                let mut files = Page::empty();
+                for entry in entries {
+                    files
+                        .try_push(CloudFile {
+                            name: Text::new(&entry.name)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            directory: entry.is_directory,
+                            size: entry.size,
+                            modified: entry
+                                .modified
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            mime: entry
+                                .content_type
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            file_id: entry
+                                .file_id
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        })
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+                Ok(ContentResult::Files(files))
+            }
             ContentCommand::Video {
                 message,
                 placeholder,

@@ -34,6 +34,7 @@ impl Desktop {
         let (title, width) = match overlay {
             Overlay::RoomInfo | Overlay::Participants => ("Gesprächsdetails", 448.),
             Overlay::Files => ("Geteilte Inhalte", 700.),
+            Overlay::CloudFiles => ("NextCloud-Dateien", 760.),
             Overlay::Thread => ("Antworten", 400.),
             Overlay::CallParticipants => ("Im Anruf", 400.),
             Overlay::CallChat => ("Chat im Anruf", 440.),
@@ -48,6 +49,7 @@ impl Desktop {
         };
         let body = match overlay {
             Overlay::Files => self.shared_contents(cx),
+            Overlay::CloudFiles => self.cloud_files_body(cx),
             Overlay::RoomInfo | Overlay::Participants => self.details_body(overlay, cx),
             Overlay::CallParticipants => {
                 let mut body = div().flex().flex_col().gap_3();

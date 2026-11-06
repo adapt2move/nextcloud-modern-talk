@@ -1,5 +1,6 @@
 //! Native content surfaces over scoped observations and composition-owned images.
 //! Views never resolve a URL, decode remote bytes, or report transfer success.
+mod browser;
 pub(in crate::presentation) mod gallery;
 pub(in crate::presentation) mod groups;
 mod window;
@@ -27,6 +28,9 @@ const MAX_POLL_OPTIONS: usize = 8;
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    OpenCloudBrowser,
+    BrowseDirectory(Text<16384>),
+    BrowserPage(i8),
     Menu,
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
@@ -48,6 +52,7 @@ pub(super) struct ContentUi {
     requested: Vec<AssetTarget>,
     request: u64,
     pub menu: bool,
+    browser_page: usize,
     pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
     gallery: Vec<AttachmentRef>,
@@ -78,6 +83,7 @@ impl ContentUi {
             requested: Vec::new(),
             request: 0,
             menu: false,
+            browser_page: 0,
             composer_menu: composer_menu::Menu::new(cx),
             preview: None,
             gallery: Vec::new(),
@@ -597,6 +603,30 @@ impl Desktop {
             return;
         }
         match action {
+            Action::OpenCloudBrowser => {
+                self.content_ui.return_overlay = self.overlay;
+                self.content_ui.browser_page = 0;
+                self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
+                self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
+            }
+            Action::BrowseDirectory(path) => {
+                self.content_ui.browser_page = 0;
+                self.submit_content(ContentAction::ListFiles(path));
+            }
+            Action::BrowserPage(delta) => {
+                let count = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map_or(0, |b| b.entries.as_slice().len());
+                let last = count.saturating_sub(1) / browser::PAGE_SIZE;
+                self.content_ui.browser_page = if delta < 0 {
+                    self.content_ui.browser_page.saturating_sub(1)
+                } else {
+                    (self.content_ui.browser_page + 1).min(last)
+                };
+            }
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {
                 self.choose_composer_menu(target, choice, window, cx);
@@ -658,7 +688,7 @@ impl Desktop {
     pub(super) fn close_content_overlay(&mut self) -> bool {
         if !matches!(
             self.overlay,
-            Some(Overlay::ContentPreview | Overlay::CreatePoll)
+            Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
         ) {
             return false;
         }
@@ -669,6 +699,9 @@ impl Desktop {
                 self.submit_content(ContentAction::ClosePreview);
             }
             self.content_ui.preview = None;
+        }
+        if self.overlay == Some(Overlay::CloudFiles) {
+            self.submit_content(ContentAction::CloseFileBrowser);
         }
         self.overlay = self.content_ui.return_overlay.take();
         self.pending_modal_focus = self.overlay.is_some();

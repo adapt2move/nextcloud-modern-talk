@@ -301,6 +301,16 @@ impl Transport {
     pub(super) fn validate(&self, c: &OperationContext) -> Result<(), PortError> {
         self.api.validate(&context(c)).map_err(error)
     }
+    pub(super) async fn list_files(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .list_directory(&context(c), &path)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn upload_file(
         &mut self,
         c: &OperationContext,

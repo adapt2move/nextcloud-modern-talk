@@ -1717,6 +1717,16 @@ impl Desktop {
                         cx,
                     )),
             );
+        if !pins && self.snapshot.active_account.is_some() {
+            body = body.child(self.button(
+                "browse-cloud-files",
+                "Alle Dateien anzeigen",
+                ButtonStyle::Secondary,
+                true,
+                LocalAction::Content(super::content::Action::OpenCloudBrowser),
+                cx,
+            ));
+        }
         let Some(panel) = self
             .snapshot
             .message_panel

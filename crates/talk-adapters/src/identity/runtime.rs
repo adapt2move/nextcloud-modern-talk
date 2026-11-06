@@ -1688,7 +1688,8 @@ impl Worker {
                     request,
                     ProtocolRequest::Content {
                         command: talk_core::protocol::content::ContentCommand::Asset(_)
-                            | talk_core::protocol::content::ContentCommand::RevalidateAvatar(_),
+                            | talk_core::protocol::content::ContentCommand::RevalidateAvatar(_)
+                            | talk_core::protocol::content::ContentCommand::ListFiles { .. },
                         ..
                     }
                 ) {

@@ -4,6 +4,7 @@ mod chat;
 mod connection;
 mod content;
 mod conversation;
+mod files;
 mod onboarding;
 mod recovery;
 mod resources;
@@ -19,6 +20,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         chat::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
+        files::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
@@ -83,6 +85,7 @@ mod tests {
             chat::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,
+            files::MESSAGES,
             updates::MESSAGES,
             onboarding::MESSAGES,
         ] {

@@ -133,7 +133,26 @@ pub struct PlaybackView {
     pub stop_unconfirmed: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudFileView {
+    pub name: Text<255>,
+    pub directory: bool,
+    pub size: Option<u64>,
+    pub modified: Option<Text<256>>,
+    pub mime: Option<Text<256>>,
+    pub file_id: Option<Text<256>>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileBrowserView {
+    pub account: AccountScope,
+    pub path: Text<16384>,
+    pub entries: Page<CloudFileView, 1000>,
+    pub loading: bool,
+    pub offline: bool,
+    pub error: Option<UnavailableReason>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
+    pub file_browser: Option<FileBrowserView>,
     pub self_name: Option<Text<256>>,
     pub organization: Option<Text<256>>,
     pub account: Option<AccountScope>,
@@ -153,6 +172,7 @@ pub struct ContentPanel {
 impl Default for ContentPanel {
     fn default() -> Self {
         Self {
+            file_browser: None,
             self_name: None,
             organization: None,
             account: None,
@@ -171,6 +191,8 @@ impl Default for ContentPanel {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
+    ListFiles(Text<16384>),
+    CloseFileBrowser,
     DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),

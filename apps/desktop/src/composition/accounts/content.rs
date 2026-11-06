@@ -2,6 +2,7 @@
 //! avatars and eligible attachment thumbnails have account-owned disk caches.
 //! Every completion is checked against current account and room.
 mod avatars;
+mod browser;
 mod links;
 mod thumbnails;
 use super::*;
@@ -44,6 +45,7 @@ impl ThumbnailRetry {
 }
 #[derive(Default)]
 pub(super) struct ContentOwner {
+    browser: browser::Owner,
     pub(super) video: super::preview::Video,
     pub(super) preview_generation: u64,
     descriptors: Vec<(view::AssetTarget, talk_adapters::identity::CachedAttachment)>,
@@ -119,6 +121,7 @@ impl Accounts {
         self.content_owner.thumbnail_retries.clear();
         self.content_owner.avatars.clear_member_observations();
         self.content_owner.jobs.clear();
+        self.content_owner.browser.retire_jobs();
         let cancelled: Vec<_> = self
             .content_owner
             .images
@@ -136,6 +139,7 @@ impl Accounts {
         self.content_owner.refresh_poll = None;
         self.content_owner.capabilities_at = None;
         let account = self.snapshot.active_account;
+        self.content_owner.browser.retain_account(account);
         let old = &self.snapshot.content_panel;
         let old_account_changed = old.account != account;
         let assets = if old.account == account {
@@ -189,6 +193,13 @@ impl Accounts {
             self.current(account)?;
         }
         match action {
+            A::ListFiles(path) => self.list_cloud_files(request, account, path),
+            A::CloseFileBrowser => {
+                self.content_owner.browser.close();
+                self.snapshot.content_panel.file_browser = None;
+                self.touch();
+                Ok(())
+            }
             A::Acknowledge => {
                 self.snapshot.content_panel.result = None;
                 self.touch();
@@ -761,6 +772,10 @@ impl Accounts {
             return;
         };
         let job = self.content_owner.jobs.remove(index);
+        if let Some(path) = self.content_owner.browser.take_job(operation) {
+            self.complete_cloud_files(job.account, job.request, operation, path, result);
+            return;
+        }
         if job
             .target
             .as_ref()

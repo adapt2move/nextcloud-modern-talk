@@ -52,6 +52,7 @@ pub enum Overlay {
     RoomInfo,
     Participants,
     Files,
+    CloudFiles,
     Accounts,
     Thread,
     Forward,

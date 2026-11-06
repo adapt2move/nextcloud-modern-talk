@@ -228,6 +228,14 @@ pub(super) fn action(
     action: ContentAction,
 ) -> Result<(), SubmitError> {
     match action {
+        ContentAction::ListFiles(path) => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
+        ContentAction::CloseFileBrowser => {
+            snapshot.content_panel.file_browser = None;
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel
@@ -284,6 +292,41 @@ pub(super) fn action(
         }
         _ => Err(SubmitError::Unavailable(UnavailableReason::Unconfigured)),
     }
+}
+
+pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
+    use talk_core::ui::content::{CloudFileView, FileBrowserView};
+    let Some(account) = snapshot.active_account else {
+        return;
+    };
+    let names: &[(&str, bool, Option<u64>)] = if path == "/" {
+        &[
+            ("Entwürfe", true, None),
+            ("Team", true, None),
+            ("Projektübersicht.pdf", false, Some(1_240_000)),
+            ("Workshop.png", false, Some(485_000)),
+        ]
+    } else {
+        &[
+            ("Konzept.pdf", false, Some(288_000)),
+            ("Notizen.txt", false, Some(4200)),
+        ]
+    };
+    snapshot.content_panel.file_browser = Some(FileBrowserView {
+        account,
+        path: text(path),
+        loading: false,
+        offline: false,
+        error: None,
+        entries: page(names.iter().map(|(name, directory, size)| CloudFileView {
+            name: text(name),
+            directory: *directory,
+            size: *size,
+            modified: Some(text("04 Nov 2026")),
+            mime: None,
+            file_id: None,
+        })),
+    });
 }
 
 pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::content::ImageJob> {
