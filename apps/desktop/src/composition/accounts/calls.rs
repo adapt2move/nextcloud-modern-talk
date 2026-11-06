@@ -576,6 +576,7 @@ impl Accounts {
             microphone: MediaState::Off,
             camera: MediaState::Off,
             share: MediaState::Unavailable,
+            screen_stage: None,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -739,6 +740,7 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         microphone: device(value.microphone),
         camera: device(value.camera),
         share: device(value.screen),
+        screen_stage: None,
         participants: page(
             value
                 .participants

@@ -93,6 +93,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-error-unknown",
     "call-controls",
     "call-gallery",
+    "call-screen-stage",
     "call-active",
     "call-requested",
     "sharing",
@@ -767,6 +768,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error-unknown"
             | "call-controls"
             | "call-gallery"
+            | "call-screen-stage"
             | "sharing"
             | "call-denied"
             | "call-active"
@@ -834,7 +836,16 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 MediaState::Unavailable
             },
-            participants: page(if scenario == "call-gallery" {
+            screen_stage: if scenario == "call-screen-stage" {
+                Some(talk_core::ui::presentation::CallScreenStage {
+                    participant: 1,
+                    name: text("Mara Fischer"),
+                    kind: talk_core::ui::presentation::CallTileKind::Screen,
+                })
+            } else {
+                None
+            },
+            participants: page(if scenario == "call-gallery" || scenario == "call-screen-stage" {
                 let mut people = participants().to_vec();
                 people[0].raised_hand = true;
                 people[3].raised_hand = true;
@@ -1824,6 +1835,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     microphone: MediaState::Unavailable,
                     camera: MediaState::Unavailable,
                     share: MediaState::Unavailable,
+                    screen_stage: None,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

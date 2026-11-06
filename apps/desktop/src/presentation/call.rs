@@ -309,7 +309,15 @@ impl Desktop {
                     )),
             );
         }
-        if call.share == MediaState::Active {
+        if let Some(screen) = call.screen_stage.as_ref().filter(|screen| screen.kind == talk_core::ui::presentation::CallTileKind::Screen) {
+            stage = stage.child(
+                div().w_full().min_h(px(360.)).rounded(px(12.)).bg(t.stage_panel)
+                    .flex().flex_col().items_center().justify_center().gap_4()
+                    .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
+                    .child(self.lf("{name} teilt den Bildschirm", &[("name", screen.name.as_str())]))
+                    .child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."))),
+            );
+        } else if call.share == MediaState::Active {
             stage = stage.child(
                 div()
                     .p_4()

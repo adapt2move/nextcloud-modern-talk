@@ -443,6 +443,20 @@ pub enum MediaState {
     Denied,
 }
 
+/// Identifies visual streams independently of their frame storage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallTileKind {
+    Camera,
+    Screen,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallScreenStage {
+    pub participant: u128,
+    pub name: Text<128>,
+    pub kind: CallTileKind,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
@@ -453,6 +467,8 @@ pub struct CallView {
     pub microphone: MediaState,
     pub camera: MediaState,
     pub share: MediaState,
+    /// Screen metadata only; frames remain in the scoped media image owner.
+    pub screen_stage: Option<CallScreenStage>,
     pub participants: Page<ParticipantView, 16>,
 }
 
