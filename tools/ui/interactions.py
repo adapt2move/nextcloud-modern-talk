@@ -122,6 +122,16 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('native editing replaces selection and deletes one grapheme', ['eplacement.example.test'], ['probe.example.test'])
         key('Tab')
         expect('keyboard focus can leave input')
+    elif scenario == 'status-message':
+        expect('status message editor is visible', ['Statusnachricht', 'Vorschläge'])
+        click('Statusnachricht')
+        type_text('LUNCHBREAK')
+        click('30')
+        click('Speichern', inspected_point=(1280,800,67,632))
+        expect('saved fictional status is shown immediately', ['LUNCHBREAK'])
+        click('LUNCHBREAK')
+        click('Entfernen')
+        expect('fictional status can be cleared', ['Statusnachricht festlegen'])
     elif scenario == 'status-picker':
         expect('status picker is visible', ['Status festlegen', 'Abwesend', 'Unsichtbar'])
         key('Escape')

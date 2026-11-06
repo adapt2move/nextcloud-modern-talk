@@ -392,6 +392,34 @@ impl Transport {
     ) -> Result<api::Reply, PortError> {
         self.api.request(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn own_status_details(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<api::presence::StatusDetails, PortError> {
+        self.api
+            .own_status_details(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn predefined_statuses(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::presence::PredefinedStatus>, PortError> {
+        self.api
+            .predefined_statuses(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn set_status_message(
+        &mut self,
+        c: &OperationContext,
+        change: &api::presence::MessageChange,
+    ) -> Result<(), PortError> {
+        self.api
+            .set_status_message(&context(c), change)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn set_own_user_status(
         &mut self,
         c: &OperationContext,

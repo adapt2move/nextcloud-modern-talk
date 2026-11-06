@@ -408,6 +408,7 @@ fn strings(v: Option<&Value>, max: usize, numbers: bool) -> Result<Option<Vec<St
 #[derive(Clone, Debug)]
 pub struct Capabilities {
     pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub notification_endpoints: Vec<String>,
     pub server_major: Option<u64>,
     pub features: Vec<String>,
@@ -448,6 +449,7 @@ impl Capabilities {
         };
         Ok(Self {
             user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             notification_endpoints: strings(
                 data["capabilities"]["notifications"].get("ocs-endpoints"),
                 32,

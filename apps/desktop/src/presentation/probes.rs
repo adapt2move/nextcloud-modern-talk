@@ -11,6 +11,7 @@ pub enum Probe {
     Accounts,
     Messages,
     Status,
+    StatusMessage,
 }
 impl Desktop {
     pub(super) fn control_probe(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {

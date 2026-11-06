@@ -13,7 +13,12 @@ use talk_core::preferences::{
 
 impl Desktop {
     pub(super) fn refresh_account_preferences(&mut self, cx: &mut Context<Self>) {
-        if self.development && self.probe == super::probes::Probe::Status {
+        if self.development
+            && matches!(
+                self.probe,
+                super::probes::Probe::Status | super::probes::Probe::StatusMessage
+            )
+        {
             return;
         }
         if self.own_status_reconcile.is_some_and(|(scope, at)| {
@@ -65,6 +70,14 @@ impl Desktop {
         if scope_changed {
             self.account_preference_error = None;
             self.own_status_optimistic = None;
+            self.own_message_optimistic = None;
+            self.own_status_editing = false;
+            self.own_status_message_input.update(cx, |input, _| {
+                input.set_context_value("");
+            });
+            self.own_status_icon_input.update(cx, |input, _| {
+                input.set_context_value("");
+            });
             self.own_status_reconcile = None;
             self.own_status_open = false;
         } else if let Some((scope, request, _)) = self.own_status_optimistic
@@ -83,6 +96,22 @@ impl Desktop {
                 ));
             }
             self.own_status_optimistic = None;
+        }
+        if let Some((scope, request, _)) = self.own_message_optimistic.as_ref()
+            && let Some(snapshot) = next.as_ref().filter(|p| p.scope == *scope)
+            && snapshot.state != (AccountPreferenceState::Saving { request: *request })
+        {
+            if matches!(snapshot.state, AccountPreferenceState::Failed {
+                request: completed,
+                error: AccountPreferenceError::Network | AccountPreferenceError::Uncertain,
+            } if completed == *request)
+            {
+                self.own_status_reconcile = Some((
+                    *scope,
+                    std::time::Instant::now() + std::time::Duration::from_secs(2),
+                ));
+            }
+            self.own_message_optimistic = None;
         }
         self.account_preferences = next;
         if let Some(scope) = self.snapshot.active_account

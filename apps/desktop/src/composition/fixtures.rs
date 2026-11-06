@@ -49,6 +49,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux",
     "chat-presence",
     "status-picker",
+    "status-message",
     "chat-ux-call",
     "chat-edit",
     "thread-error",
@@ -198,7 +199,7 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
-    if scenario == Some("status-picker") {
+    if matches!(scenario, Some("status-picker" | "status-message")) {
         let mut state = snapshot(Some("chat-presence"));
         state.accounts = page(
             state

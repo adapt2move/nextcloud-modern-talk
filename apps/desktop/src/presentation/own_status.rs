@@ -49,6 +49,17 @@ impl Desktop {
                 user_status_enabled: Some(true),
                 user_presence: Some(StatusChoice::Away),
                 user_status_observed: true,
+                user_status_emoji: Some(true),
+                status_message: None,
+                predefined_statuses: Some({
+                    let mut page = talk_core::ui::Page::empty();
+                    let _ = page.try_push(talk_core::preferences::account::PredefinedStatus {
+                        id: talk_core::ui::Text::new("meeting").expect("fixture"),
+                        icon: talk_core::ui::Text::new("📅").expect("fixture"),
+                        message: talk_core::ui::Text::new("Im Termin").expect("fixture"),
+                    });
+                    page
+                }),
             }),
             state: AccountPreferenceState::Ready,
         })
@@ -80,7 +91,7 @@ impl Desktop {
         self.own_status_open = !self.own_status_open;
         if self.own_status_open {
             self.own_status_focus = true;
-            if !(self.development && self.probe == Probe::Status)
+            if !(self.development && matches!(self.probe, Probe::Status | Probe::StatusMessage))
                 && !self.account_preferences.as_ref().is_some_and(|p| {
                     matches!(
                         p.state,
@@ -92,8 +103,11 @@ impl Desktop {
                 // Keep the last status interactive while a bounded refresh is in flight.
                 self.load_account_preferences(cx);
             }
-        } else if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
-            focus.focus(window);
+        } else {
+            self.own_status_editing = false;
+            if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
+                focus.focus(window);
+            }
         }
     }
 
@@ -114,7 +128,7 @@ impl Desktop {
         if self.own_status_value() == Some(choice) {
             return;
         }
-        if self.development && self.probe == Probe::Status {
+        if self.development && matches!(self.probe, Probe::Status | Probe::StatusMessage) {
             if let Some(values) = self
                 .account_preferences
                 .as_mut()
@@ -148,6 +162,9 @@ impl Desktop {
     }
 
     pub(super) fn own_status_menu(&self, cx: &Context<Self>) -> Div {
+        if self.own_status_editing {
+            return self.status_message_editor(cx);
+        }
         let t = self.theme;
         let snapshot = self
             .account_preferences
@@ -246,6 +263,37 @@ impl Desktop {
                 .justify_start(),
             );
         }
+        if values.is_some_and(|v| v.user_status_enabled == Some(true)) {
+            let label = self
+                .visible_status_message()
+                .map(|m| {
+                    [
+                        m.icon.as_ref().map(|s| s.as_str()),
+                        m.message.as_ref().map(|s| s.as_str()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .filter(|s| !s.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                })
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| self.l("Statusnachricht festlegen").to_owned());
+            menu = menu.child(
+                self.button(
+                    "edit-status-message",
+                    "",
+                    ButtonStyle::Quiet,
+                    ready,
+                    LocalAction::EditStatusMessage,
+                    cx,
+                )
+                .w_full()
+                .justify_start()
+                .px_2()
+                .child(div().min_w_0().text_ellipsis().child(label)),
+            );
+        }
         if let Some(error) = failed {
             let reason = match error {
                 AccountPreferenceError::Network => {
@@ -309,6 +357,9 @@ mod tests {
                 user_status_enabled: Some(true),
                 user_presence: Some(StatusChoice::Away),
                 user_status_observed: true,
+                user_status_emoji: Some(true),
+                status_message: None,
+                predefined_statuses: None,
             }),
             state: AccountPreferenceState::Saving {
                 request: RequestId(3),

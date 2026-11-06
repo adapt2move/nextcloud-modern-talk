@@ -185,3 +185,74 @@ async fn account_status_read_distinguishes_missing_from_temporary_failure() {
         assert_eq!(reply.values.user_presence, None);
     }
 }
+
+#[tokio::test]
+async fn status_message_lost_ack_is_uncertain_and_not_replayed() {
+    use talk_core::preferences::{
+        RequestId,
+        account::{AccountPreferenceChange, StatusClearAfter, StatusMessageChange},
+    };
+    let mut capability = caps(35);
+    capability["capabilities"]["user_status"] = json!({"enabled": true, "supports_emoji": true});
+    let mut lost_ack = Reply::data(json!({}));
+    lost_ack.drop_write_ack = true;
+    let server = Server::start(vec![Reply::data(capability), lost_ack]).await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let result = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SetPreference {
+                request: RequestId(12),
+                change: AccountPreferenceChange::StatusMessage(StatusMessageChange::Custom {
+                    icon: Some(Text::new("☕").unwrap()),
+                    message: Text::new("Break").unwrap(),
+                    clear_after: StatusClearAfter::OneHour,
+                }),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(result.kind, ErrorKind::Uncertain);
+    assert_eq!(server.count(), 2);
+    let requests = server.seen.lock().unwrap();
+    assert!(
+        String::from_utf8_lossy(&requests[1]).starts_with(
+            "PUT /cloud/ocs/v2.php/apps/user_status/api/v1/user_status/message/custom"
+        )
+    );
+}
+
+#[tokio::test]
+async fn clear_status_accepts_a_confirmed_missing_own_status() {
+    use talk_core::preferences::{
+        RequestId,
+        account::{AccountPreferenceChange, StatusMessageChange},
+    };
+    let mut capability = caps(35);
+    capability["capabilities"]["user_status"] = json!({"enabled": true});
+    let server = Server::start(vec![
+        Reply::data(capability),
+        Reply::data(json!([])),
+        Reply::envelope(404, "failure", 404, json!([])),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let ProtocolReply::Preferences(reply) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SetPreference {
+                request: RequestId(13),
+                change: AccountPreferenceChange::StatusMessage(StatusMessageChange::Clear),
+            },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("status reply")
+    };
+    assert!(reply.values.user_status_observed);
+    assert!(reply.values.status_message.is_none());
+    assert_eq!(server.count(), 3);
+}

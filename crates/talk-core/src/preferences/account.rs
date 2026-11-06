@@ -42,6 +42,10 @@ pub struct AccountPreferences {
     pub user_presence: Option<StatusChoice>,
     /// False means this response did not observe status and cannot clear a cached value.
     pub user_status_observed: bool,
+    pub user_status_emoji: Option<bool>,
+    pub status_message: Option<StatusMessage>,
+    /// None means the server's list was not observed, rather than an empty list.
+    pub predefined_statuses: Option<crate::bounded::Page<PredefinedStatus, 32>>,
 }
 impl AccountPreferences {
     pub fn show_read_indicators(&self) -> bool {
@@ -66,11 +70,44 @@ pub enum StatusChoice {
     Offline,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StatusMessage {
+    pub icon: Option<Text<64>>,
+    pub message: Option<Text<320>>,
+    pub clear_at: Option<u64>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PredefinedStatus {
+    pub id: Text<128>,
+    pub icon: Text<64>,
+    pub message: Text<320>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatusClearAfter {
+    Never,
+    ThirtyMinutes,
+    OneHour,
+    FourHours,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StatusMessageChange {
+    Custom {
+        icon: Option<Text<64>>,
+        message: Text<320>,
+        clear_after: StatusClearAfter,
+    },
+    Predefined {
+        id: Text<128>,
+        clear_after: StatusClearAfter,
+    },
+    Clear,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AccountPreferenceChange {
     SendReadReceipts(bool),
     ShareTypingStatus(bool),
     AttachmentFolder(NextcloudFolder),
     UserPresence(StatusChoice),
+    StatusMessage(StatusMessageChange),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountPreferenceResult {

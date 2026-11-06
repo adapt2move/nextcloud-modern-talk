@@ -20,6 +20,7 @@ mod onboarding;
 mod organization;
 mod overlays;
 mod own_status;
+mod own_status_message;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
@@ -143,6 +144,12 @@ pub enum LocalAction {
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
     ToggleOwnStatus,
+    EditStatusMessage,
+    BackStatusMenu,
+    SaveStatusMessage,
+    ClearStatusMessage,
+    SelectStatusExpiry(talk_core::preferences::account::StatusClearAfter),
+    SelectPredefinedStatus(usize),
     SetOwnStatus(talk_core::preferences::account::StatusChoice),
     SaveUploadFolder,
     RefreshDevice(talk_core::preferences::devices::DeviceKind),
@@ -308,6 +315,16 @@ pub struct Desktop {
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
     own_status_open: bool,
+    own_status_editing: bool,
+    own_status_message_input: Entity<TextInput>,
+    own_status_icon_input: Entity<TextInput>,
+    own_status_clear_after: talk_core::preferences::account::StatusClearAfter,
+    own_status_message_error: bool,
+    own_message_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        Option<talk_core::preferences::account::StatusMessage>,
+    )>,
     own_status_focus: bool,
     own_status_optimistic: Option<(
         talk_core::ui::AccountScope,
@@ -399,6 +416,9 @@ impl Desktop {
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
         let group_name = cx.new(|cx| TextInput::new("Name der Gruppe", 128, theme, cx));
         let upload_folder = cx.new(|cx| TextInput::new("/Talk", 2048, theme, cx));
+        let own_status_message_input =
+            cx.new(|cx| TextInput::new("Statusnachricht", 320, theme, cx));
+        let own_status_icon_input = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let weak = cx.weak_entity();
         let observer = window.observe_window_appearance(move |_, cx| {
             let _ = weak.update(cx, |_, cx| cx.notify());
@@ -447,7 +467,12 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
-            .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain([
+                message_ui.search.clone(),
+                message_ui.time_input.clone(),
+                own_status_message_input.clone(),
+                own_status_icon_input.clone(),
+            ])
             .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
@@ -545,7 +570,13 @@ impl Desktop {
             account_preferences: None,
             account_preference_request: 0,
             account_preference_error: None,
-            own_status_open: development && probe == Probe::Status,
+            own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
+            own_status_editing: development && probe == Probe::StatusMessage,
+            own_status_message_input,
+            own_status_icon_input,
+            own_status_clear_after: talk_core::preferences::account::StatusClearAfter::Never,
+            own_status_message_error: false,
+            own_message_optimistic: None,
             own_status_focus: false,
             own_status_optimistic: None,
             own_status_reconcile: None,
@@ -574,7 +605,7 @@ impl Desktop {
             pending_ack: None,
             theme,
         };
-        if development && probe == Probe::Status {
+        if development && matches!(probe, Probe::Status | Probe::StatusMessage) {
             desktop.account_preferences = desktop.fixture_own_status();
         }
         if development && initial_overlay == Some(Overlay::Thread) {
@@ -1103,6 +1134,7 @@ impl Desktop {
             }
             LocalAction::Open(overlay) => {
                 self.own_status_open = false;
+                self.own_status_editing = false;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1627,6 +1659,15 @@ impl Desktop {
             LocalAction::StartDevice(kind) => self.start_device_preview(kind),
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
             LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
+            LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
+            LocalAction::BackStatusMenu => {
+                self.own_status_editing = false;
+                self.own_status_focus = true;
+            }
+            LocalAction::SaveStatusMessage => self.save_status_message(cx),
+            LocalAction::ClearStatusMessage => self.clear_status_message(cx),
+            LocalAction::SelectStatusExpiry(choice) => self.own_status_clear_after = choice,
+            LocalAction::SelectPredefinedStatus(index) => self.select_predefined_status(index, cx),
             LocalAction::SetOwnStatus(choice) => self.set_own_status(choice, cx),
             LocalAction::ReloadAccountPreferences => self.load_account_preferences(cx),
             LocalAction::AccountPreference(change) => self.change_account_preference(change, cx),
@@ -1839,6 +1880,7 @@ impl Desktop {
         } else if action == Some(ActionId::Close) {
             if self.own_status_open {
                 self.own_status_open = false;
+                self.own_status_editing = false;
                 if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
                     focus.focus(window);
                 }
@@ -1939,6 +1981,8 @@ impl Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]
@@ -1958,6 +2002,8 @@ impl Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]
@@ -2154,6 +2200,21 @@ impl Render for Desktop {
             i.interactive =
                 !incoming && (self.overlay.is_none() || self.overlay == Some(Overlay::Search));
         });
+        for input in [&self.own_status_message_input, &self.own_status_icon_input] {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.interactive = !incoming
+                    && self.overlay.is_none()
+                    && self.own_status_open
+                    && self.own_status_editing;
+                i.clipboard_export_allowed = true;
+            });
+        }
+        self.own_status_message_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Statusnachricht")));
+        self.own_status_icon_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Emoji")));
         self.upload_folder.update(cx, |i, _| {
             i.interactive = !incoming
                 && self.overlay == Some(Overlay::Settings)
@@ -2210,6 +2271,8 @@ impl Render for Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]

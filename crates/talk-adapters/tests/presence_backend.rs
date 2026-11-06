@@ -4,12 +4,13 @@
 use std::path::Path;
 use talk_adapters::nextcloud::{NetworkRuntime, test_support};
 use talk_core::{
+    bounded::Text,
     ids::{AccountId, AccountScope, ClockEpoch, HostId, RuntimeGeneration},
     lifecycle::Cancellation,
     ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest},
     preferences::{
         RequestId,
-        account::{AccountPreferenceChange, StatusChoice},
+        account::{AccountPreferenceChange, StatusChoice, StatusClearAfter, StatusMessageChange},
     },
     protocol::{RoomKind, UserPresence},
 };
@@ -92,6 +93,94 @@ async fn direct_room_list_exposes_server_status() {
         assert_eq!(updated.values.scope, scope);
         assert_eq!(updated.values.user_presence, Some(choice));
     }
+    let mut deadline = runtime.now();
+    deadline.millis += 60_000;
+    let context = || OperationContext {
+        scope,
+        deadline,
+        cancellation: Cancellation::default(),
+    };
+    let ProtocolReply::Preferences(loaded) = client
+        .request(
+            context(),
+            ProtocolRequest::ReadPreferences {
+                request: RequestId(20),
+            },
+        )
+        .await
+        .expect("status choices")
+    else {
+        panic!("preferences reply")
+    };
+    let predefined = loaded
+        .values
+        .predefined_statuses
+        .as_ref()
+        .expect("server predefined statuses")
+        .as_slice()
+        .first()
+        .expect("at least one server choice")
+        .clone();
+    let ProtocolReply::Preferences(changed) = client
+        .request(
+            context(),
+            ProtocolRequest::SetPreference {
+                request: RequestId(21),
+                change: AccountPreferenceChange::StatusMessage(StatusMessageChange::Predefined {
+                    id: predefined.id.clone(),
+                    clear_after: StatusClearAfter::OneHour,
+                }),
+            },
+        )
+        .await
+        .expect("predefined status")
+    else {
+        panic!("preferences reply")
+    };
+    let status = changed.values.status_message.expect("predefined message");
+    assert_eq!(
+        status.message.as_ref().map(|v| v.as_str()),
+        Some(predefined.message.as_str())
+    );
+    assert!(status.clear_at.is_some());
+    let ProtocolReply::Preferences(changed) = client
+        .request(
+            context(),
+            ProtocolRequest::SetPreference {
+                request: RequestId(22),
+                change: AccountPreferenceChange::StatusMessage(StatusMessageChange::Custom {
+                    icon: Some(Text::new("☕").unwrap()),
+                    message: Text::new("Synthetic coffee").unwrap(),
+                    clear_after: StatusClearAfter::ThirtyMinutes,
+                }),
+            },
+        )
+        .await
+        .expect("custom status")
+    else {
+        panic!("preferences reply")
+    };
+    let status = changed.values.status_message.expect("custom message");
+    assert_eq!(
+        status.message.as_ref().map(|v| v.as_str()),
+        Some("Synthetic coffee")
+    );
+    assert_eq!(status.icon.as_ref().map(|v| v.as_str()), Some("☕"));
+    assert!(status.clear_at.is_some());
+    let ProtocolReply::Preferences(cleared) = client
+        .request(
+            context(),
+            ProtocolRequest::SetPreference {
+                request: RequestId(23),
+                change: AccountPreferenceChange::StatusMessage(StatusMessageChange::Clear),
+            },
+        )
+        .await
+        .expect("clear status")
+    else {
+        panic!("preferences reply")
+    };
+    assert!(cleared.values.status_message.is_none());
     assert!(
         list.rooms
             .as_slice()

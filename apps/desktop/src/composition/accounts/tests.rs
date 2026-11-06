@@ -742,6 +742,7 @@ pub(super) fn model() -> Accounts {
         load_tags: None,
         preferences: Vec::new(),
         status_pending: Vec::new(),
+        message_pending: Vec::new(),
         failures: Vec::new(),
         unresolved: Vec::new(),
         queued_send: None,
@@ -877,6 +878,9 @@ fn stale_preference_reply_preserves_confirmed_values_and_cannot_enable_a_toggle(
         user_status_enabled: None,
         user_presence: None,
         user_status_observed: false,
+        user_status_emoji: None,
+        status_message: None,
+        predefined_statuses: None,
     };
     m.preferences.push(AccountPreferenceSnapshot {
         scope,
@@ -1025,6 +1029,9 @@ fn pending_dnd_suppresses_only_its_runtime_until_authoritative_reconciliation() 
         user_status_enabled: Some(true),
         user_presence: Some(StatusChoice::Away),
         user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: None,
+        predefined_statuses: None,
     };
     model.preferences.push(AccountPreferenceSnapshot {
         scope,
@@ -1099,6 +1106,9 @@ fn superseded_status_read_cannot_overwrite_a_newer_admitted_choice() {
         user_status_enabled: Some(true),
         user_presence: Some(StatusChoice::Away),
         user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: None,
+        predefined_statuses: None,
     };
     let read = PreferenceRequest(90);
     let write = PreferenceRequest(91);
@@ -1141,4 +1151,68 @@ fn superseded_status_read_cannot_overwrite_a_newer_admitted_choice() {
     model.complete(Purpose::Preferences(scope, write), &confirmed);
     assert!(model.status_pending.is_empty());
     assert!(model.suppress_account_notifications(scope));
+}
+
+#[test]
+fn temporary_status_read_failure_preserves_message_but_observed_clear_removes_it() {
+    use talk_core::preferences::account::StatusMessage;
+    let mut model = model();
+    let scope = super::super::fixtures::scope();
+    let request = PreferenceRequest(101);
+    let message = StatusMessage {
+        icon: Some(text("☕")),
+        message: Some(text("Break")),
+        clear_at: None,
+    };
+    let mut values = AccountPreferences {
+        scope,
+        send_read_receipts: None,
+        share_typing_status: None,
+        attachment_folder: None,
+        attachments_allowed: None,
+        conversation_subfolders: None,
+        user_status_enabled: Some(true),
+        user_presence: None,
+        user_status_observed: true,
+        user_status_emoji: Some(true),
+        status_message: Some(message.clone()),
+        predefined_statuses: None,
+    };
+    model.preferences.push(AccountPreferenceSnapshot {
+        scope,
+        values: Some(values.clone()),
+        state: AccountPreferenceState::Loading { request },
+    });
+    values.user_status_observed = false;
+    values.status_message = None;
+    let failed_read = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult {
+            request,
+            values: values.clone(),
+        }),
+    );
+    model.complete(Purpose::Preferences(scope, request), &failed_read);
+    assert_eq!(
+        model.preferences[0].values.as_ref().unwrap().status_message,
+        Some(message)
+    );
+    let request = PreferenceRequest(102);
+    model.preferences[0].state = AccountPreferenceState::Loading { request };
+    values.user_status_observed = true;
+    let cleared = completion(
+        scope,
+        true,
+        ProtocolReply::Preferences(AccountPreferenceResult { request, values }),
+    );
+    model.complete(Purpose::Preferences(scope, request), &cleared);
+    assert!(
+        model.preferences[0]
+            .values
+            .as_ref()
+            .unwrap()
+            .status_message
+            .is_none()
+    );
 }

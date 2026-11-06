@@ -52,6 +52,7 @@ fn boolean(value: Option<&Value>) -> Decision {
 #[derive(Clone)]
 pub(super) struct Capabilities {
     pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
     pub attachment_folder: Option<talk_core::preferences::account::NextcloudFolder>,
@@ -90,6 +91,7 @@ impl Capabilities {
         }
         Ok(Self {
             user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             features,
             read_receipts: super::preferences::public_privacy(
                 &spreed["config"]["chat"]["read-privacy"],

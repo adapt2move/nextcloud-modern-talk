@@ -136,6 +136,7 @@ pub struct Accounts {
     load_tags: Option<AccountScope>,
     preferences: Vec<AccountPreferenceSnapshot>,
     // Keep a DND intent until a scoped server observation resolves an uncertain write.
+    message_pending: Vec<(AccountScope, PreferenceRequest)>,
     status_pending: Vec<(
         AccountScope,
         PreferenceRequest,
@@ -188,6 +189,7 @@ impl Accounts {
             load_tags: None,
             preferences: Vec::new(),
             status_pending: Vec::new(),
+            message_pending: Vec::new(),
             failures: Vec::new(),
             unresolved: Vec::new(),
             queued_send: None,
@@ -489,6 +491,8 @@ impl Accounts {
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
         self.status_pending
             .retain(|(scope, _, _)| admitted.iter().any(|a| a.scope == *scope));
+        self.message_pending
+            .retain(|(scope, _)| admitted.iter().any(|a| a.scope == *scope));
         self.unresolved
             .retain(|u| admitted.iter().any(|a| a.scope == u.context.account));
         if self.snapshot.active_account.is_none()
@@ -826,14 +830,24 @@ impl Accounts {
                     match result {
                         Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => {
                             let status_resolved = reply.values.user_status_observed || reply.values.user_status_enabled != Some(true);
-                            let awaiting_status = self.status_pending.iter().any(|(pending_scope, _, _)| *pending_scope == scope);
-                            if status_resolved { self.status_pending.retain(|(pending_scope, _, _)| *pending_scope != scope); }
+                            let awaiting_status = self.status_pending.iter().any(|(pending_scope, _, _)| *pending_scope == scope)
+                                || self.message_pending.iter().any(|(pending_scope, _)| *pending_scope == scope);
+                            if status_resolved {
+                                self.status_pending.retain(|(pending_scope, _, _)| *pending_scope != scope);
+                                self.message_pending.retain(|(pending_scope, _)| *pending_scope != scope);
+                            }
                             let mut values = reply.values;
                             if values.user_status_enabled == Some(true) && !values.user_status_observed
                                 && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true) && v.user_status_observed)
                             {
                                 values.user_presence = previous.user_presence;
+                                values.status_message = previous.status_message.clone();
                                 values.user_status_observed = true;
+                            }
+                            if values.user_status_enabled == Some(true) && values.predefined_statuses.is_none()
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true))
+                            {
+                                values.predefined_statuses = previous.predefined_statuses.clone();
                             }
                             cache.values = Some(values);
                             cache.state = if awaiting_status && !status_resolved {
@@ -844,6 +858,7 @@ impl Accounts {
                             let error = preference_error(error);
                             if !matches!(error, AccountPreferenceError::Network | AccountPreferenceError::Uncertain) {
                                 self.status_pending.retain(|(pending_scope, pending_request, _)| *pending_scope != scope || *pending_request != request);
+                                self.message_pending.retain(|(pending_scope, pending_request)| *pending_scope != scope || *pending_request != request);
                             }
                             cache.state = AccountPreferenceState::Failed { request, error };
                         },
@@ -869,6 +884,13 @@ impl Accounts {
         &mut self,
         command: AccountPreferenceCommand,
     ) -> Result<(), AccountPreferenceError> {
+        let message_change = matches!(
+            &command,
+            AccountPreferenceCommand::Set {
+                change: talk_core::preferences::account::AccountPreferenceChange::StatusMessage(_),
+                ..
+            }
+        );
         let status_choice = match &command {
             AccountPreferenceCommand::Set {
                 change:
@@ -901,7 +923,8 @@ impl Accounts {
             p.scope == scope
                 && (matches!(p.state, AccountPreferenceState::Saving { .. })
                     || matches!(p.state, AccountPreferenceState::Loading { .. })
-                        && status_choice.is_none())
+                        && status_choice.is_none()
+                        && !message_change)
         }) {
             return Err(AccountPreferenceError::Busy);
         }
@@ -916,6 +939,11 @@ impl Accounts {
             Purpose::Preferences(scope, request),
         )
         .map_err(preference_error)?;
+        if message_change {
+            self.message_pending
+                .retain(|(pending_scope, _)| *pending_scope != scope);
+            self.message_pending.push((scope, request));
+        }
         if let Some(choice) = status_choice {
             self.status_pending
                 .retain(|(pending_scope, _, _)| *pending_scope != scope);
@@ -1467,6 +1495,8 @@ impl Accounts {
                 self.preferences.retain(|p| p.scope.account != account);
                 self.status_pending
                     .retain(|(scope, _, _)| scope.account != account);
+                self.message_pending
+                    .retain(|(scope, _)| scope.account != account);
                 self.history.remove_account(account);
                 self.outbox.retire_account(account);
                 if self

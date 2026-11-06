@@ -54,7 +54,8 @@ If needed, `access.py fetch --directory ... --file credentials.json` (or `fixtur
 ## Direct-message status check
 
 The opt-in status runner creates a synthetic direct conversation and status,
-then reads it and changes the current user's availability through the Rust adapter.
+then reads it and changes the current user's availability, custom and predefined
+messages through the Rust adapter.
 It removes the owned backend
 and private fixture on completion:
 

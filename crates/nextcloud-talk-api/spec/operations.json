@@ -9,6 +9,34 @@
   "external_operations": [
     {
       "method": "GET",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/predefined_statuses/",
+      "api": "Client::predefined_statuses",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/PredefinedStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message/custom",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled; supports_emoji for custom icon",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "PUT",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message/predefined",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ocs/v2.php/apps/user_status/api/v1/user_status/message",
+      "api": "Client::set_status_message",
+      "capability": "user_status.enabled",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "method": "GET",
       "path": "/ocs/v2.php/apps/user_status/api/v1/user_status",
       "api": "Client::own_user_status",
       "capability": "user_status.enabled",
