@@ -11,6 +11,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Share from NextCloud",
         "Compartir desde NextCloud",
     ),
+    ("Auswahl hinzufügen", "Add selection", "Añadir selección"),
     (
         "Das Bild aus der Zwischenablage ist zu groß.",
         "The clipboard image is too large.",
@@ -72,11 +73,17 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Ordner auswählen", "Choose folder", "Elegir carpeta"),
     ("Sortieren nach", "Sort by", "Ordenar por"),
+    (
+        "Vom Computer hochladen",
+        "Upload from computer",
+        "Subir desde el ordenador",
+    ),
     ("Zuletzt", "Recent", "Recientes"),
     (
         "Zur Auswahl hinzufügen",
         "Add to selection",
         "Añadir a la selección",
     ),
+    ("{n} ausgewählt", "{n} selected", "{n} seleccionados"),
     ("Änderungsdatum", "Modified", "Modificación"),
 ];

@@ -303,6 +303,18 @@ pub(super) fn action(
                 .map_err(|_| SubmitError::Busy)?;
             Ok(())
         }
+        ContentAction::StageCloudFiles { context, paths } => {
+            for path in paths.as_slice() {
+                self::action(
+                    snapshot,
+                    ContentAction::StageCloudFile {
+                        context,
+                        path: path.clone(),
+                    },
+                )?;
+            }
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel

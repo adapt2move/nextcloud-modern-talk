@@ -236,6 +236,10 @@ pub enum ContentAction {
         context: ConversationRef,
         path: Text<16384>,
     },
+    StageCloudFiles {
+        context: ConversationRef,
+        paths: Page<Text<16384>, 8>,
+    },
     DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),

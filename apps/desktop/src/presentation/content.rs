@@ -37,6 +37,7 @@ pub(crate) enum Action {
     BrowserFavorites,
     BrowserRetry,
     BrowserSort(talk_core::ui::content::FileSort),
+    BrowserStageSelection,
     Menu,
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
@@ -61,6 +62,8 @@ pub(super) struct ContentUi {
     browser_page: usize,
     browser_folder_picker: bool,
     browser_cursor: Option<Text<16384>>,
+    browser_selection: Vec<Text<16384>>,
+    browser_anchor: Option<Text<16384>>,
     browser_typeahead: String,
     browser_typeahead_at: Option<std::time::Instant>,
     pub(super) browser_search: Entity<TextInput>,
@@ -100,6 +103,8 @@ impl ContentUi {
             browser_page: 0,
             browser_folder_picker: false,
             browser_cursor: None,
+            browser_selection: Vec::new(),
+            browser_anchor: None,
             browser_typeahead: String::new(),
             browser_typeahead_at: None,
             browser_search,
@@ -262,6 +267,8 @@ impl Desktop {
                 self.content_ui.browser_search_since = None;
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
                 let value = self.content_ui.browser_search_value.trim();
                 let action = if value.is_empty() {
                     Some(ContentAction::ListFiles(Text::new("/").expect("constant")))
@@ -692,6 +699,8 @@ impl Desktop {
                 self.content_ui.browser_folder_picker = false;
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
                 self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
@@ -701,6 +710,8 @@ impl Desktop {
                 self.content_ui.browser_folder_picker = true;
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
                 self.clear_cloud_search(cx);
                 let path = self.upload_folder.read(cx).content.to_string();
                 let path = if talk_core::preferences::account::NextcloudFolder::new(&path).is_ok() {
@@ -732,6 +743,8 @@ impl Desktop {
             Action::BrowseDirectory(path) => {
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(path));
             }
@@ -752,6 +765,8 @@ impl Desktop {
             Action::BrowserRecent | Action::BrowserFavorites => {
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
                 self.clear_cloud_search(cx);
                 self.submit_content(if matches!(action, Action::BrowserRecent) {
                     ContentAction::RecentFiles
@@ -781,6 +796,22 @@ impl Desktop {
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
                 self.submit_content(ContentAction::SortFiles(sort));
+            }
+            Action::BrowserStageSelection => {
+                if let Some(context) = self.snapshot.selected
+                    && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && self.cloud_can_stage(browser)
+                {
+                    let mut paths = Page::empty();
+                    for path in &self.content_ui.browser_selection {
+                        if paths.try_push(path.clone()).is_err() {
+                            return;
+                        }
+                    }
+                    if !paths.as_slice().is_empty() {
+                        self.submit_content(ContentAction::StageCloudFiles { context, paths });
+                    }
+                }
             }
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {

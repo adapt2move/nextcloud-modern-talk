@@ -401,6 +401,71 @@ impl Accounts {
         self.project_uploads();
         Ok(())
     }
+    pub(in crate::composition::accounts) fn stage_cloud_files(
+        &mut self,
+        context: ConversationRef,
+        paths: Page<Text<16384>, 8>,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context) {
+            return Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            ));
+        }
+        let browser = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == context.account)
+            .ok_or(SubmitError::StaleScope)?;
+        let batch = self.attachment_owner.batch.as_ref();
+        if batch.is_some_and(|batch| batch.context != context || batch.running) {
+            return Err(SubmitError::Busy);
+        }
+        let mut additions: Vec<Text<16384>> = Vec::new();
+        for path in paths.as_slice() {
+            if !browser
+                .entries
+                .as_slice()
+                .iter()
+                .any(|entry| entry.path == *path && !entry.directory)
+            {
+                return Err(SubmitError::StaleScope);
+            }
+            if additions.contains(path)
+                || batch.is_some_and(|batch| {
+                    batch.files.iter().any(|file| {
+                        file.existing
+                            && file.remote.as_ref() == Some(path)
+                            && file.view.state != UploadState::Shared
+                    })
+                })
+            {
+                continue;
+            }
+            additions.push(path.clone());
+        }
+        let existing = batch.map_or(0, |batch| {
+            batch
+                .files
+                .iter()
+                .filter(|file| file.view.state != UploadState::Shared)
+                .count()
+        });
+        if existing + additions.len() > 8
+            || self
+                .attachment_owner
+                .next
+                .checked_add(additions.len() as u64)
+                .is_none()
+        {
+            return Err(SubmitError::Busy);
+        }
+        for path in additions {
+            self.stage_cloud_file(context, path)?;
+        }
+        Ok(())
+    }
     pub(in crate::composition::accounts) fn stage_clipboard_image(
         &mut self,
         context: ConversationRef,

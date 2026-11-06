@@ -66,6 +66,49 @@ fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
         if path.as_str() == "/Plans/plan.pdf" && caption.as_str() == "hello")
     );
 }
+
+#[test]
+fn cloud_multi_selection_rejects_stale_entries_without_partial_staging() {
+    let (mut model, context) = model();
+    model.snapshot.content_panel.file_browser = Some(talk_core::ui::content::FileBrowserView {
+        account: context.account,
+        path: text("/"),
+        section: talk_core::ui::content::FileSection::All,
+        sort: talk_core::ui::content::FileSort::Name,
+        entries: page([talk_core::ui::content::CloudFileView {
+            name: text("one"),
+            path: text("/one"),
+            directory: false,
+            size: None,
+            modified: None,
+            modified_unix: None,
+            mime: None,
+            file_id: None,
+        }]),
+        loading: false,
+        offline: false,
+        error: None,
+    });
+    assert_eq!(
+        model.stage_cloud_files(context, page([text("/one"), text("/gone")])),
+        Err(SubmitError::StaleScope)
+    );
+    assert!(model.attachment_owner.batch.is_none());
+    model
+        .stage_cloud_files(context, page([text("/one"), text("/one")]))
+        .unwrap();
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()
+            .len(),
+        1
+    );
+}
 #[test]
 fn attachment_metadata_is_preserved_for_each_queued_share() {
     let (mut model, context) = model();

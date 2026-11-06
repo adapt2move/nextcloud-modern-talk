@@ -20,7 +20,79 @@ fn size_label(size: Option<u64>) -> String {
     }
 }
 impl Desktop {
-    fn cloud_can_stage(&self, browser: &talk_core::ui::content::FileBrowserView) -> bool {
+    fn select_cloud_file(
+        &mut self,
+        path: Text<16384>,
+        shift: bool,
+        toggle: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(browser) = self.snapshot.content_panel.file_browser.as_ref() else {
+            return;
+        };
+        if !self.cloud_can_stage(browser) {
+            return;
+        }
+        let entries = browser.entries.as_slice();
+        let Some(index) = entries
+            .iter()
+            .position(|entry| entry.path == path && !entry.directory)
+        else {
+            return;
+        };
+        let mut selection = if shift && toggle {
+            self.content_ui.browser_selection.clone()
+        } else {
+            Vec::new()
+        };
+        if shift {
+            let anchor = self
+                .content_ui
+                .browser_anchor
+                .as_ref()
+                .and_then(|anchor| entries.iter().position(|entry| entry.path == *anchor))
+                .unwrap_or(index);
+            let (start, end) = if anchor <= index {
+                (anchor, index)
+            } else {
+                (index, anchor)
+            };
+            for entry in &entries[start..=end] {
+                if !entry.directory && !selection.contains(&entry.path) {
+                    selection.push(entry.path.clone());
+                }
+            }
+        } else if toggle {
+            selection = self.content_ui.browser_selection.clone();
+            if let Some(position) = selection.iter().position(|selected| *selected == path) {
+                selection.remove(position);
+            } else {
+                selection.push(path.clone());
+            }
+            self.content_ui.browser_anchor = Some(path.clone());
+        } else {
+            selection.push(path.clone());
+            self.content_ui.browser_anchor = Some(path.clone());
+        }
+        if selection.len() > 8 {
+            if let Some(context) = self.snapshot.selected {
+                self.feedback = Some(
+                    crate::presentation::feedback::Feedback::error(
+                        "Du kannst höchstens 8 Dateien auf einmal anhängen.",
+                    )
+                    .in_conversation(context),
+                );
+            }
+        } else {
+            self.content_ui.browser_selection = selection;
+            self.content_ui.browser_cursor = Some(path);
+        }
+        cx.notify();
+    }
+    pub(super) fn cloud_can_stage(
+        &self,
+        browser: &talk_core::ui::content::FileBrowserView,
+    ) -> bool {
         !browser.offline
             && !self.update_restart_pending
             && !self.projection_blocked
@@ -51,6 +123,12 @@ impl Desktop {
         }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        if key == "space" && (modifiers.control || modifiers.platform) && !modifiers.alt {
+            if let Some(path) = self.content_ui.browser_cursor.clone() {
+                self.select_cloud_file(path, modifiers.shift, true, cx);
+                return true;
+            }
+        }
         if modifiers.control || modifiers.platform || modifiers.alt {
             return false;
         }
@@ -94,10 +172,14 @@ impl Desktop {
                         .selected
                         .filter(|context| context.account == browser.account)
                 {
-                    self.submit_content(ContentAction::StageCloudFile {
-                        context,
-                        path: entry.path,
-                    });
+                    if self.content_ui.browser_selection.is_empty() {
+                        self.submit_content(ContentAction::StageCloudFile {
+                            context,
+                            path: entry.path,
+                        });
+                    } else {
+                        self.content_action(Action::BrowserStageSelection, window, cx);
+                    }
                 }
                 return true;
             }
@@ -138,7 +220,11 @@ impl Desktop {
             };
         if let Some(index) = next {
             self.content_ui.browser_page = index / PAGE_SIZE;
-            self.content_ui.browser_cursor = Some(entries[index].path.clone());
+            let path = entries[index].path.clone();
+            self.content_ui.browser_cursor = Some(path.clone());
+            if modifiers.shift {
+                self.select_cloud_file(path, true, false, cx);
+            }
             self.keyboard_navigation = true;
             cx.notify();
         }
@@ -391,7 +477,8 @@ impl Desktop {
                 .border_b_1()
                 .border_color(self.theme.border)
                 .when(
-                    self.content_ui.browser_cursor.as_ref() == Some(&entry.path),
+                    self.content_ui.browser_cursor.as_ref() == Some(&entry.path)
+                        || self.content_ui.browser_selection.contains(&entry.path),
                     |row| row.bg(self.theme.selected),
                 )
                 .child(if let Some(image) = thumbnail {
@@ -540,7 +627,51 @@ impl Desktop {
                     cx,
                 ));
             }
-            body = body.child(row);
+            if !entry.directory
+                && !self.content_ui.browser_folder_picker
+                && self.cloud_can_stage(browser)
+            {
+                let path = entry.path.clone();
+                let id: SharedString = format!("cloud-select-{}", path.as_str()).into();
+                body = body.child(
+                    div()
+                        .id(id)
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                                this.select_cloud_file(
+                                    path.clone(),
+                                    event.modifiers.shift,
+                                    event.modifiers.control || event.modifiers.platform,
+                                    cx,
+                                );
+                            }),
+                        )
+                        .child(row),
+                );
+            } else {
+                body = body.child(row);
+            }
+        }
+        if !self.content_ui.browser_selection.is_empty() && !self.content_ui.browser_folder_picker {
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(self.button(
+                        "cloud-stage-selection",
+                        "Auswahl hinzufügen",
+                        ButtonStyle::Primary,
+                        self.cloud_can_stage(browser),
+                        LocalAction::Content(Action::BrowserStageSelection),
+                        cx,
+                    ))
+                    .child(self.hint(&self.lf(
+                        "{n} ausgewählt",
+                        &[("n", &self.content_ui.browser_selection.len().to_string())],
+                    ))),
+            );
         }
         if entries.len() > PAGE_SIZE {
             body = body.child(

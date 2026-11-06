@@ -236,6 +236,7 @@ impl Accounts {
                 Ok(())
             }
             A::StageCloudFile { context, path } => self.stage_cloud_file(context, path),
+            A::StageCloudFiles { context, paths } => self.stage_cloud_files(context, paths),
             A::CloseFileBrowser => {
                 self.content_owner.browser.close();
                 self.snapshot.content_panel.file_browser = None;
