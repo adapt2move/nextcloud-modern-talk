@@ -45,6 +45,25 @@ pub struct AccountProbe {
     pub channel_semantics: bool,
 }
 
+/// Server-observed status; unknown values must not imply availability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserPresence {
+    Online,
+    Away,
+    DoNotDisturb,
+    Offline,
+    Invisible,
+    Unknown,
+}
+
+/// Bounded status text accompanies a server observation, not a permission grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserStatus {
+    pub presence: UserPresence,
+    pub icon: Option<Text<64>>,
+    pub message: Option<Text<256>>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoomKind {
     Direct,
