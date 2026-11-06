@@ -18,6 +18,51 @@ fn features(names: &[&str]) -> Value {
 fn message(id: u64) -> Value {
     json!({"id":id,"token":"testroom","actorType":"users","actorId":"fixture_user","actorDisplayName":"Fixture","messageType":"comment","message":"original","timestamp":1,"referenceId":"","isReplyable":true,"messageParameters":{},"reactions":{},"reactionsSelf":[]})
 }
+
+#[tokio::test]
+async fn subscribed_threads_require_capability_and_known_account_room() {
+    for (enabled, token) in [
+        (false, "testroom"),
+        (true, "testroom"),
+        (true, "otherroom"),
+    ] {
+        let mut replies = vec![Reply::data(features(if enabled {
+            &["threads"]
+        } else {
+            &[]
+        }))];
+        if enabled {
+            replies.push(Reply::data(json!([{
+                "thread": {"id": 42, "roomToken": token, "title": "Topic", "numReplies": 2},
+                "attendee": {"notificationLevel": 1}
+            }])));
+        }
+        let server = Server::start(replies).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let result = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::SubscribedThreads { offset: 0 },
+            )
+            .await;
+        if !enabled {
+            assert_eq!(result.unwrap_err().kind, ErrorKind::Unsupported);
+            assert_eq!(server.count(), 1);
+        } else if token == "otherroom" {
+            assert_eq!(result.unwrap_err().kind, ErrorKind::NotFound);
+        } else {
+            let ProtocolReply::SubscribedThreads(page) = result.unwrap() else {
+                panic!("threads")
+            };
+            assert_eq!(page.as_slice().len(), 1);
+            assert_eq!(page.as_slice()[0].root.conversation, conversation);
+            assert_eq!(page.as_slice()[0].root.sequence, 42);
+            assert_eq!(page.as_slice()[0].replies, 2);
+        }
+    }
+}
 #[tokio::test]
 async fn reminder_writes_publish_only_confirmed_values_and_keep_read_failure_uncertain() {
     for major in [34, 35] {
