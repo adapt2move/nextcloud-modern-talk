@@ -31,6 +31,7 @@ fn listed(context: ConversationRef) -> protocol::Conversation {
         },
         unread_messages: Some(0),
         unread_direct_mention: Some(false),
+        last_read_message: Some(0),
         last_activity: Some(1),
         call_active: Some(false),
         sensitive: false,

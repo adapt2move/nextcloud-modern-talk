@@ -96,6 +96,8 @@ pub struct Conversation {
     pub unread_messages: Option<u32>,
     /// A flag, not a count; absent when direct-mention-flag is unavailable.
     pub unread_direct_mention: Option<bool>,
+    /// Last read message; zero represents the server's first-unread sentinel.
+    pub last_read_message: Option<u64>,
     pub last_activity: Option<u64>,
     pub call_active: Option<bool>,
     pub sensitive: bool,

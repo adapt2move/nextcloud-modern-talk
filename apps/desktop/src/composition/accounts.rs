@@ -1566,6 +1566,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         },
         unread: r.unread_messages.unwrap_or(0),
         unread_direct_mention: r.unread_direct_mention,
+        last_read_message: r.last_read_message.map(u128::from),
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {

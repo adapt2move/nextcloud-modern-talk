@@ -1292,6 +1292,7 @@ mod tests {
             },
             unread_messages: Some(4),
             unread_direct_mention: Some(false),
+            last_read_message: Some(3),
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,

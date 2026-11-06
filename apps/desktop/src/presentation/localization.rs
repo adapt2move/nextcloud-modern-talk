@@ -9,6 +9,7 @@ mod reaction_authors;
 mod recovery;
 mod resources;
 mod threads;
+mod unread;
 mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
@@ -24,6 +25,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         conversation::MESSAGES,
         resources::MESSAGES,
         threads::MESSAGES,
+        unread::MESSAGES,
         recovery::MESSAGES,
         updates::MESSAGES,
         onboarding::MESSAGES,
@@ -83,6 +85,7 @@ mod tests {
         for catalog in [
             resources::MESSAGES,
             threads::MESSAGES,
+            unread::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,

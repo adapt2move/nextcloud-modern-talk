@@ -733,6 +733,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archive: Decision::Unknown,
                 unread,
                 unread_direct_mention: Some(id == 1 && unread > 0),
+                last_read_message: (id == 1).then_some(1),
                 presence: if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {

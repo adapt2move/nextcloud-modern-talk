@@ -449,7 +449,16 @@ impl Desktop {
                 self.l("Lange Nachricht gekürzt angezeigt. Bearbeiten ist hier nicht verfügbar."),
             ));
         }
-        div().child(
+        div()
+        .when(self.message_ui.first_unread == Some((context, m.local_id)), |row| {
+            row.child(
+                div().px_6().py_2().flex().items_center().gap_2()
+                    .child(div().flex_1().h(px(1.)).bg(t.accent))
+                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.accent).child(self.l("Neue Nachrichten")))
+                    .child(div().flex_1().h(px(1.)).bg(t.accent)),
+            )
+        })
+        .child(
             div()
                 .id(scoped_id("message", context, m.local_id, 0))
                 .group(action_group.clone())

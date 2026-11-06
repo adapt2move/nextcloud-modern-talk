@@ -85,6 +85,7 @@ fn room(key: &NavigationRoomKey, saved_at: u64) -> CacheRoom {
         archived: Some(false),
         unread: 2,
         unread_direct_mention: Some(true),
+        last_read_message: Some(1),
         participant_count: Some(3),
         participant_count_at: Some(saved_at),
         last_activity: Some(saved_at),

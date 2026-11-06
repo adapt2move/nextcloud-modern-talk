@@ -29,6 +29,7 @@ pub(super) enum Work {
     Send,
     Read(u128),
     Unread,
+    UnreadFrom(u128),
     Typing,
     Context(u128),
     Recovery,
@@ -46,6 +47,7 @@ impl Work {
                 | Self::Share
                 | Self::Send
                 | Self::Unread
+                | Self::UnreadFrom(_)
         )
     }
     pub(super) fn diagnostic_operation(self) -> Option<DiagnosticOperation> {
@@ -655,7 +657,13 @@ impl Accounts {
             V::Refresh => Work::History,
             V::Send { .. } => Work::Send,
             V::MarkRead(id) => Work::Read(*id),
-            V::MarkUnread | V::MarkUnreadFrom(_) => Work::Unread,
+            V::MarkUnread => Work::Unread,
+            V::MarkUnreadFrom(message) => Work::UnreadFrom(
+                self.history
+                    .get(context)
+                    .and_then(|history| history.predecessor(*message))
+                    .ok_or(SubmitError::StaleScope)?,
+            ),
             V::Typing(_) => Work::Typing,
             V::Pin(message) => Work::PinChange {
                 message: *message,
@@ -783,13 +791,12 @@ impl Accounts {
             },
             V::MarkRead(id) => W::MarkRead(message_id(context, id)?),
             V::MarkUnread => W::MarkUnread,
-            V::MarkUnreadFrom(message) => W::MarkUnreadFrom(message_id(
-                context,
-                self.history
-                    .get(context)
-                    .and_then(|history| history.predecessor(message))
-                    .ok_or(SubmitError::StaleScope)?,
-            )?),
+            V::MarkUnreadFrom(_) => {
+                let Work::UnreadFrom(previous) = work else {
+                    return Err(SubmitError::StaleScope);
+                };
+                W::MarkUnreadFrom(message_id(context, previous)?)
+            }
             V::Typing(v) => W::Typing(v),
             V::Mentions(v) => W::Mentions(v),
             V::Search(query) => {
@@ -1362,7 +1369,10 @@ impl Accounts {
                                     .cloned(),
                             );
                         }
-                        reload = !matches!(work, Work::Read(_) | Work::Typing | Work::Unread);
+                        reload = !matches!(
+                            work,
+                            Work::Read(_) | Work::Typing | Work::Unread | Work::UnreadFrom(_)
+                        );
                         if let Work::Read(id) = work {
                             let reached_latest = self
                                 .history
@@ -1374,6 +1384,7 @@ impl Accounts {
                                         let mut row = row.clone();
                                         if row.context == context {
                                             row.unread = 0;
+                                            row.last_read_message = Some(id);
                                             row.unread_direct_mention =
                                                 row.unread_direct_mention.map(|_| false);
                                         }
@@ -1381,12 +1392,15 @@ impl Accounts {
                                     }),
                                 );
                             }
-                        } else if work == Work::Unread {
+                        } else if matches!(work, Work::Unread | Work::UnreadFrom(_)) {
                             self.snapshot.conversations =
                                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
                                     let mut row = row.clone();
                                     if row.context == context {
                                         row.unread = row.unread.max(1);
+                                        if let Work::UnreadFrom(previous) = work {
+                                            row.last_read_message = Some(previous);
+                                        }
                                     }
                                     row
                                 }));
