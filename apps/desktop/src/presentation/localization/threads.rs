@@ -18,6 +18,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Rename thread",
         "Cambiar nombre del hilo",
     ),
+    (
+        "Thread-Anfang konnte nicht geladen werden.",
+        "Could not load the start of the thread.",
+        "No se pudo cargar el inicio del hilo.",
+    ),
+    (
+        "Thread-Anfang wird geladen …",
+        "Loading the start of the thread …",
+        "Cargando el inicio del hilo …",
+    ),
     ("Thread-Optionen", "Thread options", "Opciones del hilo"),
     ("Thread-Titel", "Thread title", "Título del hilo"),
     ("Threads", "Threads", "Hilos"),

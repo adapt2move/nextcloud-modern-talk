@@ -63,6 +63,7 @@ pub(crate) enum Action {
 pub(super) struct MessageUi {
     pub thread_load: Option<ThreadLoad>,
     thread_info_retry: Option<(ConversationRef, u128, Instant)>,
+    thread_root_retry: Option<(ConversationRef, u128, Instant)>,
     private_reply_pending: Option<private_reply::Pending>,
     pub(super) private_reply_focus: Option<ConversationRef>,
     pub list: ListState,
@@ -246,6 +247,7 @@ impl MessageUi {
         Self {
             thread_load: None,
             thread_info_retry: None,
+            thread_root_retry: None,
             private_reply_pending: None,
             private_reply_focus: None,
             list,
@@ -552,6 +554,44 @@ impl Desktop {
         preserve_edit: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.overlay == Some(Overlay::Thread)
+            && let Some((context, root)) = self.thread_parent
+            && Some(context) == self.snapshot.selected
+            && !self
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .any(|row| row.local_id == root)
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                use talk_core::ui::{UnavailableReason, conversation::RemoteState};
+                panel.context == context
+                    && panel.thread_root == Some(root)
+                    && panel.thread_root_message.is_none()
+                    && !panel
+                        .thread_messages
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.local_id == root)
+                    && !panel.thread_state.pending()
+                    && matches!(
+                        panel.thread_root_state,
+                        RemoteState::Idle
+                            | RemoteState::Failed(_, UnavailableReason::Connection(_))
+                    )
+            })
+            && self
+                .message_ui
+                .thread_root_retry
+                .is_none_or(|(room, id, at)| room != context || id != root || Instant::now() >= at)
+        {
+            self.message_ui.thread_root_retry = Some((
+                context,
+                root,
+                Instant::now() + std::time::Duration::from_secs(5),
+            ));
+            self.submit_message(MessageAction::ThreadRoot(root));
+        }
         if self.overlay == Some(Overlay::Thread)
             && let Some((context, root)) = self.thread_parent
             && Some(context) == self.snapshot.selected

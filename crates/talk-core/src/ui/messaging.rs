@@ -262,6 +262,9 @@ pub struct MessagePanel {
     pub file_saved: Option<u64>,
     pub thread_root: Option<u128>,
     pub thread_state: RemoteState,
+    /// Independent root lookup when it lies outside the retained room history.
+    pub thread_root_state: RemoteState,
+    pub thread_root_message: Option<super::presentation::MessageView>,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
     pub thread_details: Option<ThreadDetails>,
     pub thread_details_request: Option<RequestId>,
@@ -312,6 +315,8 @@ impl MessagePanel {
             file_saved: None,
             thread_root: None,
             thread_state: RemoteState::Idle,
+            thread_root_state: RemoteState::Idle,
+            thread_root_message: None,
             thread_messages: Page::empty(),
             thread_details: None,
             thread_details_request: None,
@@ -388,6 +393,7 @@ pub enum MessageAction {
     DismissUpload,
     Files,
     Thread(u128),
+    ThreadRoot(u128),
     ThreadInfo(u128),
     RenameThread {
         root: u128,

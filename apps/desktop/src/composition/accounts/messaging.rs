@@ -7,6 +7,7 @@ use talk_core::ui::{conversation::RemoteState, messaging as view};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Work {
     Thread,
+    ThreadRoot(u128),
     ThreadInfo(u128),
     ThreadChange(u128),
     History,
@@ -467,6 +468,7 @@ impl Accounts {
                 }
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
                 Work::Thread => panel.thread_state = RemoteState::Loading(request),
+                Work::ThreadRoot(_) => panel.thread_root_state = RemoteState::Loading(request),
                 Work::Context(target) => {
                     panel.context_load = Some(view::ContextLoad {
                         target,
@@ -656,6 +658,7 @@ impl Accounts {
             V::Pins => Work::Pins,
             V::ShareUpload { .. } => Work::Share,
             V::Thread(_) => Work::Thread,
+            V::ThreadRoot(root) => Work::ThreadRoot(*root),
             V::ThreadInfo(root) => Work::ThreadInfo(*root),
             V::RenameThread { root, .. } | V::ThreadNotifications { root, .. } => {
                 Work::ThreadChange(*root)
@@ -757,6 +760,7 @@ impl Accounts {
                 before: None,
                 thread: Some(message_id(context, root)?),
             },
+            V::ThreadRoot(root) => W::Context(message_id(context, root)?),
             V::ThreadInfo(root) => W::Thread(message_id(context, root)?),
             V::RenameThread { root, title } => W::RenameThread {
                 root: message_id(context, root)?,
@@ -912,6 +916,8 @@ impl Accounts {
                 panel.thread_messages = cached_thread.unwrap_or_else(Page::empty);
                 panel.thread_details = None;
                 panel.thread_details_request = None;
+                panel.thread_root_state = RemoteState::Idle;
+                panel.thread_root_message = None;
             }
             panel.thread_root = Some(root);
         }
@@ -988,6 +994,14 @@ impl Accounts {
         // Retire obsolete cache tickets as no-effect cancellations below, so
         // neither a stale success nor failure changes rows or current feedback.
         let current_target = match work {
+            Work::ThreadRoot(root) => {
+                self.snapshot.selected == Some(context)
+                    && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context == context
+                            && panel.thread_root == Some(root)
+                            && panel.thread_root_state == RemoteState::Loading(request)
+                    })
+            }
             Work::ThreadInfo(root) => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -1111,7 +1125,7 @@ impl Accounts {
             _ if work.foreground_result() => Err(Completion::Uncertain),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
-        let mut result = if matches!(work, Work::Thread | Work::Context(_))
+        let mut result = if matches!(work, Work::Thread | Work::ThreadRoot(_) | Work::Context(_))
             && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
         {
             Err(Completion::Failed(UnavailableReason::PolicyStale))
@@ -1271,6 +1285,17 @@ impl Accounts {
                                     .filter(|m| !m.metadata.pin_notice),
                             );
                             thread_changed = true;
+                        } else if let Work::ThreadRoot(root) = work {
+                            if let Some(message) = messages
+                                .as_slice()
+                                .iter()
+                                .find(|message| u128::from(message.message.id.sequence) == root)
+                            {
+                                panel.thread_root_message = Some(message_view(message));
+                                thread_changed = true;
+                            } else {
+                                completion = Completion::Failed(UnavailableReason::PolicyUnknown);
+                            }
                         } else if work == Work::Poll
                             && let Some(root) = panel.thread_root
                         {
@@ -1521,6 +1546,9 @@ impl Accounts {
             if completion == Completion::Failed(UnavailableReason::PermissionDenied) {
                 panel.thread_messages = Page::empty();
             }
+        }
+        if matches!(work, Work::ThreadRoot(_)) {
+            panel.thread_root_state = state;
         }
         if matches!(work, Work::Context(_))
             && let Some(load) = panel.context_load.as_mut()
@@ -1815,6 +1843,14 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
 }
 fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
     let mut expired = expired.to_vec();
+    if let Some(message) = panel.thread_root_message.as_ref()
+        && message
+            .metadata
+            .expires_at
+            .is_some_and(|at| at > 0 && at <= now)
+    {
+        expired.push(message.local_id);
+    }
     for messages in [
         &panel.thread_messages,
         &panel.pinned_messages,
@@ -1844,6 +1880,7 @@ fn expire_related(panel: &mut view::MessagePanel, expired: &[u128], now: u64) {
         }
         Some(message)
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().and_then(retain);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().filter_map(retain));
     panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().filter_map(retain));
     panel.shared_files = page(panel.shared_files.as_slice().iter().filter_map(retain));
@@ -1876,6 +1913,7 @@ fn reconcile_related_reactions(
         }
         message
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().map(reconcile);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().map(reconcile));
     panel.pinned_messages = page(panel.pinned_messages.as_slice().iter().map(reconcile));
     panel.shared_files = page(panel.shared_files.as_slice().iter().map(reconcile));
@@ -1908,6 +1946,7 @@ fn reconcile_related(
         }
         result
     };
+    panel.thread_root_message = panel.thread_root_message.as_ref().map(reconcile);
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().map(reconcile));
     panel.pinned_messages = page(
         panel

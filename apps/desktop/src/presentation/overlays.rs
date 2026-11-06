@@ -559,6 +559,7 @@ impl Desktop {
             .as_slice()
             .iter()
             .find(|message| message.local_id == root)
+            .or_else(|| panel.and_then(|panel| panel.thread_root_message.as_ref()))
             .or_else(|| {
                 panel.and_then(|panel| {
                     panel
@@ -570,6 +571,28 @@ impl Desktop {
             });
         if let Some(message) = root_message {
             body = body.child(self.thread_message(message));
+        } else if panel.is_some_and(|panel| {
+            matches!(
+                panel.thread_root_state,
+                talk_core::ui::conversation::RemoteState::Failed(_, _)
+            )
+        }) {
+            body = body.child(self.hint(self.l("Thread-Anfang konnte nicht geladen werden.")));
+            body = body.child(self.button(
+                "thread-root-retry",
+                "Erneut versuchen",
+                ButtonStyle::Quiet,
+                true,
+                LocalAction::MessageIn(
+                    context,
+                    super::messaging::Action::Command(
+                        talk_core::ui::messaging::MessageAction::ThreadRoot(root),
+                    ),
+                ),
+                cx,
+            ));
+        } else {
+            body = body.child(self.hint(self.l("Thread-Anfang wird geladen …")));
         }
         let collection = CollectionState::new(
             state,

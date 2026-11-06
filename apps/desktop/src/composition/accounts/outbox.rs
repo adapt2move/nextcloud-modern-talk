@@ -1528,6 +1528,9 @@ fn overlay(
         mutate(&mut row);
         row
     }));
+    if let Some(row) = panel.thread_root_message.as_mut() {
+        mutate(row);
+    }
     panel.thread_messages = page(panel.thread_messages.as_slice().iter().cloned().map(
         |mut row| {
             mutate(&mut row);
