@@ -8,7 +8,6 @@ import argparse
 import asyncio
 import json
 import sys
-import urllib.request
 import urllib.parse
 
 sys.dont_write_bytecode = True
@@ -98,8 +97,6 @@ def exercise(lab, record):
         user = lab.request("lab_bob", "GET", "/ocs/v2.php/cloud/user", name="call-activity-inspect-member")
         lab.require("call-activity-member-identity", user.get("id") == "lab_bob")
         lab.request("lab_bob", "GET", API + "v4/room", name="call-activity-member-rooms")
-        before = {cookie.name: cookie.value for handler in lab.clients["lab_bob"].handlers
-                  if isinstance(handler, urllib.request.HTTPCookieProcessor) for cookie in handler.cookiejar}
         result = lab.request("lab_bob", "POST", room_path + "/participants/active",
                              body={}, name="call-activity-join-member-room")
         sessions["lab_bob"] = result["sessionId"]
@@ -107,15 +104,8 @@ def exercise(lab, record):
         members = lab.request("lab_alice", "GET", room_path + "/participants",
                               name="call-activity-member-session")
         observed = [p for p in members if p.get("actorId") == "lab_bob"]
-        after = {cookie.name: cookie.value for handler in lab.clients["lab_bob"].handlers
-                 if isinstance(handler, urllib.request.HTTPCookieProcessor) for cookie in handler.cookiejar}
-        cookie_counts = {actor: sum(len(handler.cookiejar) for handler in lab.clients[actor].handlers
-                                    if isinstance(handler, urllib.request.HTTPCookieProcessor))
-                         for actor in ("lab_alice", "lab_bob")}
-        print(json.dumps({"member_session_observed": len(observed) == 1
-                          and sessions["lab_bob"] in (observed[0].get("sessionIds") or []),
-                          "cookie_counts": cookie_counts,
-                          "cookie_changes": sum(before.get(name) != value for name, value in after.items())}), flush=True)
+        lab.require("call-activity-member-session-observed", len(observed) == 1
+                    and sessions["lab_bob"] in (observed[0].get("sessionIds") or []))
         lab.request("lab_bob", "POST", call_path, body={"flags": 1, "silent": True},
                     name="call-activity-join-call")
         # The released server may acknowledge a no-op rather than returning
@@ -133,6 +123,10 @@ def exercise(lab, record):
                             ("reaction", ("reaction", reaction)),
                             ("moderator-mute", ("control", mute))):
             lab.require("call-activity-" + label + "-received", pair in received)
+        lowered = {"state": False, "timestamp": 43}
+        send(lab, token, "lab_alice", alice, bob_session, [("raiseHand", lowered)])
+        received = receive(lab, token, "lab_bob", alice, bob_session, ("raiseHand", lowered))
+        lab.require("call-activity-lower-hand-received", ("raiseHand", lowered) in received)
         # The ordinary member sends an allowed marker alongside a control;
         # receipt of the marker proves the destructive poll was meaningful.
         forbidden = {"action": "forceMute", "peerId": alice}
@@ -146,8 +140,6 @@ def exercise(lab, record):
         remaining = lab.request("lab_alice", "GET", call_path,
                                 name="call-activity-ended-members")
         lab.require("call-activity-end-all-empty", remaining == [])
-        print(json.dumps({"profile": record["development"]["profile"], "result": "pass",
-                          "scope": "internal signaling and call control; no media"}))
     except LabError:
         failed = [row for row in lab.current["assertions"] if row["result"] == "fail"]
         print(json.dumps({"failed_assertions": failed}), flush=True)
@@ -155,6 +147,8 @@ def exercise(lab, record):
     finally:
         lab.request("lab_alice", "DELETE", room_path, expected=(200, 404),
                     name="call-activity-cleanup")
+    print(json.dumps({"profile": record["development"]["profile"], "result": "pass",
+                      "scope": "internal signaling and call control; no media"}))
 
 
 if __name__ == "__main__":
