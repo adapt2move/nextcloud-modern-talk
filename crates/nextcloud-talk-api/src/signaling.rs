@@ -169,6 +169,10 @@ pub enum Event {
     TransportResumed,
     PolicyChanged,
     ForceMute,
+    /// A peer asks this call session to stop microphone publication.
+    ForceMuteBy {
+        from: PeerSession,
+    },
     Signal {
         from: PeerSession,
         negotiation: Negotiation,
@@ -412,7 +416,14 @@ pub(crate) fn parse_batch(
                 let from = PeerSession::parse(text(data.get("from"), 512)?)?;
                 retained += from.0.len();
                 let kind = text(data.get("type"), 32)?;
-                if matches!(kind, "raiseHand" | "reaction") {
+                if kind == "control" {
+                    // Unknown controls cannot grant authority or terminate the call.
+                    if data["payload"]["action"].as_str() == Some("forceMute")
+                        && data["payload"]["peerId"].as_str() == Some(local)
+                    {
+                        events.push(Event::ForceMuteBy { from });
+                    }
+                } else if matches!(kind, "raiseHand" | "reaction") {
                     activities += 1;
                     if activities <= 16 {
                         if let Ok(activity) = activity::Activity::decode(kind, &data["payload"]) {

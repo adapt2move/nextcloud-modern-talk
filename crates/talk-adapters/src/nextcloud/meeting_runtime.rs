@@ -770,6 +770,17 @@ async fn media_loop(
                             transport_ready = true;
                             refresh_needed = true;
                         }
+                        SignalEvent::ForceMuteBy { from } => {
+                            // Stopping publication is safe even before a policy refresh;
+                            // an unknown sender cannot create a participant or authority.
+                            if bundle.peers.iter().any(|peer| peer.session == from) {
+                                let mut wishes = call.wishes();
+                                wishes.microphone = false;
+                                call.set_wishes(scope, wishes).map_err(|_| ())?;
+                                session.suspend();
+                                refresh_needed = true;
+                            }
+                        }
                         SignalEvent::ForceMute => {
                             let mut wishes = call.wishes();
                             wishes.microphone = false;
