@@ -20,6 +20,7 @@ pub enum MacPermissionKind {
 }
 #[path = "permission_probe.rs"]
 mod probe;
+use probe::Probe;
 pub use probe::{MacPermissionError, MacPermissionOperation, MacPermissionStatus};
 
 type MainJob = Box<dyn FnOnce() + Send>;

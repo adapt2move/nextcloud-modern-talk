@@ -1,31 +1,43 @@
 # Build, test and release
 
-The [CI workflow](../.github/workflows/ci.yml) runs only the Linux job on pull requests.
-Pushes to `main` and manual runs on `main` also run Windows and macOS. Manual runs
-on other branches run Linux only by default. An explicit manual `signing_probe`
-run checks only a disposable macOS signing identity on the selected ref. It does
-not use release credentials or run the application, and does not replace full CI.
-The probe installs no trust, changes no authorization rules and does not affect
-end-user Macs. Its disposable keychain is temporarily included in the runner
-user's search list; teardown restores the original list without changing the
-default keychain.
+Checks are local commands first. The [automatic workflow](../.github/workflows/ci.yml)
+runs `python3 tools/check.py`, also available as `task verify`, in one Linux job
+on pull requests and pushes to `main`. It checks documentation, architecture,
+workflow policy, Rust formatting, workspace Clippy and workspace tests. A new
+push cancels the obsolete run for that PR or branch.
 
-| Job | Runner | Work |
+| Check | Where | Work |
 | --- | --- | --- |
-| Linux | `ubuntu-26.04` | Docs/policy checks, package fixtures, architecture and formatting, Clippy, Rust tests, desktop build and three native fixture captures |
-| Windows | `windows-2025` | Compile the workspace and test targets for MSVC; do not execute them |
-| macOS | `macos-26` | Compile the workspace, test targets and native Swift helper for Apple Silicon; assemble and inspect the self-contained app/DMG without executing the app |
-| Manual signing probe | `macos-26` | With `signing_probe=true`, compile two inert C fixtures and check disposable signing identity continuity; no release credentials, app launch or permission prompts |
+| `task verify` | Local host; automatic CI on `ubuntu-26.04` | The same standard checks, with no UI capture or packaging |
+| `task verify:full` | Local development host with the required fixture tools | Also run tooling/package regressions, actionlint, backend-feature checks, permission callback lifetimes and isolated architecture fixtures |
+| [Native release checks](../.github/workflows/native.yml) | Manual `windows-2025` and `macos-26` jobs | Compile workspace/test targets; on macOS also check the Swift helper, disposable signing identity and app/DMG assembly |
+| [Release](../.github/workflows/release.yml) | Manual Linux/macOS jobs | Build and verify the actual distributable packages, then optionally publish |
 
-These standard GitHub-hosted runners are free for this public repository. macOS uses the Apple Silicon runner.
+Run `task verify` before pushing and choose the additional suites relevant to a
+change. `python3 tools/check.py --full` runs the extended suites without Task;
+each underlying script remains independently executable. Full tooling checks
+include Linux-specific fixtures and the pinned Linux x86_64 actionlint binary.
+UI captures remain a separate [local command](development.md#native-ui-entrypoint).
 
-Rust/application tests run only on Linux. Windows/macOS compilation and the signing probe do not establish native device, credential-store, permission or UI behavior. Linux synthetic captures are smoke checks, not a substitute for real server/device scenarios. New pull-request pushes cancel obsolete runs; a running main-branch run is allowed to finish.
+Before tagging a release, run `gh workflow run native.yml --ref main` and require
+both native jobs to pass for the exact candidate, alongside the standard checks.
+Use it earlier when changing platform code or dependencies. These jobs are
+compile/package checks; they never launch the app or its Rust tests. The macOS
+signing fixture uses a disposable identity, no release credentials or permission
+prompts, and restores its temporary keychain search-list change. No trust or
+authorization rules are changed. Neither these checks nor synthetic Linux
+captures establish native device, credential-store, permission or UI behavior.
 
 ## Prerequisites and pins
 
 [rust-toolchain.toml](../rust-toolchain.toml), [Cargo.lock](../Cargo.lock) and [action pins](../tools/release/actions.json) identify the toolchain, Rust dependencies and Actions. Cargo runs with `--locked`. CI caches registry downloads, not compiled application outputs. Release builds use a fresh target directory.
 
-Linux installs [native prerequisites](../tools/ui/prepare-linux.sh), libdbus and GLib development headers. Windows needs MSVC and uses the pinned aws-lc crate's prebuilt NASM objects. macOS needs Xcode and its Metal Toolchain; [build_env.py](../tools/ci/build_env.py) installs the optional Metal component if missing and records the actual host. Neither platform runs the app as a build check.
+Automatic CI installs only the [build prerequisites](../tools/ui/prepare-linux.sh)
+with `--build-only`, including libdbus and GLib headers. OCR, Xvfb, desktop portals
+and capture tools are reserved for local UI work and Linux release smoke checks.
+Windows needs MSVC and the pinned aws-lc crate's prebuilt NASM objects. macOS needs
+Xcode and its Metal Toolchain; [build_env.py](../tools/ci/build_env.py) installs the
+optional Metal component if missing and records the actual host.
 
 [prepare_gstreamer.py](../tools/ci/prepare_gstreamer.py) installs checksum-pinned official SDKs on macOS and Windows. The Rust `webrtc` engine comes from the pinned Cargo dependencies and uses GStreamer for codecs, with no separate libwebrtc SDK download. Third-party native code remains upstream's responsibility; application Rust forbids `unsafe`.
 
@@ -33,12 +45,12 @@ Desktop/workspace compilation uses [tools/cargo.py](../tools/cargo.py), the same
 native-environment starter used by the local [Task commands](development.md#native-ui-entrypoint).
 CI does not install Task. The starter adds the selected macOS SDK's runtime
 search path while preserving `-D warnings`; it does not install SDKs or execute
-tests implicitly. The workflow still states package, target and compile-only
-scope explicitly. Packaging retains the separate pinned-runtime builder.
+tests implicitly. Native checks state package, target and compile-only scope
+explicitly. Packaging retains the separate pinned-runtime builder.
 
 ## Releases
 
-The manual [release workflow](../.github/workflows/release.yml) accepts an exact commit on `main`, an existing version tag and an optional publish flag. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The ordinary macOS CI job also assembles these packages so packaging failures can be fixed before a release tag is created.
+The manual [release workflow](../.github/workflows/release.yml) accepts an exact commit on `main`, an existing version tag and an optional publish flag. It builds Linux `.deb`/`.tar.gz` and an Apple Silicon app ZIP plus a styled DMG. Linux installs and launches its packaged binary; macOS compiles and inspects the bundle, library paths, signatures and disk-image structure. The manual native check also assembles the macOS packages so packaging failures can be fixed before a release tag is created.
 
 The separate publisher uses `ubuntu-26.04` and is the only job with `contents: write`. It checks package receipts and the existing tag, creates a draft using GitHub CLI, uploads files, downloads and compares their bytes, rechecks the tag, then marks the release as a prerelease. An error leaves the draft for inspection. It never replaces existing release assets or creates/moves a tag. Maintainers must serialize publication of a version; tag checks do not prevent an administrator from changing GitHub state concurrently.
 

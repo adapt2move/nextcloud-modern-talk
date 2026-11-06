@@ -54,7 +54,7 @@ jobs:
       - name: Native prerequisites
         run: |
           sudo bash tools/ui/prepare-linux.sh
-          sudo apt-get install -y --no-install-recommends libdbus-1-dev libglib2.0-dev dpkg-dev
+          sudo apt-get install -y --no-install-recommends dpkg-dev
       - run: python3 tools/release/toolchain.py --target x86_64-unknown-linux-gnu
       - run: python3 tools/release/build.py --target x86_64-unknown-linux-gnu --version "${VERSION_TAG#v}" --output "$RUNNER_TEMP/packages"
       - name: Install and exercise the packaged Linux binary

@@ -42,47 +42,33 @@ class PolicyTests(unittest.TestCase):
         self.check("pull_request:", "pull_request_target:")
 
     def test_write_token_in_compile_job(self):
-        self.check("    name: Compile only (Windows x86_64 MSVC)", "    permissions:\n      contents: write\n    name: Compile only (Windows x86_64 MSVC)")
+        self.check("    name: Compile only (Windows x86_64 MSVC)", "    permissions:\n      contents: write\n    name: Compile only (Windows x86_64 MSVC)", file="native.yml")
 
     def test_windows_cannot_execute_tests(self):
-        self.check("python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc", "cargo test --locked --workspace --target x86_64-pc-windows-msvc")
+        self.check("python tools/cargo.py build --locked --workspace --all-targets --target x86_64-pc-windows-msvc", "cargo test --locked --workspace --target x86_64-pc-windows-msvc", file="native.yml")
 
     def test_compile_jobs_cannot_execute_through_cargo_wrapper(self):
         for command in ("test", "run", "bench", "nextest"):
             with self.subTest(command=command):
-                self.check("python tools/cargo.py build", "python tools/cargo.py " + command)
+                self.check("python tools/cargo.py build", "python tools/cargo.py " + command, file="native.yml")
 
     def test_wrapped_check_cannot_replace_required_compilation(self):
-        self.check("python tools/cargo.py build", "python tools/cargo.py check")
+        self.check("python tools/cargo.py build", "python tools/cargo.py check", file="native.yml")
 
     def test_macos_compile_not_skipped(self):
-        self.check("    name: Compile only (macOS Apple Silicon)", "    if: false\n    name: Compile only (macOS Apple Silicon)")
+        self.check("    name: Compile and package only (macOS Apple Silicon)", "    if: false\n    name: Compile and package only (macOS Apple Silicon)", file="native.yml")
 
-    def test_platform_builds_cannot_run_in_pull_requests(self):
-        self.check("    if: " + policy.MAIN_ONLY + "\n", "")
-        self.check(policy.MAIN_ONLY, policy.MAIN_ONLY.replace("!=", "=="))
+    def test_native_checks_are_manual_and_credential_free(self):
+        self.check("  workflow_dispatch:", "  pull_request:", file="native.yml")
+        self.check("  workflow_dispatch:", "  workflow_dispatch:\n  push:", file="native.yml")
+        self.check("    name: Compile only (Windows x86_64 MSVC)", "    name: Compile only (Windows x86_64 MSVC)\n    env:\n      SECRET: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}", file="native.yml")
 
-    def test_manual_feature_branches_cannot_run_full_ci(self):
-        self.check(policy.MAIN_ONLY, "github.event_name != 'pull_request'")
-
-    def test_linux_must_run_in_pull_requests(self):
-        self.check("    name: Linux tests and native smoke",
-                   "    if: " + policy.MAIN_ONLY + "\n    name: Linux tests and native smoke")
-
-    def test_linux_can_only_skip_the_explicit_manual_signing_probe(self):
-        self.check(policy.LINUX_NORMAL, "false")
-        self.check(policy.LINUX_NORMAL, "github.event_name != 'pull_request'")
-
-    def test_signing_probe_cannot_run_automatically_or_use_release_credentials(self):
-        self.check(policy.SIGNING_PROBE, "github.event_name == 'pull_request'")
-        self.check("    name: Disposable macOS signing contract", "    name: Disposable macOS signing contract\n    env:\n      SECRET: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}")
-
-    def test_signing_probe_cannot_replace_its_contract_with_app_execution(self):
-        self.check("      - run: python3 tools/native/check-macos-signing.py", "      - run: cargo run --locked")
-        self.check("      - run: python3 tools/native/check-macos-signing.py", "      - run: python3 tools/native/check-macos-signing.py\n        if: false")
+    def test_linux_check_cannot_be_skipped_or_replaced(self):
+        self.check("    name: Checks", "    if: false\n    name: Checks")
+        self.check("python3 tools/check.py", "true")
 
     def test_release_builds_remain_unconditional(self):
-        self.check("    runs-on: macos-26", "    if: " + policy.MAIN_ONLY + "\n    runs-on: macos-26",
+        self.check("    runs-on: macos-26", "    if: false\n    runs-on: macos-26",
                    file="release.yml")
 
     def test_only_unconditional_native_teardown_may_have_a_step_condition(self):
