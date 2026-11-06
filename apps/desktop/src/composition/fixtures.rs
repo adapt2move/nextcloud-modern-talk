@@ -1905,6 +1905,33 @@ impl NativeDesktopPort for DevelopmentPort {
                     },
                 });
             }
+            UiIntent::SetCallHand { call, raised } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.hand_supported)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.hand_raised = raised;
+            }
+            UiIntent::SendCallReaction { call, emoji } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.reactions.as_slice().contains(&emoji))
+                    .ok_or(SubmitError::StaleScope)?;
+                let sequence = view
+                    .latest_reaction
+                    .as_ref()
+                    .map_or(Some(1), |reaction| reaction.sequence.checked_add(1))
+                    .ok_or(SubmitError::Busy)?;
+                view.latest_reaction = Some(talk_core::ui::presentation::CallReactionView {
+                    sequence,
+                    participant: None,
+                    emoji,
+                });
+            }
             UiIntent::Legacy(UserIntent::Leave(call)) | UiIntent::DeclineDirect(call) => {
                 if self.snapshot.call.as_ref().is_none_or(|c| c.scope != call) {
                     return Err(SubmitError::StaleScope);

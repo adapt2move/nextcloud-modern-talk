@@ -33,6 +33,8 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
+    ("Hand heben", "Raise hand", "Levantar la mano"),
+    ("Hand senken", "Lower hand", "Bajar la mano"),
     (
         "Mit Video annehmen",
         "Accept with video",
@@ -51,6 +53,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("Raster", "Gallery", "Galería"),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
     ("Spricht", "Speaking", "Hablando"),
+    (
+        "Tastenkürzel: H",
+        "Keyboard shortcut: H",
+        "Atajo de teclado: H",
+    ),
     (
         "Tastenkürzel: M",
         "Keyboard shortcut: M",

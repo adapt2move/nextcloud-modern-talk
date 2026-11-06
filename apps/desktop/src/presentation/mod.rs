@@ -304,6 +304,11 @@ pub struct Desktop {
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
+    recent_call_reaction: Option<(
+        CallScope,
+        talk_core::ui::presentation::CallReactionView,
+        Instant,
+    )>,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -476,6 +481,11 @@ impl Desktop {
             .as_ref()
             .filter(|call| call.stage == CallStage::Active)
             .map(|call| (call.scope, std::time::Instant::now()));
+        let recent_call_reaction = snapshot.call.as_ref().and_then(|call| {
+            call.latest_reaction
+                .clone()
+                .map(|reaction| (call.scope, reaction, Instant::now()))
+        });
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
@@ -554,6 +564,7 @@ impl Desktop {
             call_speaker,
             call_minimized,
             call_started,
+            recent_call_reaction,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -794,6 +805,24 @@ impl Desktop {
             {
                 self.call_started = Some((call.scope, std::time::Instant::now()));
             }
+        }
+        if self
+            .recent_call_reaction
+            .as_ref()
+            .is_some_and(|(scope, _, _)| Some(*scope) != live_scope)
+        {
+            self.recent_call_reaction = None;
+        }
+        if let Some(call) = next.call.as_ref()
+            && let Some(reaction) = call.latest_reaction.as_ref()
+            && self
+                .recent_call_reaction
+                .as_ref()
+                .is_none_or(|(scope, old, _)| {
+                    *scope != call.scope || old.sequence != reaction.sequence
+                })
+        {
+            self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
         }
         self.snapshot = next;
         let limit = self.composer_message_limit();
@@ -2008,7 +2037,7 @@ impl Desktop {
             && !self.incoming_visible()
             && !self.text_input_focused(window, cx)
             && registry_modifiers == Some(Modifiers::None)
-            && matches!(key.as_str(), "m" | "v")
+            && matches!(key.as_str(), "m" | "v" | "h")
             && self.snapshot.call.as_ref().is_some_and(|call| {
                 self.call_minimized != Some(call.scope)
                     && matches!(
@@ -2019,6 +2048,17 @@ impl Desktop {
         {
             if let Some(call) = self.snapshot.call.as_ref() {
                 let scope = call.scope;
+                if key == "h" {
+                    if call.hand_supported && call.stage == CallStage::Active {
+                        let intent = UiIntent::SetCallHand {
+                            call: scope,
+                            raised: !call.hand_raised,
+                        };
+                        self.handle(LocalAction::Intent(intent), window, cx);
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
                 let state = if key == "m" {
                     call.microphone
                 } else {
@@ -2276,6 +2316,18 @@ impl Render for Desktop {
         if incoming && self.snapshot.call.as_ref().map(|c| c.scope) != self.last_incoming_scope {
             self.incoming_return_focus = window.focused(cx);
             self.last_incoming_scope = self.snapshot.call.as_ref().map(|c| c.scope);
+        }
+        if self
+            .recent_call_reaction
+            .as_ref()
+            .is_some_and(|(scope, _, at)| {
+                at.elapsed() < std::time::Duration::from_millis(1800)
+                    && self.snapshot.call.as_ref().is_some_and(|call| {
+                        call.scope == *scope && self.call_minimized != Some(*scope)
+                    })
+            })
+        {
+            window.request_animation_frame();
         }
         self.control_focus.begin_frame();
         self.navigation.reveal.begin();

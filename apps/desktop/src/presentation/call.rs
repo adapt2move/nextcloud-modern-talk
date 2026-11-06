@@ -502,6 +502,7 @@ impl Desktop {
                 .gap_4()
                 .p_6()
                 .child(visual)
+                .children(self.call_reaction(call.scope, Some(participant.local_id)))
                 .child(
                     div()
                         .flex_none()
@@ -702,6 +703,57 @@ impl Desktop {
                     ),
             );
         }
+        if call.hand_supported {
+            let label = if call.hand_raised {
+                "Hand senken"
+            } else {
+                "Hand heben"
+            };
+            controls = controls.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        self.icon_button(
+                            "call-hand",
+                            ("hand", label),
+                            ButtonStyle::Stage,
+                            Availability::available().labelled().help("Tastenkürzel: H"),
+                            LocalAction::Intent(UiIntent::SetCallHand {
+                                call: call.scope,
+                                raised: !call.hand_raised,
+                            }),
+                            cx,
+                        )
+                        .size(px(44.)),
+                    )
+                    .child(
+                        div()
+                            .text_size(self.sp(12.))
+                            .text_color(t.stage_muted)
+                            .child(self.l(label)),
+                    ),
+            );
+        }
+        if !call.reactions.as_slice().is_empty() {
+            let mut reactions = div().flex().flex_wrap().items_center().gap_1().relative();
+            for (index, emoji) in call.reactions.as_slice().iter().enumerate() {
+                reactions = reactions.child(self.button(
+                    ("call-reaction", index),
+                    emoji.as_str().to_owned(),
+                    ButtonStyle::Stage,
+                    true,
+                    LocalAction::Intent(UiIntent::SendCallReaction {
+                        call: call.scope,
+                        emoji: emoji.clone(),
+                    }),
+                    cx,
+                ));
+            }
+            controls = controls.child(reactions.children(self.call_reaction(call.scope, None)));
+        }
         for (id, symbol, label, action) in [
             (
                 "call-participants",
@@ -872,6 +924,27 @@ impl Desktop {
             )
             .bg(t.stage),
         )
+    }
+    fn call_reaction(
+        &self,
+        scope: talk_core::ui::CallScope,
+        participant: Option<u128>,
+    ) -> Option<gpui::AnyElement> {
+        let (current, reaction, at) = self.recent_call_reaction.as_ref()?;
+        if *current != scope
+            || reaction.participant != participant
+            || at.elapsed() >= std::time::Duration::from_millis(1800)
+        {
+            return None;
+        }
+        let id = gpui::SharedString::from(format!("call-reaction-animation-{}", reaction.sequence));
+        let element = div()
+            .absolute()
+            .right(px(12.))
+            .bottom(px(20.))
+            .text_size(self.sp(34.))
+            .child(reaction.emoji.as_str().to_owned());
+        Some(self.call_reaction_motion(id.into(), element))
     }
     fn call_outcome(&self, failed: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;
