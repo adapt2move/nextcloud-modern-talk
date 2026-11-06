@@ -130,6 +130,50 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
         expect('denied draft copy did not replace platform clipboard',['CLIPMARK'])
+    elif scenario == 'poll-dialog':
+        expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
+               ['Mindestens zwei unterschiedliche Antwortoptionen'])
+        type_text('Team lunch')
+        click('Antwortoption'); type_text('Garden')
+        click('Antwortoption'); type_text('Studio')
+        expect('completed poll keeps both distinct choices', ['Team lunch', 'Garden', 'Studio'],
+               ['Mindestens zwei unterschiedliche Antwortoptionen'])
+        click('Veröffentlichen')
+        expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+    elif scenario == 'chat-voice':
+        path, _, _ = observe()
+        width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
+        if (width, height) != (1280, 800):
+            raise AssertionError('Voice waveform interaction requires the inspected 1280x800 fixture')
+        # The compact fictional waveform occupies x=382..565, y=610..644 in
+        # this fixed fixture. Verify the resulting scoped intents, not dispatch.
+        run(['xdotool', 'mousemove', '--window', xid, '475', '627', 'click', '1'], env)
+        time.sleep(.4)
+        log = out / f'{label}.log'
+        first = re.findall(r'UI_VOICE_FIXTURE seek_ms=(\d+)', log.read_text())
+        if not first:
+            raise AssertionError('Clicking the waveform did not submit a seek')
+        key('Right')
+        time.sleep(.4)
+        second = re.findall(r'UI_VOICE_FIXTURE seek_ms=(\d+)', log.read_text())
+        if len(second) <= len(first) or int(second[-1]) != min(int(first[-1]) + 5000, 38000):
+            raise AssertionError(f'Focused waveform arrow seek did not advance five seconds: {first}, {second}')
+        path, _, _ = observe()
+        checks.append({'check': 'waveform click and focused arrow seek update the fictional player',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path)})
+    elif scenario == 'voice-recording':
+        path, _, _ = observe()
+        width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
+        if (width, height) != (1280, 800):
+            raise AssertionError('Recording interaction requires the inspected 1280x800 fixture')
+        # The rightmost round button is the explicit direct-send action.
+        run(['xdotool', 'mousemove', '--window', xid, '1214', '734',
+             'click', '--repeat', '2', '--delay', '50', '1'], env)
+        time.sleep(.8)
+        log = (out / f'{label}.log').read_text()
+        if log.count('UI_VOICE_FIXTURE send no_backend=true') != 1:
+            raise AssertionError('Direct recording send did not settle exactly once')
+        expect('direct send retires the fictional recording', ['Nachricht an Designteam'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

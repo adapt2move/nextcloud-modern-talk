@@ -1412,12 +1412,14 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
             }
             UiIntent::Content {
-                account, action, ..
+                request,
+                account,
+                action,
             } if self.chat_content => {
                 if self.snapshot.active_account != Some(account) {
                     return Err(SubmitError::StaleScope);
                 }
-                content::action(&mut self.snapshot, action)?;
+                content::action(&mut self.snapshot, request, action)?;
             }
             UiIntent::Refresh(_) if self.chat_motion => {
                 self.probe_step = (self.probe_step + 1).min(14);

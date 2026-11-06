@@ -248,7 +248,7 @@ pub struct Bridge {
     pub services: Rc<Services>,
     pub cursor: u64,
     pub device_cursor: u64,
-    pub fixture_voice: Option<talk_core::ui::content::VoiceSnapshot>,
+    pub fixture_voice: std::cell::RefCell<Option<talk_core::ui::content::VoiceSnapshot>>,
     pub permission_cursor: u64,
     pub notification_request: Option<RequestId>,
     pub notification_result: NotificationState,
@@ -357,8 +357,8 @@ impl ComputerSettingsPort for Bridge {
         Ok(())
     }
     fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
-        if self.fixture_voice.is_some() {
-            return self.fixture_voice;
+        if self.fixture_voice.borrow().is_some() {
+            return *self.fixture_voice.borrow();
         }
         self.services.devices.as_ref().ok()?.voice_snapshot()
     }
@@ -385,6 +385,20 @@ impl ComputerSettingsPort for Bridge {
         context: talk_core::ui::presentation::ConversationRef,
         cancel: bool,
     ) -> Result<(), DeviceError> {
+        {
+            let mut fixture = self.fixture_voice.borrow_mut();
+            if let Some(voice) = fixture.as_mut() {
+                if voice.context != context {
+                    return Err(DeviceError::Stale);
+                }
+                if cancel {
+                    *fixture = None;
+                } else {
+                    voice.phase = talk_core::ui::content::VoicePhase::Review;
+                }
+                return Ok(());
+            }
+        }
         if cancel
             && let Some((_, player, _)) = self
                 .services
@@ -405,6 +419,16 @@ impl ComputerSettingsPort for Bridge {
         &self,
         context: talk_core::ui::presentation::ConversationRef,
     ) -> Result<(), DeviceError> {
+        let fixture_voice = *self.fixture_voice.borrow();
+        if let Some(voice) = fixture_voice {
+            if voice.context != context || voice.phase != talk_core::ui::content::VoicePhase::Review
+            {
+                return Err(DeviceError::Stale);
+            }
+            *self.fixture_voice.borrow_mut() = None;
+            println!("UI_VOICE_FIXTURE send no_backend=true");
+            return Ok(());
+        }
         let accounts = self
             .services
             .accounts
@@ -437,7 +461,10 @@ impl ComputerSettingsPort for Bridge {
             player.stop();
         }
         self.services.voice_sequence.set(sequence);
-        devices.stop_voice(context, true)?;
+        // The upload owner has already accepted this intent. A concurrent
+        // device teardown may have retired the local review; it must not turn
+        // an accepted send into a retry that could duplicate the message.
+        let _ = devices.stop_voice(context, true);
         Ok(())
     }
     fn resolve_deadline(

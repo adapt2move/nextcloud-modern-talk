@@ -258,22 +258,24 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         services: services.clone(),
         cursor: 0,
         device_cursor: 0,
-        fixture_voice: matches!(
-            options.scenario.as_deref(),
-            Some("voice-recording" | "voice-review")
-        )
-        .then(|| fixtures::snapshot(Some("voice-recording")).selected)
-        .flatten()
-        .map(|context| talk_core::ui::content::VoiceSnapshot {
-            context,
-            phase: if options.scenario.as_deref() == Some("voice-review") {
-                talk_core::ui::content::VoicePhase::Review
-            } else {
-                talk_core::ui::content::VoicePhase::Recording
-            },
-            elapsed_ms: 13_000,
-            level: 600,
-        }),
+        fixture_voice: std::cell::RefCell::new(
+            matches!(
+                options.scenario.as_deref(),
+                Some("voice-recording" | "voice-review")
+            )
+            .then(|| fixtures::snapshot(Some("voice-recording")).selected)
+            .flatten()
+            .map(|context| talk_core::ui::content::VoiceSnapshot {
+                context,
+                phase: if options.scenario.as_deref() == Some("voice-review") {
+                    talk_core::ui::content::VoicePhase::Review
+                } else {
+                    talk_core::ui::content::VoicePhase::Recording
+                },
+                elapsed_ms: 13_000,
+                level: 600,
+            }),
+        ),
         permission_cursor: 0,
         notification_request: None,
         notification_result: talk_core::preferences::notifications::NotificationState::Idle,

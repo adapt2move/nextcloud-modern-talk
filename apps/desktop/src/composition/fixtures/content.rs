@@ -335,9 +335,25 @@ pub(super) fn transfer(snapshot: &mut PresentationSnapshot) {
 
 pub(super) fn action(
     snapshot: &mut PresentationSnapshot,
+    request: RequestId,
     action: ContentAction,
 ) -> Result<(), SubmitError> {
     match action {
+        ContentAction::RefreshPollDrafts if snapshot.content_panel.poll_drafts_manage.enabled() => {
+            snapshot.content_panel.poll_state = talk_core::ui::conversation::RemoteState::Idle;
+            Ok(())
+        }
+        ContentAction::CreatePoll(draft) if snapshot.content_panel.poll_create.enabled() => {
+            // Disconnected UI fixtures never contact a server; this receipt only
+            // exercises the native dialog's accepted-state transition.
+            println!(
+                "UI_POLL_FIXTURE create options={} no_backend=true",
+                draft.options.as_slice().len()
+            );
+            snapshot.content_panel.poll_state = talk_core::ui::conversation::RemoteState::Idle;
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel
