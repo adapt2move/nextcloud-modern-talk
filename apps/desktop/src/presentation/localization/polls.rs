@@ -1,4 +1,4 @@
-//! Poll interface copy.
+//! Poll and voice message interface copy.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
         "Als Entwurf speichern",
@@ -6,6 +6,28 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Guardar como borrador",
     ),
     ("Anonym", "Anonymous", "Anónima"),
+    (
+        "Aufnahme bereit zum Senden",
+        "Recording ready to send",
+        "Grabación lista para enviar",
+    ),
+    (
+        "Aufnahme fehlgeschlagen",
+        "Recording failed",
+        "La grabación falló",
+    ),
+    ("Aufnahme läuft", "Recording", "Grabando"),
+    ("Aufnahme prüfen", "Review recording", "Revisar grabación"),
+    (
+        "Aufnahme verwerfen",
+        "Discard recording",
+        "Descartar grabación",
+    ),
+    (
+        "Aufnahme wird abgeschlossen …",
+        "Finishing recording…",
+        "Finalizando grabación…",
+    ),
     (
         "Deine Auswahl bleibt erhalten. Bitte erneut versuchen.",
         "Your selection is kept. Please try again.",
@@ -50,8 +72,38 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Mehr Stimmen", "More votes", "Más votos"),
     ("Mehrere Antworten", "Multiple choice", "Varias respuestas"),
+    (
+        "Mikrofon nicht verfügbar. Prüfe die Geräteauswahl.",
+        "Microphone unavailable. Check the selected device.",
+        "Micrófono no disponible. Comprueba el dispositivo seleccionado.",
+    ),
+    (
+        "Mikrofon wird vorbereitet …",
+        "Preparing microphone…",
+        "Preparando micrófono…",
+    ),
+    (
+        "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen.",
+        "Microphone access denied. Allow access in system settings.",
+        "Acceso al micrófono denegado. Permítelo en los ajustes del sistema.",
+    ),
     ("Nach oben", "Move up", "Subir"),
     ("Nach unten", "Move down", "Bajar"),
+    (
+        "Sprachnachricht aufnehmen",
+        "Record voice message",
+        "Grabar mensaje de voz",
+    ),
+    (
+        "Sprachnachricht konnte nicht verarbeitet werden. Bitte erneut versuchen.",
+        "The voice message could not be processed. Please try again.",
+        "No se pudo procesar el mensaje de voz. Inténtalo de nuevo.",
+    ),
+    (
+        "Sprachnachricht senden",
+        "Send voice message",
+        "Enviar mensaje de voz",
+    ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     (
         "Umfrage wirklich beenden?",

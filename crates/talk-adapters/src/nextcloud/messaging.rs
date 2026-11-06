@@ -11,6 +11,7 @@ pub(super) struct UploadName {
     conversation: ConversationId,
     path: String,
     name: String,
+    voice_message: bool,
     share: Option<OperationId>,
 }
 #[cfg(test)]
@@ -20,6 +21,7 @@ impl UploadName {
             conversation,
             path: "/draft/one".into(),
             name: "one.png".into(),
+            voice_message: false,
             share: None,
         }
     }
@@ -67,6 +69,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
             F::Threads
         }
         C::Forward { .. } | C::ForwardApproved { .. } => F::Forward,
+        C::UploadVoice { .. } => F::Voice,
         C::SharedFiles { .. }
         | C::ShareFile { .. }
         | C::UploadFile { .. }
@@ -92,6 +95,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Threads => "threads",
         F::Forward => "chat-reference-id",
         F::Files => "rich-object-sharing",
+        F::Voice => "voice-message-sharing",
         F::Typing => "typing-privacy",
         F::ReadReceipts => "chat-read-marker",
         F::Translation => "translation",
@@ -107,7 +111,7 @@ fn availability(
     use MessagingFeature as F;
     let allowed = if room.unknown_restrictions {
         Decision::Unknown
-    } else if matches!(f, F::Forward | F::Translation | F::Summary) && room.classified {
+    } else if matches!(f, F::Forward | F::Translation | F::Summary | F::Voice) && room.classified {
         Decision::Denied
     } else if f == F::React {
         if room.actions.read_messages == Decision::Allowed
@@ -119,7 +123,7 @@ fn availability(
         }
     } else if matches!(
         f,
-        F::Send | F::Reply | F::Edit | F::Delete | F::Silent | F::Schedule | F::Forward
+        F::Send | F::Reply | F::Edit | F::Delete | F::Silent | F::Schedule | F::Forward | F::Voice
     ) {
         room.actions.send_message
     } else if f == F::ReadReceipts && caps.read_receipts != Some(true)
@@ -131,7 +135,17 @@ fn availability(
     };
     ActionAvailability {
         implemented: !matches!(f, F::Typing | F::Translation | F::Summary),
-        server: caps.feature(support(f)),
+        server: if f == F::Voice
+            && caps.feature("voice-message-sharing") == FeatureSupport::Supported
+            && (!caps.has("rich-object-sharing")
+                || !caps.has("chat-reference-id")
+                || caps.conversation_subfolders != Some(true)
+                || caps.attachments_allowed != Some(true))
+        {
+            FeatureSupport::Unsupported
+        } else {
+            caps.feature(support(f))
+        },
         allowed,
     }
 }
@@ -260,6 +274,7 @@ impl NextcloudClient {
             F::Threads,
             F::Forward,
             F::Files,
+            F::Voice,
             F::Typing,
             F::ReadReceipts,
             F::Translation,
@@ -749,7 +764,10 @@ impl NextcloudClient {
                 .reconcile_durable_send(c, id, operation, &room, caps)
                 .await;
         }
-        if matches!(command, C::UploadFile { .. } | C::ShareFile { .. }) {
+        if matches!(
+            command,
+            C::UploadFile { .. } | C::UploadVoice { .. } | C::ShareFile { .. }
+        ) {
             self.message_action(MessagingFeature::Send, &room, &data, caps)?;
             if caps.conversation_subfolders != Some(true) {
                 return Err(self.error(ErrorKind::Unsupported));
@@ -758,29 +776,55 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::Unsupported));
             }
         }
-        if let C::UploadFile {
-            local_path,
-            name,
-            progress,
-        } = &command
-        {
+        if matches!(command, C::UploadFile { .. } | C::UploadVoice { .. }) {
             if caps.attachments_allowed != Some(true) || room.classified {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
             if self.uploads.len() >= 100 {
                 return Err(self.error(ErrorKind::Busy));
             }
-            let file = tokio::fs::File::open(local_path.as_str())
-                .await
-                .map_err(|_| self.error(ErrorKind::NotFound))?;
-            let metadata = file
-                .metadata()
-                .await
-                .map_err(|_| self.error(ErrorKind::Transport))?;
-            if !metadata.is_file() {
-                return Err(self.error(ErrorKind::Unsupported));
-            }
-            let size = metadata.len();
+            let (file, size, name, progress, voice_message): (
+                Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+                u64,
+                &Text<255>,
+                &talk_core::protocol::content::TransferProgress,
+                bool,
+            ) = match &command {
+                C::UploadFile {
+                    local_path,
+                    name,
+                    progress,
+                } => {
+                    let file = tokio::fs::File::open(local_path.as_str())
+                        .await
+                        .map_err(|_| self.error(ErrorKind::NotFound))?;
+                    let metadata = file
+                        .metadata()
+                        .await
+                        .map_err(|_| self.error(ErrorKind::Transport))?;
+                    if !metadata.is_file() {
+                        return Err(self.error(ErrorKind::Unsupported));
+                    }
+                    (Box::new(file), metadata.len(), name, progress, false)
+                }
+                C::UploadVoice {
+                    bytes,
+                    name,
+                    progress,
+                } => {
+                    if !caps.has("voice-message-sharing") {
+                        return Err(self.error(ErrorKind::Unsupported));
+                    }
+                    (
+                        Box::new(std::io::Cursor::new(bytes.shared())),
+                        bytes.len() as u64,
+                        name,
+                        progress,
+                        true,
+                    )
+                }
+                _ => return Err(self.error(ErrorKind::Malformed)),
+            };
             if size > api::files::MAX_FILE_BYTES {
                 return Err(self.error(ErrorKind::TooLarge));
             }
@@ -823,6 +867,7 @@ impl NextcloudClient {
                 conversation: id,
                 path: path.clone(),
                 name: name.as_str().into(),
+                voice_message,
                 share: None,
             });
             return Ok(R::Uploaded {
@@ -1157,15 +1202,17 @@ impl NextcloudClient {
                 if *voice_message && !caption.as_str().is_empty() {
                     return Err(self.error(ErrorKind::Malformed));
                 }
+                let upload = self
+                    .uploads
+                    .iter()
+                    .find(|u| u.conversation == id && u.path == path.as_str())
+                    .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+                if upload.voice_message != *voice_message {
+                    return Err(self.error(ErrorKind::WrongScope));
+                }
                 WireCommand::ShareAttachment {
                     path: path.as_str().into(),
-                    file_name: self
-                        .uploads
-                        .iter()
-                        .find(|u| u.conversation == id && u.path == path.as_str())
-                        .ok_or_else(|| self.error(ErrorKind::WrongScope))?
-                        .name
-                        .clone(),
+                    file_name: upload.name.clone(),
                     caption: caption.as_str().into(),
                     reference: send_reference(operation),
                     voice_message: *voice_message,

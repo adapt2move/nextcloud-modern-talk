@@ -1458,6 +1458,22 @@ impl NativeDesktopPort for Port {
         Some(model.snapshot.clone())
     }
 }
+impl Accounts {
+    pub(super) fn voice_allowed(&self, context: ConversationRef) -> bool {
+        self.snapshot.selected == Some(context)
+            && self.snapshot.active_account == Some(context.account)
+            && self.snapshot.content == ContentState::Ready
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Voice)
+                        .enabled()
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Files)
+                        .enabled()
+            })
+    }
+}
 fn page<T, const N: usize>(items: impl IntoIterator<Item = T>) -> Page<T, N> {
     let mut result = Page::empty();
     for item in items {

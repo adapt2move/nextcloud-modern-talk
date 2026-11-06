@@ -48,6 +48,10 @@ pub(crate) enum Action {
     CancelClosePoll,
     ClosePoll(u64),
     PollDetails(u64),
+    VoiceStart(ConversationRef),
+    VoiceStop(ConversationRef),
+    VoiceCancel(ConversationRef),
+    VoiceSend(ConversationRef),
     Preview(AttachmentRef),
     GalleryMove { from: AttachmentRef, offset: i8 },
     Download(AttachmentRef),
@@ -85,6 +89,9 @@ pub(super) struct ContentUi {
     vote_error: Option<u64>,
     confirm_close: Option<u64>,
     details_poll: Option<u64>,
+    pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
+    pub(super) voice_levels: Vec<u16>,
+    pub(super) voice_error: Option<&'static str>,
 }
 impl ContentUi {
     pub fn new(
@@ -126,6 +133,9 @@ impl ContentUi {
             vote_error: None,
             confirm_close: None,
             details_poll: None,
+            voice: None,
+            voice_levels: Vec::new(),
+            voice_error: None,
         }
     }
     pub fn inputs(&self) -> impl Iterator<Item = &Entity<TextInput>> {
@@ -252,6 +262,28 @@ impl Desktop {
     /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
         self.refresh_attachment_send(cx);
+        let voice = self.settings_port.voice_snapshot();
+        if let Some(voice) = voice
+            && Some(voice.context) != self.snapshot.selected
+        {
+            let _ = self.settings_port.stop_voice(voice.context, true);
+        }
+        let voice = voice.filter(|voice| Some(voice.context) == self.snapshot.selected);
+        if self.content_ui.voice != voice {
+            if let Some(voice) = voice
+                && voice.phase == talk_core::ui::content::VoicePhase::Recording
+            {
+                if self.content_ui.voice_levels.len() == 32 {
+                    self.content_ui.voice_levels.remove(0);
+                }
+                self.content_ui.voice_levels.push(voice.level);
+            }
+            if voice.is_none() {
+                self.content_ui.voice_levels.clear();
+            }
+            self.content_ui.voice = voice;
+            cx.notify();
+        }
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
             self.content_ui.requested.clear();
@@ -569,6 +601,105 @@ impl Desktop {
             && self.snapshot.content_panel.account == self.snapshot.active_account
             && self.snapshot.selected.is_some()
             && self.snapshot.content_panel.context == self.snapshot.selected
+    }
+    pub(super) fn voice_composer(
+        &self,
+        voice: talk_core::ui::content::VoiceSnapshot,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        use talk_core::ui::content::VoicePhase;
+        let context = voice.context;
+        let time = format!(
+            "{:02}:{:02}",
+            voice.elapsed_ms / 60_000,
+            (voice.elapsed_ms / 1_000) % 60
+        );
+        let label = match voice.phase {
+            VoicePhase::Starting => "Mikrofon wird vorbereitet …",
+            VoicePhase::Recording => "Aufnahme läuft",
+            VoicePhase::Stopping => "Aufnahme wird abgeschlossen …",
+            VoicePhase::Review => "Aufnahme bereit zum Senden",
+            VoicePhase::Failed(_) => "Aufnahme fehlgeschlagen",
+        };
+        let mut body = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(self.icon_button(
+                "voice-cancel",
+                ("x", "Aufnahme verwerfen"),
+                ButtonStyle::Quiet,
+                true.into(),
+                LocalAction::Content(Action::VoiceCancel(context)),
+                cx,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(self.l(label))
+                    .child(self.hint(&time)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(32.))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .children(self.content_ui.voice_levels.iter().map(|level| {
+                        div()
+                            .w(px(3.))
+                            .h(px(3. + f32::from(*level) / 1000. * 25.))
+                            .rounded(px(2.))
+                            .bg(self.theme.accent)
+                    })),
+            );
+        body = match voice.phase {
+            VoicePhase::Starting | VoicePhase::Recording => body.child(self.button(
+                "voice-stop",
+                "Aufnahme prüfen",
+                ButtonStyle::Secondary,
+                true,
+                LocalAction::Content(Action::VoiceStop(context)),
+                cx,
+            )),
+            VoicePhase::Review => body.child(self.button(
+                "voice-send",
+                "Sprachnachricht senden",
+                ButtonStyle::Primary,
+                true,
+                LocalAction::Content(Action::VoiceSend(context)),
+                cx,
+            )),
+            VoicePhase::Stopping | VoicePhase::Failed(_) => body,
+        };
+        div()
+            .flex_none()
+            .px(if compact { px(12.) } else { px(24.) })
+            .pb_4()
+            .pt_2()
+            .child(
+                div()
+                    .p_3()
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(self.theme.input_border)
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(body)
+                    .when_some(
+                        match voice.phase {
+                            VoicePhase::Failed(error) => Some(voice_error(error)),
+                            _ => self.content_ui.voice_error,
+                        },
+                        |d, error| d.child(self.hint(self.l(error))),
+                    ),
+            )
     }
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
@@ -901,6 +1032,33 @@ impl Desktop {
                     self.content_ui.details_poll = Some(poll);
                     self.content_ui.return_overlay = self.overlay;
                     self.handle(LocalAction::Open(Overlay::PollDetails), window, cx);
+                }
+            }
+            Action::VoiceStart(context) => {
+                self.content_ui.voice_error = None;
+                if Some(context) == self.snapshot.selected
+                    && self.composer.read(cx).content.is_empty()
+                    && !self.has_staged_attachments()
+                    && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice)
+                    && let Err(error) = self.settings_port.start_voice(context)
+                {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                }
+            }
+            Action::VoiceStop(context) => {
+                if let Err(error) = self.settings_port.stop_voice(context, false) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                }
+            }
+            Action::VoiceCancel(context) => {
+                let _ = self.settings_port.stop_voice(context, true);
+                self.content_ui.voice_error = None;
+            }
+            Action::VoiceSend(context) => {
+                if let Err(error) = self.settings_port.send_voice(context) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                } else {
+                    self.content_ui.voice_error = None;
                 }
             }
             Action::Preview(reference) => self.open_media_preview(reference, window, cx),
@@ -1626,6 +1784,19 @@ impl Desktop {
             }
         }
         body
+    }
+}
+
+fn voice_error(error: talk_core::preferences::devices::DeviceError) -> &'static str {
+    use talk_core::preferences::devices::DeviceError;
+    match error {
+        DeviceError::PermissionDenied => {
+            "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen."
+        }
+        DeviceError::Removed | DeviceError::InvalidSelection | DeviceError::Unavailable => {
+            "Mikrofon nicht verfügbar. Prüfe die Geräteauswahl."
+        }
+        _ => "Sprachnachricht konnte nicht verarbeitet werden. Bitte erneut versuchen.",
     }
 }
 

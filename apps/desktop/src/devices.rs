@@ -37,21 +37,7 @@ const TICK: Duration = Duration::from_millis(33);
 const REFRESH: Duration = Duration::from_secs(2);
 static LEASE: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum VoicePhase {
-    Starting,
-    Recording,
-    Stopping,
-    Review,
-    Failed(DeviceError),
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct VoiceSnapshot {
-    pub context: talk_core::ui::presentation::ConversationRef,
-    pub phase: VoicePhase,
-    pub elapsed_ms: u64,
-    pub level: u16,
-}
+use talk_core::ui::content::{VoicePhase, VoiceSnapshot};
 struct VoiceSession {
     context: talk_core::ui::presentation::ConversationRef,
     signal: Arc<Signal>,
@@ -61,7 +47,7 @@ struct VoiceSession {
     failure: Option<DeviceError>,
     started: Instant,
     elapsed_ms: u64,
-    wave: Option<Vec<u8>>,
+    wave: Option<talk_core::protocol::content::VoiceBytes>,
 }
 
 /// Preferences, never a capture permission. Missing explicit devices are retained
@@ -358,11 +344,11 @@ impl DeviceRuntime {
         Ok(())
     }
     /// Transfers the completed recording to its scoped upload owner once.
-    pub fn take_voice(
+    pub fn voice_audio(
         &self,
         context: talk_core::ui::presentation::ConversationRef,
-    ) -> Option<Vec<u8>> {
-        let mut state = self.shared.lock();
+    ) -> Option<talk_core::protocol::content::VoiceBytes> {
+        let state = self.shared.lock();
         if !state
             .voice
             .as_ref()
@@ -370,9 +356,7 @@ impl DeviceRuntime {
         {
             return None;
         }
-        let wave = state.voice.take()?.wave;
-        state.changed();
-        wave
+        state.voice.as_ref()?.wave.clone()
     }
     pub fn submit(&self, intent: DeviceIntent) -> Result<(), DeviceError> {
         let mut state = self.shared.lock();
@@ -675,7 +659,9 @@ fn run(shared: &Shared) {
             let wave = if cancel || failure.is_some() {
                 None
             } else {
-                recording.and_then(|r| r.wave())
+                recording
+                    .and_then(|r| r.wave())
+                    .and_then(|wave| talk_core::protocol::content::VoiceBytes::new(wave).ok())
             };
             let mut state = shared.lock();
             if cancel {

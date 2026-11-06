@@ -490,6 +490,13 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
+        if let Some(voice) = self
+            .content_ui
+            .voice
+            .filter(|voice| voice.context == row.context)
+        {
+            return self.voice_composer(voice, compact, cx);
+        }
         let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = self.drafts.pending(row.context);
@@ -624,16 +631,42 @@ impl Desktop {
                                         cx,
                                     )),
                             )
-                            .child(div().flex().items_center().gap_3().child(self.icon_button(
-                                "send",
-                                ("arrow-up", "Senden"),
-                                ButtonStyle::Primary,
-                                send_availability,
-                                LocalAction::Send,
-                                cx,
-                            ))),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .when(
+                                        self.composer.read(cx).content.is_empty()
+                                            && !attached
+                                            && self.message_feature_enabled(MessageFeature::Voice),
+                                        |d| {
+                                            d.child(self.icon_button(
+                                                "voice-start",
+                                                ("mic", "Sprachnachricht aufnehmen"),
+                                                ButtonStyle::Quiet,
+                                                ready.into(),
+                                                LocalAction::Content(
+                                                    super::content::Action::VoiceStart(row.context),
+                                                ),
+                                                cx,
+                                            ))
+                                        },
+                                    )
+                                    .child(self.icon_button(
+                                        "send",
+                                        ("arrow-up", "Senden"),
+                                        ButtonStyle::Primary,
+                                        send_availability,
+                                        LocalAction::Send,
+                                        cx,
+                                    )),
+                            ),
                     ),
             )
+            .when_some(self.content_ui.voice_error, |d, error| {
+                d.child(self.hint(self.l(error)))
+            })
             .children(
                 connection_failure
                     .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),

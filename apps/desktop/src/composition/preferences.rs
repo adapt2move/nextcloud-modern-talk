@@ -18,6 +18,7 @@ pub struct Services {
     shutdown_unconfirmed_reported: std::cell::Cell<bool>,
     pub(super) install: std::cell::RefCell<super::updates::Install>,
     notification_sequence: std::cell::Cell<u64>,
+    voice_sequence: std::cell::Cell<u64>,
     notification_sources:
         std::cell::RefCell<Vec<talk_core::preferences::notifications::NotificationSources>>,
     pub updates:
@@ -54,6 +55,7 @@ impl Services {
             shutdown_unconfirmed_reported: std::cell::Cell::new(false),
             install: std::cell::RefCell::default(),
             notification_sequence: std::cell::Cell::new(0),
+            voice_sequence: std::cell::Cell::new(0),
             notification_sources: std::cell::RefCell::new(Vec::new()),
             updates: if connect_accounts {
                 talk_adapters::updates::UpdateRuntime::start(env!("CARGO_PKG_VERSION"))
@@ -240,6 +242,68 @@ pub struct Bridge {
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
+    fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
+        self.services.devices.as_ref().ok()?.voice_snapshot()
+    }
+    fn start_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        let accounts = self
+            .services
+            .accounts
+            .as_ref()
+            .ok_or(DeviceError::Unavailable)?;
+        if !accounts.borrow().voice_allowed(context) || !self.device_preferences_applied() {
+            return Err(DeviceError::Unavailable);
+        }
+        self.services
+            .devices
+            .as_ref()
+            .map_err(|e| *e)?
+            .start_voice(context)
+    }
+    fn stop_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        cancel: bool,
+    ) -> Result<(), DeviceError> {
+        self.services
+            .devices
+            .as_ref()
+            .map_err(|e| *e)?
+            .stop_voice(context, cancel)
+    }
+    fn send_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        let accounts = self
+            .services
+            .accounts
+            .as_ref()
+            .ok_or(DeviceError::Unavailable)?;
+        if !accounts.borrow().voice_allowed(context) {
+            return Err(DeviceError::Unavailable);
+        }
+        let devices = self.services.devices.as_ref().map_err(|e| *e)?;
+        let bytes = devices.voice_audio(context).ok_or(DeviceError::Stale)?;
+        let sequence = self
+            .services
+            .voice_sequence
+            .get()
+            .checked_add(1)
+            .filter(|n| *n < (1u64 << 63))
+            .ok_or(DeviceError::Unavailable)?;
+        let request = talk_core::ui::presentation::RequestId((1u64 << 63) | sequence);
+        accounts
+            .borrow_mut()
+            .send_voice_bytes(request, context, bytes)
+            .map_err(|_| DeviceError::Unavailable)?;
+        self.services.voice_sequence.set(sequence);
+        devices.stop_voice(context, true)?;
+        Ok(())
+    }
     fn resolve_deadline(
         &self,
         choice: talk_core::preferences::time::DeadlineChoice,

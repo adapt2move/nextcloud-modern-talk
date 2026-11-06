@@ -1911,6 +1911,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Schedule => V::Schedules,
         W::Forward => V::Forward,
         W::Files => V::Files,
+        W::Voice => V::Voice,
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
         _ => return None,

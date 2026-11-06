@@ -129,6 +129,21 @@ pub enum PlaybackState {
     Stopping,
     Failed(UnavailableReason),
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VoicePhase {
+    Starting,
+    Recording,
+    Stopping,
+    Review,
+    Failed(crate::preferences::devices::DeviceError),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceSnapshot {
+    pub context: ConversationRef,
+    pub phase: VoicePhase,
+    pub elapsed_ms: u64,
+    pub level: u16,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackView {
     pub attachment: AttachmentRef,

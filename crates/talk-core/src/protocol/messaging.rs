@@ -104,6 +104,7 @@ pub enum MessagingFeature {
     Threads,
     Forward,
     Files,
+    Voice,
     Typing,
     ReadReceipts,
     Translation,
@@ -216,6 +217,11 @@ pub enum MessagingCommand {
     /// Upload only; a separate explicit ShareFile publishes it to the room.
     UploadFile {
         local_path: Text<16384>,
+        name: Text<255>,
+        progress: super::content::TransferProgress,
+    },
+    UploadVoice {
+        bytes: super::content::VoiceBytes,
         name: Text<255>,
         progress: super::content::TransferProgress,
     },

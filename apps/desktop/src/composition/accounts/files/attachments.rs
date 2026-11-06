@@ -24,6 +24,8 @@ pub(in crate::composition::accounts) struct Work {
 }
 struct File {
     local: Text<16384>,
+    voice: Option<protocol::content::VoiceBytes>,
+    voice_message: bool,
     remote: Option<Text<16384>>,
     view: UploadView,
     progress: protocol::content::TransferProgress,
@@ -57,7 +59,7 @@ impl Batch {
                 Step::Share,
                 Command::ShareFile {
                     path: path.clone(),
-                    voice_message: false,
+                    voice_message: file.voice_message,
                     caption: file
                         .outgoing
                         .as_ref()
@@ -67,6 +69,15 @@ impl Batch {
                                 .find(|(request, _)| *request == outgoing.request)
                         })
                         .map_or_else(|| text(""), |(_, caption)| caption.clone()),
+                },
+            )
+        } else if let Some(bytes) = &file.voice {
+            (
+                Step::Upload,
+                Command::UploadVoice {
+                    bytes: bytes.clone(),
+                    name: file.view.name.clone(),
+                    progress: file.progress.clone(),
                 },
             )
         } else {
@@ -253,6 +264,8 @@ impl Accounts {
             self.attachment_owner.next += 1;
             batch.files.push(File {
                 local,
+                voice: None,
+                voice_message: false,
                 remote: None,
                 view: UploadView {
                     id: self.attachment_owner.next,
@@ -275,6 +288,69 @@ impl Accounts {
         self.project_uploads();
         self.queue_upload_previews();
         Ok(())
+    }
+    /// Admit captured bytes into the same single-flight attachment owner. The
+    /// caller retains its review buffer until this succeeds.
+    pub(in crate::composition) fn send_voice_bytes(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        bytes: protocol::content::VoiceBytes,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context)
+            || !self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .is_some_and(|p| p.availability(MessageFeature::Voice).enabled())
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+        }
+        if self.attachment_owner.flight.is_some()
+            || self.content_owner.transfer.is_some()
+            || self.file_export_pending()
+            || self.attachment_owner.batch.as_ref().is_some_and(|batch| {
+                batch.running
+                    || batch
+                        .files
+                        .iter()
+                        .any(|f| f.view.state != UploadState::Shared)
+            })
+        {
+            return Err(SubmitError::Busy);
+        }
+        let id = self
+            .attachment_owner
+            .next
+            .checked_add(1)
+            .ok_or(SubmitError::Busy)?;
+        self.attachment_owner.next = id;
+        self.attachment_owner.batch = Some(Batch {
+            context,
+            files: vec![File {
+                local: text(""),
+                voice: Some(bytes.clone()),
+                voice_message: true,
+                remote: None,
+                view: UploadView {
+                    id,
+                    name: text("Voice message.wav"),
+                    bytes: Some(bytes.len() as u64),
+                    state: UploadState::Selected,
+                    submitted: false,
+                    transferred: 0,
+                    uploaded: false,
+                    server_message: None,
+                },
+                progress: protocol::content::TransferProgress::default(),
+                outgoing: None,
+                preview_queued: true,
+            }],
+            captions: Vec::new(),
+            running: false,
+            created: Instant::now(),
+        });
+        self.send_files(request, context, text(""), ComposeTarget::default())
     }
     pub(in crate::composition::accounts) fn send_files(
         &mut self,
@@ -719,6 +795,7 @@ impl Accounts {
         match result {
             Ok(Reply::Uploaded { path, bytes }) if work.step == Step::Upload => {
                 batch.files[index].remote = Some(path);
+                batch.files[index].voice = None;
                 batch.files[index].view.bytes = Some(u64::from(bytes));
                 batch.files[index].view.state = UploadState::Selected;
                 batch.files[index].view.uploaded = true;

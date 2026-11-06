@@ -18,6 +18,7 @@ pub enum MessageFeature {
     Schedules,
     Forward,
     Files,
+    Voice,
     Typing,
     ReadReceipts,
 }

@@ -11,6 +11,32 @@ use std::sync::{
 
 pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_VIDEO_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_VOICE_BYTES: usize = 4 * 1024 * 1024;
+/// Ephemeral encoded voice data; it is never part of a serialized snapshot.
+#[derive(Clone, Eq, PartialEq)]
+pub struct VoiceBytes(Arc<[u8]>);
+impl std::fmt::Debug for VoiceBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VoiceBytes").field(&self.0.len()).finish()
+    }
+}
+impl VoiceBytes {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, LimitExceeded> {
+        if bytes.is_empty() || bytes.len() > MAX_VOICE_BYTES {
+            return Err(LimitExceeded);
+        }
+        Ok(Self(bytes.into()))
+    }
+    pub fn shared(&self) -> Arc<[u8]> {
+        self.0.clone()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 /// One admitted original video, retained in memory only for its scoped player.
 /// Encoded bytes never become message, cache or serializable UI data.
 #[derive(Clone, Eq, PartialEq)]
