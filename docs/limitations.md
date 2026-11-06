@@ -20,10 +20,15 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   speech recognition or a connection-quality measurement. The dock is inside
   the main window; it is not a separate always-on-top window.
 - The screen stage has camera/screen tile identities and a fictional fixture,
-  but no screen stream is connected. Call reactions and outgoing raised hands
-  are unavailable; received hands are limited to currently projected peers.
-  In-call moderator actions, recording controls, live device switching and
-  automatic speaker and layout behavior require further integration and
+  but no screen stream is connected. Raised hands and reactions are scoped to
+  projected participants and require advertised server support; their signaling
+  interoperability needs further validation.
+- Moderator mute, end-for-everyone and local-user re-ring requests check current
+  policy and session identity; call-only removal and federated re-ring are not
+  offered. A request receipt does not establish that another client acted on it.
+  Recording controls are unavailable. Selecting a different capture device
+  stops its current publication and requires the user to enable it again.
+  These controls and automatic speaker selection require native and server
   interoperability validation.
 
 ## Messages and background activity
