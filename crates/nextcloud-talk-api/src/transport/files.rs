@@ -4,6 +4,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 const FILE_LIMIT: Duration = Duration::from_secs(60);
 pub(super) enum StreamRead<'a> {
     File(Option<&'a (dyn Fn(u64, Option<u64>) + Send + Sync)>),
+    Listing,
     Image,
     Pdf,
     Video(crate::content::VideoFormat),
@@ -13,6 +14,9 @@ impl Transport {
         &self,
         path: &crate::files::FilePath,
     ) -> Result<url::Url, PortError> {
+        self.dav_endpoint(path.as_str())
+    }
+    fn dav_endpoint(&self, path: &str) -> Result<url::Url, PortError> {
         let mut url = self
             .binding
             .origin
@@ -23,11 +27,24 @@ impl Transport {
                 .path_segments_mut()
                 .map_err(|_| self.error(ErrorKind::Malformed))?;
             parts.pop_if_empty().push(self.binding.user.as_str());
-            for segment in path.as_str().split('/').skip(1) {
+            for segment in path.split('/').skip(1).filter(|segment| !segment.is_empty()) {
                 parts.push(segment);
             }
         }
         Ok(url)
+    }
+    #[allow(dead_code, reason = "directory response parser is integrated separately")]
+    pub(crate) async fn directory_listing(
+        &mut self,
+        c: &OperationContext,
+        path: &crate::files::DirectoryPath,
+    ) -> Result<Vec<u8>, PortError> {
+        self.request_dispatched = false;
+        let url = self.dav_endpoint(path.as_str())?;
+        let mut sink = Vec::new();
+        self.stream(c, url, None, &mut sink, StreamRead::Listing)
+            .await?;
+        Ok(sink)
     }
     pub(crate) async fn file<W: AsyncWrite + Unpin + Send>(
         &mut self,
@@ -63,6 +80,7 @@ impl Transport {
         read: StreamRead<'_>,
     ) -> Result<u64, PortError> {
         self.request_dispatched = false;
+        let listing = matches!(read, StreamRead::Listing);
         let pdf = matches!(read, StreamRead::Pdf);
         let video = match &read {
             StreamRead::Video(format) => Some(*format),
@@ -70,6 +88,7 @@ impl Transport {
         };
         let (read_limit, progress, image) = match read {
             StreamRead::File(progress) => (crate::files::MAX_FILE_BYTES, progress, false),
+            StreamRead::Listing => (BODY_LIMIT as u64, None, false),
             StreamRead::Image => (crate::content::MAX_IMAGE_BYTES as u64, None, true),
             StreamRead::Pdf => (crate::content::MAX_IMAGE_BYTES as u64, None, false),
             StreamRead::Video(_) => (crate::content::MAX_VIDEO_BYTES as u64, None, false),
@@ -86,7 +105,16 @@ impl Transport {
         let writing = upload.is_some();
         let mut request = self
             .client
-            .request(if writing { Method::PUT } else { Method::GET }, url.clone())
+            .request(
+                if listing {
+                    Method::from_bytes(b"PROPFIND").map_err(|_| self.error(ErrorKind::Malformed))?
+                } else if writing {
+                    Method::PUT
+                } else {
+                    Method::GET
+                },
+                url.clone(),
+            )
             .timeout(FILE_LIMIT)
             .header(ACCEPT_ENCODING, "identity")
             .header(CACHE_CONTROL, "no-store")
@@ -94,6 +122,12 @@ impl Transport {
                 self.binding.login_name.as_str(),
                 Some(self.binding.password.as_str()),
             );
+        if listing {
+            request = request
+                .header("Depth", "1")
+                .header(CONTENT_TYPE, "application/xml; charset=utf-8")
+                .body("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><oc:fileid/></d:prop></d:propfind>");
+        }
         self.cookies
             .retain(|cookie| cookie.expires.is_none_or(|time| time > Instant::now()));
         let mut cookies = Zeroizing::new(String::new());
@@ -161,7 +195,8 @@ impl Transport {
             }
             match status {
                 201 if writing => {}
-                200 if !writing => {}
+                207 if listing => {}
+                200 if !writing && !listing => {}
                 401 | 403 => return Err(self.error(ErrorKind::PermissionDenied)),
                 404 => return Err(self.error(ErrorKind::NotFound)),
                 409 | 412 => return Err(self.error(ErrorKind::Conflict)),

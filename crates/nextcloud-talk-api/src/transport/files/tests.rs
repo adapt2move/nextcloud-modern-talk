@@ -8,6 +8,25 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
 #[tokio::test]
+async fn directory_listing_uses_depth_one_and_encoded_account_path() {
+    let body = "<d:multistatus xmlns:d=\"DAV:\"/>";
+    let server = Server::start(vec![(207, body.into(), Duration::ZERO)]).await;
+    let (mut owner, runtime) = client(&server);
+    let path = crate::files::DirectoryPath::parse("/Plans & notes").unwrap();
+    let bytes = owner
+        .transport
+        .directory_listing(&context(&runtime), &path)
+        .await
+        .unwrap();
+    assert_eq!(bytes, body.as_bytes());
+    let requests = server.requests();
+    let request = &requests[0];
+    assert!(request.starts_with("PROPFIND /remote.php/dav/files/synthetic-user/Plans%20&%20notes "));
+    assert!(request.to_ascii_lowercase().contains("depth: 1\r\n"));
+    assert!(request.contains("<d:resourcetype/>"));
+}
+
+#[tokio::test]
 async fn existing_file_share_sends_room_path_and_caption() {
     let server = Server::start(vec![reply(json!({"id": "42"}))]).await;
     let (mut owner, runtime) = client(&server);
