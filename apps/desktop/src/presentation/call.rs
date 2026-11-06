@@ -410,7 +410,8 @@ impl Desktop {
         // Reserve the docked chat before choosing a grid so tiles keep a
         // useful width when the panel opens or the window is narrow.
         let stage_width =
-            f32::from(window.viewport_size().width) - if show_chat { 300. } else { 0. } - 32.;
+            (f32::from(window.viewport_size().width) - if show_chat { 300. } else { 0. } - 56.)
+                .max(160.);
         let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
         let pinned = self.call_focus.and_then(|(scope, id)| {
             (scope == call.scope
@@ -444,13 +445,16 @@ impl Desktop {
             ((stage_height - rows.saturating_sub(1) as f32 * 12.) / rows as f32).clamp(160., 210.)
         };
         let mut feature = None;
+        let tile_width = if filmstrip {
+            200.
+        } else {
+            ((stage_width - f32::from(columns.saturating_sub(1)) * 12.) / f32::from(columns))
+                .max(160.)
+        };
         let mut tiles = div()
-            .grid()
-            .grid_cols(if filmstrip {
-                strip_count as u16
-            } else {
-                columns
-            })
+            .flex()
+            .flex_wrap()
+            .justify_center()
             .gap_3()
             .when(filmstrip, |d| {
                 d.w(px(
@@ -484,30 +488,26 @@ impl Desktop {
                 div()
                     .flex_1()
                     .flex()
-                    .flex_col()
                     .items_center()
                     .justify_center()
-                    .gap_2()
                     .child(self.person_avatar(
                         participant.initials.as_str(),
-                        if filmstrip { 56. } else { 64. },
+                        if focused == Some(participant.local_id) {
+                            104.
+                        } else if filmstrip {
+                            64.
+                        } else {
+                            84.
+                        },
                     ))
-                    .child(
-                        div()
-                            .text_size(self.sp(13.))
-                            .text_color(t.stage_muted)
-                            .child(self.l(
-                                if participant.self_user && call.camera == MediaState::Off {
-                                    "Deine Kamera ist aus"
-                                } else {
-                                    "Kein Videobild verfügbar"
-                                },
-                            )),
-                    )
             };
             let tile = div()
                 .relative()
                 .min_w_0()
+                .when(focused == Some(participant.local_id), |tile| tile.w_full())
+                .when(focused != Some(participant.local_id), |tile| {
+                    tile.w(px(tile_width))
+                })
                 .min_h(px(if focused == Some(participant.local_id) {
                     feature_height
                 } else {
@@ -549,62 +549,85 @@ impl Desktop {
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .text_ellipsis()
-                                .text_size(self.sp(12.))
+                                .text_size(self.sp(13.))
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(format!(
-                                    "{}{}",
-                                    participant.name.as_str(),
-                                    if participant.self_user {
-                                        self.l(" · Du")
+                                .child(
+                                    if participant.self_user && participant.name.as_str().is_empty()
+                                    {
+                                        self.l("Du").to_owned()
                                     } else {
-                                        ""
-                                    }
-                                )),
+                                        format!(
+                                            "{}{}",
+                                            participant.name.as_str(),
+                                            if participant.self_user {
+                                                self.l(" · Du")
+                                            } else {
+                                                ""
+                                            }
+                                        )
+                                    },
+                                ),
                         )
                         .when(participant.call_microphone == Some(false), |row| {
                             row.child(self.scaled_icon("mic-off", 14., t.stage_muted))
-                        })
-                        .when(participant.call_camera == Some(false), |row| {
-                            row.child(self.scaled_icon("video-off", 14., t.stage_muted))
-                        })
-                        .when(participant.raised_hand, |row| {
-                            row.child(self.scaled_icon("hand", 14., t.stage_muted))
-                        })
-                        .child(
-                            self.icon_button(
-                                gpui::SharedString::from(format!(
-                                    "focus-call-{}",
-                                    participant.local_id
-                                )),
-                                (
-                                    "pin",
-                                    if focused == Some(participant.local_id) {
-                                        "Raster"
-                                    } else {
-                                        "Person hervorheben"
-                                    },
-                                ),
-                                ButtonStyle::Stage,
-                                Availability::available().hinted(),
-                                LocalAction::FocusCallParticipant(
-                                    call.scope,
-                                    if focused == Some(participant.local_id) {
-                                        None
-                                    } else {
-                                        Some(participant.local_id)
-                                    },
-                                ),
-                                cx,
-                            )
-                            .opacity(if focused == Some(participant.local_id) {
-                                1.
-                            } else {
-                                0.
-                            })
-                            .group_hover("call-tile", |style| style.opacity(1.))
-                            .focus(|style| style.opacity(1.)),
+                        }),
+                )
+                .when(participant.raised_hand, |tile| {
+                    tile.child(
+                        self.call_hand_badge(
+                            gpui::SharedString::from(format!(
+                                "call-hand-badge-{}-{}",
+                                call.scope.call.as_local(),
+                                participant.local_id
+                            ))
+                            .into(),
+                            div()
+                                .absolute()
+                                .top(px(12.))
+                                .left(px(12.))
+                                .size(px(30.))
+                                .rounded_full()
+                                .bg(t.stage)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(self.scaled_icon("hand", 16., t.warning)),
                         ),
+                    )
+                })
+                .child(
+                    self.icon_button(
+                        gpui::SharedString::from(format!("focus-call-{}", participant.local_id)),
+                        (
+                            "pin",
+                            if focused == Some(participant.local_id) {
+                                "Raster"
+                            } else {
+                                "Person hervorheben"
+                            },
+                        ),
+                        ButtonStyle::Stage,
+                        Availability::available().hinted(),
+                        LocalAction::FocusCallParticipant(
+                            call.scope,
+                            if focused == Some(participant.local_id) {
+                                None
+                            } else {
+                                Some(participant.local_id)
+                            },
+                        ),
+                        cx,
+                    )
+                    .absolute()
+                    .top(px(8.))
+                    .right(px(8.))
+                    .opacity(if focused == Some(participant.local_id) {
+                        1.
+                    } else {
+                        0.
+                    })
+                    .group_hover("call-tile", |style| style.opacity(1.))
+                    .focus(|style| style.opacity(1.)),
                 );
             let tile = self.reveal(
                 gpui::SharedString::from(format!(

@@ -181,9 +181,26 @@ impl Desktop {
         }
     }
 
-    /// Mounted only while hovered. Persistent selection is static, including
-    /// when a virtualized row returns or a modal closes. GPUI's one-shot settles and
-    /// stops requesting frames; unmounting retires it without a timer or task.
+    /// A single subtle pulse acknowledges a raised hand without a perpetual
+    /// frame loop; reduced motion keeps the badge visible and static.
+    pub(super) fn call_hand_badge(&self, id: ElementId, badge: Div) -> AnyElement {
+        if self.reduced_motion {
+            badge.into_any_element()
+        } else {
+            let frames = self.motion_frame_counter();
+            badge
+                .with_animation(
+                    id,
+                    Animation::new(Duration::from_millis(700)),
+                    move |element, progress| {
+                        count_frame(&frames);
+                        element.opacity(1. - 0.25 * (std::f32::consts::PI * progress).sin())
+                    },
+                )
+                .into_any_element()
+        }
+    }
+
     pub(super) fn call_reaction_motion(&self, id: ElementId, element: Div) -> AnyElement {
         if self.reduced_motion {
             element.into_any_element()
