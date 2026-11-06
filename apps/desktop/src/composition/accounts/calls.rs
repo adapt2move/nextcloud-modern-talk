@@ -277,7 +277,13 @@ impl Accounts {
                 self.call_events.event = None;
             }
             self.call_actions.admit(call.call, cancellation);
-            self.snapshot.call = Some(project(&call, &title, true));
+            let account = self
+                .snapshot
+                .accounts
+                .as_slice()
+                .iter()
+                .find(|account| account.scope == call.call.account);
+            self.snapshot.call = Some(project(&call, &title, true, account));
             self.call_ui = Some(CallUi {
                 scope: call.call,
                 title: title.clone(),
@@ -806,7 +812,13 @@ impl Accounts {
                 ) {
                     ui.wishes = MediaWishes::default();
                 }
-                self.snapshot.call = Some(project(&value, &ui.title, ui.direct));
+                let account = self
+                    .snapshot
+                    .accounts
+                    .as_slice()
+                    .iter()
+                    .find(|account| account.scope == value.call.account);
+                self.snapshot.call = Some(project(&value, &ui.title, ui.direct, account));
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
                         let mut row = row.clone();
@@ -850,7 +862,19 @@ fn device(state: DeviceState) -> MediaState {
         DeviceState::Unavailable => MediaState::Unavailable,
     }
 }
-fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
+fn local_device_state(state: DeviceState) -> Option<bool> {
+    match state {
+        DeviceState::Active => Some(true),
+        DeviceState::Off => Some(false),
+        DeviceState::Requested | DeviceState::Unavailable => None,
+    }
+}
+fn project(
+    value: &Snapshot,
+    title: &Text<256>,
+    direct: bool,
+    account: Option<&AccountView>,
+) -> CallView {
     let stage = match value.phase {
         Phase::Ringing => CallStage::Incoming,
         Phase::Preparing | Phase::Connecting => CallStage::Connecting,
@@ -956,23 +980,47 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         end_pending: value.end_pending,
         end_failed: value.end_failed,
         participants: page(
-            value
-                .participants
-                .as_slice()
-                .iter()
-                .map(|p| ParticipantView {
-                    local_id: p.local,
-                    name: text(p.name.as_str()),
-                    initials: initials(p.name.as_str()),
-                    role_label: text("Teilnehmend"),
-                    presence: Presence::Unknown,
-                    self_user: false,
-                    raised_hand: p.raised_hand,
-                    speaking: p.speaking,
-                    call_can_mute: p.can_mute,
-                    call_microphone: Some(p.microphone),
-                    call_camera: Some(p.camera),
-                }),
+            account
+                .filter(|_| {
+                    matches!(
+                        value.phase,
+                        Phase::Connecting | Phase::Active | Phase::Reconnecting
+                    )
+                })
+                .map(|account| ParticipantView {
+                    // Zero is reserved for the local sender within this call generation.
+                    local_id: 0,
+                    name: text(account.self_name.as_str()),
+                    initials: account.initials.clone(),
+                    role_label: text("Du"),
+                    presence: account.presence,
+                    self_user: true,
+                    raised_hand: value.hand_raised,
+                    speaking: false,
+                    call_can_mute: false,
+                    call_microphone: local_device_state(value.microphone),
+                    call_camera: local_device_state(value.camera),
+                })
+                .into_iter()
+                .chain(
+                    value
+                        .participants
+                        .as_slice()
+                        .iter()
+                        .map(|p| ParticipantView {
+                            local_id: p.local,
+                            name: text(p.name.as_str()),
+                            initials: initials(p.name.as_str()),
+                            role_label: text("Teilnehmend"),
+                            presence: Presence::Unknown,
+                            self_user: false,
+                            raised_hand: p.raised_hand,
+                            speaking: p.speaking,
+                            call_can_mute: p.can_mute,
+                            call_microphone: Some(p.microphone),
+                            call_camera: Some(p.camera),
+                        }),
+                ),
         ),
     }
 }
@@ -1029,6 +1077,58 @@ mod action_tests {
             eligible: true,
         }
     }
+    #[test]
+    fn local_sender_has_a_reserved_tile_and_never_displaces_remote_participants() {
+        let scope = call();
+        let account = AccountView {
+            scope: scope.account,
+            navigation_key: None,
+            connection: AccountConnectionState::Connected,
+            connection_failure: None,
+            label: text("Alex"),
+            server_label: text("Example"),
+            self_name: text("Alex"),
+            initials: text("A"),
+            presence: Presence::Unknown,
+            storage: StorageStatus::SessionOnly,
+        };
+        let mut snapshot = invitation(scope).call.unwrap();
+        assert!(
+            project(&snapshot, &text("Room"), false, Some(&account))
+                .participants
+                .as_slice()
+                .is_empty()
+        );
+        snapshot.phase = Phase::Active;
+        snapshot.hand_raised = true;
+        snapshot.microphone = DeviceState::Requested;
+        for id in 1..=16 {
+            snapshot
+                .participants
+                .try_push(talk_core::calls::Participant {
+                    local: id,
+                    name: text("Other"),
+                    microphone: false,
+                    camera: false,
+                    raised_hand: false,
+                    speaking: false,
+                    can_mute: false,
+                })
+                .unwrap();
+        }
+        let view = project(&snapshot, &text("Room"), false, Some(&account));
+        assert_eq!(view.participants.as_slice().len(), 17);
+        let local = &view.participants.as_slice()[0];
+        assert_eq!(local.local_id, 0);
+        assert!(local.self_user && local.raised_hand && !local.call_can_mute);
+        assert_eq!(local.call_microphone, None);
+        assert!(
+            view.participants.as_slice()[1..]
+                .iter()
+                .all(|p| !p.self_user && p.local_id != 0)
+        );
+    }
+
     #[test]
     fn inactive_account_can_offer_without_selecting_or_capturing_and_other_errors_cannot_revoke_it()
     {

@@ -532,7 +532,8 @@ pub struct CallView {
     pub can_end_everyone: bool,
     pub end_pending: bool,
     pub end_failed: bool,
-    pub participants: Page<ParticipantView, 16>,
+    /// Up to sixteen remote participants plus the local call participant.
+    pub participants: Page<ParticipantView, 17>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

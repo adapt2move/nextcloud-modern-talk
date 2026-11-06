@@ -529,7 +529,14 @@ impl Desktop {
                 .gap_2()
                 .p_4()
                 .child(visual)
-                .children(self.call_reaction(call.scope, Some(participant.local_id)))
+                .children(self.call_reaction(
+                    call.scope,
+                    if participant.self_user {
+                        None
+                    } else {
+                        Some(participant.local_id)
+                    },
+                ))
                 .child(
                     div()
                         .flex_none()
@@ -831,7 +838,17 @@ impl Desktop {
                     cx,
                 ));
             }
-            controls = controls.child(reactions.children(self.call_reaction(call.scope, None)));
+            let local_reaction = if call
+                .participants
+                .as_slice()
+                .iter()
+                .any(|person| person.self_user)
+            {
+                None
+            } else {
+                self.call_reaction(call.scope, None)
+            };
+            controls = controls.child(reactions.children(local_reaction));
         }
         for (id, symbol, label, action) in [
             (

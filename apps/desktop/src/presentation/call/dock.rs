@@ -40,7 +40,19 @@ impl Desktop {
             _ => self.l("Verbindung wird aufgebaut …").to_owned(),
         };
         let mut avatars = div().flex().items_center().gap_1();
-        for participant in call.participants.as_slice().iter().take(3) {
+        for participant in call
+            .participants
+            .as_slice()
+            .iter()
+            .filter(|person| person.speaking)
+            .chain(
+                call.participants
+                    .as_slice()
+                    .iter()
+                    .filter(|person| !person.speaking),
+            )
+            .take(3)
+        {
             avatars = avatars.child(
                 div()
                     .rounded_full()
