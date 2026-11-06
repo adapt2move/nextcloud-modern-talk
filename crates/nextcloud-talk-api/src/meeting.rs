@@ -203,6 +203,107 @@ impl MeetingModerationWriter {
         crate::decode(kind, response).map_err(|kind| self.binding.error(kind))
     }
 
+    /// Ask currently connected peers to stop the target's microphone. This is
+    /// a signaling request, not proof that the remote client complied.
+    pub async fn mute_participant(
+        &mut self,
+        context: &OperationContext,
+        target: &PeerSession,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if target.0.as_str() == self.binding.session.as_str() {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || caps.call_enabled != Some(true)
+            || !caps.supports("force-mute")
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !matches!(room.participant_type, Some(1 | 2))
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if in_call.len() > 17
+            || !in_call
+                .iter()
+                .any(|p| p.session == self.binding.session.as_str())
+            || !in_call.iter().any(|p| p.session == target.0.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let mut recipients = Vec::with_capacity(16);
+        for participant in &in_call {
+            if participant.session == self.binding.session.as_str() {
+                continue;
+            }
+            let peer = PeerSession::parse(&participant.session)
+                .map_err(|kind| self.binding.error(kind))?;
+            if recipients.contains(&peer) {
+                return Err(self.binding.error(ErrorKind::Malformed));
+            }
+            recipients.push(peer);
+        }
+        if let Some(route) = &self.binding.hpb {
+            for peer in &recipients {
+                route
+                    .send_force_mute(&context, peer, target)
+                    .await
+                    .map_err(|kind| self.binding.error(kind))?;
+            }
+        } else {
+            let messages: Vec<_> = recipients.iter().map(|peer| {
+                let inner = json!({"to":peer.0.as_str(),"roomType":"video","type":"control","payload":{"action":"forceMute","peerId":target.0.as_str()}});
+                json!({"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()})
+            }).collect();
+            let messages = serde_json::to_string(&messages)
+                .map_err(|_| self.binding.error(ErrorKind::Malformed))?;
+            let route = format!(
+                "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+                self.binding.room.as_str()
+            );
+            self.transport
+                .ocs(
+                    &context,
+                    Method::POST,
+                    &route,
+                    &[],
+                    &[("messages", messages)],
+                    false,
+                )
+                .await
+                .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        }
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
     /// End the current call for everyone after a fresh role and session check.
     /// This is distinct from an ordinary local leave and is never replayed.
     pub async fn end_for_everyone(
