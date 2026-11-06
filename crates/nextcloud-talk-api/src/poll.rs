@@ -45,6 +45,51 @@ pub struct Poll {
     pub details: Vec<Voter>,
     pub details_complete: bool,
 }
+/// A moderator-visible draft. Draft responses omit votes and voter data.
+#[derive(Clone, Debug)]
+pub struct Draft {
+    pub id: u64,
+    pub question: String,
+    pub options: Vec<String>,
+    pub hidden_results: bool,
+    pub max_votes: u16,
+    pub actor_type: String,
+    pub actor_id: String,
+}
+
+impl Draft {
+    fn decode(v: &Value) -> Result<Self, ErrorKind> {
+        if integer(v.get("status")) != Some(2) {
+            return Err(ErrorKind::Malformed);
+        }
+        let raw = v["options"].as_array().ok_or(ErrorKind::Malformed)?;
+        if !(2..=MAX_OPTIONS).contains(&raw.len()) {
+            return Err(ErrorKind::TooLarge);
+        }
+        let options = raw.iter().map(|v| {
+            string(Some(v), 1000)?.ok_or(ErrorKind::Malformed)
+        }).collect::<Result<Vec<_>, _>>()?;
+        let hidden_results = match integer(v.get("resultMode")) {
+            Some(0) => false,
+            Some(1) => true,
+            _ => return Err(ErrorKind::Unsupported),
+        };
+        let max_votes = u16::try_from(integer(v.get("maxVotes")).ok_or(ErrorKind::Malformed)?)
+            .map_err(|_| ErrorKind::TooLarge)?;
+        if usize::from(max_votes) > options.len() {
+            return Err(ErrorKind::Malformed);
+        }
+        Ok(Self {
+            id: id(integer(v.get("id")).ok_or(ErrorKind::Malformed)?)?,
+            question: string(v.get("question"), 4000)?.ok_or(ErrorKind::Malformed)?,
+            options,
+            hidden_results,
+            max_votes,
+            actor_type: string(v.get("actorType"), 64)?.ok_or(ErrorKind::Malformed)?,
+            actor_id: string(v.get("actorId"), 512)?.ok_or(ErrorKind::Malformed)?,
+        })
+    }
+}
 fn id(id: u64) -> Result<u64, ErrorKind> {
     if id == 0 {
         Err(ErrorKind::Malformed)
@@ -204,6 +249,24 @@ impl Poll {
     }
 }
 impl Client {
+    /// Fetch a bounded moderator draft list for this room.
+    pub async fn poll_drafts(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<Vec<Draft>, Error> {
+        self.validate(c)?;
+        let route = format!("ocs/v2.php/apps/spreed/api/v1/poll/{}/drafts", room.as_str());
+        let response = self.transport.ocs(c, Method::GET, &route, &[], &[], false).await?;
+        let values = response.data.as_array().ok_or_else(|| self.error(ErrorKind::Malformed))?;
+        if values.len() > 100 {
+            return Err(self.error(ErrorKind::TooLarge));
+        }
+        let drafts = values.iter().map(Draft::decode).collect::<Result<Vec<_>, _>>()
+            .map_err(|kind| self.error(kind))?;
+        self.validate(c)?;
+        Ok(drafts)
+    }
     pub async fn poll(
         &mut self,
         c: &OperationContext,
