@@ -346,8 +346,8 @@ pub(crate) fn parse_batch(
         return Err(ErrorKind::TooLarge);
     }
     let mut events = Vec::with_capacity(rows.len());
-    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut retained) =
-        (0, 0, 0, 0, 0usize);
+    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut activities, mut retained) =
+        (0, 0, 0, 0, 0, 0usize);
     for row in rows {
         match row["type"].as_str() {
             Some("usersInRoom") => {
@@ -413,12 +413,12 @@ pub(crate) fn parse_batch(
                 retained += from.0.len();
                 let kind = text(data.get("type"), 32)?;
                 if matches!(kind, "raiseHand" | "reaction") {
-                    hints += 1;
-                    if hints > 16 {
-                        return Err(ErrorKind::TooLarge);
+                    activities += 1;
+                    if activities <= 16 {
+                        if let Ok(activity) = activity::Activity::decode(kind, &data["payload"]) {
+                            events.push(Event::Activity { from, activity });
+                        }
                     }
-                    let activity = activity::Activity::decode(kind, &data["payload"])?;
-                    events.push(Event::Activity { from, activity });
                 } else if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
                     hints += 1;
                     if hints > 16 {

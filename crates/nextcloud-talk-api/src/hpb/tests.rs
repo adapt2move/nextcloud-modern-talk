@@ -578,3 +578,55 @@ async fn real_wss_native_roots() {
         }
     }
 }
+
+#[test]
+fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
+    use crate::signaling::activity::Activity;
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    let message = |sender: &str, state: bool, timestamp: u64| {
+        json!({
+            "type":"message", "message": {
+                "sender":{"type":"session", "sessionid":sender},
+                "data":{"type":"raiseHand", "roomType":"video", "payload":{"state":state,"timestamp":timestamp}}
+            }
+        })
+    };
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    assert!(
+        shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .is_empty()
+    );
+    shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    shared.incoming(&message("hpb-other", false, 2)).unwrap();
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    let mut locked = shared.state.lock().unwrap();
+    let room = locked.room.as_mut().unwrap();
+    assert!(
+        room.signals
+            .iter()
+            .any(|(_, event)| matches!(event, Event::Activity {
+        from, activity: Activity::RaisedHand { state: false, timestamp: 2 }
+    } if from == &peer("talk-other")))
+    );
+    // Fill the queue with transient activity, then retain a mandatory update.
+    for i in 0..20 {
+        room.push_activity(peer(&format!("peer-{i}")), Activity::Reaction("👍".into()));
+    }
+    for _ in 0..84 {
+        let _ = room.push(Event::PolicyChanged);
+    }
+    assert!(
+        room.signals
+            .iter()
+            .any(|(_, event)| matches!(event, Event::PolicyChanged))
+    );
+}

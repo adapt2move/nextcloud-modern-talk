@@ -54,7 +54,10 @@ mod tests {
     #[test]
     fn activity_round_trips_and_rejects_invalid_payloads() {
         for activity in [
-            Activity::RaisedHand { state: true, timestamp: 42 },
+            Activity::RaisedHand {
+                state: true,
+                timestamp: 42,
+            },
             Activity::Reaction("👍".into()),
         ] {
             let (kind, payload) = activity.encode().unwrap();
@@ -75,15 +78,30 @@ mod batch_tests {
 
     #[test]
     fn activity_is_scoped_and_bounded_in_batch() {
-        let row = |to: &str| json!({"type":"message", "data": json!({
+        let row = |to: &str| {
+            json!({"type":"message", "data": json!({
             "from":"peer", "to":to, "roomType":"video", "type":"raiseHand",
             "payload":{"state":true,"timestamp":42}
-        }).to_string()});
+        }).to_string()})
+        };
         let batch = parse_batch(&json!([row("local")]), "local", 1).unwrap();
-        assert!(matches!(&batch.events()[0], Event::Activity {
-            activity: Activity::RaisedHand { state: true, timestamp: 42 }, ..
-        }));
+        assert!(matches!(
+            &batch.events()[0],
+            Event::Activity {
+                activity: Activity::RaisedHand {
+                    state: true,
+                    timestamp: 42
+                },
+                ..
+            }
+        ));
         assert!(parse_batch(&json!([row("other")]), "local", 1).is_err());
-        assert!(parse_batch(&json!(vec![row("local"); 17]), "local", 1).is_err());
+        assert_eq!(
+            parse_batch(&json!(vec![row("local"); 17]), "local", 1)
+                .unwrap()
+                .events()
+                .len(),
+            16
+        );
     }
 }

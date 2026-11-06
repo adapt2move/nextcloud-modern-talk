@@ -80,13 +80,53 @@ impl Room {
             } => c.candidate().len() + c.mid().len(),
             _ => 1024,
         };
-        if self.signals.len() == 84 || self.signal_bytes + bytes > 192 * 1024 {
+        // Ephemeral activity never displaces a required media or policy event.
+        while self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
+            let Some(index) = self
+                .signals
+                .iter()
+                .position(|(_, event)| matches!(event, Event::Activity { .. }))
+            else {
+                break;
+            };
+            if let Some((size, _)) = self.signals.remove(index) {
+                self.signal_bytes -= size;
+            }
+        }
+        if self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
             self.cancellation.cancel();
             return Err(ErrorKind::Busy);
         }
         self.signal_bytes += bytes;
         self.signals.push_back((bytes, event));
         Ok(())
+    }
+    fn push_activity(&mut self, from: PeerSession, activity: crate::signaling::activity::Activity) {
+        use crate::signaling::activity::Activity;
+        // Coalesce each hand so a delayed raise cannot replace a later lower.
+        if let Activity::RaisedHand { timestamp, .. } = &activity {
+            if let Some((_, event)) = self.signals.iter_mut().find(|(_, event)| {
+                matches!(event, Event::Activity { from: sender, activity: Activity::RaisedHand { .. } } if sender == &from)
+            }) {
+                if let Event::Activity { activity: Activity::RaisedHand { timestamp: previous, .. }, .. } = event {
+                    if *timestamp > *previous {
+                        *event = Event::Activity { from, activity };
+                    }
+                }
+                return;
+            }
+        }
+        let count = self
+            .signals
+            .iter()
+            .filter(|(_, event)| matches!(event, Event::Activity { .. }))
+            .count();
+        if count >= 16 || self.signals.len() >= 84 || self.signal_bytes + 1024 > 192 * 1024 {
+            return;
+        }
+        self.signal_bytes += 1024;
+        self.signals
+            .push_back((1024, Event::Activity { from, activity }));
     }
 }
 pub(crate) struct Owner {
