@@ -174,6 +174,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Este servidor no admite encuestas.",
     ),
     ("Unbegrenzte Stimmen", "Unlimited votes", "Votos ilimitados"),
+    (
+        "Verbinde dich erneut, um abzustimmen.",
+        "Reconnect to vote.",
+        "Vuelve a conectarte para votar.",
+    ),
+    (
+        "Verbinde dich erneut, um die Aufnahme zu senden.",
+        "Reconnect to send the recording.",
+        "Vuelve a conectarte para enviar la grabación.",
+    ),
     ("Weniger Stimmen", "Fewer votes", "Menos votos"),
     (
         "Wiedergabe nicht verfügbar. Lade die Datei herunter.",

@@ -175,6 +175,50 @@ pub(super) fn polls(snapshot: &mut PresentationSnapshot) {
     }]);
 }
 
+pub(super) fn poll_details(snapshot: &mut PresentationSnapshot) {
+    let Some(mut poll) = snapshot.content_panel.polls.as_slice().first().cloned() else {
+        return;
+    };
+    poll.question = text("Fiktive Umfrage: Was soll unser gemeinsamer Raum bieten?");
+    poll.closed = true;
+    poll.max_votes = 0;
+    poll.voters = Some(6);
+    poll.options = page(
+        [
+            ("Helle Meetingecke", 4, true),
+            ("Ruhiges Studio", 3, false),
+            ("Offene Werkbank", 2, false),
+            ("Pflanzen und Tageslicht", 2, true),
+            ("Kleine Bibliothek", 1, false),
+            ("Flexible Tische", 1, false),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(id, (label, votes, own))| PollOption {
+            id: id as u16,
+            label: text(label),
+            votes: Some(votes),
+            own,
+        }),
+    );
+    poll.details = page([
+        PollVoter {
+            name: text("Alex Sommer"),
+            option: 0,
+        },
+        PollVoter {
+            name: text("Mara Fischer"),
+            option: 1,
+        },
+        PollVoter {
+            name: text("Luis Vega"),
+            option: 3,
+        },
+    ]);
+    poll.details_complete = true;
+    snapshot.content_panel.polls = page([poll]);
+}
+
 pub(super) fn voice(snapshot: &mut PresentationSnapshot) {
     let context = snapshot.selected.unwrap();
     let mut recording = message(109, "Mara Fischer", "MF", "09:48", "", false);

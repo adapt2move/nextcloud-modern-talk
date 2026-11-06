@@ -224,7 +224,8 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("thread") => Some(Overlay::Thread),
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
-        Some("poll-dialog") => Some(Overlay::CreatePoll),
+        Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),
+        Some("poll-details") => Some(Overlay::PollDetails),
         Some("discover") => Some(Overlay::Discover),
         Some("accounts" | "focus-accounts" | "accounts-server-denied") => Some(Overlay::Accounts),
         _ => None,
@@ -257,19 +258,27 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         services: services.clone(),
         cursor: 0,
         device_cursor: 0,
-        fixture_voice: (options.scenario.as_deref() == Some("voice-recording"))
-            .then(|| fixtures::snapshot(Some("voice-recording")).selected)
-            .flatten()
-            .map(|context| talk_core::ui::content::VoiceSnapshot {
-                context,
-                phase: talk_core::ui::content::VoicePhase::Recording,
-                elapsed_ms: 13_000,
-                level: 600,
-            }),
+        fixture_voice: matches!(
+            options.scenario.as_deref(),
+            Some("voice-recording" | "voice-review")
+        )
+        .then(|| fixtures::snapshot(Some("voice-recording")).selected)
+        .flatten()
+        .map(|context| talk_core::ui::content::VoiceSnapshot {
+            context,
+            phase: if options.scenario.as_deref() == Some("voice-review") {
+                talk_core::ui::content::VoicePhase::Review
+            } else {
+                talk_core::ui::content::VoicePhase::Recording
+            },
+            elapsed_ms: 13_000,
+            level: 600,
+        }),
         permission_cursor: 0,
         notification_request: None,
         notification_result: talk_core::preferences::notifications::NotificationState::Idle,
     });
+    let disconnected_fixture = services.accounts.is_none();
     let window=cx.open_window(WindowOptions{
             window_bounds:Some(WindowBounds::Windowed(bounds)),
             // A minimized native window remains recoverable from the taskbar.
@@ -300,7 +309,11 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
-            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx))
+            cx.new(|cx|{
+                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref()); }
+                desktop
+            })
         });
     match window {
         Ok(window) => {

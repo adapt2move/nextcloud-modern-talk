@@ -53,8 +53,11 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content",
     "chat-polls",
     "poll-dialog",
+    "poll-drafts",
+    "poll-details",
     "chat-voice",
     "voice-recording",
+    "voice-review",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
@@ -394,8 +397,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             "chat-content"
                 | "chat-polls"
                 | "poll-dialog"
+                | "poll-drafts"
+                | "poll-details"
                 | "chat-voice"
                 | "voice-recording"
+                | "voice-review"
                 | "chat-attachments"
                 | "chat-upload"
                 | "chat-upload-uncertain"
@@ -406,10 +412,19 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
-        if matches!(scenario, Some("chat-polls" | "poll-dialog")) {
+        if matches!(
+            scenario,
+            Some("chat-polls" | "poll-dialog" | "poll-drafts" | "poll-details")
+        ) {
             content::polls(&mut state);
         }
-        if matches!(scenario, Some("chat-voice" | "voice-recording")) {
+        if scenario == Some("poll-details") {
+            content::poll_details(&mut state);
+        }
+        if matches!(
+            scenario,
+            Some("chat-voice" | "voice-recording" | "voice-review")
+        ) {
             content::voice(&mut state);
         }
         if scenario == Some("chat-attachments") {
@@ -1188,8 +1203,11 @@ impl DevelopmentPort {
                     "chat-content"
                         | "chat-polls"
                         | "poll-dialog"
+                        | "poll-drafts"
+                        | "poll-details"
                         | "chat-voice"
                         | "voice-recording"
+                        | "voice-review"
                         | "chat-attachments"
                         | "chat-upload"
                         | "chat-upload-uncertain"

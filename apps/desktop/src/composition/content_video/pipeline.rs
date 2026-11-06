@@ -952,6 +952,36 @@ mod tests {
         settle(&mut player);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires optional Linux AAC encoder and decoder plugins"]
+    fn mp4_aac_audio_prerolls_and_seeks_with_native_pipeline() {
+        gst::init().unwrap();
+        let bytes = synthetic(
+            "audiotestsrc num-buffers=80 samplesperbuffer=1024 wave=silence ! audio/x-raw,rate=48000,channels=1 ! voaacenc ! aacparse ! mp4mux ! filesink name=fixture sync=false",
+        );
+        let shared = Arc::new(Shared::new());
+        let pipeline =
+            Pipeline::with_audio_output(bytes, Container::Mp4, shared.clone(), true, "fakesink")
+                .unwrap();
+        let state = shared.clone();
+        let worker = thread::spawn(move || run_pipeline(pipeline, &state, Instant::now(), true));
+        let mut player = Player {
+            shared,
+            worker: Some(worker),
+        };
+        until(&player, |snapshot| snapshot.phase == Phase::Paused);
+        player.seek_ms(500).unwrap();
+        player.set_rate(4).unwrap();
+        player.set_playing(true).unwrap();
+        until(&player, |snapshot| {
+            matches!(snapshot.phase, Phase::Playing | Phase::Ended)
+        });
+        player.stop();
+        until(&player, |snapshot| snapshot.phase == Phase::Stopped);
+        settle(&mut player);
+    }
+
     #[test]
     fn large_demux_reads_share_the_original_and_ranges_stay_finite() {
         gst::init().unwrap();

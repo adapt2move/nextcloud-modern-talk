@@ -178,6 +178,22 @@ impl ContentUi {
     }
 }
 impl Desktop {
+    /// Only disconnected development scenarios call this after installing
+    /// their fictional snapshot; it never opens a server or a media device.
+    pub(crate) fn configure_content_scenario(&mut self, scenario: Option<&str>) {
+        match scenario {
+            Some("poll-drafts") => self.content_ui.drafts_open = true,
+            Some("poll-details") => self.content_ui.details_poll = Some(9001),
+            Some("voice-recording") => {
+                self.content_ui.voice_levels = vec![
+                    90, 200, 360, 580, 370, 170, 220, 460, 710, 490, 240, 120, 280, 540, 680, 390,
+                    180, 130, 310, 620, 450, 200, 90, 150,
+                ];
+            }
+            _ => {}
+        }
+    }
+
     /// Composition supplies already decoded render images. Reject URI/path
     /// image sources; renderer caches cannot become an alternate HTTP owner.
     pub fn set_content_images(
@@ -299,9 +315,12 @@ impl Desktop {
         self.refresh_attachment_send(cx);
         let voice = self.settings_port.voice_snapshot();
         if let Some(voice) = voice
-            && (Some(voice.context) != self.snapshot.selected
-                || self.snapshot.content != ContentState::Ready
-                || !self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice))
+            && voice_session_retired(
+                Some(voice.context) == self.snapshot.selected,
+                self.snapshot.content,
+                !self.media_offline(),
+                self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice),
+            )
         {
             let _ = self.settings_port.stop_voice(voice.context, true);
         }
@@ -782,7 +801,14 @@ impl Desktop {
                 "voice-send",
                 "Sprachnachricht senden",
                 ButtonStyle::Primary,
-                true,
+                Availability::when(
+                    !self.media_offline()
+                        && self.snapshot.content == ContentState::Ready
+                        && self.message_feature_enabled(
+                            talk_core::ui::messaging::MessageFeature::Voice,
+                        ),
+                    "Verbinde dich erneut, um die Aufnahme zu senden.",
+                ),
                 LocalAction::Content(Action::VoiceSend(context)),
                 cx,
             )),
@@ -880,6 +906,9 @@ impl Desktop {
                     .gap_2()
                     .child(body)
                     .child(review)
+                    .when(voice.phase == VoicePhase::Review && self.media_offline(), |d| {
+                        d.child(self.hint(self.l("Verbinde dich erneut, um die Aufnahme zu senden.")))
+                    })
                     .when_some(
                         match voice.phase {
                         VoicePhase::Failed(talk_core::ui::UnavailableReason::PermissionDenied) => Some("Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen."),
@@ -925,26 +954,27 @@ impl Desktop {
             .flex()
             .items_center()
             .gap_2()
-            .child(
-                self.icon_button(
-                    ("voice-play", reference.message as usize),
-                    (
-                        if playing { "pause" } else { "play" },
-                        if playing {
-                            "Pausieren"
-                        } else {
-                            "Sprachnachricht abspielen"
-                        },
-                    ),
-                    ButtonStyle::Quiet,
-                    (self.snapshot.content == ContentState::Ready
-                        && !loading
-                        && self.snapshot.call.is_none())
-                    .into(),
-                    LocalAction::Content(Action::Command(play)),
-                    cx,
+            .child(self.icon_button(
+                ("voice-play", reference.message as usize),
+                (
+                    if playing { "pause" } else { "play" },
+                    if playing {
+                        "Pausieren"
+                    } else {
+                        "Sprachnachricht abspielen"
+                    },
                 ),
-            )
+                ButtonStyle::Quiet,
+                Availability::when(
+                    self.snapshot.content == ContentState::Ready
+                        && !self.media_offline()
+                        && !loading
+                        && self.snapshot.call.is_none(),
+                    "Die Verbindung ist derzeit nicht bereit.",
+                ),
+                LocalAction::Content(Action::Command(play)),
+                cx,
+            ))
             .child(self.hint(self.l(if loading {
                 "Sprachnachricht wird geladen …"
             } else {
@@ -965,7 +995,11 @@ impl Desktop {
                 ("voice-download", reference.message as usize),
                 ("download", "Herunterladen"),
                 ButtonStyle::Quiet,
-                self.message_available(talk_core::ui::messaging::MessageFeature::Files),
+                if self.media_offline() {
+                    Availability::when(false, "Die Verbindung ist derzeit nicht bereit.")
+                } else {
+                    self.download_available()
+                },
                 LocalAction::Content(Action::Download(reference.clone())),
                 cx,
             ));
@@ -1202,6 +1236,8 @@ impl Desktop {
             Action::SubmitPoll => {
                 if let Some(draft) = self.poll_draft(cx)
                     && self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                     && self.snapshot.content_panel.poll_create.enabled()
                     && !self.poll_submission_blocked()
                     && let Some(context) = self.snapshot.selected
@@ -1213,6 +1249,8 @@ impl Desktop {
             Action::SaveDraft => {
                 if let Some(draft) = self.poll_draft(cx)
                     && self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                     && self.snapshot.content_panel.poll_drafts_manage.enabled()
                     && !self.poll_submission_blocked()
                     && let Some(context) = self.snapshot.selected
@@ -1233,6 +1271,8 @@ impl Desktop {
                 self.content_ui.drafts_open = !self.content_ui.drafts_open;
                 if self.content_ui.drafts_open
                     && self.snapshot.content_panel.poll_drafts_manage.enabled()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                 {
                     self.submit_content(ContentAction::RefreshPollDrafts);
                 }
@@ -1281,6 +1321,8 @@ impl Desktop {
             Action::DeleteDraft(id) => {
                 if self.content_ui.delete_draft == Some(id)
                     && self.snapshot.content_panel.poll_drafts_manage.enabled()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                 {
                     self.submit_content(ContentAction::DeletePollDraft(id));
                     self.content_ui.delete_draft = None;
@@ -1326,6 +1368,8 @@ impl Desktop {
             }
             Action::SubmitVote(poll) => {
                 if self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                     && !self.poll_submission_blocked()
                     && let Some((_, options)) = self
                         .content_ui
@@ -1346,14 +1390,16 @@ impl Desktop {
             Action::ConfirmClosePoll(poll) => self.content_ui.confirm_close = Some(poll),
             Action::CancelClosePoll => self.content_ui.confirm_close = None,
             Action::ClosePoll(poll) => {
-                if self.content_ui.confirm_close == Some(poll) && !self.poll_submission_blocked() {
-                    if let Some(context) = self.snapshot.selected
-                        && let Some(request) = self.submit_content(ContentAction::ClosePoll(poll))
-                    {
-                        self.content_ui.pending_close = Some((context, request, poll));
-                        self.content_ui.close_error = None;
-                        self.content_ui.confirm_close = None;
-                    }
+                if self.content_ui.confirm_close == Some(poll)
+                    && !self.poll_submission_blocked()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && let Some(context) = self.snapshot.selected
+                    && let Some(request) = self.submit_content(ContentAction::ClosePoll(poll))
+                {
+                    self.content_ui.pending_close = Some((context, request, poll));
+                    self.content_ui.close_error = None;
+                    self.content_ui.confirm_close = None;
                 }
             }
             Action::PollDetails(poll) => {
@@ -1642,8 +1688,10 @@ impl Desktop {
     }
     pub(super) fn poll_creation_body(&self, cx: &Context<Self>) -> Div {
         let busy = self.poll_submission_blocked();
-        let available =
-            self.content_scope_current() && self.snapshot.content_panel.poll_create.enabled();
+        let online = self.snapshot.content == ContentState::Ready && !self.media_offline();
+        let available = self.content_scope_current()
+            && online
+            && self.snapshot.content_panel.poll_create.enabled();
         let mut body = div()
             .flex()
             .flex_col()
@@ -1689,7 +1737,7 @@ impl Desktop {
                             "poll-drafts-retry",
                             "Erneut laden",
                             ButtonStyle::Quiet,
-                            true,
+                            online,
                             LocalAction::Content(Action::Command(ContentAction::RefreshPollDrafts)),
                             cx,
                         ));
@@ -1729,7 +1777,7 @@ impl Desktop {
                                 ("poll-draft-delete-confirm", id as usize),
                                 "Entwurf endgültig löschen",
                                 ButtonStyle::Quiet,
-                                !busy,
+                                !busy && online,
                                 LocalAction::Content(Action::DeleteDraft(id)),
                                 cx,
                             ))
@@ -1870,9 +1918,11 @@ impl Desktop {
             ))
             .child(self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")));
         if !available {
-            body = body.child(self.hint(self.l(super::conversation_dialog::unavailable(
-                self.snapshot.content_panel.poll_create,
-            ))));
+            body = body.child(self.hint(self.l(if !online {
+                "Die Verbindung ist derzeit nicht bereit."
+            } else {
+                super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create)
+            })));
         }
         if self.snapshot.content_panel.poll_drafts_manage.enabled() {
             body = body.child(self.button(
@@ -1880,6 +1930,7 @@ impl Desktop {
                 "Als Entwurf speichern",
                 ButtonStyle::Secondary,
                 !busy
+                    && online
                     && self.poll_draft(cx).is_some()
                     && (self.content_ui.editing_draft.is_none()
                         || self.snapshot.content_panel.poll_drafts_edit.enabled()),
@@ -1944,13 +1995,19 @@ impl Desktop {
                 .p_3()
                 .rounded(px(8.))
                 .bg(self.theme.subtle)
-                .child(self.hint(self.l("Umfrage wird geladen …")))
+                .child(self.hint(self.l(if self.media_offline() {
+                    "Die Verbindung ist derzeit nicht bereit."
+                } else {
+                    "Umfrage wird geladen …"
+                })))
                 .when(!self.snapshot.content_panel.poll_state.pending(), |body| {
                     body.child(self.button(
                         ("load-poll", id as usize),
                         "Umfrage öffnen",
                         ButtonStyle::Secondary,
-                        self.content_scope_current(),
+                        self.content_scope_current()
+                            && self.snapshot.content == ContentState::Ready
+                            && !self.media_offline(),
                         LocalAction::Content(Action::Command(ContentAction::RefreshPoll(id))),
                         cx,
                     ))
@@ -2122,6 +2179,8 @@ impl Desktop {
                     },
                     ButtonStyle::Secondary,
                     !self.poll_submission_blocked()
+                        && self.snapshot.content == ContentState::Ready
+                        && !self.media_offline()
                         && self
                             .content_ui
                             .selections
@@ -2135,6 +2194,9 @@ impl Desktop {
         if self.content_ui.vote_error == Some(poll.id) {
             body = body
                 .child(self.hint(self.l("Deine Auswahl bleibt erhalten. Bitte erneut versuchen.")));
+        }
+        if !poll.closed && self.media_offline() {
+            body = body.child(self.hint(self.l("Verbinde dich erneut, um abzustimmen.")));
         }
         if let Some((id, uncertain)) = self.content_ui.close_error
             && id == poll.id
@@ -2158,7 +2220,7 @@ impl Desktop {
                 ("poll-recheck", poll.id as usize),
                 "Umfrage erneut prüfen",
                 ButtonStyle::Quiet,
-                true,
+                !self.media_offline(),
                 LocalAction::Content(Action::Command(ContentAction::RefreshPoll(poll.id))),
                 cx,
             ));
@@ -2222,7 +2284,7 @@ impl Desktop {
                         ("poll-close-confirm", poll.id as usize),
                         "Jetzt beenden",
                         ButtonStyle::Secondary,
-                        !self.poll_submission_blocked(),
+                        !self.poll_submission_blocked() && !self.media_offline(),
                         LocalAction::Content(Action::ClosePoll(poll.id)),
                         cx,
                     ))
@@ -2239,7 +2301,7 @@ impl Desktop {
                     ("close-poll", poll.id as usize),
                     "Umfrage beenden",
                     ButtonStyle::Quiet,
-                    !self.poll_submission_blocked(),
+                    !self.poll_submission_blocked() && !self.media_offline(),
                     LocalAction::Content(Action::ConfirmClosePoll(poll.id)),
                     cx,
                 ));
@@ -2247,6 +2309,17 @@ impl Desktop {
         }
         body
     }
+}
+
+fn voice_session_retired(
+    same_scope: bool,
+    content: ContentState,
+    online: bool,
+    feature_enabled: bool,
+) -> bool {
+    !same_scope
+        || matches!(content, ContentState::Denied | ContentState::Unconfigured)
+        || (content == ContentState::Ready && online && !feature_enabled)
 }
 
 fn voice_error(error: talk_core::preferences::devices::DeviceError) -> &'static str {
@@ -2408,13 +2481,50 @@ fn poll_draft_values<'a>(
 mod tests {
     use super::{
         message_avatar_alias, poll_creation_pending, poll_draft_values, toggled_poll_votes,
+        voice_session_retired,
     };
     use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
     use talk_core::ui::conversation::RemoteState;
-    use talk_core::ui::presentation::{ConversationRef, DeliveryState, MessageView, RequestId};
+    use talk_core::ui::presentation::{
+        ContentState, ConversationRef, DeliveryState, MessageView, RequestId,
+    };
     use talk_core::ui::{
         AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration, Text,
     };
+
+    #[test]
+    fn voice_draft_survives_connection_loss_but_not_scope_or_permission_loss() {
+        assert!(!voice_session_retired(
+            true,
+            ContentState::Offline,
+            false,
+            false
+        ));
+        assert!(!voice_session_retired(
+            true,
+            ContentState::Ready,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            false,
+            ContentState::Offline,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            true,
+            ContentState::Denied,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            true,
+            ContentState::Ready,
+            true,
+            false
+        ));
+    }
 
     fn avatar_message(id: u128, key: Option<&str>) -> MessageView {
         let metadata = talk_core::ui::messaging::MessageMetadata {
