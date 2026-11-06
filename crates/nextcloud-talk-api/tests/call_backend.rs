@@ -10,17 +10,8 @@ use nextcloud_talk_api::{
     },
     signaling::{Event, PeerSession, activity::Activity},
 };
-use serde::Deserialize;
 use std::path::PathBuf;
 use zeroize::Zeroizing;
-
-#[derive(Deserialize)]
-struct Fixture {
-    origin: String,
-    room: String,
-    alice_password: String,
-    bob_password: String,
-}
 
 struct Actor {
     client: Client,
@@ -121,10 +112,19 @@ async fn activity(
 #[ignore = "requires the private disposable r35 call fixture"]
 async fn released_server_accepts_scoped_activity_and_moderation() {
     let path = PathBuf::from(std::env::var_os("NMT_CALL_FIXTURE").expect("private fixture"));
-    let fixture: Fixture = serde_json::from_slice(&std::fs::read(path).expect("fixture bytes"))
-        .expect("fixture shape");
-    let room = RoomToken::parse(&fixture.room).expect("synthetic room");
-    let mut alice = Actor::new(&fixture.origin, "lab_alice", fixture.alice_password, 801);
+    let fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("fixture bytes"))
+            .expect("fixture shape");
+    let field = |key: &str| {
+        fixture
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .expect("private fixture field")
+            .to_owned()
+    };
+    let origin = field("origin");
+    let room = RoomToken::parse(&field("room")).expect("synthetic room");
+    let mut alice = Actor::new(&origin, "lab_alice", field("alice_password"), 801);
     let (_alice_reader, mut alice_writer) = alice.join(&room).await;
     let alice_session = alice_writer.own_session().expect("owner session");
     let mut moderator = alice_writer
@@ -151,7 +151,7 @@ async fn released_server_accepts_scoped_activity_and_moderation() {
         .await
         .unwrap_or_else(|error| panic!("ring: {:?}", error.kind));
 
-    let mut bob = Actor::new(&fixture.origin, "lab_bob", fixture.bob_password, 802);
+    let mut bob = Actor::new(&origin, "lab_bob", field("bob_password"), 802);
     let (mut bob_reader, mut bob_writer) = bob.join(&room).await;
     let bob_session = bob_writer.own_session().expect("member session");
     assert!(moderator.ring(&alice.context(), attendee).await.is_err());
