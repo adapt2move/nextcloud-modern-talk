@@ -254,6 +254,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Senden fehlgeschlagen", "Sending failed", "Error al enviar"),
     (
+        "Thread breiter",
+        "Widen thread pane",
+        "Ampliar panel del hilo",
+    ),
+    (
+        "Thread schmaler",
+        "Narrow thread pane",
+        "Estrechar panel del hilo",
+    ),
+    (
         "Threads sind derzeit nicht verfügbar.",
         "Threads are currently unavailable.",
         "Los hilos no están disponibles en este momento.",

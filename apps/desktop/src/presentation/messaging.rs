@@ -358,7 +358,10 @@ impl Desktop {
             && !self.incoming_visible()
             && !self.onboarding_open
             && !self.navigation_open
-            && matches!(self.overlay, None | Some(Overlay::CallChat))
+            && matches!(
+                self.overlay,
+                None | Some(Overlay::CallChat | Overlay::Thread)
+            )
             && if self.overlay == Some(Overlay::CallChat) {
                 true
             } else if let Some(call) = call_host {
@@ -562,9 +565,13 @@ impl Desktop {
             .filter(|p| Some(p.context) == self.snapshot.selected)
             .and_then(|p| p.result)
         {
-            if self.message_ui.unread_hold.is_some_and(|(context, pending)| {
-                Some(context) == self.snapshot.selected && pending == request
-            }) && matches!(completion, Completion::Failed(_))
+            if self
+                .message_ui
+                .unread_hold
+                .is_some_and(|(context, pending)| {
+                    Some(context) == self.snapshot.selected && pending == request
+                })
+                && matches!(completion, Completion::Failed(_))
             {
                 self.message_ui.unread_hold = None;
             }
@@ -655,7 +662,7 @@ impl Desktop {
             || self.onboarding_open
             || self.navigation_open
             || !window.is_window_active()
-            || self.overlay.is_some()
+            || (self.overlay.is_some() && !self.thread_is_docked(window))
             || self.prejoin.is_some()
             || self.incoming_visible()
             || self.snapshot.content != ContentState::Ready
@@ -665,7 +672,11 @@ impl Desktop {
         self.snapshot.selected
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
-        if self.message_ui.unread_hold.is_some_and(|(room, _)| room == context) {
+        if self
+            .message_ui
+            .unread_hold
+            .is_some_and(|(room, _)| room == context)
+        {
             return;
         }
         if !self.snapshot.message_panel.as_ref().is_some_and(|p| {

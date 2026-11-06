@@ -102,6 +102,7 @@ pub enum LocalAction {
     ToggleNavigation,
     ToggleCallChat,
     Navigate(ConversationRef),
+    ResizeThread(bool),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     Favorite(ConversationRef, bool),
@@ -308,6 +309,7 @@ pub struct Desktop {
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
     pub thread_parent: Option<(ConversationRef, u128)>,
+    thread_width: f32,
     drafts: Drafts,
     root_focus: FocusHandle,
     modal_focus: FocusHandle,
@@ -537,6 +539,7 @@ impl Desktop {
             search_kind: SearchKind::All,
             directory_query: None,
             thread_parent: None,
+            thread_width: 400.,
             drafts: Drafts::default(),
             root_focus,
             modal_focus,
@@ -764,6 +767,12 @@ impl Desktop {
                 cx.notify();
             });
             self.thread_parent = None;
+        }
+        if previous != self.snapshot.selected && self.overlay == Some(Overlay::Thread) {
+            self.overlay = None;
+            self.thread_parent = None;
+            self.return_focus = None;
+            self.pending_modal_focus = false;
         }
         if (previous != self.snapshot.selected || reset_draft)
             && !(selected_rebind && self.message_ui.editing.is_some())
@@ -1296,6 +1305,10 @@ impl Desktop {
                 }
             }
             LocalAction::Destination(destination) => self.destination = destination,
+            LocalAction::ResizeThread(wider) => {
+                self.thread_width =
+                    (self.thread_width + if wider { 64. } else { -64. }).clamp(288., 608.);
+            }
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
@@ -2188,7 +2201,8 @@ impl Render for Desktop {
         }
         // Text scaling is independent of spacing; scaling both exhausts small windows.
         window.set_rem_size(px(16.));
-        self.background_inert = self.overlay.is_some() || incoming;
+        self.background_inert =
+            (self.overlay.is_some() && !self.thread_is_docked(window)) || incoming;
         let mut shell_visible = false;
         let body = if self.update_restart_pending {
             use talk_core::preferences::updates::UpdateState;
@@ -2244,7 +2258,7 @@ impl Render for Desktop {
         self.background_inert = incoming || self.account_removal.confirming();
         let overlay = self
             .overlay
-            .filter(|_| !self.update_restart_pending)
+            .filter(|_| !self.update_restart_pending && !self.thread_is_docked(window))
             .map(|overlay| {
                 self.dialog_backdrop(
                     motion::DialogSurface::Overlay(overlay),
@@ -2463,7 +2477,7 @@ impl Render for Desktop {
 // The call-chat dialog owns the same editor as the docked call chat. Other
 // dialogs and incoming-call priority always exclude editor input and dispatch.
 fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool) -> bool {
-    !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat))
+    !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat | Overlay::Thread))
 }
 fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
@@ -2558,6 +2572,7 @@ mod interaction_tests {
         }
         assert!(docked_call_chat(true, true, None));
         assert!(!docked_call_chat(false, true, None));
+        assert!(composer_allowed(Some(Overlay::Thread), false, false));
         for modal in [Overlay::Settings, Overlay::Search, Overlay::Accounts] {
             assert!(!composer_allowed(Some(modal), false, false));
         }

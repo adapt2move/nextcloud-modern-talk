@@ -292,7 +292,7 @@ impl Desktop {
         }
         if m.reply_count > 0 {
             let count = self.count(
-                super::super::localization::Count::Replies,
+                crate::presentation::localization::Count::Replies,
                 m.reply_count.into(),
             );
             content = if self.message_feature_enabled(MessageFeature::Threads) {

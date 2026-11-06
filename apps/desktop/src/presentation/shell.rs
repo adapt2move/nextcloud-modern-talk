@@ -124,6 +124,9 @@ impl Desktop {
         } else {
             layout.children(content)
         };
+        let layout = layout.when(self.thread_is_docked(window), |d| {
+            d.child(self.thread_pane(window, cx))
+        });
         layout.when(
             self.snapshot.call.as_ref().is_some_and(|c| {
                 c.stage == talk_core::ui::presentation::CallStage::Incoming

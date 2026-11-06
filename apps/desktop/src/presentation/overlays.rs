@@ -6,6 +6,103 @@ use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
 
 impl Desktop {
+    pub(super) fn thread_is_docked(&self, window: &Window) -> bool {
+        self.overlay == Some(Overlay::Thread)
+            && self.snapshot.selected.is_some()
+            && self.prejoin.is_none()
+            && !self.onboarding_open
+            && !self.snapshot.call.as_ref().is_some_and(|call| {
+                call.stage != super::CallStage::Incoming
+                    && !(matches!(
+                        call.stage,
+                        super::CallStage::Ended | super::CallStage::Failed
+                    ) && self.dismissed_terminal_call == Some(call.scope))
+            })
+            && window.viewport_size().width >= px(1050.)
+    }
+
+    pub(super) fn thread_pane(&self, window: &Window, cx: &Context<Self>) -> Div {
+        let t = self.theme;
+        let available = (f32::from(window.viewport_size().width) - 600.).max(288.);
+        let width = self.thread_width.min(available);
+        div().flex_none().w(px(width)).h_full().py_3().pr_3().child(
+            self.dialog_panel(
+                DialogSurface::Overlay(Overlay::Thread),
+                div()
+                    .size_full()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(13.))
+                    .border_1()
+                    .border_color(t.border)
+                    .bg(t.surface)
+                    .track_focus(&self.modal_focus)
+                    .tab_group()
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .px_4()
+                            .py_3()
+                            .border_b_1()
+                            .border_color(t.border)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(self.l("Antworten")),
+                            )
+                            .child(
+                                self.icon_button(
+                                    "thread-narrower",
+                                    ("minus", "Thread schmaler"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(self.thread_width > 288., ""),
+                                    LocalAction::ResizeThread(false),
+                                    cx,
+                                )
+                                .size(px(32.)),
+                            )
+                            .child(
+                                self.icon_button(
+                                    "thread-wider",
+                                    ("plus", "Thread breiter"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(
+                                        self.thread_width < 608. && self.thread_width < available,
+                                        "",
+                                    ),
+                                    LocalAction::ResizeThread(true),
+                                    cx,
+                                )
+                                .size(px(32.)),
+                            )
+                            .child(
+                                self.icon_button(
+                                    "close-overlay",
+                                    ("x", "Schließen"),
+                                    ButtonStyle::Quiet,
+                                    Availability::available(),
+                                    LocalAction::Close,
+                                    cx,
+                                )
+                                .size(px(32.)),
+                            ),
+                    )
+                    .child(
+                        self.scroll_area(super::navigation::Region::Overlay)
+                            .flex_1()
+                            .min_h_0()
+                            .p_4()
+                            .child(self.thread_body(cx)),
+                    ),
+            ),
+        )
+    }
+
     pub fn overlay_view(&self, window: &Window, cx: &Context<Self>) -> Div {
         if self.overlay == Some(Overlay::Forward) {
             return self.forward_dialog(window, cx);
