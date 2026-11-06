@@ -86,6 +86,10 @@ impl NextcloudClient {
                     return Err(self.error(ErrorKind::Unsupported));
                 }
                 let object = self.attachment(c, message, &placeholder, caps).await?;
+                // Android's AAC-in-MP4 recorder currently names files .mp3;
+                // its DAV MIME may therefore be audio/mpeg. The native player
+                // still identifies the container from bounded bytes.
+                // https://github.com/nextcloud/talk-android/blob/master/app/src/main/java/com/nextcloud/talk/chat/data/io/MediaRecorderManager.kt
                 if !matches!(
                     object.mime_type.as_deref(),
                     Some(
@@ -94,6 +98,7 @@ impl NextcloudClient {
                             | "audio/ogg"
                             | "application/ogg"
                             | "audio/opus"
+                            | "audio/mpeg"
                             | "audio/webm"
                             | "audio/mp4"
                             | "audio/x-m4a"

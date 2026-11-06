@@ -3,6 +3,7 @@
 //! Every completion is checked against current account and room.
 mod avatars;
 mod links;
+mod poll_discovery;
 mod thumbnails;
 mod voice;
 use super::*;
@@ -65,6 +66,9 @@ pub(super) struct ContentOwner {
     link: Option<(AccountScope, Text<2048>)>,
     message_link: Option<links::Pending>,
     refresh_poll: Option<(ConversationRef, u64)>,
+    refresh_uncertain: Option<RequestId>,
+    refresh_attempts: u8,
+    refresh_next: Option<Instant>,
     // One deliberate preview may wait behind the two admitted content jobs.
     preview_request: Option<(RequestId, view::AttachmentRef)>,
     profile: Option<AccountScope>,
@@ -72,6 +76,7 @@ pub(super) struct ContentOwner {
     poll_at: Option<Instant>,
     capabilities_at: Option<Instant>,
     poll_index: usize,
+    poll_discovery: poll_discovery::Discovery,
 }
 #[derive(Clone)]
 pub(crate) struct ImageJob {
@@ -138,6 +143,11 @@ impl Accounts {
         self.content_owner.link = None;
         self.content_owner.message_link = None;
         self.content_owner.refresh_poll = None;
+        self.content_owner.refresh_uncertain = None;
+        self.content_owner.refresh_attempts = 0;
+        self.content_owner.refresh_next = None;
+        self.content_owner.poll_discovery.clear();
+        self.content_owner.poll_at = None;
         self.content_owner.capabilities_at = None;
         let account = self.snapshot.active_account;
         let old = &self.snapshot.content_panel;
@@ -1005,6 +1015,16 @@ impl Accounts {
                     Some((job.request, Completion::ServerAccepted));
             }
             Ok(wire::ContentResult::Poll(poll)) => {
+                if self
+                    .content_owner
+                    .refresh_poll
+                    .is_some_and(|(context, id)| job.context == Some(context) && poll.id == id)
+                {
+                    self.content_owner.refresh_poll = None;
+                    self.content_owner.refresh_uncertain = None;
+                    self.content_owner.refresh_next = None;
+                    self.content_owner.refresh_attempts = 0;
+                }
                 let mut values = self.snapshot.content_panel.polls.as_slice().to_vec();
                 values.retain(|p| p.id != poll.id);
                 if values.len() >= 20 {
@@ -1246,6 +1266,26 @@ impl Accounts {
                 && let (Some(context), Some(poll)) = (job.context, job.poll)
             {
                 self.content_owner.refresh_poll = Some((context, poll));
+                self.content_owner.refresh_uncertain =
+                    (completion == Completion::Uncertain).then_some(job.request);
+                self.content_owner.refresh_attempts = 0;
+                self.content_owner.refresh_next = Some(Instant::now());
+            } else if !job.mutation
+                && self
+                    .content_owner
+                    .refresh_poll
+                    .is_some_and(|(context, poll)| {
+                        job.context == Some(context) && job.poll == Some(poll)
+                    })
+            {
+                // A failed read cannot turn an uncertain mutation into a safe
+                // retry. Keep the last confirmed poll until a read succeeds.
+                if let Some(request) = self.content_owner.refresh_uncertain {
+                    self.snapshot.content_panel.poll_state = RemoteState::Uncertain(request);
+                } else if self.content_owner.refresh_attempts >= 3 {
+                    self.content_owner.refresh_poll = None;
+                    self.content_owner.refresh_next = None;
+                }
             }
         }
     }
@@ -1807,6 +1847,7 @@ impl Accounts {
         self.retry_thumbnail_assets(Instant::now());
         self.revalidate_avatar();
         if self.snapshot.selected.is_some()
+            && self.content_owner.refresh_poll.is_none()
             && self
                 .content_owner
                 .capabilities_at
@@ -1818,10 +1859,56 @@ impl Accounts {
         {
             let _ = self.start_poll(RequestId(0), wire::PollCommand::Capabilities);
         }
-        if self
-            .content_owner
-            .poll_at
-            .is_none_or(|at| at <= Instant::now())
+        if let Some((context, poll)) = self.content_owner.refresh_poll {
+            if self.snapshot.selected != Some(context) {
+                self.content_owner.refresh_poll = None;
+                self.content_owner.refresh_uncertain = None;
+                self.content_owner.refresh_next = None;
+            } else if self
+                .content_owner
+                .refresh_next
+                .is_some_and(|at| at <= Instant::now())
+                && self
+                    .start_poll(RequestId(0), wire::PollCommand::Read(poll))
+                    .is_ok()
+            {
+                self.content_owner.refresh_attempts =
+                    self.content_owner.refresh_attempts.saturating_add(1);
+                self.content_owner.refresh_next =
+                    (self.content_owner.refresh_attempts < 3).then(|| {
+                        Instant::now()
+                            + Duration::from_secs(1 << self.content_owner.refresh_attempts)
+                    });
+            }
+        }
+        // Discover polls already present in bounded history without requiring a
+        // click on each placeholder. Failures retry quietly and finitely; a
+        // deliberate retry remains available on the card after exhaustion.
+        let candidates = poll_discovery::candidates(&self.snapshot);
+        self.content_owner.poll_discovery.retain(&candidates);
+        if self.snapshot.content == ContentState::Ready
+            && self.content_owner.refresh_poll.is_none()
+            && !self.snapshot.content_panel.poll_state.pending()
+            && self.snapshot.content_panel.poll_create.server == FeatureSupport::Supported
+            && let Some(id) = self.content_owner.poll_discovery.next(
+                &candidates,
+                self.snapshot.content_panel.polls.as_slice(),
+                Instant::now(),
+            )
+            && self
+                .start_poll(RequestId(0), wire::PollCommand::Read(id))
+                .is_ok()
+        {
+            self.content_owner
+                .poll_discovery
+                .started(id, Instant::now());
+        }
+        if self.content_owner.refresh_poll.is_none()
+            && !self.snapshot.content_panel.poll_state.pending()
+            && self
+                .content_owner
+                .poll_at
+                .is_none_or(|at| at <= Instant::now())
         {
             self.content_owner.poll_at = Some(Instant::now() + Duration::from_secs(5));
             let polls = self.snapshot.content_panel.polls.as_slice();
@@ -1849,14 +1936,6 @@ impl Accounts {
                     self.touch();
                 }
             }
-        }
-        if let Some((context, poll)) = self.content_owner.refresh_poll
-            && (self.snapshot.selected != Some(context)
-                || self
-                    .start_poll(RequestId(0), wire::PollCommand::Read(poll))
-                    .is_ok())
-        {
-            self.content_owner.refresh_poll = None;
         }
     }
 }
@@ -2246,6 +2325,19 @@ mod tests {
                             RemoteState::Failed(RequestId(88), UnavailableReason::Unsupported)
                         }
                     );
+                    if kind == ErrorKind::Uncertain {
+                        let mut read = job.clone();
+                        read.request = RequestId(0);
+                        read.mutation = false;
+                        model.content_owner.refresh_attempts = 3;
+                        model.content_failure(&read, IdentityError::Request(ErrorKind::Transport));
+                        assert_eq!(model.content_owner.refresh_poll, Some((context, 7)));
+                        assert_eq!(
+                            model.snapshot.content_panel.poll_state,
+                            RemoteState::Uncertain(RequestId(88)),
+                            "a failed reconciliation cannot authorize a duplicate mutation"
+                        );
+                    }
                 }
             }
         }

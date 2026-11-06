@@ -224,9 +224,7 @@ where
                 signal.observed.store(true, Ordering::Release);
             },
             move |error| {
-                if error.kind() != cpal::ErrorKind::Xrun {
-                    errors.fail(map_error(error));
-                }
+                errors.fail(map_error(error));
             },
             None,
         )

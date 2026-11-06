@@ -189,6 +189,16 @@ pub(super) fn voice(snapshot: &mut PresentationSnapshot) {
         link: None,
     }]);
     snapshot.messages = page([recording]);
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        let _ = panel.features.try_push((
+            talk_core::ui::messaging::MessageFeature::Voice,
+            Availability {
+                implemented: true,
+                server: FeatureSupport::Supported,
+                allowed: Decision::Allowed,
+            },
+        ));
+    }
     snapshot.content_panel.voice_playback = Some(VoicePlaybackView {
         attachment: AttachmentRef {
             context,

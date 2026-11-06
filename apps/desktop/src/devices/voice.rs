@@ -166,4 +166,17 @@ mod tests {
         assert!(recording.failed());
         assert!(recording.wave().is_none());
     }
+    #[test]
+    fn recording_stops_at_the_sample_limit_across_callbacks() {
+        let recording = Recording::new();
+        let mut resampler = Resampler::default();
+        let chunk = vec![0.0f32; 16_000];
+        for _ in 0..=MAX_SECONDS {
+            recording.push(&chunk, 1, RATE, &mut resampler);
+        }
+        assert!(recording.full());
+        assert!(!recording.failed());
+        assert_eq!(recording.snapshot().0, MAX_SECONDS as u64 * 1_000);
+        assert_eq!(recording.wave().unwrap().len(), 44 + MAX_SAMPLES * 2);
+    }
 }

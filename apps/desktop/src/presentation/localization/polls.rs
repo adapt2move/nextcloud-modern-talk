@@ -7,6 +7,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anonym", "Anonymous", "Anónima"),
     (
+        "Anonym abstimmen (Ergebnisse erst nach Abschluss)",
+        "Anonymous voting (results appear after closing)",
+        "Votación anónima (resultados al finalizar)",
+    ),
+    (
         "Aufnahme abspielen",
         "Play recording",
         "Reproducir grabación",
@@ -40,9 +45,24 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Deine Stimme", "Your vote", "Tu voto"),
     (
+        "Der Status ist unklar. Die Umfrage wird erneut geprüft.",
+        "The status is uncertain. Checking the poll again.",
+        "El estado es incierto. Se está comprobando la encuesta de nuevo.",
+    ),
+    (
         "Details und Ergebnisse",
         "Details and results",
         "Detalles y resultados",
+    ),
+    (
+        "Die Aufnahme kann hier nicht abgespielt werden.",
+        "The recording cannot be played here.",
+        "No se puede reproducir la grabación aquí.",
+    ),
+    (
+        "Die Umfrage konnte nicht beendet werden. Bitte erneut versuchen.",
+        "The poll could not be closed. Please try again.",
+        "No se pudo finalizar la encuesta. Inténtalo de nuevo.",
     ),
     (
         "Diesen Entwurf löschen?",
@@ -122,12 +142,37 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     (
+        "Umfrage erneut prüfen",
+        "Check poll again",
+        "Volver a comprobar la encuesta",
+    ),
+    (
+        "Umfrage wird geladen …",
+        "Loading poll…",
+        "Cargando encuesta…",
+    ),
+    (
         "Umfrage wirklich beenden?",
         "Close this poll?",
         "¿Finalizar esta encuesta?",
     ),
     ("Umfragedetails", "Poll details", "Detalles de la encuesta"),
     ("Umfrageentwürfe", "Poll drafts", "Borradores de encuestas"),
+    (
+        "Umfrageentwürfe konnten nicht geladen werden.",
+        "Poll drafts could not be loaded.",
+        "No se pudieron cargar los borradores de encuestas.",
+    ),
+    (
+        "Umfrageentwürfe werden geladen …",
+        "Loading poll drafts…",
+        "Cargando borradores de encuestas…",
+    ),
+    (
+        "Umfragen werden von diesem Server nicht unterstützt.",
+        "This server does not support polls.",
+        "Este servidor no admite encuestas.",
+    ),
     ("Unbegrenzte Stimmen", "Unlimited votes", "Votos ilimitados"),
     ("Weniger Stimmen", "Fewer votes", "Menos votos"),
     (

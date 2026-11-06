@@ -24,9 +24,21 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- Typing indicators, voice messages, complete document viewers, account-wide
-  content search and parts of moderation remain incomplete. Documents can open
-  in the Cloud web view; poll drafts remain server-managed.
+- Typing indicators, complete document viewers, account-wide content search and
+  parts of moderation remain incomplete. Documents can open in the Cloud web view.
+- Poll drafts are server-managed and require moderator rights and the advertised
+  capabilities. Using a draft to create a poll keeps the draft. Voter details
+  are shown only when the server supplies them; avatar initials are local fallbacks.
+  Native semantic accessibility and full platform behavior remain unqualified.
+- Voice recording is explicitly started, limited to two minutes, and encoded as
+  16 kHz mono PCM WAV in memory. Recordings and original audio are not retained
+  across restart or available offline; unsent recordings retire on scope or
+  permission loss. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
+  MP4/WebM audio codecs up to 32 MiB. AAC needs an installed native decoder;
+  unsupported or unavailable codecs offer download. The progress bar supports
+  pointer scrubbing; keyboard seeking uses quarter-duration controls. Native
+  microphone, speaker, permission and mobile interoperability have not yet
+  been qualified.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
