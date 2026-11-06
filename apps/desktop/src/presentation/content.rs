@@ -894,6 +894,27 @@ impl Desktop {
             .bg(self.theme.subtle)
             .child(row);
         if let Some(duration) = playback.and_then(|p| p.duration_ms) {
+            let fraction = playback.map_or(0.0, |p| {
+                if duration == 0 {
+                    0.0
+                } else {
+                    (p.position_ms as f32 / duration as f32).clamp(0.0, 1.0)
+                }
+            });
+            card = card.child(
+                div()
+                    .w_full()
+                    .h(px(5.))
+                    .rounded(px(3.))
+                    .bg(self.theme.border)
+                    .child(
+                        div()
+                            .h_full()
+                            .w(gpui::relative(fraction))
+                            .rounded(px(3.))
+                            .bg(self.theme.accent),
+                    ),
+            );
             let mut controls = div().flex().items_center().gap_1();
             for step in 0..=4usize {
                 controls = controls.child(

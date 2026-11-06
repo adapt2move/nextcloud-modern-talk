@@ -573,6 +573,10 @@ fn audio_codec(
         (Container::Mp4, "audio/mpeg") if structure.get::<i32>("mpegversion") == Ok(4) => {
             Ok((Some("aacparse"), Some("atdec")))
         }
+        #[cfg(target_os = "linux")]
+        (Container::Mp4, "audio/mpeg") if structure.get::<i32>("mpegversion") == Ok(4) => {
+            Ok((Some("aacparse"), Some("avdec_aac")))
+        }
         _ => Err(Error::Unsupported),
     }
 }

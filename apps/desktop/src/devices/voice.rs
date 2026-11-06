@@ -43,7 +43,11 @@ impl Recording {
     ) where
         f32: FromSample<T>,
     {
-        if channels == 0 || rate < RATE || frames.len() > 65_536 || frames.len() % channels != 0 {
+        if channels == 0
+            || rate < RATE
+            || frames.len() > 65_536
+            || !frames.len().is_multiple_of(channels)
+        {
             self.failed.store(true, Ordering::Release);
             return;
         }

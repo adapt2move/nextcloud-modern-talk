@@ -1,8 +1,8 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
   "counts": {
-    "implemented": 90,
-    "missing": 61,
+    "implemented": 92,
+    "missing": 59,
     "not-client": 23,
     "partial": 13
   },
@@ -477,7 +477,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment",
       "status": "partial",
       "api": "Request::Chat / chat::Command::ShareAttachment",
-      "scope": "Create-only attachment with reference and caption; richer attachment metadata remains outside this implementation."
+      "scope": "Create-only attachment with reference, caption or voice-message metadata; other metadata remains unsupported. Talk 24/25 docs/chat.md release pins are recorded in tests/lab/pins.json."
     },
     {
       "operation_id": "conversation_tag-get-tags",
