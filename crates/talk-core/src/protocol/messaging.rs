@@ -229,6 +229,12 @@ pub enum MessagingCommand {
         path: Text<16384>,
         caption: Text<4096>,
     },
+    /// Share an already existing account file; result reconciles by reference.
+    ShareExistingFile {
+        path: Text<16384>,
+        caption: Text<4096>,
+        options: ComposeOptions,
+    },
     Translate {
         message: MessageId,
         language: Text<64>,

@@ -69,6 +69,7 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Forward { .. } | C::ForwardApproved { .. } => F::Forward,
         C::SharedFiles { .. }
         | C::ShareFile { .. }
+        | C::ShareExistingFile { .. }
         | C::UploadFile { .. }
         | C::DownloadFile { .. } => F::Files,
         C::Translate { .. } => F::Translation,
@@ -748,6 +749,87 @@ impl NextcloudClient {
             return self
                 .reconcile_durable_send(c, id, operation, &room, caps)
                 .await;
+        }
+        if let C::ShareExistingFile {
+            path,
+            caption,
+            options,
+        } = &command
+        {
+            self.message_action(MessagingFeature::Send, &room, &data, caps)?;
+            if room.classified || room.sensitive || caps.attachments_allowed != Some(true) {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            if !caps.has("chat-reference-id")
+                || ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
+                || (options.thread.is_some() && !caps.has("threads"))
+                || options.thread_title.is_some()
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if options.reply_to.is_some() {
+                self.message_action(MessagingFeature::Reply, &room, &data, caps)?;
+            }
+            let reply_to = options
+                .reply_to
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let thread = options
+                .thread
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let path = api::files::FilePath::parse(path.as_str())
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            if self.sends.len() >= 100 {
+                if let Some(index) = self
+                    .sends
+                    .iter()
+                    .position(|s| s.state != SendState::Uncertain)
+                {
+                    self.sends.remove(index);
+                } else {
+                    return Err(self.error(ErrorKind::Busy));
+                }
+            }
+            self.admit_action(id, operation)?;
+            let reference = send_reference(operation);
+            self.sends.push(PendingSend {
+                operation,
+                conversation: id,
+                reference: reference.clone(),
+                state: SendState::Uncertain,
+            });
+            let options = api::files::ShareOptions {
+                caption: caption.as_str().to_owned(),
+                reply_to,
+                thread,
+                silent: options.silent,
+            };
+            let result = self
+                .transport
+                .share_existing_file(c, &token, &path, &reference, &options)
+                .await;
+            if let Err(error) = &result
+                && matches!(
+                    error.kind,
+                    ErrorKind::PermissionDenied
+                        | ErrorKind::NotFound
+                        | ErrorKind::Unsupported
+                        | ErrorKind::ReauthenticationRequired
+                        | ErrorKind::Conflict
+                        | ErrorKind::TooLarge
+                )
+                && let Some(send) = self
+                    .sends
+                    .iter_mut()
+                    .find(|s| s.operation == operation && s.conversation == id)
+            {
+                send.state = SendState::Rejected;
+            }
+            self.settle_action(operation, result.as_ref().err());
+            return result.map(|_| R::Changed);
         }
         if matches!(command, C::UploadFile { .. } | C::ShareFile { .. }) {
             self.message_action(MessagingFeature::Send, &room, &data, caps)?;

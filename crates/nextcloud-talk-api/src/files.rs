@@ -174,6 +174,13 @@ impl FilePath {
         &self.0
     }
 }
+#[derive(Clone, Debug, Default)]
+pub struct ShareOptions {
+    pub caption: String,
+    pub reply_to: Option<u64>,
+    pub thread: Option<u64>,
+    pub silent: bool,
+}
 impl Client {
     pub async fn list_directory(
         &mut self,
@@ -190,21 +197,43 @@ impl Client {
         c: &OperationContext,
         room: &crate::models::RoomToken,
         path: &FilePath,
-        caption: &str,
+        reference: &str,
+        options: &ShareOptions,
     ) -> Result<String, Error> {
         self.validate(c)?;
-        if caption.len() > 4096 || caption.contains('\0') {
+        if options.caption.len() > 4096
+            || options.caption.contains('\0')
+            || reference.is_empty()
+            || reference.len() > 256
+            || reference.chars().any(char::is_control)
+            || options.reply_to == Some(0)
+            || options.thread == Some(0)
+        {
             return Err(self.error(ErrorKind::Malformed));
         }
         let mut form = vec![
             ("shareType", "10".to_owned()),
             ("shareWith", room.as_str().to_owned()),
             ("path", path.as_str().to_owned()),
+            ("referenceId", reference.to_owned()),
         ];
-        if !caption.is_empty() {
+        let mut metadata = serde_json::Map::new();
+        if !options.caption.is_empty() {
+            metadata.insert("caption".into(), options.caption.clone().into());
+        }
+        if let Some(reply) = options.reply_to {
+            metadata.insert("replyTo".into(), reply.into());
+        }
+        if let Some(thread) = options.thread {
+            metadata.insert("threadId".into(), thread.into());
+        }
+        if options.silent {
+            metadata.insert("silent".into(), true.into());
+        }
+        if !metadata.is_empty() {
             form.push((
                 "talkMetaData",
-                serde_json::json!({"caption": caption}).to_string(),
+                serde_json::Value::Object(metadata).to_string(),
             ));
         }
         let response = self

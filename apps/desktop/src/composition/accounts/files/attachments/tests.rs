@@ -9,6 +9,59 @@ fn model() -> (Accounts, ConversationRef) {
 fn paths(names: &[&str]) -> Page<Text<16384>, 8> {
     page(names.iter().map(|name| text(&format!("/tmp/{name}"))))
 }
+#[test]
+fn selected_cloud_file_is_scoped_and_enters_the_share_queue_without_upload() {
+    let (mut model, context) = model();
+    model.snapshot.content_panel.file_browser = Some(talk_core::ui::content::FileBrowserView {
+        account: context.account,
+        path: text("/Plans"),
+        entries: page([talk_core::ui::content::CloudFileView {
+            name: text("plan.pdf"),
+            directory: false,
+            size: Some(42),
+            modified: None,
+            mime: None,
+            file_id: None,
+        }]),
+        loading: false,
+        offline: false,
+        error: None,
+    });
+    assert_eq!(
+        model.stage_cloud_file(context, text("/old"), text("plan.pdf")),
+        Err(SubmitError::StaleScope)
+    );
+    model
+        .stage_cloud_file(context, text("/Plans"), text("plan.pdf"))
+        .unwrap();
+    model
+        .stage_cloud_file(context, text("/Plans"), text("plan.pdf"))
+        .unwrap();
+    assert_eq!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .uploads
+            .as_slice()
+            .len(),
+        1
+    );
+    model
+        .send_files(
+            RequestId(12),
+            context,
+            text("hello"),
+            ComposeTarget::default(),
+        )
+        .unwrap();
+    assert!(
+        matches!(model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((_, Step::Share, Command::ShareExistingFile { path, caption, .. }))
+        if path.as_str() == "/Plans/plan.pdf" && caption.as_str() == "hello")
+    );
+}
 fn result(model: &mut Accounts, id: u64, step: Step, result: Result<Reply, ErrorKind>) -> Work {
     let context = model.snapshot.selected.unwrap();
     let operation = OperationId::from_local(100 + u128::from(id) * 10 + step as u128);

@@ -193,6 +193,11 @@ impl Default for ContentPanel {
 pub enum ContentAction {
     ListFiles(Text<16384>),
     CloseFileBrowser,
+    StageCloudFile {
+        context: ConversationRef,
+        directory: Text<16384>,
+        name: Text<255>,
+    },
     DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),

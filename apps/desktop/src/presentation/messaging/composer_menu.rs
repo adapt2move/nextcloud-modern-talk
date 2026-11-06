@@ -11,6 +11,7 @@ pub(crate) struct Target {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Choice {
     File,
+    CloudFile,
     Poll,
     Schedule,
     Scheduled,
@@ -130,6 +131,12 @@ impl Desktop {
                 "paperclip",
                 MessageFeature::Files,
             ),
+            message(
+                Choice::CloudFile,
+                "Aus NextCloud teilen",
+                "cloud",
+                MessageFeature::Files,
+            ),
             Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",
@@ -239,6 +246,9 @@ impl Desktop {
         self.composer.focus_handle(cx).focus(window);
         let action = match choice {
             Choice::File => LocalAction::Message(Action::Command(MessageAction::PickUpload)),
+            Choice::CloudFile => {
+                LocalAction::Content(crate::presentation::content::Action::OpenCloudBrowser)
+            }
             Choice::Poll => LocalAction::Content(crate::presentation::content::Action::CreatePoll),
             Choice::Schedule => LocalAction::Message(Action::Schedule),
             Choice::Scheduled => LocalAction::Message(Action::Command(MessageAction::Scheduled)),

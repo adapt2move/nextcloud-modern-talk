@@ -185,6 +185,27 @@ impl Desktop {
                         .child(modified.as_str().to_owned()),
                 );
             }
+            if !entry.directory
+                && let Some(context) = self
+                    .snapshot
+                    .selected
+                    .filter(|context| context.account == browser.account)
+            {
+                let id: SharedString = format!("cloud-add-{}-{}", path, entry.name.as_str()).into();
+                row = row.child(self.button(
+                    id,
+                    "Zur Auswahl hinzufügen",
+                    ButtonStyle::Quiet,
+                    self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Files)
+                        && !browser.offline,
+                    LocalAction::Content(Action::Command(ContentAction::StageCloudFile {
+                        context,
+                        directory: browser.path.clone(),
+                        name: entry.name.clone(),
+                    })),
+                    cx,
+                ));
+            }
             body = body.child(row);
         }
         if entries.len() > PAGE_SIZE {

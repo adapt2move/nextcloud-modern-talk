@@ -7,6 +7,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ver todos los archivos",
     ),
     (
+        "Aus NextCloud teilen",
+        "Share from NextCloud",
+        "Compartir desde NextCloud",
+    ),
+    (
         "Dateien konnten nicht geladen werden.",
         "Files could not be loaded.",
         "No se pudieron cargar los archivos.",
@@ -31,5 +36,10 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Offline · gespeicherte Dateien",
         "Offline · saved files",
         "Sin conexión · archivos guardados",
+    ),
+    (
+        "Zur Auswahl hinzufügen",
+        "Add to selection",
+        "Añadir a la selección",
     ),
 ];

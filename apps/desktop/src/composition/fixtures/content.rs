@@ -236,6 +236,53 @@ pub(super) fn action(
             snapshot.content_panel.file_browser = None;
             Ok(())
         }
+        ContentAction::StageCloudFile {
+            context,
+            directory,
+            name,
+        } => {
+            let entry = snapshot
+                .content_panel
+                .file_browser
+                .as_ref()
+                .filter(|browser| browser.account == context.account && browser.path == directory)
+                .and_then(|browser| {
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .find(|item| item.name == name && !item.directory)
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            let size = entry.size;
+            let panel = snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+                .ok_or(SubmitError::StaleScope)?;
+            if panel
+                .uploads
+                .as_slice()
+                .iter()
+                .any(|item| item.name == name)
+            {
+                return Ok(());
+            }
+            panel
+                .uploads
+                .try_push(talk_core::ui::messaging::UploadView {
+                    id: 8000 + panel.uploads.as_slice().len() as u64,
+                    name,
+                    bytes: size,
+                    state: talk_core::ui::messaging::UploadState::Selected,
+                    submitted: false,
+                    transferred: 0,
+                    uploaded: true,
+                    server_message: None,
+                })
+                .map_err(|_| SubmitError::Busy)?;
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel

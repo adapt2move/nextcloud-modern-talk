@@ -73,7 +73,18 @@ async fn existing_file_share_sends_room_path_and_caption() {
     let room = crate::models::RoomToken::parse("room1234").unwrap();
     let path = crate::files::FilePath::parse("/Documents/a file.txt").unwrap();
     let id = owner
-        .share_existing_file(&context(&runtime), &room, &path, "A caption")
+        .share_existing_file(
+            &context(&runtime),
+            &room,
+            &path,
+            "reference-1",
+            &crate::files::ShareOptions {
+                caption: "A caption".into(),
+                reply_to: Some(12),
+                thread: Some(13),
+                silent: true,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(id, "42");
@@ -87,11 +98,18 @@ async fn existing_file_share_sends_room_path_and_caption() {
     assert_eq!(form.get("shareType").map(String::as_str), Some("10"));
     assert_eq!(form.get("shareWith").map(String::as_str), Some("room1234"));
     assert_eq!(
+        form.get("referenceId").map(String::as_str),
+        Some("reference-1")
+    );
+    assert_eq!(
         form.get("path").map(String::as_str),
         Some("/Documents/a file.txt")
     );
     let metadata: serde_json::Value = serde_json::from_str(&form["talkMetaData"]).unwrap();
     assert_eq!(metadata["caption"], "A caption");
+    assert_eq!(metadata["replyTo"], 12);
+    assert_eq!(metadata["threadId"], 13);
+    assert_eq!(metadata["silent"], true);
 }
 
 #[tokio::test]
@@ -101,7 +119,16 @@ async fn existing_file_share_rejects_invalid_caption_before_dispatch() {
     let room = crate::models::RoomToken::parse("room1234").unwrap();
     let path = crate::files::FilePath::parse("/file.txt").unwrap();
     let error = owner
-        .share_existing_file(&context(&runtime), &room, &path, "bad\0caption")
+        .share_existing_file(
+            &context(&runtime),
+            &room,
+            &path,
+            "ref",
+            &crate::files::ShareOptions {
+                caption: "bad\0caption".into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Malformed);
@@ -115,7 +142,7 @@ async fn existing_file_share_with_missing_id_is_uncertain() {
     let room = crate::models::RoomToken::parse("room1234").unwrap();
     let path = crate::files::FilePath::parse("/file.txt").unwrap();
     let error = owner
-        .share_existing_file(&context(&runtime), &room, &path, "")
+        .share_existing_file(&context(&runtime), &room, &path, "ref", &Default::default())
         .await
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Uncertain);

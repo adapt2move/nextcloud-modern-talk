@@ -311,6 +311,19 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) async fn share_existing_file(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        path: &api::files::FilePath,
+        reference: &str,
+        options: &api::files::ShareOptions,
+    ) -> Result<String, PortError> {
+        self.api
+            .share_existing_file(&context(c), room, path, reference, options)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn upload_file(
         &mut self,
         c: &OperationContext,

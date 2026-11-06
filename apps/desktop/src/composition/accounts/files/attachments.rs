@@ -25,6 +25,7 @@ pub(in crate::composition::accounts) struct Work {
 struct File {
     local: Text<16384>,
     remote: Option<Text<16384>>,
+    existing: bool,
     view: UploadView,
     progress: protocol::content::TransferProgress,
     outgoing: Option<Outgoing>,
@@ -53,19 +54,28 @@ impl Batch {
             .iter()
             .find(|file| file.view.submitted && file.view.state == UploadState::Selected)?;
         let (step, command) = if let Some(path) = &file.remote {
+            let caption = file
+                .outgoing
+                .as_ref()
+                .and_then(|outgoing| {
+                    self.captions
+                        .iter()
+                        .find(|(request, _)| *request == outgoing.request)
+                })
+                .map_or_else(|| text(""), |(_, caption)| caption.clone());
             (
                 Step::Share,
-                Command::ShareFile {
-                    path: path.clone(),
-                    caption: file
-                        .outgoing
-                        .as_ref()
-                        .and_then(|outgoing| {
-                            self.captions
-                                .iter()
-                                .find(|(request, _)| *request == outgoing.request)
-                        })
-                        .map_or_else(|| text(""), |(_, caption)| caption.clone()),
+                if file.existing {
+                    Command::ShareExistingFile {
+                        path: path.clone(),
+                        caption,
+                        options: Default::default(),
+                    }
+                } else {
+                    Command::ShareFile {
+                        path: path.clone(),
+                        caption,
+                    }
                 },
             )
         } else {
@@ -253,6 +263,7 @@ impl Accounts {
             batch.files.push(File {
                 local,
                 remote: None,
+                existing: false,
                 view: UploadView {
                     id: self.attachment_owner.next,
                     name,
@@ -273,6 +284,104 @@ impl Accounts {
         }
         self.project_uploads();
         self.queue_upload_previews();
+        Ok(())
+    }
+    pub(in crate::composition::accounts) fn stage_cloud_file(
+        &mut self,
+        context: ConversationRef,
+        directory: Text<16384>,
+        name: Text<255>,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context) {
+            return Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            ));
+        }
+        let browser = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == context.account && browser.path == directory)
+            .ok_or(SubmitError::StaleScope)?;
+        let entry = browser
+            .entries
+            .as_slice()
+            .iter()
+            .find(|entry| entry.name == name && !entry.directory)
+            .ok_or(SubmitError::StaleScope)?;
+        let bytes = entry.size;
+        let path = if directory.as_str() == "/" {
+            format!("/{}", name.as_str())
+        } else {
+            format!("{}/{}", directory.as_str(), name.as_str())
+        };
+        let path = Text::new(&path)
+            .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+        if self
+            .attachment_owner
+            .batch
+            .as_ref()
+            .is_some_and(|batch| batch.context != context || batch.running)
+        {
+            return Err(SubmitError::Busy);
+        }
+        let batch = self.attachment_owner.batch.get_or_insert_with(|| Batch {
+            context,
+            files: Vec::new(),
+            captions: Vec::new(),
+            running: false,
+            created: Instant::now(),
+        });
+        if batch.files.iter().any(|file| {
+            file.existing
+                && file.remote.as_ref() == Some(&path)
+                && file.view.state != UploadState::Shared
+        }) {
+            return Ok(());
+        }
+        if batch
+            .files
+            .iter()
+            .filter(|file| file.view.state != UploadState::Shared)
+            .count()
+            >= 8
+        {
+            return Err(SubmitError::Busy);
+        }
+        while batch.files.len() >= 8 {
+            let Some(index) = batch
+                .files
+                .iter()
+                .position(|file| file.view.state == UploadState::Shared)
+            else {
+                return Err(SubmitError::Busy);
+            };
+            batch.files.remove(index).progress.cancel();
+        }
+        let Some(next) = self.attachment_owner.next.checked_add(1) else {
+            return Err(SubmitError::Busy);
+        };
+        self.attachment_owner.next = next;
+        batch.files.push(File {
+            local: text(""),
+            remote: Some(path),
+            existing: true,
+            view: UploadView {
+                id: next,
+                name,
+                bytes,
+                state: UploadState::Selected,
+                submitted: false,
+                transferred: 0,
+                uploaded: true,
+                server_message: None,
+            },
+            progress: protocol::content::TransferProgress::default(),
+            outgoing: None,
+            preview_queued: true,
+        });
+        self.project_uploads();
         Ok(())
     }
     pub(in crate::composition::accounts) fn send_files(
