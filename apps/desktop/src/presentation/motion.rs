@@ -141,6 +141,26 @@ impl Desktop {
         }
     }
 
+    /// A waiting indicator belongs to its mounted call surface and does not
+    /// create a task. Reduced Motion leaves the same icon stationary.
+    pub(super) fn call_spinner(&self, id: ElementId, size: f32, color: gpui::Hsla) -> AnyElement {
+        let icon = self.scaled_icon("refresh", size, color);
+        if self.reduced_motion {
+            icon.into_any_element()
+        } else {
+            icon.with_animation(
+                id,
+                Animation::new(Duration::from_millis(1_200)).repeat(),
+                |icon, progress| {
+                    icon.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                        progress * std::f32::consts::TAU,
+                    )))
+                },
+            )
+            .into_any_element()
+        }
+    }
+
     pub(super) fn incoming_call_avatar(&self, avatar: Div) -> AnyElement {
         let ring = div()
             .p(gpui::px(6.))

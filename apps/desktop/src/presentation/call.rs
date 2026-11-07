@@ -345,7 +345,11 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(self.scaled_icon("refresh", 16., gpui::rgb(0x795300).into()))
+                    .child(self.call_spinner(
+                        "call-reconnecting-spinner".into(),
+                        16.,
+                        gpui::rgb(0x795300).into(),
+                    ))
                     .child(self.l("Verbindung wird wiederhergestellt …"))
                     .when(
                         self.call_reconnecting_since.is_some_and(|(scope, at)| {
@@ -517,7 +521,11 @@ impl Desktop {
                         .items_center()
                         .justify_center()
                         .gap_2()
-                        .child(self.scaled_icon("refresh", 18., t.stage_muted))
+                        .child(self.call_spinner(
+                            "call-screen-waiting-spinner".into(),
+                            18.,
+                            t.stage_muted,
+                        ))
                         .child(self.lf(
                             "{name} teilt den Bildschirm",
                             &[("name", screen.name.as_str())],
