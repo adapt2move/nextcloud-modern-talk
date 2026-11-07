@@ -3206,7 +3206,7 @@ impl Desktop {
         div()
             .flex()
             .flex_col()
-            .rounded(px(10.))
+            .rounded(px(12.))
             .border_1()
             .border_color(self.theme.border)
             .bg(self.theme.surface)

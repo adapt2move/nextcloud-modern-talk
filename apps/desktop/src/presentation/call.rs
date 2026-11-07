@@ -344,7 +344,7 @@ impl Desktop {
                     self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        BannerRole::Warning.foreground(),
+                        BannerRole::Warning.foreground(self.theme.dark),
                     ),
                 )
                 .flex_none()
@@ -1084,6 +1084,9 @@ impl Desktop {
                 .size(px(44.))
                 .min_h(px(44.))
                 .rounded_full()
+                .when(id != "screen-share", |d| {
+                    d.rounded(px(0.)).rounded_l(px(22.))
+                })
                 .when(id != "screen-share" && state == MediaState::Off, |d| {
                     d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
                 });
@@ -1092,7 +1095,11 @@ impl Desktop {
                 .flex()
                 .items_center()
                 .rounded_full()
-                .bg(t.stage_panel)
+                .bg(if id != "screen-share" && state == MediaState::Off {
+                    gpui::rgb(0x9e3e32).into()
+                } else {
+                    t.stage_panel
+                })
                 .child(control);
             if let Some(kind) = match id {
                 "microphone" => Some(talk_core::preferences::devices::DeviceKind::Microphone),
@@ -1118,7 +1125,9 @@ impl Desktop {
                     .w(px(28.))
                     .border_l_1()
                     .border_color(t.stage)
-                    .rounded_full(),
+                    .rounded(px(0.))
+                    .rounded_r(px(22.))
+                    .when(state == MediaState::Off, |d| d.bg(gpui::rgb(0x9e3e32))),
                 );
                 if self.call_device_picker == Some((call.scope, kind)) {
                     group = group
@@ -1569,7 +1578,7 @@ impl Desktop {
         div()
             .flex_none()
             .size(px(size))
-            .rounded(px(size / 3.))
+            .rounded(px(size * 0.28))
             .bg(gpui::rgb(colors[seed % colors.len()]))
             .text_color(gpui::white())
             .text_size(px(size * 0.36))

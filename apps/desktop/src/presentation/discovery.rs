@@ -3,7 +3,7 @@ use super::{
     ButtonStyle, Desktop, LocalAction,
     controls::{Availability, BannerRole},
 };
-use gpui::{Context, Div, FontWeight, Window, div, prelude::*};
+use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::{
     Decision, Text,
     conversation::RemoteState,
@@ -183,27 +183,32 @@ impl Desktop {
                     .items_center()
                     .gap_3()
                     .p_3()
-                    .rounded_md()
+                    .rounded(px(12.))
                     .border_1()
                     .border_color(self.theme.border)
                     .child(details)
-                    .child(self.button(
-                        super::controls::scoped_id("discover-join", room.context, 0, 0),
-                        if joining {
-                            "Beitritt läuft …"
-                        } else {
-                            "Beitreten"
-                        },
-                        ButtonStyle::Secondary,
-                        Availability::when(
-                            self.active_account_connected()
-                                && !busy
-                                && room.join == Decision::Allowed,
-                            reason,
-                        ),
-                        LocalAction::DiscoverJoin(room.context),
-                        cx,
-                    )),
+                    .child(
+                        self.button(
+                            super::controls::scoped_id("discover-join", room.context, 0, 0),
+                            if joining {
+                                "Beitritt läuft …"
+                            } else {
+                                "Beitreten"
+                            },
+                            ButtonStyle::Secondary,
+                            Availability::when(
+                                self.active_account_connected()
+                                    && !busy
+                                    && room.join == Decision::Allowed,
+                                reason,
+                            ),
+                            LocalAction::DiscoverJoin(room.context),
+                            cx,
+                        )
+                        .border_1()
+                        .border_color(self.theme.input_border)
+                        .rounded(px(8.)),
+                    ),
             );
         }
         if panel.loaded && shown == 0 && !panel.state.pending() {

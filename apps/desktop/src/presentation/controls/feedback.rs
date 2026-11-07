@@ -10,17 +10,20 @@ pub(in crate::presentation) enum BannerRole {
 }
 
 impl BannerRole {
-    fn colors(self) -> (gpui::Hsla, gpui::Hsla, &'static str) {
-        let (foreground, background, symbol) = match self {
-            Self::Info => (0x315e98, 0xeaf1fb, "info"),
-            Self::Warning => (0x795300, 0xfff4d6, "cloud-off"),
-            Self::Error => (0x9e3e32, 0xfff0ec, "info"),
+    fn colors(self, dark: bool) -> (gpui::Hsla, gpui::Hsla, &'static str) {
+        let (foreground, background, symbol) = match (self, dark) {
+            (Self::Info, false) => (0x315e98, 0xeaf1fb, "info"),
+            (Self::Warning, false) => (0x795300, 0xfff4d6, "cloud-off"),
+            (Self::Error, false) => (0x9e3e32, 0xfff0ec, "info"),
+            (Self::Info, true) => (0xcfe0fa, 0x26364f, "info"),
+            (Self::Warning, true) => (0xf2cf7e, 0x3a2f14, "cloud-off"),
+            (Self::Error, true) => (0xf0a89e, 0x3b1f1c, "info"),
         };
         (rgb(foreground).into(), rgb(background).into(), symbol)
     }
 
-    pub(in crate::presentation) fn foreground(self) -> gpui::Hsla {
-        self.colors().0
+    pub(in crate::presentation) fn foreground(self, dark: bool) -> gpui::Hsla {
+        self.colors(dark).0
     }
 }
 
@@ -35,7 +38,7 @@ impl Desktop {
         label: &str,
         icon: Option<&'static str>,
     ) -> Div {
-        let (foreground, _, symbol) = role.colors();
+        let (foreground, _, symbol) = role.colors(self.theme.dark);
         self.banner_with_leading(
             role,
             label,
@@ -49,12 +52,14 @@ impl Desktop {
         label: &str,
         leading: impl IntoElement,
     ) -> Div {
-        let (foreground, background, _) = role.colors();
+        let (foreground, background, _) = role.colors(self.theme.dark);
         div()
             .min_h(px(36.))
             .px_3()
             .py_1()
             .rounded(px(8.))
+            .border_1()
+            .border_color(foreground.opacity(0.20))
             .flex()
             .items_center()
             .gap_2()

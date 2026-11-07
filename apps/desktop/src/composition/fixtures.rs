@@ -1062,7 +1062,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "Mara Fischer",
                 "MF",
                 "10:00",
-                "That works for me.",
+                "Das passt für mich.",
                 false,
             );
             reply.metadata.thread = Some(root);
@@ -1082,7 +1082,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "Alex Sommer",
                 "AS",
                 "10:02",
-                "I'll update the final details.",
+                "Ich aktualisiere die letzten Details.",
                 true,
             );
             second.metadata.thread = Some(root);
@@ -2155,7 +2155,7 @@ fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
             "Mara Fischer",
             "MF",
             "09:51",
-            "Hier ist Platz für unser Gespräch. Diese Inhalte sind fiktive UI-Beispiele.",
+            "Hier ist Platz für unser Gespräch.",
             false,
         )]);
     }

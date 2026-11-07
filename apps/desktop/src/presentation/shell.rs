@@ -65,7 +65,7 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        avatar_size: f32,
+        _avatar_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
@@ -73,7 +73,7 @@ impl Desktop {
         }
         // The requested diameter excludes the two-point surface ring. Half of
         // the footprint sits outside on each axis, keeping initials unobscured.
-        let diameter = if avatar_size < 32. { 8. } else { 10. };
+        let diameter = 10.;
         let footprint = diameter + 4.;
         div().flex_none().relative().child(avatar).child(
             div()
@@ -1068,7 +1068,7 @@ impl Desktop {
                     .child(div().flex().justify_center().gap_3().py_3()
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("decline",("phone-down","Ablehnen"),ButtonStyle::StageDanger,Availability::available().labelled(),LocalAction::Intent(UiIntent::DeclineDirect(call.scope)),cx).size(px(56.)).min_h(px(56.))).child(self.l("Ablehnen")))
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx).size(px(56.)).min_h(px(56.))).child(self.l("Annehmen")))
-                        .child(div().flex().flex_col().items_center().justify_center().gap_2().child(self.button_with_icon("accept-video", ("Mit Video annehmen", "video"), ButtonStyle::Primary, Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(), LocalAction::AcceptCallWithVideo, cx).min_h(px(44.)).rounded_full())))
+                        .child(div().flex().flex_col().items_center().justify_center().gap_2().child(self.round_icon_button("accept-video", ("video", "Mit Video annehmen"), ButtonStyle::Primary, Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(), LocalAction::AcceptCallWithVideo, cx).size(px(56.)).min_h(px(56.))).child(self.l("Mit Video annehmen"))))
                     .child(self.button("dismiss","Später ansehen",ButtonStyle::Quiet,true,LocalAction::DismissIncoming,cx))))
     }
 }

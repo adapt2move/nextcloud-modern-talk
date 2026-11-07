@@ -1367,6 +1367,7 @@ impl Desktop {
             } else {
                 gpui::transparent_black()
             })
+            .when(selected, |d| d.border_color(t.input_border.opacity(0.45)))
             .text_color(if selected {
                 t.text
             } else {
@@ -1392,7 +1393,7 @@ impl Desktop {
         div()
             .flex_none()
             .size(px(extent))
-            .rounded(px(extent / 3.))
+            .rounded(px(extent * 0.28))
             .flex()
             .items_center()
             .justify_center()

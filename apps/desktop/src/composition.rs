@@ -308,7 +308,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             show:true,focus:!hidden,
             window_min_size:Some(size(px(720.),px(580.))),
             titlebar:Some(TitlebarOptions{
-                title:Some(if development{"Talk — FICTITIOUS DATA · UI development"}else{"Talk"}.into()),
+                title:Some("NextCloud Talk".into()),
                 appears_transparent:true,
                 traffic_light_position:Some(gpui::point(px(12.),px(8.))),
             }),

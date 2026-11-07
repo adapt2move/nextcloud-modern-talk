@@ -729,17 +729,15 @@ impl Desktop {
                         d.child(
                         div()
                             .absolute()
-                            // Narrow thread rows keep the actions over the header,
-                            // with an opaque surface so the message body remains readable.
-                            .when(thread, |d| {
-                                d.top_0().right_2().rounded(px(8.))
-                                    .group_hover(action_group.clone(), |s| {
-                                        s.bg(t.surface).border_1().border_color(t.border).shadow_sm()
-                                    })
-                                    .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
-                                        d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
-                                    })
+                            // One surface frames the tools without changing row geometry.
+                            .rounded(px(8.))
+                            .group_hover(action_group.clone(), |s| {
+                                s.bg(t.surface).border_1().border_color(t.border).shadow_sm()
                             })
+                            .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
+                                d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
+                            })
+                            .when(thread, |d| d.top_0().right_2())
                             .when(!thread, |d| { d.top(px(-20.)).right(if m.own {
                                 px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
                             } else { px(8.) })

@@ -444,7 +444,7 @@ impl Desktop {
             .iter()
             .any(|r| r.unread_mention.is_some());
         sidebar = sidebar.child(
-            div().flex().gap_1().mt_2().children(
+            self.segmented().w_full().mt_2().children(
                 [
                     (SidebarFilter::All, "Alle"),
                     (SidebarFilter::Unread, "Ungelesen"),
@@ -477,7 +477,11 @@ impl Desktop {
                     )
                     .flex_1()
                     .px_1()
-                    .text_size(self.sp(11.))
+                    .min_w_0()
+                    .when(value == filter, |d| {
+                        d.bg(t.segment).border_color(t.input_border.opacity(0.45))
+                    })
+                    .text_size(self.sp(12.))
                 }),
             ),
         );

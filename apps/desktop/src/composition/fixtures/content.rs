@@ -114,7 +114,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         account: Some(context.account),
         context: Some(context),
         self_name: Some(text("Alex Sommer")),
-        organization: Some(text("Nord Studio · Beispieldaten")),
+        organization: Some(text("Nord Studio")),
         assets: page(assets),
         poll_create: ready,
         polls: page([PollView {

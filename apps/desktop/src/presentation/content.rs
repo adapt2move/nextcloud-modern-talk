@@ -1448,7 +1448,7 @@ impl Desktop {
         let base = div()
             .flex_none()
             .size(extent)
-            .rounded(extent / 3.)
+            .rounded(extent * 0.28)
             .overflow_hidden()
             .flex()
             .items_center()
@@ -1473,7 +1473,7 @@ impl Desktop {
                 base.child(
                     img(image)
                         .size_full()
-                        .rounded(extent / 3.)
+                        .rounded(extent * 0.28)
                         .object_fit(ObjectFit::Cover),
                 ),
             );
@@ -2628,27 +2628,21 @@ impl Desktop {
             );
         }
         body = body
-            .child(
-                div().flex().flex_wrap().gap_2().child(
-                    self.button(
-                        "poll-add-option",
-                        "Option hinzufügen",
-                        ButtonStyle::Secondary,
-                        Availability::when(
-                            !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
-                            if busy {
-                                "Eine Anfrage wird bereits bearbeitet."
-                            } else {
-                                "Die maximale Anzahl an Optionen ist erreicht."
-                            },
-                        ),
-                        LocalAction::Content(Action::AddOption),
-                        cx,
-                    )
-                    .border_1()
-                    .border_color(self.theme.input_border),
+            .child(div().flex().flex_wrap().gap_2().child(self.button(
+                "poll-add-option",
+                "Option hinzufügen",
+                ButtonStyle::Quiet,
+                Availability::when(
+                    !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                    if busy {
+                        "Eine Anfrage wird bereits bearbeitet."
+                    } else {
+                        "Die maximale Anzahl an Optionen ist erreicht."
+                    },
                 ),
-            )
+                LocalAction::Content(Action::AddOption),
+                cx,
+            )))
             .child(self.dialog_row(
                 "Mehrere Antworten erlauben",
                 Some("Teilnehmende können mehr als eine Antwort wählen."),
@@ -2720,12 +2714,6 @@ impl Desktop {
             } else {
                 super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create)
             })));
-        }
-        if self.poll_draft(cx).is_none() {
-            body =
-                body.child(self.hint(
-                    self.l("Gib eine Frage und mindestens zwei unterschiedliche Optionen ein."),
-                ));
         }
         let status = match self.snapshot.content_panel.poll_state {
             RemoteState::Failed(request, _) if request != RequestId(0) => {
@@ -3008,15 +2996,20 @@ impl Desktop {
                     .w_full()
                     .h(px(6.))
                     .rounded(px(3.))
-                    .bg(self
-                        .theme
-                        .muted
-                        .opacity(if self.theme.dark { 0.65 } else { 0.35 }))
+                    .bg(if self.theme.dark {
+                        gpui::rgb(0x3a4558).into()
+                    } else {
+                        self.theme.muted.opacity(0.35)
+                    })
                     .child(
                         div()
                             .h_full()
                             .rounded(px(3.))
-                            .bg(self.theme.accent)
+                            .bg(if self.theme.dark {
+                                gpui::rgb(0x6fa0e8).into()
+                            } else {
+                                self.theme.accent
+                            })
                             .w(gpui::relative(percent as f32 / 100.)),
                     );
                 row = row
