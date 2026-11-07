@@ -164,7 +164,7 @@ impl Desktop {
                 Choice::Reminders,
                 "Erinnerungen",
                 "bell",
-                MessageFeature::Reminders,
+                MessageFeature::UpcomingReminders,
             ),
         ]
     }

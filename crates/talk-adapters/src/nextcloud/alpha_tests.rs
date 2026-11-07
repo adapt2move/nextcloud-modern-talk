@@ -497,11 +497,10 @@ async fn channel_member_list_and_classified_exposure_remain_closed() {
 async fn unsupported_provider_and_unknown_permissions_are_truthful() {
     let mut room_data = room();
     room_data["permissions"] = json!(1023);
-    let server = Server::start(vec![
-        Reply::data(features(&["edit-messages"])),
-        Reply::data(room_data),
-    ])
-    .await;
+    let mut advertised = features(&["edit-messages", "translation", "chat-summary"]);
+    advertised["capabilities"]["spreed"]["config"]["chat"]["has-translation-providers"] =
+        json!(true);
+    let server = Server::start(vec![Reply::data(advertised), Reply::data(room_data)]).await;
     let r = runtime();
     let mut c = client(&server.origin, r.clone());
     let id = bind(&mut c);
@@ -528,6 +527,12 @@ async fn unsupported_provider_and_unknown_permissions_are_truthful() {
             .as_slice()
             .iter()
             .any(|(f, a)| *f == MessagingFeature::Translation && !a.implemented)
+    );
+    assert!(
+        caps.actions
+            .as_slice()
+            .iter()
+            .any(|(f, a)| *f == MessagingFeature::Summary && !a.implemented)
     );
     assert!(
         caps.actions
@@ -729,5 +734,50 @@ async fn scheduled_list_preserves_failed_and_rescheduled_deadlines() {
             (400, Some(200))
         );
         assert_eq!((items[2].send_at, items[2].original_send_at), (500, None));
+    }
+}
+
+#[tokio::test]
+async fn upcoming_reminders_have_an_independent_server_capability() {
+    for (names, upcoming) in [
+        (vec!["remind-me-later"], FeatureSupport::Unsupported),
+        (
+            vec!["remind-me-later", "upcoming-reminders"],
+            FeatureSupport::Supported,
+        ),
+    ] {
+        let server = Server::start(vec![Reply::data(features(&names)), Reply::data(room())]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let reply = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::Capabilities,
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Messaging {
+            result: R::Capabilities(caps),
+            ..
+        } = reply
+        else {
+            panic!("capabilities");
+        };
+        let get = |feature| {
+            caps.actions
+                .as_slice()
+                .iter()
+                .find(|(f, _)| *f == feature)
+                .unwrap()
+                .1
+                .server
+        };
+        assert_eq!(get(MessagingFeature::Reminders), FeatureSupport::Supported);
+        assert_eq!(get(MessagingFeature::UpcomingReminders), upcoming);
     }
 }

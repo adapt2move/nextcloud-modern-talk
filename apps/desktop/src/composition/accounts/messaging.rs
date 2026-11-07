@@ -1904,6 +1904,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Search => V::Search,
         W::Pins => V::Pins,
         W::Reminders => V::Reminders,
+        W::UpcomingReminders => V::UpcomingReminders,
         W::Schedule => V::Schedules,
         W::Forward => V::Forward,
         W::Files => V::Files,

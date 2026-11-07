@@ -267,7 +267,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 messaging::{MessageFeature, Reminder, Scheduled},
                 presentation::FeatureSupport,
             };
-            for feature in [MessageFeature::Reminders, MessageFeature::Schedules] {
+            for feature in [
+                MessageFeature::Reminders,
+                MessageFeature::UpcomingReminders,
+                MessageFeature::Schedules,
+            ] {
                 let _ = panel.features.try_push((
                     feature,
                     Availability {

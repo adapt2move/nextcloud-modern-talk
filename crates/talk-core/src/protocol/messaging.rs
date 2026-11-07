@@ -101,6 +101,7 @@ pub enum MessagingFeature {
     Search,
     Pins,
     Reminders,
+    UpcomingReminders,
     Schedule,
     Threads,
     Forward,

@@ -59,7 +59,8 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Mentions(_) => F::Mentions,
         C::Search { .. } => F::Search,
         C::Pin { .. } | C::Unpin(_) | C::HidePin(_) | C::Pins => F::Pins,
-        C::Reminder { .. } | C::ReadReminder(_) | C::Reminders => F::Reminders,
+        C::Reminder { .. } | C::ReadReminder(_) => F::Reminders,
+        C::Reminders => F::UpcomingReminders,
         C::Scheduled | C::Schedule { .. } | C::EditScheduled { .. } | C::CancelScheduled(_) => {
             F::Schedule
         }
@@ -88,6 +89,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Search => "unified-search",
         F::Pins => "pinned-messages",
         F::Reminders => "remind-me-later",
+        F::UpcomingReminders => "upcoming-reminders",
         F::Schedule => "scheduled-messages",
         F::Threads => "threads",
         F::Forward => "chat-reference-id",
@@ -256,6 +258,7 @@ impl NextcloudClient {
             F::Search,
             F::Pins,
             F::Reminders,
+            F::UpcomingReminders,
             F::Schedule,
             F::Threads,
             F::Forward,
