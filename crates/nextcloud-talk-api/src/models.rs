@@ -93,6 +93,10 @@ impl Account {
 #[derive(Clone, Debug)]
 pub struct Room {
     pub avatar_version: Option<String>,
+    /// User status returned for one-to-one conversations when available.
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
     pub custom_avatar: Option<bool>,
     pub token: String,
     pub server_id: Option<u64>,
@@ -148,6 +152,11 @@ impl Room {
         let v = &v;
         let result = Self {
             avatar_version: string(v.get("avatarVersion"), 128)?,
+            // Optional status is display-only: an oversized field must not hide
+            // the room list. NC34/35 allow 80 Unicode characters (320 UTF-8 bytes).
+            status: string(v.get("status"), 32).unwrap_or_default(),
+            status_icon: string(v.get("statusIcon"), 64).unwrap_or_default(),
+            status_message: string(v.get("statusMessage"), 320).unwrap_or_default(),
             custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,
             server_id: v.get("id").and_then(Value::as_u64).filter(|n| *n > 0),
@@ -208,6 +217,9 @@ pub struct Participant {
     pub attendee_id: Option<u64>,
     pub permissions: Option<u64>,
     pub room_token: Option<String>,
+    pub status: Option<String>,
+    pub status_icon: Option<String>,
+    pub status_message: Option<String>,
 }
 impl Participant {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -224,6 +236,9 @@ impl Participant {
             attendee_id: integer(v.get("attendeeId")),
             permissions: integer(v.get("permissions")),
             room_token: string(v.get("roomToken"), 30)?,
+            status: string(v.get("status"), 32)?,
+            status_icon: string(v.get("statusIcon"), 64)?,
+            status_message: string(v.get("statusMessage"), 320)?,
         };
         Ok(result)
     }
@@ -398,6 +413,8 @@ fn strings(v: Option<&Value>, max: usize, numbers: bool) -> Result<Option<Vec<St
 }
 #[derive(Clone, Debug)]
 pub struct Capabilities {
+    pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub notification_endpoints: Vec<String>,
     pub server_major: Option<u64>,
     pub features: Vec<String>,
@@ -437,6 +454,8 @@ impl Capabilities {
             None => return Err(ErrorKind::Malformed),
         };
         Ok(Self {
+            user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             notification_endpoints: strings(
                 data["capabilities"]["notifications"].get("ocs-endpoints"),
                 32,
@@ -574,6 +593,29 @@ pub enum Preference {
 mod message_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn room_status_preserves_optional_fields_and_drops_oversized_input() {
+        let mut room = json!({"token":"testroom", "displayName":"Fixture"});
+        let absent = Room::decode(&room).unwrap();
+        assert!(absent.status.is_none());
+        assert!(absent.status_icon.is_none());
+        assert!(absent.status_message.is_none());
+        room["status"] = json!("away");
+        room["statusIcon"] = json!("☕");
+        room["statusMessage"] = json!("On a break");
+        let present = Room::decode(&room).unwrap();
+        assert_eq!(present.status.as_deref(), Some("away"));
+        assert_eq!(present.status_icon.as_deref(), Some("☕"));
+        assert_eq!(present.status_message.as_deref(), Some("On a break"));
+        room["statusMessage"] = json!("🦀".repeat(80));
+        assert_eq!(
+            Room::decode(&room).unwrap().status_message.unwrap().len(),
+            320
+        );
+        room["statusMessage"] = json!("x".repeat(321));
+        assert!(Room::decode(&room).unwrap().status_message.is_none());
+    }
 
     #[test]
     fn room_read_markers_preserve_missing_zero_and_bounded_numeric_values() {

@@ -47,6 +47,13 @@ pub const SCENARIOS: &[&str] = &[
     "chat-server-unavailable",
     "accounts-server-denied",
     "chat-ux",
+    "chat-presence",
+    "people-card",
+    "chat-typing",
+    "chat-typing-two",
+    "chat-typing-many",
+    "status-picker",
+    "status-message",
     "chat-ux-call",
     "chat-edit",
     "thread-error",
@@ -196,6 +203,79 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(
+        scenario,
+        Some("chat-typing" | "chat-typing-two" | "chat-typing-many")
+    ) {
+        let mut state = snapshot(Some("chat-grouped"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let count = match scenario {
+                Some("chat-typing") => 1,
+                Some("chat-typing-two") => 2,
+                _ => 3,
+            };
+            panel.typing = page(
+                [
+                    ("Mara", "fixture-mara"),
+                    ("Jonas", "fixture-jonas"),
+                    ("Lea", "fixture-lea"),
+                ]
+                .into_iter()
+                .take(count)
+                .map(|(name, key)| talk_core::ui::messaging::TypingPerson {
+                    name: text(name),
+                    author_key: text(key),
+                }),
+            );
+        }
+        return state;
+    }
+    if scenario == Some("people-card") {
+        let mut state = snapshot(Some("chat-grouped"));
+        dialog::configure(&mut state);
+        let context = state.selected.expect("fixture room");
+        let panel = state.conversation_panel.as_mut().expect("fixture details");
+        panel.members_loaded = true;
+        panel.members = page([talk_core::ui::conversation::Member {
+            id: talk_core::ui::conversation::PersonRef { context, local: 71 },
+            name: text("Mara Fischer"),
+            author_key: Some(text("5:users:mara")),
+            presence: Presence::Away,
+            status_icon: Some(text("☕")),
+            status_message: Some(text("Zurück nach der Kaffeepause")),
+            role: talk_core::ui::conversation::MemberRole::Moderator,
+            source: talk_core::ui::conversation::DirectorySource::User,
+            permissions: Some(511),
+            self_user: false,
+        }]);
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                talk_core::ui::messaging::MessageFeature::Mentions,
+                talk_core::ui::conversation::Availability {
+                    implemented: true,
+                    server: talk_core::ui::presentation::FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+        }
+        return state;
+    }
+    if matches!(scenario, Some("status-picker" | "status-message")) {
+        let mut state = snapshot(Some("chat-presence"));
+        state.accounts = page(
+            state
+                .accounts
+                .as_slice()
+                .iter()
+                .cloned()
+                .map(|mut account| {
+                    account.connection =
+                        talk_core::ui::presentation::AccountConnectionState::Connected;
+                    account
+                }),
+        );
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
@@ -687,11 +767,16 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
-                presence: if kind == ConversationKind::Direct {
+                presence: if scenario == "chat-presence" && id == 3 {
+                    Presence::Away
+                } else if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {
                     Presence::Unknown
                 },
+                status_icon: (scenario == "chat-presence" && id == 3).then(|| text("☕")),
+                status_message: (scenario == "chat-presence" && id == 3)
+                    .then(|| text("Kaffeepause")),
                 participants: Some(if kind == ConversationKind::Direct {
                     2
                 } else {
@@ -715,15 +800,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     );
     populate(
         &mut s,
-        context(if matches!(scenario, "direct-call" | "outgoing") {
-            3
-        } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
-            2
-        } else if scenario == "room" {
-            4
-        } else {
-            1
-        }),
+        context(
+            if matches!(scenario, "direct-call" | "outgoing" | "chat-presence") {
+                3
+            } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
+                2
+            } else if scenario == "room" {
+                4
+            } else {
+                1
+            },
+        ),
     );
     match scenario {
         "offline" => s.content = ContentState::Offline,
@@ -1129,6 +1216,7 @@ pub struct DevelopmentPort {
     chat_motion: bool,
     history_pagination: bool,
     chat_content: bool,
+    people_fixture: bool,
 }
 impl DevelopmentPort {
     pub fn new(scenario: Option<&str>) -> Self {
@@ -1167,6 +1255,7 @@ impl DevelopmentPort {
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
+            people_fixture: scenario == Some("people-card"),
             history_pagination: scenario == Some("history-pagination"),
             chat_content: matches!(
                 scenario,
@@ -1508,6 +1597,57 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
                 if self.chat_content {
                     content::configure(&mut self.snapshot);
+                }
+            }
+            UiIntent::Create {
+                account,
+                request,
+                action: talk_core::ui::conversation::CreateAction::DirectMember(person),
+            } if self.people_fixture => {
+                if self.snapshot.active_account != Some(account)
+                    || self.snapshot.selected != Some(person.context)
+                    || !self
+                        .snapshot
+                        .conversation_panel
+                        .as_ref()
+                        .is_some_and(|panel| {
+                            panel.context == person.context
+                                && panel.members_loaded
+                                && !panel.details_stale
+                                && panel
+                                    .members
+                                    .as_slice()
+                                    .iter()
+                                    .any(|member| member.id == person && !member.self_user)
+                        })
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                let direct = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| {
+                        row.kind == ConversationKind::Direct && row.title.as_str() == "Mara Fischer"
+                    })
+                    .map(|row| row.context)
+                    .ok_or(SubmitError::StaleScope)?;
+                populate(&mut self.snapshot, direct);
+                let mut panel = talk_core::ui::conversation::CreatePanel::new(account);
+                panel.result = Some(talk_core::ui::conversation::CreationResult {
+                    request,
+                    completion: Completion::ServerAccepted,
+                    conversation: Some(direct),
+                });
+                self.snapshot.create_panel = Some(panel);
+            }
+            UiIntent::AcknowledgeCreation { account, request } if self.people_fixture => {
+                if let Some(panel) = self.snapshot.create_panel.as_mut()
+                    && panel.account == account
+                    && panel.result.is_some_and(|result| result.request == request)
+                {
+                    panel.result = None;
                 }
             }
             UiIntent::SetFavorite {
@@ -1856,6 +1996,53 @@ impl NativeDesktopPort for DevelopmentPort {
 mod tests {
     use super::*;
     use talk_core::ui::MediaIntent;
+
+    #[test]
+    fn person_fixture_resolves_only_a_current_member_to_the_direct_room() {
+        let mut port = DevelopmentPort::new(Some("people-card"));
+        let account = port.snapshot.active_account.unwrap();
+        let person = port
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .members
+            .as_slice()[0]
+            .id;
+        let mut stale = person;
+        stale.local ^= 1;
+        let request = |member| UiIntent::Create {
+            account,
+            request: RequestId(71),
+            action: talk_core::ui::conversation::CreateAction::DirectMember(member),
+        };
+        assert_eq!(
+            port.try_submit(request(stale)),
+            Err(SubmitError::StaleScope)
+        );
+        assert_eq!(port.try_submit(request(person)), Ok(()));
+        let direct = port.snapshot.selected.unwrap();
+        assert_eq!(
+            port.snapshot
+                .create_panel
+                .as_ref()
+                .unwrap()
+                .result
+                .unwrap()
+                .conversation,
+            Some(direct)
+        );
+        assert_eq!(
+            port.snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|row| row.context == direct)
+                .unwrap()
+                .kind,
+            ConversationKind::Direct
+        );
+    }
     #[test]
     fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {
         use talk_core::ui::{conversation::RemoteState, messaging::MessageAction};

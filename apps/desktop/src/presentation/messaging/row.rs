@@ -114,13 +114,19 @@ impl Desktop {
                         .gap_2()
                         .pr(px(76.))
                         .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(self.sp(13.))
-                                .line_height(self.sp(20.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(m.author.as_str().to_owned()),
+                            self.person_trigger(
+                                crate::presentation::people_card::Source::Message(
+                                    context, m.local_id, true,
+                                ),
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(self.sp(13.))
+                                    .line_height(self.sp(20.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(m.author.as_str().to_owned()),
+                                cx,
+                            ),
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
                         .child(metadata(m.time_label.as_str()))
@@ -305,15 +311,25 @@ impl Desktop {
                         .group_hover(action_group.clone(), |s| s.opacity(1.))
                         .into_any_element()
                 } else {
-                    self.content_avatar(
-                        talk_core::ui::content::AssetTarget::MessageAvatar {
-                            context,
-                            message: m.local_id,
-                        },
-                        m.initials.as_str(),
-                        36.,
-                    )
-                    .into_any_element()
+                    self.person_trigger(
+                        crate::presentation::people_card::Source::Message(context, m.local_id, false),
+                        self.avatar_with_presence(
+                            self.content_avatar(
+                                talk_core::ui::content::AssetTarget::MessageAvatar { context, message: m.local_id },
+                                m.initials.as_str(), 36.,
+                            ),
+                            self.person_member(crate::presentation::people_card::Source::Message(context, m.local_id, false))
+                                .map(|member| member.presence)
+                                .or_else(|| m.own.then(|| self.own_presence()))
+                                .or_else(|| self.selected().filter(|row| {
+                                    !m.own && row.context == context
+                                        && row.kind == talk_core::ui::presentation::ConversationKind::Direct
+                                        && row.title.as_str() == m.author.as_str()
+                                }).map(|row| row.presence))
+                                .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
+                            10., t.surface,
+                        ), cx,
+                    ).into_any_element()
                 })
                 .child(content)
                 .child(self.pin_source_anchor(context, m.local_id))

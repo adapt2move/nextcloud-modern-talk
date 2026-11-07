@@ -58,6 +58,7 @@ pub struct ComposeOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mention {
     pub id: Text<512>,
+    pub author_key: Option<Text<256>>,
     pub label: Text<256>,
     pub source: Text<64>,
 }

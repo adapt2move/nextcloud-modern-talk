@@ -22,6 +22,7 @@ pub mod test_support;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod typing;
 mod wire;
 
 pub use transport::NetworkRuntime;
@@ -119,6 +120,7 @@ pub struct NextcloudClient {
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
     direct_attempts: Vec<people::DirectAttempt>,
+    typing_watch: Option<(ConversationId, nextcloud_talk_api::typing::Watch)>,
     integrations: Vec<conversation::IntegrationBinding>,
     active: Option<ActiveConversation>,
     observed_call: Option<CallScope>,
@@ -220,6 +222,7 @@ impl NextcloudClient {
             recipients: Vec::new(),
             people: Vec::new(),
             direct_attempts: Vec::new(),
+            typing_watch: None,
             integrations: Vec::new(),
             active: None,
             observed_call: None,
@@ -685,16 +688,32 @@ impl NextcloudClient {
             self.diagnostic_signaling.invalidate();
         }
         validation?;
+        // Retire an active watch before a potentially slow capabilities request.
+        // Turning sharing off must stop local signaling immediately.
+        if matches!(
+            &request,
+            ProtocolRequest::SetPreference {
+                change: talk_core::preferences::account::AccountPreferenceChange::ShareTypingStatus(
+                    false
+                ),
+                ..
+            }
+        ) {
+            self.typing_watch = None;
+        }
         let room_id = match &request {
             ProtocolRequest::ReconcileConversation(id)
             | ProtocolRequest::Participants(id)
             | ProtocolRequest::LeaveConversation(id)
             | ProtocolRequest::ActivateConversation(id)
-            | ProtocolRequest::DeactivateConversation(id) => Some(*id),
+            | ProtocolRequest::DeactivateConversation(id)
+            | ProtocolRequest::WatchTyping(id)
+            | ProtocolRequest::PollTyping(id) => Some(*id),
             ProtocolRequest::History { conversation, .. }
             | ProtocolRequest::Messaging { conversation, .. }
             | ProtocolRequest::ConversationSettings { conversation, .. } => Some(*conversation),
-            ProtocolRequest::SetArchived { conversation, .. } => Some(*conversation),
+            ProtocolRequest::SetArchived { conversation, .. }
+            | ProtocolRequest::TypingActivity { conversation, .. } => Some(*conversation),
             ProtocolRequest::Send(send) => Some(send.conversation),
             ProtocolRequest::MarkRead(id) => Some(id.conversation),
             ProtocolRequest::ObserveCall(call)
@@ -711,6 +730,16 @@ impl NextcloudClient {
             self.check_room(id)?;
         }
         match request {
+            ProtocolRequest::WatchTyping(id) => return self.watch_typing(context, id),
+            ProtocolRequest::StopTyping => {
+                self.typing_watch = None;
+                return Ok(ProtocolReply::TypingAccepted);
+            }
+            ProtocolRequest::TypingActivity {
+                conversation,
+                active,
+            } => return self.typing_activity(context, conversation, active),
+            ProtocolRequest::PollTyping(id) => return self.poll_typing(context, id),
             ProtocolRequest::Meeting(command) => return self.meeting(context, command).await,
             ProtocolRequest::PollIncomingCalls => return self.poll_incoming_calls(context).await,
             ProtocolRequest::PollMessageNotifications => {
@@ -810,13 +839,17 @@ impl NextcloudClient {
                     .await?,
             }),
             ProtocolRequest::ListConversations => {
+                let mut query = vec![("noStatusUpdate", "1".into())];
+                if caps.user_status_enabled == Some(true) {
+                    query.push(("includeStatus", "true".into()));
+                }
                 let response = self
                     .transport
                     .ocs(
                         context,
                         Method::GET,
                         "ocs/v2.php/apps/spreed/api/v4/room",
-                        &[("noStatusUpdate", "1".into())],
+                        &query,
                         &[],
                         false,
                     )
@@ -870,7 +903,7 @@ impl NextcloudClient {
             ProtocolRequest::ReadPreferences { request } => Ok(ProtocolReply::Preferences(
                 talk_core::preferences::account::AccountPreferenceResult {
                     request,
-                    values: caps.account_preferences(context.scope),
+                    values: self.read_account_preferences(context, &caps).await?,
                 },
             )),
             ProtocolRequest::SetPreference { request, change } => {
@@ -965,6 +998,10 @@ impl NextcloudClient {
                 recipient,
             } => {
                 self.create_direct(context, operation, recipient, &caps)
+                    .await
+            }
+            ProtocolRequest::CreateDirectForMember { operation, member } => {
+                self.create_direct_for_member(context, operation, member, &caps)
                     .await
             }
             ProtocolRequest::CreateGroup { name } => {
@@ -1129,6 +1166,7 @@ impl NextcloudPort for NextcloudClient {
                         | ProtocolRequest::SetConversationTags { .. }
                         | ProtocolRequest::CreateGroup { .. }
                         | ProtocolRequest::CreateDirect { .. }
+                        | ProtocolRequest::CreateDirectForMember { .. }
                         | ProtocolRequest::MarkRead(_)
                         | ProtocolRequest::LeaveConversation(_)
                         | ProtocolRequest::ActivateConversation(_)

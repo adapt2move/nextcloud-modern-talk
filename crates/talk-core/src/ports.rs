@@ -108,6 +108,13 @@ pub enum ProtocolRequest {
     PollMessageNotifications,
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
+    WatchTyping(ConversationId),
+    StopTyping,
+    TypingActivity {
+        conversation: ConversationId,
+        active: bool,
+    },
+    PollTyping(ConversationId),
     Meeting(crate::calls::Command),
     ProbeAccount,
     RefreshCallPolicy(CallScope),
@@ -168,6 +175,11 @@ pub enum ProtocolRequest {
         operation: OperationId,
         recipient: crate::protocol::conversation::RecipientId,
     },
+    /// A currently observed room participant; the adapter revalidates membership.
+    CreateDirectForMember {
+        operation: OperationId,
+        member: crate::protocol::conversation::MemberId,
+    },
     LeaveConversation(ConversationId),
     ActivateConversation(ConversationId),
     DeactivateConversation(ConversationId),
@@ -193,6 +205,8 @@ pub enum ProtocolReply {
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
     LiveEvents(crate::protocol::AccountLiveEvents),
+    Typing(crate::protocol::TypingObservation),
+    TypingAccepted,
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),
     Policy(Box<PolicyInputs>),

@@ -65,4 +65,9 @@ sh tests/lab/cleanup.sh --state /run/nmtlab-RUN/state.json
 
 Replace the placeholder with that run's printed state location. Cleanup checks exact ownership labels, removes only its recorded containers/networks/volumes, checks for remaining run-labelled resources, then removes its runtime directory. It never invokes global prune. Failed cleanup retains the recovery record and fails the run. Downloaded packages and passwords are removed before hibernation; immutable public image cache layers may remain. No secret-bearing lab snapshot should be retained.
 
-Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB/TURN, recording, native performance and full parity remain **not tested here**. HPB/TURN artifacts are not pinned or provisioned by this harness. No native client or full compatibility pass is implied by these harness commands.
+`typing_hpb.py` additionally pins and provisions HPB 2.1.1 for two-user chat
+typing against the selected released server. It uses the same private fixture and
+label-checked cleanup, with loopback relays and no published ports; it does not
+configure Janus or exercise media. See the [backend lab guide](../../docs/backend-lab.md#presence-and-typing-checks).
+
+Browser authorization, revoked-credential/callback races, guest/file/federation workflows, most preset restrictions, Keychain fallback, GPUI, accessibility, WebRTC/audio/video/screen sharing, E2EE, HPB media/TURN, recording, native performance and full parity remain **not tested here**. No native client or full compatibility pass is implied by these harness commands.

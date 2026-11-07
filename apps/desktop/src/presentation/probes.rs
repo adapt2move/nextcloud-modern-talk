@@ -10,6 +10,9 @@ pub enum Probe {
     Focus,
     Accounts,
     Messages,
+    Status,
+    StatusMessage,
+    PeopleCard,
 }
 impl Desktop {
     pub(super) fn control_probe(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {

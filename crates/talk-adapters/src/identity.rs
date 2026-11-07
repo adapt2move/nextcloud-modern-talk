@@ -16,11 +16,12 @@ pub use connection::{
     ConnectionSnapshot, ConnectionState, ConnectionUpdate, SavedAccountState,
 };
 pub use data::{
-    CACHE_HISTORY_LIMIT, CACHE_LIFETIME, CACHE_ROOM_LIMIT, CACHE_THUMBNAIL_BYTES,
-    CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory, CacheRoom, CacheRoomObservation,
-    CacheThumbnail, CachedAttachment, CachedMessage, CachedNotificationLevel, CachedReaction,
-    CachedReply, CachedRoomKind, DataCommand, DataError, DataResult, DataSnapshot, OUTBOX_LIMIT,
-    OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxRecord,
+    CACHE_HISTORY_LIMIT, CACHE_LIFETIME, CACHE_PRESENCE_LIFETIME, CACHE_ROOM_LIMIT,
+    CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory,
+    CacheRoom, CacheRoomObservation, CacheThumbnail, CacheUserStatus, CachedAttachment,
+    CachedMessage, CachedNotificationLevel, CachedPresence, CachedReaction, CachedReply,
+    CachedRoomKind, DataCommand, DataError, DataResult, DataSnapshot, OUTBOX_LIMIT, OutboxEntry,
+    OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxRecord,
 };
 pub use error::{IdentityError, ProfileFailure};
 pub use runtime::{

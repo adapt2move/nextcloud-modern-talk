@@ -392,6 +392,44 @@ impl Transport {
     ) -> Result<api::Reply, PortError> {
         self.api.request(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn own_status_details(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<api::presence::StatusDetails, PortError> {
+        self.api
+            .own_status_details(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn predefined_statuses(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::presence::PredefinedStatus>, PortError> {
+        self.api
+            .predefined_statuses(&context(c))
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn set_status_message(
+        &mut self,
+        c: &OperationContext,
+        change: &api::presence::MessageChange,
+    ) -> Result<(), PortError> {
+        self.api
+            .set_status_message(&context(c), change)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn set_own_user_status(
+        &mut self,
+        c: &OperationContext,
+        choice: api::presence::StatusChoice,
+    ) -> Result<api::presence::UserStatus, PortError> {
+        self.api
+            .set_own_user_status(&context(c), choice)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn own_user_status(
         &mut self,
         c: &OperationContext,
@@ -406,6 +444,39 @@ impl Transport {
             .message_notifications(&context(c))
             .await
             .map_err(error)
+    }
+    pub(super) fn watch_typing(
+        &self,
+        c: &OperationContext,
+        room: RoomToken,
+    ) -> Result<api::typing::Watch, PortError> {
+        self.api.watch_typing(&context(c), room).map_err(error)
+    }
+    pub(super) fn typing_activity(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        active: bool,
+    ) -> Result<(), PortError> {
+        watch
+            .activity(&context(c), active)
+            .map_err(|value| self.error(kind(value)))
+    }
+    pub(super) fn typing_people(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> Vec<api::typing::Person> {
+        watch.people(scope(c.scope), room)
+    }
+    pub(super) fn typing_matches(
+        &self,
+        c: &OperationContext,
+        watch: &api::typing::Watch,
+        room: &RoomToken,
+    ) -> bool {
+        watch.matches(scope(c.scope), room)
     }
     pub(super) async fn poll_live_events(
         &mut self,
@@ -507,7 +578,18 @@ fn request(
     match route {
         "ocs/v2.php/cloud/user" if get => return Ok(R::Account),
         "ocs/v2.php/cloud/capabilities" if get => return Ok(R::Capabilities),
-        "ocs/v2.php/apps/spreed/api/v4/room" if get => return Ok(R::Rooms),
+        "ocs/v2.php/apps/spreed/api/v4/room" if get => {
+            return Ok(
+                if query
+                    .iter()
+                    .any(|(key, value)| *key == "includeStatus" && value == "true")
+                {
+                    R::RoomsWithStatus
+                } else {
+                    R::Rooms
+                },
+            );
+        }
         "ocs/v2.php/apps/spreed/api/v4/room" if post => {
             return Ok(R::CreateGroup {
                 name: v("roomName")?,

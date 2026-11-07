@@ -13,6 +13,21 @@ use talk_core::preferences::{
 
 impl Desktop {
     pub(super) fn refresh_account_preferences(&mut self, cx: &mut Context<Self>) {
+        if self.development
+            && matches!(
+                self.probe,
+                super::probes::Probe::Status | super::probes::Probe::StatusMessage
+            )
+        {
+            return;
+        }
+        if self.own_status_reconcile.is_some_and(|(scope, at)| {
+            Some(scope) == self.snapshot.active_account && std::time::Instant::now() >= at
+        }) {
+            self.own_status_reconcile = None;
+            self.load_account_preferences(cx);
+            return;
+        }
         let next = self
             .snapshot
             .active_account
@@ -22,6 +37,16 @@ impl Desktop {
                     && p.values.as_ref().is_none_or(|v| v.scope == p.scope)
             });
         if next == self.account_preferences {
+            if let Some(scope) = self.snapshot.active_account
+                && self.own_status_loaded != Some(scope)
+                && self.own_status_connected()
+                && next
+                    .as_ref()
+                    .is_some_and(|p| p.state == AccountPreferenceState::Unavailable)
+            {
+                self.own_status_loaded = Some(scope);
+                self.load_account_preferences(cx);
+            }
             return;
         }
         let scope_changed =
@@ -44,8 +69,62 @@ impl Desktop {
         }
         if scope_changed {
             self.account_preference_error = None;
+            self.own_status_optimistic = None;
+            self.own_message_optimistic = None;
+            self.own_status_editing = false;
+            self.own_status_message_input.update(cx, |input, _| {
+                input.set_context_value("");
+            });
+            self.own_status_icon_input.update(cx, |input, _| {
+                input.set_context_value("");
+            });
+            self.own_status_reconcile = None;
+            self.own_status_open = false;
+        } else if let Some((scope, request, _)) = self.own_status_optimistic
+            && let Some(snapshot) = next.as_ref().filter(|p| p.scope == scope)
+            && snapshot.state != (AccountPreferenceState::Saving { request })
+        {
+            if matches!(snapshot.state, AccountPreferenceState::Failed {
+                request: completed,
+                error: AccountPreferenceError::Network | AccountPreferenceError::Uncertain,
+            } if completed == request)
+            {
+                // A read is safe after a lost acknowledgement. Never replay the write.
+                self.own_status_reconcile = Some((
+                    scope,
+                    std::time::Instant::now() + std::time::Duration::from_secs(2),
+                ));
+            }
+            self.own_status_optimistic = None;
+        }
+        if let Some((scope, request, _)) = self.own_message_optimistic.as_ref()
+            && let Some(snapshot) = next.as_ref().filter(|p| p.scope == *scope)
+            && snapshot.state != (AccountPreferenceState::Saving { request: *request })
+        {
+            if matches!(snapshot.state, AccountPreferenceState::Failed {
+                request: completed,
+                error: AccountPreferenceError::Network | AccountPreferenceError::Uncertain,
+            } if completed == *request)
+            {
+                self.own_status_reconcile = Some((
+                    *scope,
+                    std::time::Instant::now() + std::time::Duration::from_secs(2),
+                ));
+            }
+            self.own_message_optimistic = None;
         }
         self.account_preferences = next;
+        if let Some(scope) = self.snapshot.active_account
+            && self.own_status_loaded != Some(scope)
+            && self.own_status_connected()
+            && self
+                .account_preferences
+                .as_ref()
+                .is_some_and(|p| p.state == AccountPreferenceState::Unavailable)
+        {
+            self.own_status_loaded = Some(scope);
+            self.load_account_preferences(cx);
+        }
         cx.notify();
     }
     pub(super) fn load_account_preferences(&mut self, cx: &mut Context<Self>) {

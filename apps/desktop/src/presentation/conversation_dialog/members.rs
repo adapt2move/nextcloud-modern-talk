@@ -914,27 +914,43 @@ impl Desktop {
                     .items_start()
                     .gap_2()
                     .py_1()
-                    .child(self.content_avatar(
-                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
-                            context: panel.context,
-                            participant: member.id.local,
-                        },
-                        &person_initials(member.name.as_str()),
-                        30.,
-                    ))
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .whitespace_normal()
-                                    .child(member.name.as_str().to_owned()),
-                            )
-                            .child(self.hint(self.l(role_label(member.role)))),
+                        self.person_trigger(
+                            crate::presentation::people_card::Source::Member(member.id),
+                            div()
+                                .flex()
+                                .items_start()
+                                .gap_2()
+                                .child(self.avatar_with_presence(
+                                    self.content_avatar(
+                                        talk_core::ui::content::AssetTarget::ParticipantAvatar {
+                                            context: panel.context,
+                                            participant: member.id.local,
+                                        },
+                                        &person_initials(member.name.as_str()),
+                                        30.,
+                                    ),
+                                    member.presence,
+                                    10.,
+                                    self.theme.surface,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .min_w_0()
+                                        .items_start()
+                                        .child(
+                                            div()
+                                                .whitespace_normal()
+                                                .child(member.name.as_str().to_owned()),
+                                        )
+                                        .child(self.hint(self.l(role_label(member.role)))),
+                                ),
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0(),
                     )
                     .when(!choices(member).is_empty(), |row| {
                         row.child(self.member_menu_trigger(member, cx))
@@ -1291,6 +1307,10 @@ mod tests {
         Member {
             id: person(),
             name: Text::new("Synthetic participant").unwrap(),
+            author_key: None,
+            presence: talk_core::ui::presentation::Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             role,
             source: DirectorySource::User,
             permissions: None,

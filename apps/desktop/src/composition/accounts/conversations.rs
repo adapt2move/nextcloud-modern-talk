@@ -35,6 +35,8 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;
+    // Presence changes are not room policy or metadata invalidations.
+    identity.user_status = None;
     identity
 }
 impl Metadata {
@@ -631,7 +633,22 @@ impl Accounts {
                         } else if self.snapshot.content == ContentState::Denied {
                             reload_messages = true;
                         }
-                        let mut row = conversation(&details.conversation, context.account);
+                        let mut row = self
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|existing| existing.context == context)
+                            .map_or_else(
+                                || conversation(&details.conversation, context.account),
+                                |existing| {
+                                    conversation_with_existing(
+                                        &details.conversation,
+                                        context.account,
+                                        existing,
+                                    )
+                                },
+                            );
                         if let Some(count) = details
                             .participant_count
                             .and_then(|count| u16::try_from(count).ok())
@@ -682,6 +699,10 @@ impl Accounts {
                         panel.members = page(people.as_slice().iter().map(|m| view::Member {
                             id: person(context, m.id.local),
                             name: m.name.clone(),
+                            author_key: m.author_key.clone(),
+                            presence: member_presence(m.user_status.as_ref()),
+                            status_icon: m.user_status.as_ref().and_then(|s| s.icon.clone()),
+                            status_message: m.user_status.as_ref().and_then(|s| s.message.clone()),
                             role: role_view(m.role),
                             source: source_view(m.source),
                             permissions: m.permissions,
@@ -1151,6 +1172,18 @@ fn role_wire(r: view::MemberRole) -> protocol::Role {
         view::MemberRole::Following => protocol::Role::Following,
         view::MemberRole::GuestModerator => protocol::Role::GuestModerator,
         view::MemberRole::Unknown => protocol::Role::Unknown,
+    }
+}
+
+fn member_presence(status: Option<&protocol::UserStatus>) -> Presence {
+    match status.map(|s| s.presence) {
+        Some(protocol::UserPresence::Online) => Presence::Available,
+        Some(protocol::UserPresence::Away) => Presence::Away,
+        Some(protocol::UserPresence::DoNotDisturb) => Presence::DoNotDisturb,
+        Some(protocol::UserPresence::Offline | protocol::UserPresence::Invisible) => {
+            Presence::Offline
+        }
+        Some(protocol::UserPresence::Unknown) | None => Presence::Unknown,
     }
 }
 

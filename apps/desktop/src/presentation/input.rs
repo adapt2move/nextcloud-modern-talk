@@ -605,6 +605,28 @@ impl TextInput {
         Some(&self.content[range.start + 1..range.end])
     }
 
+    /// Insert a server-confirmed mention at the current selection. Reject syntax
+    /// that cannot be represented safely rather than guessing an escape form.
+    pub(super) fn insert_person_mention(&mut self, identifier: &str, cx: &mut Context<Self>) {
+        if !self.interactive || self.composing() {
+            return;
+        }
+        let Some(token) = mention_token(identifier) else {
+            return;
+        };
+        let needs_space = self
+            .content
+            .get(..self.selected_range.start)
+            .and_then(|s| s.chars().next_back())
+            .is_some_and(|c| !c.is_whitespace());
+        let replacement = if needs_space {
+            format!(" {token}")
+        } else {
+            token
+        };
+        self.apply_replacement(None, Insertion::Literal(&replacement), cx);
+    }
+
     pub(super) fn insert_mention(&mut self, identifier: &str, cx: &mut Context<Self>) {
         if !self.interactive || self.composing() || !self.selected_range.is_empty() {
             return;
@@ -612,7 +634,9 @@ impl TextInput {
         let Some(range) = mention_range(&self.content, self.cursor_offset()) else {
             return;
         };
-        let replacement = format!("@{identifier} ");
+        let Some(replacement) = mention_token(identifier) else {
+            return;
+        };
         self.apply_replacement(
             Some(self.range_to_utf16(&range)),
             Insertion::Literal(&replacement),
@@ -1084,6 +1108,23 @@ fn imported_value(
     } else {
         (value.len() <= limit).then(|| (value.to_owned().into(), None))
     }
+}
+
+fn mention_token(identifier: &str) -> Option<String> {
+    if identifier.is_empty()
+        || identifier
+            .chars()
+            .any(|c| c.is_control() || c == '"' || c == '\\')
+    {
+        return None;
+    }
+    Some(
+        if identifier.contains('/') || identifier.chars().any(char::is_whitespace) {
+            format!("@\"{identifier}\" ")
+        } else {
+            format!("@{identifier} ")
+        },
+    )
 }
 
 fn mention_range(text: &str, cursor: usize) -> Option<Range<usize>> {
@@ -2226,6 +2267,21 @@ mod tests {
         assert!(!caret.tick(generation));
         assert!(caret.visible);
         assert!(!caret.restart);
+    }
+
+    #[test]
+    fn server_mention_identifiers_are_quoted_or_rejected_safely() {
+        assert_eq!(super::mention_token("alice").as_deref(), Some("@alice "));
+        assert_eq!(
+            super::mention_token("guest/alice").as_deref(),
+            Some("@\"guest/alice\" ")
+        );
+        assert_eq!(
+            super::mention_token("Alice Example").as_deref(),
+            Some("@\"Alice Example\" ")
+        );
+        assert!(super::mention_token("bad\"id").is_none());
+        assert!(super::mention_token("bad\nid").is_none());
     }
 
     #[test]

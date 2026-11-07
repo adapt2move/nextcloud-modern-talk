@@ -372,7 +372,8 @@ impl Purpose {
             Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
             | Self::Mutation(_, c)
-            | Self::Send(_, c, _) => Some(c),
+            | Self::Send(_, c, _)
+            | Self::Typing(c, _) => Some(c),
             Self::Call(c) => Some(ConversationRef {
                 account: c.account,
                 conversation: c.conversation,
@@ -1247,6 +1248,7 @@ mod tests {
     }
     fn room(n: u128) -> protocol::Conversation {
         protocol::Conversation {
+            user_status: None,
             id: talk_core::ids::ConversationId {
                 account: scope(1).account,
                 host: HostId::from_local(1),

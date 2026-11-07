@@ -21,6 +21,7 @@ pub mod presence;
 pub mod scope;
 pub mod signaling;
 mod transport;
+pub mod typing;
 pub use error::{ErrorKind, PortError as Error, Retry};
 use models::*;
 use reqwest::Method;
@@ -76,8 +77,12 @@ pub enum Request {
     Account,
     Capabilities,
     Rooms,
+    /// Room list with direct-message status; caller must check user_status.enabled.
+    RoomsWithStatus,
     Room(RoomToken),
     Participants(RoomToken),
+    /// Participant status is requested only when user_status is enabled.
+    ParticipantsWithStatus(RoomToken),
     History {
         room: RoomToken,
         before: Option<u64>,
@@ -191,6 +196,7 @@ pub struct Client {
     hpb_route: Option<hpb::Route>,
     live_settings_at: Option<scope::Moment>,
     live_internal: bool,
+    typing_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 struct SendAttempt {
     room: RoomToken,
@@ -243,6 +249,7 @@ impl Client {
             hpb_route: None,
             live_settings_at: None,
             live_internal: false,
+            typing_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
     pub fn validate(&self, context: &OperationContext) -> Result<(), Error> {
@@ -769,6 +776,16 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             vec![],
             Kind::Rooms,
         ),
+        Request::RoomsWithStatus => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v4/room".into(),
+            vec![
+                ("noStatusUpdate", "1".into()),
+                ("includeStatus", "true".into()),
+            ],
+            vec![],
+            Kind::Rooms,
+        ),
         Request::Room(t) => (
             Method::GET,
             room("v4/room", t, ""),
@@ -780,6 +797,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Method::GET,
             room("v4/room", t, "/participants"),
             vec![],
+            vec![],
+            Kind::Participants,
+        ),
+        Request::ParticipantsWithStatus(t) => (
+            Method::GET,
+            room("v4/room", t, "/participants"),
+            vec![("includeStatus", "true".into())],
             vec![],
             Kind::Participants,
         ),

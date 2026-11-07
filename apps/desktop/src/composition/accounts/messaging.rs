@@ -1206,6 +1206,7 @@ impl Accounts {
                     wire::MessagingResult::Mentions(mentions) => {
                         panel.mentions = page(mentions.as_slice().iter().map(|m| view::Mention {
                             identifier: m.id.clone(),
+                            author_key: m.author_key.clone(),
                             label: m.label.clone(),
                         }));
                     }

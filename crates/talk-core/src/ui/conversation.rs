@@ -113,6 +113,7 @@ pub enum CreateAction {
     FindPeople(Text<256>),
     Group(Text<256>),
     Direct(AccountPersonRef),
+    DirectMember(PersonRef),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CreationResult {
@@ -147,6 +148,11 @@ impl CreatePanel {
 pub struct Member {
     pub id: PersonRef,
     pub name: Text<256>,
+    /// Opaque room-bound correlation; never grants member actions.
+    pub author_key: Option<Text<256>>,
+    pub presence: super::presentation::Presence,
+    pub status_icon: Option<Text<64>>,
+    pub status_message: Option<Text<320>>,
     pub role: MemberRole,
     pub source: DirectorySource,
     pub permissions: Option<u16>,

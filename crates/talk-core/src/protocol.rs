@@ -45,6 +45,38 @@ pub struct AccountProbe {
     pub channel_semantics: bool,
 }
 
+/// Bounded, ephemeral room-scoped typing observation from signaling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingPerson {
+    pub name: Text<256>,
+    pub author_key: Text<256>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypingObservation {
+    pub conversation: ConversationId,
+    pub running: bool,
+    pub people: Page<TypingPerson, 16>,
+}
+
+/// Server-observed status; unknown values must not imply availability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserPresence {
+    Online,
+    Away,
+    DoNotDisturb,
+    Offline,
+    Invisible,
+    Unknown,
+}
+
+/// Bounded status text accompanies a server observation, not a permission grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserStatus {
+    pub presence: UserPresence,
+    pub icon: Option<Text<64>>,
+    pub message: Option<Text<320>>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoomKind {
     Direct,
@@ -79,6 +111,8 @@ pub struct RoomActions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Conversation {
+    /// Ephemeral direct-message presence from the latest room-list observation.
+    pub user_status: Option<UserStatus>,
     pub id: ConversationId,
     pub call_scope: Option<CallScope>,
     /// Set only by the identity ledger owner from an authoritative server room ID.

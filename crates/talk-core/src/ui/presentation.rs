@@ -355,6 +355,9 @@ pub struct ConversationView {
     pub archived: Option<bool>,
     pub archive: Decision,
     pub presence: Presence,
+    /// Ephemeral status text returned for a direct conversation.
+    pub status_icon: Option<Text<64>>,
+    pub status_message: Option<Text<320>>,
     pub participants: Option<u16>,
     pub send: Decision,
     pub attach: Decision,
@@ -585,6 +588,11 @@ pub enum UiIntent {
         request: RequestId,
         context: ConversationRef,
         action: super::messaging::MessageAction,
+    },
+    /// Recent local composing activity; the account signaling owner throttles it.
+    Typing {
+        context: ConversationRef,
+        active: bool,
     },
     AcknowledgeRoom {
         request: RequestId,

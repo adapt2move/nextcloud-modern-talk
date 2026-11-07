@@ -19,8 +19,10 @@ use talk_core::{
 
 mod codec;
 mod intent;
+mod presence;
 mod thumbnails;
 pub use intent::{OutboxIntent, OutboxOptions};
+pub use presence::{CACHE_PRESENCE_LIFETIME, CacheUserStatus, CachedPresence};
 
 pub const CACHE_ROOM_LIMIT: usize = 100;
 pub const CACHE_HISTORY_LIMIT: usize = 8;
@@ -74,6 +76,9 @@ pub struct CacheRoom {
     /// Display observations only. Never restore controls or authorization from disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<CacheRoomObservation>,
+    /// Recent direct-room display state only; never an authority or preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_status: Option<CacheUserStatus>,
 }
 
 impl CacheRoom {
@@ -84,6 +89,15 @@ impl CacheRoom {
         self.observation = Some(observation);
         if codec::encode(self, META_BYTES).is_err() {
             self.observation = None;
+            false
+        } else {
+            true
+        }
+    }
+    pub fn retain_user_status(&mut self, status: CacheUserStatus) -> bool {
+        self.user_status = Some(status);
+        if codec::encode(self, META_BYTES).is_err() {
+            self.user_status = None;
             false
         } else {
             true
@@ -487,8 +501,15 @@ impl Store {
                 return Err(DataError::InvalidInput);
             }
             let mut room = room.clone();
+            let status = room
+                .user_status
+                .take()
+                .filter(|status| room.kind == CachedRoomKind::Direct && status.fresh(now));
             if let Some(observation) = room.observation.take() {
                 room.retain_observation(observation);
+            }
+            if let Some(status) = status {
+                room.retain_user_status(status);
             }
             let bytes = codec::encode(&room, META_BYTES)?;
             thumbnails::reserve_for_write(&tx, bytes.len())?;
@@ -905,12 +926,24 @@ fn read_rooms(db: &Connection, now: u64) -> Result<Page<CacheRoom, CACHE_ROOM_LI
         {
             return Err(DataError::Corrupt);
         }
+        let mut scrub = false;
         if value
             .observation
             .as_ref()
             .is_some_and(|o| !fresh(o.observed_at, now))
         {
             value.observation = None;
+            scrub = true;
+        }
+        if value
+            .user_status
+            .as_ref()
+            .is_some_and(|status| value.kind != CachedRoomKind::Direct || !status.fresh(now))
+        {
+            value.user_status = None;
+            scrub = true;
+        }
+        if scrub {
             expired.push((key, codec::encode(&value, META_BYTES)?));
         }
         result.try_push(value).map_err(|_| DataError::Corrupt)?;

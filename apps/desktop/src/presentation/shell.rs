@@ -24,7 +24,7 @@ impl Desktop {
 
     pub(super) fn conversation_avatar(&self, row: &ConversationView) -> Div {
         let t = self.theme;
-        let mut avatar = self
+        let avatar = self
             .projected_avatar(
                 talk_core::ui::content::AssetTarget::ConversationAvatar(row.context),
                 36.,
@@ -53,29 +53,36 @@ impl Desktop {
                         ))
                 }
             });
-        if row.kind == ConversationKind::Direct && row.presence != Presence::Unknown {
-            avatar = avatar.relative().child(
-                div()
-                    .absolute()
-                    .right(px(-1.))
-                    .bottom(px(-1.))
-                    .size(px(12.))
-                    .rounded_full()
-                    .border_2()
-                    .border_color(if self.snapshot.selected == Some(row.context) {
-                        t.selected
-                    } else {
-                        t.sidebar
-                    })
-                    .bg(match row.presence {
-                        Presence::Available => t.success,
-                        Presence::DoNotDisturb => t.danger,
-                        Presence::Away => t.warning,
-                        _ => t.muted,
-                    }),
-            );
+        if row.kind == ConversationKind::Direct {
+            self.avatar_with_presence(avatar, row.presence, 12., t.surface)
+        } else {
+            avatar
         }
-        avatar
+    }
+
+    // Wrap the avatar so projected images' clipping cannot hide the status dot.
+    pub(super) fn avatar_with_presence(
+        &self,
+        avatar: Div,
+        presence: Presence,
+        dot_size: f32,
+        background: gpui::Hsla,
+    ) -> Div {
+        if presence == Presence::Unknown {
+            return avatar;
+        }
+        div().flex_none().relative().child(avatar).child(
+            div()
+                .absolute()
+                .right(px(-1.))
+                .bottom(px(-1.))
+                .size(px(dot_size))
+                .rounded_full()
+                .when(dot_size < 10., |dot| dot.border_1())
+                .when(dot_size >= 10., |dot| dot.border_2())
+                .border_color(background)
+                .bg(self.theme.presence_dot(presence)),
+        )
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {
         let narrow = self.narrow_navigation(window);
@@ -216,6 +223,39 @@ impl Desktop {
         );
         let search_availability = self.message_available(MessageFeature::Search);
         let h = chat_header::theme(t, self.palette);
+        let presence = if row.kind == ConversationKind::Direct {
+            match row.presence {
+                Presence::Available => Some(self.l("Verfügbar")),
+                Presence::Away => Some(self.l("Abwesend")),
+                Presence::DoNotDisturb => Some(self.l("Nicht stören")),
+                Presence::Offline => Some(self.l("Offline")),
+                Presence::Unknown => None,
+            }
+        } else {
+            None
+        };
+        let custom_status = [
+            row.status_icon.as_ref().map(|v| v.as_str()),
+            row.status_message.as_ref().map(|v| v.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+        let status_line = match (presence, custom_status.is_empty()) {
+            (Some(presence), false) => format!("{presence} · {custom_status}"),
+            (Some(presence), true) => presence.to_owned(),
+            (None, false) if row.kind == ConversationKind::Direct => custom_status,
+            _ => format!(
+                "{}{}",
+                self.l(kind),
+                row.participants.map_or(String::new(), |n| format!(
+                    " · {}",
+                    self.count(super::localization::Count::Participants, u64::from(n))
+                ))
+            ),
+        };
         let header = div()
             .id("conversation-header")
             .group("conversation-header")
@@ -308,15 +348,10 @@ impl Desktop {
                             ),
                     )
                     .child(
-                        self.hint(&format!(
-                            "{}{}",
-                            self.l(kind),
-                            row.participants.map_or(String::new(), |n| format!(
-                                " · {}",
-                                self.count(super::localization::Count::Participants, u64::from(n))
-                            ))
-                        ))
-                        .text_color(h.sidebar_secondary),
+                        self.hint(&status_line)
+                            .min_w_0()
+                            .text_ellipsis()
+                            .text_color(h.sidebar_secondary),
                     ),
             )
             .when(row.organization.classified == Some(true), |d| {
@@ -528,6 +563,7 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_2()
+            .child(self.typing_slot(row.context))
             .children(self.composer_context(cx))
             .child(
                 div()

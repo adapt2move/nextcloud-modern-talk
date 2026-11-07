@@ -169,6 +169,7 @@ impl Accounts {
         let event = self.call_events.event.as_ref()?.clone();
         if let NotificationKind::IncomingCall { call } = event.kind
             && self.ringing_call() == Some(call)
+            && !self.suppress_account_notifications(call.account)
         {
             return Some(event);
         }

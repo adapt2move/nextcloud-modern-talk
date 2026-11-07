@@ -122,23 +122,28 @@ impl Accounts {
             .map(|a| NotificationSources {
                 scope: a.scope,
                 revision: 0,
-                messages: if self.background.source(
-                    a.scope,
-                    background::Observation::Messages,
-                    Instant::now(),
-                ) {
+                messages: if !self.suppress_account_notifications(a.scope)
+                    && self.background.source(
+                        a.scope,
+                        background::Observation::Messages,
+                        Instant::now(),
+                    ) {
                     SourceAvailability::Available
                 } else {
                     SourceAvailability::Unavailable
                 },
                 important: SourceAvailability::Unavailable,
-                incoming_calls: if self.incoming_source_available(a.scope) {
+                incoming_calls: if !self.suppress_account_notifications(a.scope)
+                    && self.incoming_source_available(a.scope)
+                {
                     SourceAvailability::Available
                 } else {
                     SourceAvailability::Unavailable
                 },
                 calendar: SourceAvailability::Unavailable,
-                ringing: self.ringing_call().filter(|call| call.account == a.scope),
+                ringing: self.ringing_call().filter(|call| {
+                    call.account == a.scope && !self.suppress_account_notifications(a.scope)
+                }),
             })
             .collect()
     }
@@ -160,6 +165,7 @@ impl Accounts {
                 .and_then(|p| p.details.as_ref());
             let eligible = notice.received.elapsed() < LIFETIME
                 && self.current(notice.scope).is_ok()
+                && !self.suppress_account_notifications(notice.scope)
                 && self.background.source(
                     notice.scope,
                     background::Observation::Messages,

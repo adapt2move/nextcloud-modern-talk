@@ -14,6 +14,7 @@ mod preview;
 mod reads;
 mod removal;
 mod startup;
+mod typing;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -62,6 +63,7 @@ enum Purpose {
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
     LiveEvents(AccountScope),
+    Typing(ConversationRef, typing::Work),
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
@@ -135,6 +137,13 @@ pub struct Accounts {
     load_rooms: Option<AccountScope>,
     load_tags: Option<AccountScope>,
     preferences: Vec<AccountPreferenceSnapshot>,
+    // Keep a DND intent until a scoped server observation resolves an uncertain write.
+    message_pending: Vec<(AccountScope, PreferenceRequest)>,
+    status_pending: Vec<(
+        AccountScope,
+        PreferenceRequest,
+        talk_core::preferences::account::StatusChoice,
+    )>,
     failures: Vec<(AccountId, LoginFailure)>,
     unresolved: Vec<Unresolved>,
     queued_send: Option<messaging::QueuedSend>,
@@ -144,6 +153,7 @@ pub struct Accounts {
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
     background: background::Background,
+    typing: typing::Typing,
     history: history::Cache,
     cache: cache::Cache,
     picker: Option<files::Picker>,
@@ -181,6 +191,8 @@ impl Accounts {
             load_rooms: None,
             load_tags: None,
             preferences: Vec::new(),
+            status_pending: Vec::new(),
+            message_pending: Vec::new(),
             failures: Vec::new(),
             unresolved: Vec::new(),
             queued_send: None,
@@ -190,6 +202,7 @@ impl Accounts {
             message_search: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
+            typing: typing::Typing::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
             picker: None,
@@ -480,6 +493,10 @@ impl Accounts {
         let admitted = self.snapshot.accounts.as_slice();
         self.preferences
             .retain(|p| admitted.iter().any(|a| a.scope == p.scope));
+        self.status_pending
+            .retain(|(scope, _, _)| admitted.iter().any(|a| a.scope == *scope));
+        self.message_pending
+            .retain(|(scope, _)| admitted.iter().any(|a| a.scope == *scope));
         self.unresolved
             .retain(|u| admitted.iter().any(|a| a.scope == u.context.account));
         if self.snapshot.active_account.is_none()
@@ -516,6 +533,7 @@ impl Accounts {
                 self.account_load_failed(error);
             }
         }
+        self.expire_cached_presence();
         if let Some((request, deadline, choice)) = self.login.as_ref().and_then(|login| {
             login
                 .automatic_save_pending
@@ -542,6 +560,7 @@ impl Accounts {
         self.tick_content();
         self.tick_file_work();
         self.tick_background();
+        self.tick_typing();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -666,6 +685,7 @@ impl Accounts {
                 self.cache_history(context);
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
+            Purpose::Typing(context, work) => self.complete_typing(context, work, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
             Purpose::LiveEvents(scope) => {
@@ -778,7 +798,7 @@ impl Accounts {
                     }
                     Ok(RuntimeReply::Protocol(ProtocolReply::TagCreated(tag))) if tag.id.scope == scope => { self.load_tags = Some(scope); Completion::ServerAccepted }
                     Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id.account == scope.account => {
-                        if self.snapshot.active_account == Some(scope) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context.conversation == row.id { conversation(&row, scope) } else { r.clone() })); }
+                        if self.snapshot.active_account == Some(scope) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context.conversation == row.id { conversation_with_existing(&row, scope, r) } else { r.clone() })); }
                         Completion::ServerAccepted
                     }
                     Err(error) => { if self.snapshot.active_account == Some(scope) { self.snapshot.tag_state = content_error(error); } completion_error(error) }
@@ -793,7 +813,7 @@ impl Accounts {
             Purpose::Mutation(request, context) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id == context.conversation => {
-                        if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation(&row, context.account) } else { r.clone() })); }
+                        if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation_with_existing(&row, context.account, r) } else { r.clone() })); }
                         Completion::ServerAccepted
                     }
                     Err(error) => completion_error(error),
@@ -815,8 +835,40 @@ impl Accounts {
             Purpose::Preferences(scope, request) => {
                 if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope && matches!(p.state, AccountPreferenceState::Loading { request: r } | AccountPreferenceState::Saving { request: r } if r == request)) {
                     match result {
-                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => { cache.values = Some(reply.values); cache.state = AccountPreferenceState::Ready; }
-                        Err(error) => cache.state = AccountPreferenceState::Failed { request, error: preference_error(error) },
+                        Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(reply))) if reply.request == request && reply.values.scope == scope => {
+                            let status_resolved = reply.values.user_status_observed || reply.values.user_status_enabled != Some(true);
+                            let awaiting_status = self.status_pending.iter().any(|(pending_scope, _, _)| *pending_scope == scope)
+                                || self.message_pending.iter().any(|(pending_scope, _)| *pending_scope == scope);
+                            if status_resolved {
+                                self.status_pending.retain(|(pending_scope, _, _)| *pending_scope != scope);
+                                self.message_pending.retain(|(pending_scope, _)| *pending_scope != scope);
+                            }
+                            let mut values = reply.values;
+                            if values.user_status_enabled == Some(true) && !values.user_status_observed
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true) && v.user_status_observed)
+                            {
+                                values.user_presence = previous.user_presence;
+                                values.status_message = previous.status_message.clone();
+                                values.user_status_observed = true;
+                            }
+                            if values.user_status_enabled == Some(true) && values.predefined_statuses.is_none()
+                                && let Some(previous) = cache.values.as_ref().filter(|v| v.scope == scope && v.user_status_enabled == Some(true))
+                            {
+                                values.predefined_statuses = previous.predefined_statuses.clone();
+                            }
+                            cache.values = Some(values);
+                            cache.state = if awaiting_status && !status_resolved {
+                                AccountPreferenceState::Failed { request, error: AccountPreferenceError::Uncertain }
+                            } else { AccountPreferenceState::Ready };
+                        }
+                        Err(error) => {
+                            let error = preference_error(error);
+                            if !matches!(error, AccountPreferenceError::Network | AccountPreferenceError::Uncertain) {
+                                self.status_pending.retain(|(pending_scope, pending_request, _)| *pending_scope != scope || *pending_request != request);
+                                self.message_pending.retain(|(pending_scope, pending_request)| *pending_scope != scope || *pending_request != request);
+                            }
+                            cache.state = AccountPreferenceState::Failed { request, error };
+                        },
                         _ => cache.state = AccountPreferenceState::Failed { request, error: AccountPreferenceError::Unavailable },
                     }
                 }
@@ -839,6 +891,21 @@ impl Accounts {
         &mut self,
         command: AccountPreferenceCommand,
     ) -> Result<(), AccountPreferenceError> {
+        let message_change = matches!(
+            &command,
+            AccountPreferenceCommand::Set {
+                change: talk_core::preferences::account::AccountPreferenceChange::StatusMessage(_),
+                ..
+            }
+        );
+        let status_choice = match &command {
+            AccountPreferenceCommand::Set {
+                change:
+                    talk_core::preferences::account::AccountPreferenceChange::UserPresence(choice),
+                ..
+            } => Some(*choice),
+            _ => None,
+        };
         let (scope, request, protocol, state) = match command {
             AccountPreferenceCommand::Load { scope, request } => (
                 scope,
@@ -861,10 +928,10 @@ impl Accounts {
             .map_err(|_| AccountPreferenceError::Stale)?;
         if self.preferences.iter().any(|p| {
             p.scope == scope
-                && matches!(
-                    p.state,
-                    AccountPreferenceState::Loading { .. } | AccountPreferenceState::Saving { .. }
-                )
+                && (matches!(p.state, AccountPreferenceState::Saving { .. })
+                    || matches!(p.state, AccountPreferenceState::Loading { .. })
+                        && status_choice.is_none()
+                        && !message_change)
         }) {
             return Err(AccountPreferenceError::Busy);
         }
@@ -879,6 +946,16 @@ impl Accounts {
             Purpose::Preferences(scope, request),
         )
         .map_err(preference_error)?;
+        if message_change {
+            self.message_pending
+                .retain(|(pending_scope, _)| *pending_scope != scope);
+            self.message_pending.push((scope, request));
+        }
+        if let Some(choice) = status_choice {
+            self.status_pending
+                .retain(|(pending_scope, _, _)| *pending_scope != scope);
+            self.status_pending.push((scope, request, choice));
+        }
         if let Some(cache) = self.preferences.iter_mut().find(|p| p.scope == scope) {
             cache.state = state;
         } else {
@@ -890,6 +967,23 @@ impl Accounts {
         }
         Ok(())
     }
+    fn suppress_account_notifications(&self, scope: AccountScope) -> bool {
+        use talk_core::preferences::account::StatusChoice;
+        self.status_pending
+            .iter()
+            .any(|(pending_scope, _, choice)| {
+                *pending_scope == scope && *choice == StatusChoice::DoNotDisturb
+            })
+            || self.preferences.iter().any(|snapshot| {
+                snapshot.scope == scope
+                    && snapshot.values.as_ref().is_some_and(|values| {
+                        values.user_status_enabled == Some(true)
+                            && values.user_status_observed
+                            && values.user_presence == Some(StatusChoice::DoNotDisturb)
+                    })
+            })
+    }
+
     fn cancel_login(&mut self) {
         self.login_retry_server = None;
         if let Some(login) = self.login.take()
@@ -975,6 +1069,7 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::Typing { context, active } => self.typing_activity(context, active)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -1406,6 +1501,10 @@ impl Accounts {
                     .logout(account)
                     .map_err(submit_error)?;
                 self.preferences.retain(|p| p.scope.account != account);
+                self.status_pending
+                    .retain(|(scope, _, _)| scope.account != account);
+                self.message_pending
+                    .retain(|(scope, _)| scope.account != account);
                 self.history.remove_account(account);
                 self.outbox.retire_account(account);
                 if self
@@ -1578,7 +1677,23 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         },
         archived: r.archived,
         archive: r.archive,
-        presence: Presence::Unknown,
+        presence: match r.user_status.as_ref().map(|status| status.presence) {
+            Some(protocol::UserPresence::Online) => Presence::Available,
+            Some(protocol::UserPresence::Away) => Presence::Away,
+            Some(protocol::UserPresence::DoNotDisturb) => Presence::DoNotDisturb,
+            Some(protocol::UserPresence::Offline | protocol::UserPresence::Invisible) => {
+                Presence::Offline
+            }
+            Some(protocol::UserPresence::Unknown) | None => Presence::Unknown,
+        },
+        status_icon: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.icon.clone()),
+        status_message: r
+            .user_status
+            .as_ref()
+            .and_then(|status| status.message.clone()),
         participants: None,
         send: r.actions.send_message,
         attach: Decision::Unknown,
@@ -1592,6 +1707,26 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         call: Decision::Unknown,
         call_scope: r.call_scope,
     }
+}
+
+// Single-room metadata and mutation replies do not request status. Preserve only
+// the current same-room observation; the next authoritative list can clear it.
+fn conversation_with_existing(
+    room: &protocol::Conversation,
+    scope: AccountScope,
+    existing: &ConversationView,
+) -> ConversationView {
+    let mut row = conversation(room, scope);
+    if room.user_status.is_none()
+        && row.context == existing.context
+        && row.kind == ConversationKind::Direct
+        && existing.kind == ConversationKind::Direct
+    {
+        row.presence = existing.presence;
+        row.status_icon = existing.status_icon.clone();
+        row.status_message = existing.status_message.clone();
+    }
+    row
 }
 
 impl Purpose {

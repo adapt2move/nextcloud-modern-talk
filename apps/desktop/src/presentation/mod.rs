@@ -19,6 +19,9 @@ mod navigation;
 mod onboarding;
 mod organization;
 mod overlays;
+mod own_status;
+mod own_status_message;
+mod people_card;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
@@ -30,6 +33,7 @@ mod sidebar;
 mod state;
 pub mod theme;
 mod toast;
+mod typing;
 mod window_chrome;
 
 use gpui::{
@@ -90,6 +94,7 @@ pub enum LocalAction {
     CheckUpdates,
     InstallUpdate(u64),
     Room(conversation_dialog::Action),
+    Person(people_card::Action),
     Message(messaging::Action),
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
@@ -141,6 +146,14 @@ pub enum LocalAction {
     NotificationAccess(talk_core::preferences::notifications::NotificationAccessAction),
     ReloadAccountPreferences,
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
+    ToggleOwnStatus,
+    EditStatusMessage,
+    BackStatusMenu,
+    SaveStatusMessage,
+    ClearStatusMessage,
+    SelectStatusExpiry(talk_core::preferences::account::StatusClearAfter),
+    SelectPredefinedStatus(usize),
+    SetOwnStatus(talk_core::preferences::account::StatusChoice),
     SaveUploadFolder,
     RefreshDevice(talk_core::preferences::devices::DeviceKind),
     Permission(
@@ -211,6 +224,7 @@ pub struct Desktop {
     // never cleared by an error snapshot; composition owns restart/quit.
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
+    people_card: people_card::Card,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -297,6 +311,7 @@ pub struct Desktop {
     pub composer: Entity<TextInput>,
     composer_focus: FocusHandle,
     composer_active: bool,
+    typing_input: typing::Input,
     file_send: Option<attachments::PendingSend>,
     pub conversation_name: Entity<TextInput>,
     group_name: Entity<TextInput>,
@@ -304,6 +319,25 @@ pub struct Desktop {
     account_preferences: Option<talk_core::preferences::account::AccountPreferenceSnapshot>,
     account_preference_request: u64,
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
+    own_status_open: bool,
+    own_status_editing: bool,
+    own_status_message_input: Entity<TextInput>,
+    own_status_icon_input: Entity<TextInput>,
+    own_status_clear_after: talk_core::preferences::account::StatusClearAfter,
+    own_status_message_error: bool,
+    own_message_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        Option<talk_core::preferences::account::StatusMessage>,
+    )>,
+    own_status_focus: bool,
+    own_status_optimistic: Option<(
+        talk_core::ui::AccountScope,
+        talk_core::preferences::RequestId,
+        talk_core::preferences::account::StatusChoice,
+    )>,
+    own_status_reconcile: Option<(talk_core::ui::AccountScope, std::time::Instant)>,
+    own_status_loaded: Option<talk_core::ui::AccountScope>,
     account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
@@ -387,6 +421,9 @@ impl Desktop {
         let conversation_name = cx.new(|cx| TextInput::new("Name des Gesprächs", 256, theme, cx));
         let group_name = cx.new(|cx| TextInput::new("Name der Gruppe", 128, theme, cx));
         let upload_folder = cx.new(|cx| TextInput::new("/Talk", 2048, theme, cx));
+        let own_status_message_input =
+            cx.new(|cx| TextInput::new("Statusnachricht", 320, theme, cx));
+        let own_status_icon_input = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let weak = cx.weak_entity();
         let observer = window.observe_window_appearance(move |_, cx| {
             let _ = weak.update(cx, |_, cx| cx.notify());
@@ -435,7 +472,12 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
-            .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain([
+                message_ui.search.clone(),
+                message_ui.time_input.clone(),
+                own_status_message_input.clone(),
+                own_status_icon_input.clone(),
+            ])
             .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
@@ -447,6 +489,7 @@ impl Desktop {
             _text_selection_observer: text_selection_observer,
             _text_link_subscription: text_link_subscription,
             room_ui,
+            people_card: people_card::Card::new(cx),
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -526,6 +569,7 @@ impl Desktop {
             composer,
             composer_focus,
             composer_active: false,
+            typing_input: typing::Input::default(),
             file_send: None,
             conversation_name,
             group_name,
@@ -533,6 +577,17 @@ impl Desktop {
             account_preferences: None,
             account_preference_request: 0,
             account_preference_error: None,
+            own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
+            own_status_editing: development && probe == Probe::StatusMessage,
+            own_status_message_input,
+            own_status_icon_input,
+            own_status_clear_after: talk_core::preferences::account::StatusClearAfter::Never,
+            own_status_message_error: false,
+            own_message_optimistic: None,
+            own_status_focus: false,
+            own_status_optimistic: None,
+            own_status_reconcile: None,
+            own_status_loaded: None,
             account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
@@ -557,6 +612,9 @@ impl Desktop {
             pending_ack: None,
             theme,
         };
+        if development && matches!(probe, Probe::Status | Probe::StatusMessage) {
+            desktop.account_preferences = desktop.fixture_own_status();
+        }
         if development && initial_overlay == Some(Overlay::Thread) {
             desktop.thread_parent = desktop.snapshot.selected.and_then(|c| {
                 desktop
@@ -965,6 +1023,17 @@ impl Desktop {
         {
             return;
         }
+        if matches!(
+            &action,
+            LocalAction::Navigate(_)
+                | LocalAction::ReturnConversation
+                | LocalAction::Destination(_)
+                | LocalAction::Call
+                | LocalAction::Accept
+                | LocalAction::Intent(UiIntent::SelectAccount(_) | UiIntent::OpenConversation(_))
+        ) {
+            self.cancel_pending_person_call();
+        }
         if self.local_preference_action(&action, cx) {
             return;
         }
@@ -1005,6 +1074,9 @@ impl Desktop {
         let invoker = window.focused(cx);
         let mut server_input_rejected = false;
         let mut sent_in = None;
+        if matches!(action, LocalAction::Send) {
+            self.stop_local_typing();
+        }
         match action {
             LocalAction::RemoveAccount(account, scope) => {
                 self.request_account_removal(account, scope, window, cx)
@@ -1031,6 +1103,7 @@ impl Desktop {
                     self.submit_creation(talk_core::ui::conversation::CreateAction::Group(name));
                 }
             }
+            LocalAction::Person(action) => self.person_action(action, window, cx),
             LocalAction::CreateDirect(person) => {
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
@@ -1082,6 +1155,8 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                self.own_status_open = false;
+                self.own_status_editing = false;
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1283,6 +1358,7 @@ impl Desktop {
                 }
             }
             LocalAction::Navigate(context) => {
+                self.own_status_open = false;
                 if self.save_draft(cx) && self.submit(UiIntent::OpenConversation(context)) {
                     self.retire_emoji_picker();
                     self.navigation_open = false;
@@ -1604,6 +1680,17 @@ impl Desktop {
             }
             LocalAction::StartDevice(kind) => self.start_device_preview(kind),
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
+            LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
+            LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
+            LocalAction::BackStatusMenu => {
+                self.own_status_editing = false;
+                self.own_status_focus = true;
+            }
+            LocalAction::SaveStatusMessage => self.save_status_message(cx),
+            LocalAction::ClearStatusMessage => self.clear_status_message(cx),
+            LocalAction::SelectStatusExpiry(choice) => self.own_status_clear_after = choice,
+            LocalAction::SelectPredefinedStatus(index) => self.select_predefined_status(index, cx),
+            LocalAction::SetOwnStatus(choice) => self.set_own_status(choice, cx),
             LocalAction::ReloadAccountPreferences => self.load_account_preferences(cx),
             LocalAction::AccountPreference(change) => self.change_account_preference(change, cx),
             LocalAction::SaveUploadFolder => {
@@ -1813,6 +1900,16 @@ impl Desktop {
             }
             cx.stop_propagation();
         } else if action == Some(ActionId::Close) {
+            if self.own_status_open {
+                self.own_status_open = false;
+                self.own_status_editing = false;
+                if let Some(focus) = self.control_focus.current(&"own-status-menu".into()) {
+                    focus.focus(window);
+                }
+                cx.notify();
+                cx.stop_propagation();
+                return;
+            }
             if self.conversation_search_open() && self.composer_available() {
                 self.handle(
                     LocalAction::Message(messaging::Action::CloseSearch),
@@ -1906,6 +2003,8 @@ impl Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]
@@ -1925,6 +2024,8 @@ impl Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]
@@ -1983,11 +2084,13 @@ impl Render for Desktop {
         // Only entry/exit notifications rebuild the optional composer details.
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
+        self.prepare_typing(window, cx);
         self.prepare_message_motion(window);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
         self.prepare_member_dialog(window, cx);
+        self.prepare_person_card(window);
         // One native frame deadline for the current eligible control only.
         // No background task survives this view; at most one queued frame can
         // drain after cancellation. Pending and displayed IDs must remain live.
@@ -2121,6 +2224,21 @@ impl Render for Desktop {
             i.interactive =
                 !incoming && (self.overlay.is_none() || self.overlay == Some(Overlay::Search));
         });
+        for input in [&self.own_status_message_input, &self.own_status_icon_input] {
+            input.update(cx, |i, _| {
+                i.theme = t;
+                i.text_scale = f32::from(self.scale) / 100.;
+                i.interactive = !incoming
+                    && self.overlay.is_none()
+                    && self.own_status_open
+                    && self.own_status_editing;
+                i.clipboard_export_allowed = true;
+            });
+        }
+        self.own_status_message_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Statusnachricht")));
+        self.own_status_icon_input
+            .update(cx, |i, _| i.set_placeholder(self.l("Emoji")));
         self.upload_folder.update(cx, |i, _| {
             i.interactive = !incoming
                 && self.overlay == Some(Overlay::Settings)
@@ -2177,6 +2295,8 @@ impl Render for Desktop {
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
             &self.message_ui.time_input,
         ]
@@ -2314,7 +2434,8 @@ impl Render for Desktop {
                     }
                 }
                 if !composing
-                    && (this.member_dialog_key(event, window, cx)
+                    && (this.person_key(event, window, cx)
+                        || this.member_dialog_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)
                         || this.message_deadline_key(event, window, cx)
@@ -2370,6 +2491,15 @@ impl Render for Desktop {
                 reveal.request();
                 window.refresh();
             });
+        }
+        if self.own_status_focus
+            && self.own_status_open
+            && let Some(focus) = self
+                .control_focus
+                .current(&("own-status-choice", 0usize).into())
+        {
+            self.own_status_focus = false;
+            focus.focus(window);
         }
         if let Some(id) = self.pending_device_focus.take()
             && self.devices_open()

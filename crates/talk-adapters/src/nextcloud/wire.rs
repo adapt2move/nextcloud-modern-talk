@@ -6,7 +6,7 @@ use talk_core::policy::Decision;
 use talk_core::ports::ErrorKind;
 use talk_core::protocol::{
     AccountProbe, Conversation, ConversationOrganization, FeatureSupport, Role, RoomActions,
-    RoomKind, ServerFamily,
+    RoomKind, ServerFamily, UserPresence, UserStatus,
 };
 
 #[cfg(any(test, feature = "backend-test"))]
@@ -51,6 +51,8 @@ fn boolean(value: Option<&Value>) -> Decision {
 
 #[derive(Clone)]
 pub(super) struct Capabilities {
+    pub user_status_enabled: Option<bool>,
+    pub user_status_emoji: Option<bool>,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
     pub attachment_folder: Option<talk_core::preferences::account::NextcloudFolder>,
@@ -88,6 +90,8 @@ impl Capabilities {
             return Err(ErrorKind::Malformed);
         }
         Ok(Self {
+            user_status_enabled: data["capabilities"]["user_status"]["enabled"].as_bool(),
+            user_status_emoji: data["capabilities"]["user_status"]["supports_emoji"].as_bool(),
             features,
             read_receipts: super::preferences::public_privacy(
                 &spreed["config"]["chat"]["read-privacy"],
@@ -149,6 +153,39 @@ impl Capabilities {
             channel_semantics: self.has("announcement-preset"),
         }
     }
+}
+
+pub(super) fn presence(value: nextcloud_talk_api::presence::UserStatus) -> UserPresence {
+    use nextcloud_talk_api::presence::UserStatus as S;
+    match value {
+        S::Online => UserPresence::Online,
+        S::Away => UserPresence::Away,
+        S::DoNotDisturb => UserPresence::DoNotDisturb,
+        S::Offline => UserPresence::Offline,
+        S::Invisible => UserPresence::Invisible,
+        S::Unknown => UserPresence::Unknown,
+    }
+}
+
+fn user_status(data: &Value, kind: RoomKind, caps: &Capabilities) -> Option<UserStatus> {
+    if kind != RoomKind::Direct || caps.user_status_enabled != Some(true) || !caps.supported() {
+        return None;
+    }
+    let raw = data.get("status")?.as_str()?;
+    let presence = presence(nextcloud_talk_api::presence::UserStatus::from_wire(Some(
+        raw,
+    )));
+    Some(UserStatus {
+        presence,
+        icon: data
+            .get("statusIcon")
+            .and_then(Value::as_str)
+            .and_then(|s| Text::new(s).ok()),
+        message: data
+            .get("statusMessage")
+            .and_then(Value::as_str)
+            .and_then(|s| Text::new(s).ok()),
+    })
 }
 
 pub(super) fn room(
@@ -265,6 +302,7 @@ pub(super) fn room(
         actions.join_call = Decision::Denied;
     }
     Ok(Conversation {
+        user_status: user_status(data, kind, caps),
         id,
         call_scope: None,
         navigation_key: None,

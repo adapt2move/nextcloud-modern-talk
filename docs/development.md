@@ -157,6 +157,11 @@ The fixture shows a pending send rather than fabricating upload success. It has
 no file or server I/O. Native Finder promises require a real macOS account-connected
 run; an isolated Cocoa binding check or Linux UI run does not qualify them.
 
+Use `chat-presence` to inspect fictional direct-message presence and custom status
+in the sidebar and header. `status-picker` opens a fictional account-status
+menu, and `status-message` opens its fictional status-message editor. These
+fixtures do not query a server.
+
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 
 Update development builds are not treated as installable packages. For installation checks use the private fixture in [tools/updates](../tools/updates/install_probe.py), which creates a disposable package and never overwrites a system installation. The PackageKit fixture uses a private D-Bus service, not the system package manager. Runtime checks and package-layout fixtures do not qualify native macOS or Windows installation.

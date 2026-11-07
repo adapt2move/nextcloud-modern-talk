@@ -753,7 +753,7 @@ pub(super) fn cached_draft_context(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     fn test_page<T, const N: usize>(
         values: impl IntoIterator<Item = T>,
@@ -764,7 +764,7 @@ mod tests {
         }
         page
     }
-    fn draft_snapshot() -> PresentationSnapshot {
+    pub(in crate::presentation) fn draft_snapshot() -> PresentationSnapshot {
         use talk_core::ui::presentation::{
             AccountConnectionState, AccountView, ConversationListState, LoginPhase, LoginView,
             NativeStoreState, Presence, StorageStatus,
@@ -785,6 +785,8 @@ mod tests {
             archived: Some(false),
             archive: Decision::Unknown,
             presence: Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             participants: None,
             send: Decision::Unknown,
             attach: Decision::Unknown,
@@ -1835,6 +1837,8 @@ mod tests {
             archived: None,
             archive: Decision::Unknown,
             presence: talk_core::ui::presentation::Presence::Unknown,
+            status_icon: None,
+            status_message: None,
             participants: None,
             send: Decision::Unknown,
             attach: Decision::Unknown,

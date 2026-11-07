@@ -27,7 +27,10 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
-        let write = matches!(action, CreateAction::Group(_) | CreateAction::Direct(_));
+        let write = matches!(
+            action,
+            CreateAction::Group(_) | CreateAction::Direct(_) | CreateAction::DirectMember(_)
+        );
         if write
             && self
                 .snapshot
@@ -77,6 +80,44 @@ impl Accounts {
                         operation,
                         recipient: protocol::conversation::RecipientId {
                             scope: account,
+                            local: person.local,
+                        },
+                    },
+                    Work::Create,
+                )
+            }
+            CreateAction::DirectMember(person) => {
+                if person.context.account != account
+                    || self.snapshot.selected != Some(person.context)
+                    || self
+                        .snapshot
+                        .conversation_panel
+                        .as_ref()
+                        .is_none_or(|panel| {
+                            panel.context != person.context
+                                || !panel.members_loaded
+                                || panel.details_stale
+                                || !panel.members.as_slice().iter().any(|member| {
+                                    member.id == person
+                                        && !member.self_user
+                                        && member.source
+                                            == talk_core::ui::conversation::DirectorySource::User
+                                })
+                        })
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                let operation = self
+                    .connection
+                    .as_ref()
+                    .map_err(|e| submit_error(*e))?
+                    .new_operation_id(account)
+                    .map_err(submit_error)?;
+                (
+                    ProtocolRequest::CreateDirectForMember {
+                        operation,
+                        member: protocol::conversation::MemberId {
+                            conversation: person.context.conversation,
                             local: person.local,
                         },
                     },

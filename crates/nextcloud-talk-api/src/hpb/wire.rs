@@ -92,6 +92,28 @@ pub(super) fn hint(
         _ => None,
     })
 }
+/// Talk 24/25 use ordinary session messages, not the video/MCU protocol.
+pub(super) fn typing(value: &Value) -> Result<Option<(PeerSession, bool)>, ErrorKind> {
+    let started = match value["data"]["type"].as_str() {
+        Some("startedTyping") => true,
+        Some("stoppedTyping") => false,
+        _ => return Ok(None),
+    };
+    if value["sender"]["type"].as_str() != Some("session") {
+        return Err(ErrorKind::WrongScope);
+    }
+    let sender = PeerSession::parse(text(&value["sender"]["sessionid"], 512)?)?;
+    if value["data"].get("from").is_some()
+        && value["data"]["from"].as_str() != Some(sender.0.as_str())
+    {
+        return Err(ErrorKind::WrongScope);
+    }
+    Ok(Some((sender, started)))
+}
+pub(super) fn typing_message(peer: &PeerSession, started: bool) -> Value {
+    json!({"type":"message","message":{"recipient":{"type":"session","sessionid":peer.0.as_str()},
+        "data":{"type":if started { "startedTyping" } else { "stoppedTyping" }, "to":peer.0.as_str()}}})
+}
 pub(super) fn signal(
     value: &Value,
 ) -> Result<Option<(PeerSession, Negotiation, Signal)>, ErrorKind> {

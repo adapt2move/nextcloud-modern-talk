@@ -45,6 +45,43 @@ impl Drop for MeetingLifetime {
 }
 
 impl Transport {
+    /// Split a chat signaling long-poll from writes within the isolated chat
+    /// cookie owner. Cookie changes merge by revision just like call lanes.
+    pub(crate) fn typing_reader(&mut self) -> Transport {
+        let cookies = self
+            .shared_cookies
+            .get_or_insert_with(|| {
+                Arc::new(Mutex::new(SharedCookies {
+                    revision: 0,
+                    cookies: self.cookies.clone(),
+                }))
+            })
+            .clone();
+        Transport {
+            request_dispatched: false,
+            binding: AuthenticatedBinding {
+                scope: self.binding.scope,
+                host: self.binding.host,
+                origin: ServerOrigin(self.binding.origin.0.clone()),
+                login_name: self.binding.login_name.clone(),
+                user: self.binding.user.clone(),
+                password: self.binding.password.clone(),
+                cancellation: self.binding.cancellation.clone(),
+            },
+            client: self.client.clone(),
+            runtime: self.runtime.clone(),
+            _account_charge: self._account_charge.clone(),
+            #[cfg(any(test, feature = "backend-test"))]
+            diagnostic_loop: std::sync::Weak::new(),
+            #[cfg(any(test, feature = "backend-test"))]
+            diagnostic_cookies: duplex::CookieOrder::default(),
+            cookies: Vec::new(),
+            shared_cookies: Some(cookies),
+            cancel_account_on_drop: false,
+            meeting_active: self.meeting_active.clone(),
+            meeting_lifetime: std::sync::Weak::new(),
+        }
+    }
     pub(crate) fn open_meeting(
         &mut self,
         context: &OperationContext,

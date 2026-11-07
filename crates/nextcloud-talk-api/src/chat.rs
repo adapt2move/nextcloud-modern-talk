@@ -219,6 +219,8 @@ pub(crate) fn rich(v: Option<&Value>) -> Result<Vec<RichObject>, ErrorKind> {
 #[derive(Clone, Debug)]
 pub struct Mention {
     pub id: String,
+    /// Identity in the source namespace; never used as a send token when mentionId is present.
+    pub actor_id: String,
     pub label: String,
     pub source: String,
 }
@@ -400,8 +402,11 @@ pub(crate) fn decode(kind: ResponseKind, v: &Value) -> Result<crate::Reply, Erro
             R::Search { hits, cursor }
         }
         K::Mentions => R::Mentions(array(v, 100, |v| {
+            let actor_id = required(v, "id", 512)?;
+            let id = string(v.get("mentionId"), 512)?.unwrap_or_else(|| actor_id.clone());
             Ok(Mention {
-                id: required(v, "mentionId", 512)?,
+                id,
+                actor_id,
                 label: required(v, "label", 256)?,
                 source: required(v, "source", 64)?,
             })
@@ -850,5 +855,28 @@ pub(crate) fn validate(room: &RoomToken, response: &Response) -> Result<(), Erro
         Err(ErrorKind::WrongScope)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn mention_prefers_federation_id_and_falls_back_to_actor_id() {
+        let value = json!([
+            {"id":"alice", "mentionId":"federated/alice", "label":"Alice", "source":"users"},
+            {"id":"bob", "label":"Bob", "source":"users"}
+        ]);
+        let crate::Reply::Chat(Response::Mentions(mentions)) =
+            decode(ResponseKind::Mentions, &value).unwrap()
+        else {
+            panic!("mention response");
+        };
+        assert_eq!(mentions[0].actor_id, "alice");
+        assert_eq!(mentions[0].id, "federated/alice");
+        assert_eq!(mentions[1].actor_id, "bob");
+        assert_eq!(mentions[1].id, "bob");
     }
 }

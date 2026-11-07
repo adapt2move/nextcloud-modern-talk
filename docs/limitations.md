@@ -24,9 +24,22 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- Typing indicators, voice messages, complete document viewers, account-wide
+- Voice messages, complete document viewers, account-wide
   content search and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
+- Typing uses the active ordinary local room's internal or HPB signaling session
+  only when typing privacy and current room policy permit it. Classified,
+  channel, federated and unknown-policy rooms are excluded. Indicators are
+  ephemeral and expire; they are not an offline history of activity.
+- Direct-conversation presence and custom status are refreshed with the room
+  list when the server enables `user_status`. Recent direct-room status may be
+  restored for five minutes from the existing private, unencrypted ordinary-room
+  cache; it never grants authority and is hidden when stale. The account menu changes availability and
+  edits custom and predefined messages with expiry. Member status is loaded with the
+  room's bounded participant list, and message-author status is shown when that list
+  provides a matching identity. People cards use current room observations; calling
+  a group member first resolves the direct room and checks its call permission. Native
+  accessibility qualification remains separate from UI fixtures.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
