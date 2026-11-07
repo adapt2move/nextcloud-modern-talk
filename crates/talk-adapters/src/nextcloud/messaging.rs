@@ -515,7 +515,7 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
         }
-        let private_token = if let Some(parent) = o.private_reply {
+        let private_token = if let Some(parent) = o.private_reply.as_deref().copied() {
             if !caps.has("private-reply") || !caps.has("chat-get-context") {
                 return Err(self.error(ErrorKind::Unsupported));
             }
@@ -568,7 +568,10 @@ impl NextcloudClient {
                 .await?;
         }
         Ok(api::chat::ComposeOptions {
-            reply_to: o.reply_to.or(o.private_reply).map(|m| m.sequence),
+            reply_to: o
+                .reply_to
+                .or(o.private_reply.as_deref().copied())
+                .map(|m| m.sequence),
             reply_to_token: private_token,
             thread: o.thread.map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),

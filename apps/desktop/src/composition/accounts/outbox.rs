@@ -1279,10 +1279,10 @@ fn command(
                     if source.account != context.account || source == context {
                         return None;
                     }
-                    Some(protocol::MessageId {
+                    Some(Box::new(protocol::MessageId {
                         conversation: source.conversation,
                         sequence: private.message,
-                    })
+                    }))
                 }
                 None => None,
             },

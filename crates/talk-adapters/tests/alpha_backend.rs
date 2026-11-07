@@ -205,7 +205,7 @@ async fn released_server_messaging_and_room_controls() {
         M::Send {
             text: text("A private response"),
             options: ComposeOptions {
-                private_reply: Some(source),
+                private_reply: Some(Box::new(source)),
                 ..Default::default()
             },
         },

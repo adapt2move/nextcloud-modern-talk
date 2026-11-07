@@ -56,7 +56,7 @@ pub struct MessageDetails {
 pub struct ComposeOptions {
     pub reply_to: Option<MessageId>,
     /// Original message in another conversation for a private reply.
-    pub private_reply: Option<MessageId>,
+    pub private_reply: Option<Box<MessageId>>,
     pub thread: Option<MessageId>,
     pub thread_title: Option<Text<256>>,
     pub silent: bool,
