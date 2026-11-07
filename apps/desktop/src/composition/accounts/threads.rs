@@ -1,14 +1,14 @@
 //! Account-scoped, bounded subscribed-thread observation.
 use super::*;
-use talk_core::ui::presentation::ThreadView;
+use talk_core::ui::presentation::{ThreadList, ThreadView};
 
 impl Accounts {
     pub(super) fn tick_thread_refresh(&mut self, now: Instant) {
-        let Some((scope, due)) = self.thread_refresh_due else {
+        let Some((scope, offset, due)) = self.thread_refresh_due else {
             return;
         };
         if self.snapshot.active_account != Some(scope)
-            || self.snapshot.threads.support != FeatureSupport::Supported
+            || self.snapshot.threads.support == FeatureSupport::Unsupported
         {
             self.thread_refresh_due = None;
             return;
@@ -16,14 +16,13 @@ impl Accounts {
         if now < due {
             return;
         }
-        let offset = self.snapshot.threads.offset;
         match self.load_threads(scope, offset) {
             Ok(()) => self.thread_refresh_due = None,
             Err(SubmitError::Busy) => {
-                self.thread_refresh_due = Some((scope, now + Duration::from_secs(2)));
+                self.thread_refresh_due = Some((scope, offset, now + Duration::from_secs(2)));
             }
             Err(_) => {
-                self.thread_refresh_due = Some((scope, now + Duration::from_secs(30)));
+                self.thread_refresh_due = Some((scope, offset, now + Duration::from_secs(30)));
             }
         }
     }
@@ -34,8 +33,10 @@ impl Accounts {
         {
             let soon = now + Duration::from_secs(2);
             self.thread_refresh_due = Some(match self.thread_refresh_due {
-                Some((current, due)) if current == scope => (scope, due.min(soon)),
-                _ => (scope, soon),
+                Some((current, offset, due)) if current == scope && due <= soon => {
+                    (scope, offset, due)
+                }
+                _ => (scope, self.snapshot.threads.offset, soon),
             });
         }
     }
@@ -87,6 +88,7 @@ impl Accounts {
         if self.snapshot.active_account != Some(scope) || self.current(scope).is_err() {
             return;
         }
+        let mut retry = false;
         match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::SubscribedThreads(threads)))
                 if threads.as_slice().iter().all(|thread| {
@@ -129,17 +131,43 @@ impl Accounts {
                 self.snapshot.threads.support = FeatureSupport::Unsupported;
                 self.snapshot.threads.content = ContentState::Unconfigured;
             }
-            Err(error) => self.snapshot.threads.content = content_error(error),
+            Err(error) => retry = record_thread_failure(&mut self.snapshot.threads, error),
             _ => self.snapshot.threads.content = ContentState::Failed,
         }
-        if self.snapshot.threads.support == FeatureSupport::Supported {
+        if retry || self.snapshot.threads.content == ContentState::Ready {
             let next = Instant::now() + Duration::from_secs(30);
             self.thread_refresh_due = Some(match self.thread_refresh_due {
-                Some((current, due)) if current == scope => (scope, due.min(next)),
-                _ => (scope, next),
+                Some((current, _, due)) if current == scope => (scope, offset, due.min(next)),
+                _ => (scope, offset, next),
             });
+        } else {
+            self.thread_refresh_due = None;
         }
         self.touch();
+    }
+}
+
+/// Keep the last useful page visible while transient failures retry in the background.
+fn record_thread_failure(list: &mut ThreadList, error: IdentityError) -> bool {
+    if matches!(
+        error,
+        IdentityError::Request(
+            ErrorKind::Transport
+                | ErrorKind::Deadline
+                | ErrorKind::ServerUnavailable
+                | ErrorKind::RateLimited
+                | ErrorKind::Busy
+        )
+    ) {
+        list.content = if list.support == FeatureSupport::Supported {
+            ContentState::Ready
+        } else {
+            ContentState::Loading
+        };
+        true
+    } else {
+        list.content = content_error(error);
+        false
     }
 }
 
@@ -156,15 +184,60 @@ mod tests {
         model.hint_thread_refresh(scope, now);
         assert_eq!(
             model.thread_refresh_due,
-            Some((scope, now + Duration::from_secs(2)))
+            Some((scope, 0, now + Duration::from_secs(2)))
         );
         model.hint_thread_refresh(scope, now + Duration::from_secs(1));
         assert_eq!(
             model.thread_refresh_due,
-            Some((scope, now + Duration::from_secs(2)))
+            Some((scope, 0, now + Duration::from_secs(2)))
         );
         model.snapshot.threads.support = FeatureSupport::Unsupported;
         model.tick_thread_refresh(now + Duration::from_secs(3));
         assert!(model.thread_refresh_due.is_none());
+    }
+
+    #[test]
+    fn transient_failures_keep_the_observed_page_and_retry_discovery() {
+        let snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
+        let mut list = snapshot.threads;
+        let entries = list.entries.clone();
+        for kind in [
+            ErrorKind::Transport,
+            ErrorKind::Deadline,
+            ErrorKind::ServerUnavailable,
+            ErrorKind::RateLimited,
+            ErrorKind::Busy,
+        ] {
+            assert!(record_thread_failure(
+                &mut list,
+                IdentityError::Request(kind)
+            ));
+            assert_eq!(list.content, ContentState::Ready);
+            assert_eq!(list.entries, entries);
+        }
+        list.support = FeatureSupport::Unknown;
+        list.entries = Page::empty();
+        assert!(record_thread_failure(
+            &mut list,
+            IdentityError::Request(ErrorKind::Transport)
+        ));
+        assert_eq!(list.content, ContentState::Loading);
+        assert!(!record_thread_failure(
+            &mut list,
+            IdentityError::Request(ErrorKind::PermissionDenied)
+        ));
+        assert_eq!(list.content, ContentState::Denied);
+
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
+        let scope = model.snapshot.active_account.unwrap();
+        model.snapshot.threads.support = FeatureSupport::Unknown;
+        let now = Instant::now();
+        model.thread_refresh_due = Some((scope, 50, now));
+        model.tick_thread_refresh(now);
+        assert_eq!(
+            model.thread_refresh_due,
+            Some((scope, 50, now + Duration::from_secs(30)))
+        );
     }
 }

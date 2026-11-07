@@ -155,7 +155,7 @@ pub struct Accounts {
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
-    thread_refresh_due: Option<(AccountScope, Instant)>,
+    thread_refresh_due: Option<(AccountScope, u32, Instant)>,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
