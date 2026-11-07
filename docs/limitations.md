@@ -28,11 +28,13 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   cannot be established within that bound.
 - Threads use the Talk `threads` capability and current room permissions. The
   account-wide list contains the subscriptions the server returns for rooms
-  already known to the account, in pages of 50. Talk 24/25 has no independent
-  thread read marker, so a thread's unread indicator is inferred from the room
-  marker and latest known reply. Each displayed reply page holds at most 50
-  messages. Replier avatars use available cached replies and the server's most
-  recent activity summary; unopened threads may initially show only one replier.
+  already known to the account, in pages of 50. Its last page is retained for
+  the session; the list is discovered again after restart. Talk 24/25 has no
+  independent thread read marker, so a thread's unread indicator is inferred
+  from the room marker and latest known reply. Each displayed reply page holds at
+  most 50 messages. Replier avatars use available cached replies and the
+  server's most recent activity summary; unopened threads may initially show
+  only one replier.
   Sending thread replies can use the bounded outgoing queue when a prior
   capability observation permits it. Thread-page reads retry transient failures
   up to four times before offering an explicit retry. Renaming and subscription
