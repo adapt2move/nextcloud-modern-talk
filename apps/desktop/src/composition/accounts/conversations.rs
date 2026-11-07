@@ -116,7 +116,7 @@ impl Metadata {
                     retired.push((context, policy_changed));
                 }
                 old.listed = listed;
-            } else if self.rooms.len() < 100 {
+            } else if self.rooms.len() < 256 {
                 self.rooms.push(RoomObservation {
                     context,
                     listed,
@@ -495,6 +495,21 @@ impl Accounts {
         action: view::ConversationAction,
         automatic: bool,
     ) -> Result<(), SubmitError> {
+        if let view::ConversationAction::SetNotifications(level) = action {
+            let level = match level {
+                view::NotificationLevel::Default => 0,
+                view::NotificationLevel::Always => 1,
+                view::NotificationLevel::Mention => 2,
+                view::NotificationLevel::Never => 3,
+            };
+            return self
+                .queue_message_action(
+                    request,
+                    context,
+                    &talk_core::ui::messaging::MessageAction::SetNotificationLevel(level),
+                )
+                .unwrap_or(Err(SubmitError::StaleScope));
+        }
         match action {
             view::ConversationAction::PickAvatar => {
                 return self.queue_picker(request, context, super::files::Kind::Avatar);
@@ -1542,7 +1557,7 @@ pub(super) fn availability(a: wire::ActionAvailability) -> view::Availability {
         allowed: a.allowed,
     }
 }
-fn details_view(d: wire::ConversationDetails) -> view::RoomDetails {
+pub(super) fn details_view(d: wire::ConversationDetails) -> view::RoomDetails {
     view::RoomDetails {
         name: d.conversation.name,
         description: d.description,

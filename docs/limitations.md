@@ -96,17 +96,33 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
-- Favorite and archive changes project immediately during an admitted live
-  request and reconcile against canonical room observations. Failure removes
-  the overlay. They do not yet have durable offline replay. Poll votes and
-  notification-level changes still require a live request with pending feedback.
-- Speculative history warms at most four policy-approved rooms, preferring unread,
-  favorites and recent activity. It has one global in-flight slot and a 60-second
-  planning window, yields to foreground reads/actions, and is cancelled when its
-  account becomes inactive. Repeated room-list transport failures pause ordinary
-  background reads with a bounded jittered cooldown. This is not a full priority
-  scheduler for every avatar/preview/presence transport or an OS network-change
-  observer; sleep/network handover qualification remains incomplete.
+- Favorite/archive, room notification-level and poll-vote changes now use the same
+  bounded optimistic outgoing queue as text, thread and reminder intents. Unknown
+  cached permission permits local staging only; dispatch requires fresh authority.
+- Each account has one executing REST operation and at most seven admitted
+  descriptors. User, visible-content and background lanes reserve admission and
+  select queued work in that order, with FIFO within each lane. User work can
+  interrupt disposable background reads; it cannot preempt mutations or call
+  control. The application additionally bounds ordinary HTTP concurrency to eight,
+  with separate call transport lanes. Two local data slots per account keep
+  required outgoing/draft commits independent of the network queue. Queue waits
+  expire after 30/20/15 seconds by lane; transfers retain their longer class limit.
+  After repeated transport failures a versioned, jittered circuit cooldown pauses
+  background avatars, link cards, presence and prefetch while foreground recovery
+  can proceed. Four likely ordinary rooms can be prefetched, one at a time, in a
+  60-second planning window; account changes cancel speculative work.
+- A resume gap over five seconds or a changed local route/source address interrupts
+  stale HTTP/HPB work and requests catch-up. A bounded route observation runs every
+  two seconds outside GPUI. This detects source-address and Linux route changes;
+  a handover that preserves both is observed through transport failure/heartbeat,
+  not an OS-specific network API. Recovery never renews media or room authority.
+  Native physical-network and platform sleep/call continuity qualification remains
+  separate from the controlled lab interruption.
+- Account presence/custom-status changes are optimistic and retried within the
+  current authorized session, one per account for at most five minutes. Ambiguous
+  writes are read back before another change can be attempted. These ephemeral
+  status intents are not restored after restart. Uncertainty checks never rewrite
+  an already applied status or renew its expiry.
 
 - Marking unread from a message requires a live-proven preceding message or an
   exhausted live history page proving the first message; cached-only gaps do not
@@ -222,7 +238,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   Submission creates immediate session-local chat rows with inline upload
   progress; a reference-correlated own message replaces each row after sharing.
   Lost share acknowledgements are reconciled by reading history, never replaying
-  that share. These pending attachment intents are not durable across restart.
+  that share. Original bytes and local upload paths remain session-only. Once upload completes,
+  eligible publication intents transfer durably before the session owner releases
+  their caption. The existing-file workflow uses the same durable publication queue.
   Local raster previews use the same bounded decoder and stay out of disk caches.
   File-list and image paste and incoming file drops need native qualification on
   each platform; file-list paste has been exercised on Linux X11. Caption and
@@ -235,8 +253,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   server's pagination support when available, and sorting applies to the current
   page. Search and recent results are limited to 200; other DAV responses are
   bounded to 1,000 entries and a response-size limit. A server that rejects DAV
-  search or favorites disables that section. Existing-file shares are staged and
-  reconciled in the session and are not queued across restart.
+  search or favorites disables that section. Eligible existing-file publications are staged durably and reconciled by
+  reference after restart; the browser listing itself remains session-only.
 - The media gallery and local video player are implemented but await native GUI,
   real-server and packaged-runtime qualification. The player accepts MP4
   H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders
@@ -255,6 +273,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   macOS window closing keeps the application services alive; native close/reopen
   and notification reception with a hidden window still need Mac qualification.
   Explicit quit stops background reception.
+- A complete room listing and its eligible durable metadata are bounded to 256
+  rooms per account, including order and unread observations. Larger complete
+  server listings require a future paged-list contract; they are not silently
+  truncated. Sidebar customization placements remain separately bounded.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
@@ -328,3 +350,5 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 Report reproducible problems without credentials, private server details or
 message contents. Security issues follow [SECURITY.md](../SECURITY.md).
+
+HTTP JSON ingress also has a 131,072-node structure budget, a 64-level depth bound and a 1 MiB response byte bound (previously 256 KiB). This accommodates complete 256-room metadata responses; typed endpoint bounds still reject oversized lists without granting reconciliation authority.

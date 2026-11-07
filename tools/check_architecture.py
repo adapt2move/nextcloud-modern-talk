@@ -214,7 +214,7 @@ UI_MODULE_TYPES = {
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",
         "CsvFileError", "CsvFileOutcome", "CsvFileResult",
     },
-    "messaging": {"ComposerDraft", "MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
+    "messaging": {"ComposerDraft", "MessageMetadata", "MessagePanel", "MessageAction", "MessageActionError", "SystemEvent"},
     "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
     "search": {"Action", "Filters", "Hit", "Panel"},
     "discover": {"Action", "Panel", "Room"},
@@ -397,8 +397,10 @@ def check() -> None:
     for name, (directory, expected) in GRAPH.items():
         manifest = read_toml(ROOT / directory / "Cargo.toml")
         require(manifest["package"]["name"] == name, f"{directory}: unexpected package name")
-        require(set(manifest) <= ({"package", "dependencies", "lints", "features", "example", "target", "dev-dependencies"} if name == "talk-adapters" else {"package", "dependencies", "lints", "features"} if name == "nextcloud-talk-api" else {"package", "dependencies", "lints", "target"} if name == "talk-desktop" else {"package", "dependencies", "lints"}),
+        require(set(manifest) <= ({"package", "dependencies", "lints", "features", "example", "target", "dev-dependencies"} if name == "talk-adapters" else {"package", "dependencies", "lints", "features"} if name == "nextcloud-talk-api" else {"package", "dependencies", "lints", "target", "features"} if name == "talk-desktop" else {"package", "dependencies", "lints"}),
                 f"{name}: unreviewed manifest section")
+        if name == "talk-desktop":
+            require(manifest.get("features") == {"default": [], "dev-probes": ["talk-adapters/backend-test"]}, "desktop probes must remain explicit and default-off")
         package_fields = {"name", "version", "edition", "rust-version", "license", "publish"}
         if name == "talk-adapters":
             package_fields.add("autoexamples")
@@ -531,6 +533,7 @@ def check() -> None:
                 allowed = len(imported) == 2 and imported[0] == "super" and imported[1] in {
                     "AccountId", "AccountScope", "CallScope", "ClipboardImage", "ConversationId", "Decision", "MediaIntent", "Page", "SubmitError", "Text", "UnavailableReason", "UserIntent", "AddressInputError", "ServerInput"
                 }
+                allowed |= imported == ("super", "markup", "Prepared")
                 allowed |= imported in {
                     ("crate", "preferences", "navigation", "NavigationAccountKey"),
                     ("crate", "preferences", "navigation", "NavigationRoomKey"),

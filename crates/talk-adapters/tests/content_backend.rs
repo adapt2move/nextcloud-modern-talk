@@ -305,6 +305,7 @@ async fn released_server_file_listing_and_existing_share() {
         &mut sequence,
         room,
         M::ShareExistingFile {
+            voice_message: false,
             path,
             caption: text("Fixture caption"),
             options: talk_core::protocol::messaging::ComposeOptions {
@@ -395,6 +396,7 @@ async fn released_server_file_listing_and_existing_share() {
         &mut sequence,
         room,
         M::ShareExistingFile {
+            voice_message: false,
             path: text("/nmt-files-thread.txt"),
             caption: text("Fixture thread caption"),
             options: talk_core::protocol::messaging::ComposeOptions {

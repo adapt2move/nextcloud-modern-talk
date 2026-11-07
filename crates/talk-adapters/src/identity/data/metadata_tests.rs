@@ -169,3 +169,20 @@ fn scalar_observation_revocation_and_account_binding_survive_reopen() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_two_hundred_room_account_restores_complete_observed_order_and_unread_counts() {
+    let fixture = Fixture::new();
+    let values: Page<CacheRoom, CACHE_ROOM_LIMIT> = page((1..=200).rev().map(|id| {
+        let mut row = room(&fixture.key(id), 100);
+        row.title = text(&format!("Synthetic {id}"));
+        row.unread = id as u32;
+        row
+    }));
+    fixture.store().put_rooms(&values, 100).unwrap();
+    let restored = fixture.store().load(101).unwrap();
+    assert_eq!(
+        restored.rooms, values,
+        "database ordering cannot sort by opaque room identity"
+    );
+}

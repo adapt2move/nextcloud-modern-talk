@@ -46,6 +46,7 @@ impl CollectionState {
                     "Inhalte konnten noch nicht geladen werden. Prüfe deine Verbindung und versuche es erneut."
                 },
             ),
+            ContentState::Failed if self.retained => return None,
             ContentState::Failed => (
                 "info",
                 "Aktualisierung fehlgeschlagen.",
@@ -90,29 +91,12 @@ impl Desktop {
         if state.initial_loading() {
             return self.collection_skeleton(Skeleton::Rows);
         }
-        if state.state == ContentState::Offline {
-            // Chat owns one connection line in its composer footer. Retained
-            // collections must not introduce a second account-wide indicator.
-            if self.snapshot.selected.is_some() || !self.offline_notice_visible() {
-                return div();
-            }
-            return div()
-                .flex_none()
-                .px_2()
-                .py_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(self.sp(12.))
-                .text_color(self.theme.muted)
-                .child(self.scaled_icon("cloud", 14., self.theme.muted))
-                .child(div().flex_1().child(self.l("Offline")))
-                .child(
-                    self.button(id, "Erneut laden", ButtonStyle::Quiet, true, retry, cx)
-                        .min_h(px(28.))
-                        .py_0()
-                        .text_size(self.sp(12.)),
-                );
+        // Connectivity belongs to the single account banner. A failed refresh
+        // with retained content is also quiet; the owner keeps retrying it.
+        if state.state == ContentState::Offline
+            || state.retained && state.state == ContentState::Failed
+        {
+            return div();
         }
         let Some((symbol, title, detail)) = state.copy() else {
             return div();
@@ -169,7 +153,7 @@ mod tests {
             let retained = CollectionState::new(state, true);
             assert!(retained.shows_content());
             assert!(!retained.confirmed_empty());
-            assert_eq!(retained.copy().is_some(), state != ContentState::Loading);
+            assert_eq!(retained.copy().is_some(), state == ContentState::Offline);
             assert!(!retained.initial_loading());
             let initial = CollectionState::new(state, false);
             assert!(!initial.shows_content());

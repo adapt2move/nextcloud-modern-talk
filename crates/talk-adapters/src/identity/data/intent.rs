@@ -33,6 +33,33 @@ pub struct OutboxPrivateReply {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OutboxIntent {
+    MarkRead {
+        message: u64,
+    },
+    ShareFile {
+        #[serde(with = "codec::text")]
+        path: Text<4096>,
+        #[serde(with = "codec::text")]
+        name: Text<255>,
+        #[serde(with = "codec::text")]
+        caption: Text<4096>,
+        options: OutboxOptions,
+        voice: bool,
+    },
+    Favorite {
+        value: bool,
+    },
+    Archived {
+        value: bool,
+    },
+    Notifications {
+        level: u8,
+    },
+    PollVote {
+        poll: u64,
+        #[serde(with = "codec::page")]
+        options: talk_core::bounded::Page<u16, 100>,
+    },
     Send {
         #[serde(with = "codec::text")]
         body: Text<4096>,
@@ -99,6 +126,12 @@ pub enum OutboxIntent {
 impl OutboxIntent {
     pub fn kind(&self) -> OutboxKind {
         match self {
+            Self::MarkRead { .. } => OutboxKind::MarkRead,
+            Self::ShareFile { .. } => OutboxKind::ShareFile,
+            Self::Favorite { .. } => OutboxKind::Favorite,
+            Self::Archived { .. } => OutboxKind::Archived,
+            Self::Notifications { .. } => OutboxKind::Notifications,
+            Self::PollVote { .. } => OutboxKind::PollVote,
             Self::Send { .. } => OutboxKind::Send,
             Self::Edit { .. } => OutboxKind::Edit,
             Self::Delete { .. } => OutboxKind::Delete,
@@ -129,9 +162,35 @@ impl OutboxIntent {
                 })
         };
         match self {
-            Self::MarkUnread => true,
+            Self::MarkRead { message } => *message > 0,
+            Self::MarkUnread | Self::Favorite { .. } | Self::Archived { .. } => true,
+            Self::Notifications { level } => *level <= 3,
+            Self::PollVote { poll, options } => {
+                *poll > 0
+                    && options.as_slice().iter().all(|id| *id < 100)
+                    && !options
+                        .as_slice()
+                        .iter()
+                        .enumerate()
+                        .any(|(i, id)| options.as_slice()[..i].contains(id))
+            }
             Self::RenameThread { root, title } => *root > 0 && !title.as_str().trim().is_empty(),
             Self::ThreadNotifications { root, level } => *root > 0 && (0..=3).contains(level),
+            Self::ShareFile {
+                path,
+                name,
+                options: o,
+                ..
+            } => {
+                path.as_str().starts_with('/')
+                    && !path.as_str().contains("://")
+                    && !path.as_str().split('/').any(|part| part == "..")
+                    && !path.as_str().chars().any(char::is_control)
+                    && !name.as_str().is_empty()
+                    && options(o)
+                    && o.private_reply.is_none()
+                    && o.thread_title.is_none()
+            }
             Self::Send { body, options: o } => !body.as_str().trim().is_empty() && options(o),
             Self::Schedule {
                 body,
@@ -325,5 +384,50 @@ mod tests {
         let mut corrupt = record;
         corrupt.kind = OutboxKind::Delete;
         assert_eq!(corrupt.intent(), Err(DataError::Corrupt));
+    }
+    #[test]
+    fn queued_settings_votes_and_cloud_publication_roundtrip_with_no_runtime_or_local_file_authority()
+     {
+        let room = NavigationRoomKey::new(&format!("r1:{:032x}", 1)).unwrap();
+        let mut options = talk_core::bounded::Page::empty();
+        options.try_push(2).unwrap();
+        for intent in [
+            OutboxIntent::Favorite { value: true },
+            OutboxIntent::Archived { value: false },
+            OutboxIntent::Notifications { level: 2 },
+            OutboxIntent::PollVote { poll: 7, options },
+            OutboxIntent::ShareFile {
+                path: Text::new("/Documents/plan.pdf").unwrap(),
+                name: Text::new("plan.pdf").unwrap(),
+                caption: Text::new("caption").unwrap(),
+                options: OutboxOptions::default(),
+                voice: false,
+            },
+        ] {
+            let record =
+                OutboxRecord::from_intent(OperationId::from_local(1), room.clone(), &intent)
+                    .unwrap();
+            assert_eq!(record.intent(), Ok(intent));
+        }
+        for path in [
+            "file:///tmp/plan.pdf",
+            "/Documents/../secret",
+            "https://cloud.invalid/f",
+        ] {
+            assert!(
+                OutboxRecord::from_intent(
+                    OperationId::from_local(1),
+                    room.clone(),
+                    &OutboxIntent::ShareFile {
+                        path: Text::new(path).unwrap(),
+                        name: Text::new("plan.pdf").unwrap(),
+                        caption: Text::new("").unwrap(),
+                        options: OutboxOptions::default(),
+                        voice: false
+                    }
+                )
+                .is_err()
+            );
+        }
     }
 }

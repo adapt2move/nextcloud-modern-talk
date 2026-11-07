@@ -322,6 +322,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")
     ) {
         let mut state = snapshot(Some("offline"));
+        state.pending_intents = u16::from(scenario == Some("offline-with-queue"));
         if let Some(context) = state.selected {
             let mut panel = talk_core::ui::messaging::MessagePanel::new(context);
             panel.queue_available = true;
@@ -1363,6 +1364,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return ready;
     }
     let mut s = PresentationSnapshot {
+        pending_intents: 0,
         content_panel: talk_core::ui::content::ContentPanel::default(),
         file_export: None,
         create_panel: None,
@@ -1567,6 +1569,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     s.conversations = page(
         rows.map(
             |(id, title, initials, subtitle, kind, favorite, unread)| ConversationView {
+                action_error: None,
                 tags: None,
                 context: context(id),
                 navigation_key: None,

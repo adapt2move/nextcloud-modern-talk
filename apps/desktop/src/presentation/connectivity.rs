@@ -106,13 +106,26 @@ impl Desktop {
         self.offline_notice.visible(self.snapshot.active_account)
     }
 
-    pub(super) fn offline_footer(
-        &self,
-        context: ConversationRef,
-        cx: &Context<Self>,
-    ) -> Option<Div> {
-        self.offline_notice_visible()
-            .then(|| self.connection_line(context, None, cx))
+    pub(super) fn connection_banner(&self) -> Option<gpui::Stateful<Div>> {
+        self.offline_notice_visible().then(|| {
+            div()
+                .id("connection-status")
+                .flex_none()
+                .min_h(px(28.))
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .bg(self.theme.subtle)
+                .text_size(self.sp(12.))
+                .text_color(self.theme.muted)
+                .child(self.scaled_icon("cloud", 14., self.theme.muted))
+                .child(self.l(if self.snapshot.pending_intents > 0 {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                }))
+        })
     }
 
     pub(super) fn connection_failure_footer(

@@ -76,6 +76,7 @@ impl Batch {
                 Step::Share,
                 if file.existing {
                     Command::ShareExistingFile {
+                        voice_message: false,
                         path: path.clone(),
                         caption,
                         options,
@@ -989,6 +990,102 @@ impl Accounts {
             self.project_uploads();
             return;
         };
+        // Once bytes exist on NextCloud, transfer the publication intent to the
+        // durable outbox. Original bytes and local paths remain session-only.
+        if step == Step::Share && self.cache.persistable(context) {
+            let share = match &command {
+                Command::ShareExistingFile {
+                    path,
+                    caption,
+                    options,
+                    voice_message,
+                }
+                | Command::ShareFile {
+                    path,
+                    caption,
+                    options,
+                    voice_message,
+                } => Some((
+                    path.clone(),
+                    caption.clone(),
+                    options.clone(),
+                    *voice_message,
+                )),
+                _ => None,
+            };
+            if let Some((path, caption, options, voice)) = share {
+                let source = self
+                    .attachment_owner
+                    .batch
+                    .as_ref()
+                    .and_then(|b| b.files.iter().find(|f| f.view.id == id))
+                    .and_then(|f| {
+                        f.outgoing
+                            .as_ref()
+                            .map(|o| (o.request, f.view.name.clone()))
+                    });
+                let stable = self.cache.stable_room(context);
+                if let (Some((request, name)), Some(stable)) = (source, stable) {
+                    let intent = talk_adapters::identity::OutboxIntent::ShareFile {
+                        path: match Text::new(path.as_str()) {
+                            Ok(path) => path,
+                            Err(_) => {
+                                if let Some(file) = self
+                                    .attachment_owner
+                                    .batch
+                                    .as_mut()
+                                    .and_then(|b| b.files.iter_mut().find(|f| f.view.id == id))
+                                {
+                                    file.view.state =
+                                        UploadState::Failed(UploadFailure::Unsupported);
+                                }
+                                self.project_uploads();
+                                return;
+                            }
+                        },
+                        name,
+                        caption,
+                        options: talk_adapters::identity::OutboxOptions {
+                            reply_to: options.reply_to.map(|m| m.sequence),
+                            thread: options.thread.map(|m| m.sequence),
+                            silent: options.silent,
+                            ..Default::default()
+                        },
+                        voice,
+                    };
+                    match self.queue_intent(request, context, stable, intent, false) {
+                        Ok(()) => {
+                            let operation = self.file_share_operation(context, request);
+                            if let Some(file) = self
+                                .attachment_owner
+                                .batch
+                                .as_mut()
+                                .and_then(|b| b.files.iter_mut().find(|f| f.view.id == id))
+                            {
+                                file.view.state = UploadState::Sharing;
+                                if let Some(outgoing) = file.outgoing.as_mut() {
+                                    outgoing.operation = operation;
+                                }
+                            }
+                            self.project_uploads();
+                        }
+                        Err(SubmitError::Busy) => (),
+                        Err(_) => {
+                            if let Some(file) = self
+                                .attachment_owner
+                                .batch
+                                .as_mut()
+                                .and_then(|b| b.files.iter_mut().find(|f| f.view.id == id))
+                            {
+                                file.view.state = UploadState::Failed(UploadFailure::Denied);
+                            }
+                            self.project_uploads();
+                        }
+                    }
+                    return;
+                }
+            }
+        }
         let result = self.operation(context).and_then(|operation| {
             let work = Work {
                 context,
@@ -1053,6 +1150,46 @@ impl Accounts {
                 ) => UploadState::Failed(UploadFailure::Denied),
                 Err(_) => UploadState::Failed(UploadFailure::Connection),
             };
+        }
+        self.project_uploads();
+    }
+    /// The durable owner settles the handoff before the session owner releases
+    /// its caption/file state. A storage rejection leaves a retryable file.
+    pub(in crate::composition::accounts) fn finish_file_handoff(
+        &mut self,
+        operation: OperationId,
+        accepted: bool,
+    ) {
+        let Some(batch) = self.attachment_owner.batch.as_mut() else {
+            return;
+        };
+        let Some(index) = batch.files.iter().position(|f| {
+            f.outgoing
+                .as_ref()
+                .is_some_and(|o| o.operation == Some(operation))
+        }) else {
+            return;
+        };
+        let request = batch.files[index].outgoing.as_ref().map(|o| o.request);
+        if accepted {
+            batch.files.remove(index);
+            if let Some(request) = request {
+                batch.captions.retain(|(r, _)| *r != request);
+                if let Some(panel) = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .filter(|p| p.context == batch.context)
+                {
+                    panel.files_sent = Some(request);
+                }
+            }
+        } else {
+            let file = &mut batch.files[index];
+            file.view.state = UploadState::Failed(UploadFailure::Connection);
+            if let Some(outgoing) = file.outgoing.as_mut() {
+                outgoing.operation = None;
+            }
         }
         self.project_uploads();
     }

@@ -418,7 +418,7 @@ async fn complete_lists_keep_metadata_and_stable_ids_but_partial_or_oversized_li
         Reply::data(capabilities.clone()),
         partial,
         Reply::data(capabilities),
-        Reply::data(json!(vec![data; 101])),
+        Reply::data(json!(vec![data; 257])),
     ])
     .await;
     let r = runtime();

@@ -1440,13 +1440,15 @@ fn outgoing_order_is_per_destination_and_only_one_dispatch_runs_per_account() {
     for entry in &mut outbox.entries {
         entry.retry = now;
     }
-    outbox.entries[0].state = State::Uncertain;
+    assert_eq!(outbox.next_index(context.account.account, now), Some(0));
     outbox.entries[0].retry = now + Duration::from_secs(30);
     assert_eq!(outbox.next_index(context.account.account, now), Some(2));
+    outbox.entries[0].state = State::Uncertain;
+    assert_eq!(outbox.next_index(context.account.account, now), Some(1));
     outbox.entries[2].state = State::Running;
     assert_eq!(outbox.next_index(context.account.account, now), None);
     outbox.entries[2].state = State::Removing;
-    assert_eq!(outbox.next_index(context.account.account, now), Some(2));
+    assert_eq!(outbox.next_index(context.account.account, now), Some(1));
 }
 
 #[test]
@@ -1599,7 +1601,7 @@ fn a_mismatching_or_forbidden_read_preserves_outcome_uncertainty_without_overwri
 }
 
 #[test]
-fn each_failed_action_has_a_new_notice_but_an_uncertain_operation_does_not_repeat_its_toast() {
+fn failures_are_scoped_and_automatic_uncertainty_checks_stay_quiet_before_one_delayed_hint() {
     let (mut model, context, room) = model();
     model.outbox.load(
         context.account.account,
@@ -1641,6 +1643,13 @@ fn each_failed_action_has_a_new_notice_but_an_uncertain_operation_does_not_repea
     );
     let second = model.outbox.errors.last().unwrap().2;
     assert!(second > first);
+    model.outbox_result(OperationId::from_local(3), &Err(Completion::Uncertain));
+    assert_eq!(
+        model.outbox.errors.last().unwrap().2,
+        second,
+        "a transient lost acknowledgment is reconciled quietly"
+    );
+    model.outbox.entries[2].created = history::now_unix().saturating_sub(30);
     model.outbox_result(OperationId::from_local(3), &Err(Completion::Uncertain));
     let uncertain = model.outbox.errors.last().unwrap().2;
     assert!(uncertain > second);
@@ -1741,4 +1750,364 @@ fn persisted_failed_send_edit_and_schedule_restore_as_recoverable_drafts_without
     // Rendering and revisiting the room do not acknowledge the durable text.
     model.project_history(context);
     assert_eq!(model.outbox.entries.len(), 3);
+}
+
+#[test]
+fn queued_room_settings_project_over_fresh_observations_and_rollback_without_stale_snapshots() {
+    let (mut model, context, room) = model();
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::Favorite { value: true },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room,
+                Intent::Archived { value: true },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    let mut canonical = model.snapshot.clone();
+    canonical.conversations = page(canonical.conversations.as_slice().iter().cloned().map(
+        |mut r| {
+            if r.context == context {
+                r.favorite = Some(false);
+                r.archived = Some(false);
+            }
+            r
+        },
+    ));
+    let mut projected = canonical.clone();
+    model.project_queued_settings(&mut projected);
+    let changed = projected
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap();
+    assert_eq!(
+        (changed.favorite, changed.archived),
+        (Some(true), Some(true))
+    );
+    assert_eq!(
+        canonical
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .favorite,
+        Some(false)
+    );
+    model.fail_outbox(
+        OperationId::from_local(1),
+        UnavailableReason::PermissionDenied,
+    );
+    let mut rolled_back = canonical;
+    model.project_queued_settings(&mut rolled_back);
+    let changed = rolled_back
+        .conversations
+        .as_slice()
+        .iter()
+        .find(|r| r.context == context)
+        .unwrap();
+    assert_eq!(
+        (changed.favorite, changed.archived),
+        (Some(false), Some(true))
+    );
+}
+#[test]
+fn queued_setting_retries_only_proven_pre_dispatch_failures_and_reconciles_uncertain_writes() {
+    for (error, uncertain) in [(ErrorKind::Transport, false), (ErrorKind::Uncertain, true)] {
+        let (mut model, context, room) = model();
+        model.outbox.load(
+            context.account.account,
+            &page([stored(
+                1,
+                room,
+                Intent::Favorite { value: true },
+                OutboxPhase::Queued,
+                1,
+            )]),
+        );
+        let entry = &mut model.outbox.entries[0];
+        entry.context = Some(context);
+        entry.state = State::Running;
+        entry.record.phase = OutboxPhase::Dispatched;
+        model.complete_queued_setting(
+            context,
+            OperationId::from_local(1),
+            Err(IdentityError::Request(error)),
+        );
+        let entry = &model.outbox.entries[0];
+        assert!(
+            entry.state
+                == if uncertain {
+                    State::Uncertain
+                } else {
+                    State::Ready
+                }
+        );
+        let request =
+            setting_command(context, entry.record.operation, &entry.intent, uncertain).unwrap();
+        assert_eq!(
+            matches!(request, ProtocolRequest::ReconcileConversation(_)),
+            uncertain
+        );
+        // A completion from another room cannot settle this operation.
+        let mut stale = context;
+        stale.conversation.local += 1;
+        model.complete_queued_setting(
+            stale,
+            OperationId::from_local(1),
+            Err(IdentityError::Request(ErrorKind::PermissionDenied)),
+        );
+        assert!(model.outbox.entries[0].state != State::Failed);
+    }
+}
+
+#[test]
+fn restored_file_publication_only_reads_its_reference_and_keeps_a_visible_pending_identity() {
+    let (mut model, context, room) = model();
+    model.outbox.load(
+        context.account.account,
+        &page([stored(
+            7,
+            room.clone(),
+            Intent::ShareFile {
+                path: text("/Documents/synthetic.pdf"),
+                name: text("synthetic.pdf"),
+                caption: text("caption"),
+                options: Default::default(),
+                voice: false,
+            },
+            OutboxPhase::Dispatched,
+            7,
+        )]),
+    );
+    let entry = &model.outbox.entries[0];
+    assert!(entry.state == State::Uncertain);
+    assert!(matches!(
+        reconcile_command(context, &entry.intent),
+        Some((wire::MessagingCommand::ReconcileSend, messaging::Work::Send))
+    ));
+    let mut messages = Page::empty();
+    let mut panel = view::MessagePanel::new(context);
+    model
+        .outbox
+        .project(context, &room, "Synthetic actor", &mut messages, &mut panel);
+    assert_eq!(messages.as_slice().len(), 1);
+    assert_eq!(messages.as_slice()[0].delivery, DeliveryState::Uncertain);
+    assert!(
+        messages.as_slice()[0]
+            .body
+            .as_str()
+            .contains("synthetic.pdf")
+    );
+    model.fail_outbox(
+        OperationId::from_local(7),
+        UnavailableReason::PermissionDenied,
+    );
+    assert!(model.outbox.entries[0].state == State::Failed);
+    let draft = failed_draft(&model.outbox.entries[0]).unwrap();
+    assert_eq!(draft.kind, view::FailedDraftKind::File);
+}
+
+#[test]
+fn an_unknown_delivery_cannot_freeze_later_independent_sends_but_queued_order_is_preserved() {
+    let context = crate::composition::fixtures::context(1);
+    let mut owner = Outbox::default();
+    let outgoing = |body: &str| Intent::Send {
+        body: text(body),
+        options: Default::default(),
+    };
+    owner.load(
+        context.account.account,
+        &page([
+            stored(1, key(1), outgoing("first"), OutboxPhase::Queued, 1),
+            stored(2, key(1), outgoing("second"), OutboxPhase::Queued, 2),
+        ]),
+    );
+    assert!(conflicts(&owner.entries[0], &owner.entries[1]));
+    owner.entries[0].state = State::Uncertain;
+    owner.entries[0].retry = Instant::now() + Duration::from_secs(30);
+    assert!(!conflicts(&owner.entries[0], &owner.entries[1]));
+    assert_eq!(
+        owner.next_index(context.account.account, Instant::now()),
+        Some(1)
+    );
+    assert_eq!(
+        owner.entries[0].record.operation,
+        OperationId::from_local(1)
+    );
+}
+
+#[test]
+fn read_markers_are_optimistic_ordered_coalesced_and_restore_without_write_replay() {
+    let (mut model, context, room) = model();
+    observe(&mut model, context, 1, [details(context, 2, "newest")]);
+    model.snapshot.conversations = page(
+        model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                r.unread = 5;
+                r.last_read_message = Some(0);
+                r
+            }),
+    );
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(1, room.clone(), Intent::MarkUnread, OutboxPhase::Queued, 1),
+            stored(
+                2,
+                room.clone(),
+                Intent::MarkRead { message: 2 },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    assert!(conflicts(
+        &model.outbox.entries[0],
+        &model.outbox.entries[1]
+    ));
+    let mut snapshot = model.snapshot.clone();
+    model.project_room_unread(&mut snapshot);
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        0
+    );
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .last_read_message,
+        Some(2)
+    );
+    assert_eq!(
+        model.queue_intent(
+            RequestId(22),
+            context,
+            room.clone(),
+            Intent::MarkRead { message: 2 },
+            false
+        ),
+        Ok(())
+    );
+    assert_eq!(model.outbox.entries.len(), 2);
+    model.outbox.entries[1].state = State::Failed;
+    let mut snapshot = model.snapshot.clone();
+    model.project_room_unread(&mut snapshot);
+    assert_eq!(
+        snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == context)
+            .unwrap()
+            .unread,
+        5
+    );
+    let mut restored = Outbox::default();
+    restored.load(
+        context.account.account,
+        &page([stored(
+            3,
+            room,
+            Intent::MarkRead { message: 2 },
+            OutboxPhase::Dispatched,
+            3,
+        )]),
+    );
+    assert!(restored.entries[0].state == State::Uncertain);
+    assert!(matches!(
+        setting_command(
+            context,
+            OperationId::from_local(3),
+            &restored.entries[0].intent,
+            true
+        ),
+        Some(ProtocolRequest::ReconcileConversation(_))
+    ));
+}
+
+#[test]
+fn replacing_an_uncertain_unread_marker_keeps_the_old_intent_until_disk_commit() {
+    for success in [false, true] {
+        let (mut model, context, room) = model();
+        let first = stored(
+            1,
+            room.clone(),
+            Intent::MarkUnread,
+            OutboxPhase::Uncertain,
+            1,
+        );
+        let replacement = stored(2, room.clone(), Intent::MarkUnread, OutboxPhase::Queued, 2);
+        model
+            .outbox
+            .load(context.account.account, &page([first, replacement.clone()]));
+        model.outbox.entries[1].state = State::Saving;
+        model.outbox.entries[1].replaces = Some(OperationId::from_local(1));
+        assert_eq!(model.outbox.entries.len(), 2);
+        assert_eq!(
+            model.queue_intent(
+                RequestId(3),
+                context,
+                room.clone(),
+                Intent::MarkRead { message: 9 },
+                false
+            ),
+            Err(SubmitError::Busy)
+        );
+        model.complete_outbox_data(
+            Work::Save(context.account.account, OperationId::from_local(2)),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result: Err(talk_adapters::identity::DataError::Unavailable),
+            }),
+        );
+        assert_eq!(
+            model.outbox.entries.len(),
+            2,
+            "lost acknowledgement retains both identities until the same replacement settles"
+        );
+        let result = if success {
+            Ok(DataResult::Queued(replacement))
+        } else {
+            Err(talk_adapters::identity::DataError::Capacity)
+        };
+        model.complete_outbox_data(
+            Work::Save(context.account.account, OperationId::from_local(2)),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result,
+            }),
+        );
+        assert_eq!(model.outbox.entries.len(), 1);
+        assert_eq!(
+            model.outbox.entries[0].record.operation,
+            OperationId::from_local(if success { 2 } else { 1 })
+        );
+    }
 }

@@ -80,6 +80,7 @@ pub(super) struct Cache {
     writes: Vec<Write>,
     in_flight: Option<Write>,
     selection: Option<(AccountId, NavigationRoomKey)>,
+    selections: Vec<(AccountId, NavigationRoomKey)>,
     next_generation: u64,
     thumbnail_denials: Vec<(AccountId, u64, NavigationRoomKey, u64, Text<128>)>,
     thumbnail_load_blocked: Vec<(AccountId, u64)>,
@@ -97,6 +98,14 @@ fn required_cleanup(command: &DataCommand) -> bool {
     )
 }
 impl Cache {
+    pub(super) fn remember_selection(&mut self, account: AccountId, key: NavigationRoomKey) {
+        if let Some((_, previous)) = self.selections.iter_mut().find(|(id, _)| *id == account) {
+            *previous = key.clone();
+        } else if self.selections.len() < 8 {
+            self.selections.push((account, key.clone()));
+        }
+        self.selection = Some((account, key));
+    }
     fn write_ready(&self, now: Instant) -> Option<usize> {
         let current = |w: &Write| {
             self.accounts
@@ -577,6 +586,7 @@ fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationV
         .as_ref()
         .filter(|status| room.kind == CachedRoomKind::Direct && status.fresh(now));
     ConversationView {
+        action_error: None,
         context,
         navigation_key: Some(room.key.clone()),
         title: room.title.clone(),
@@ -648,7 +658,7 @@ impl Accounts {
         if let Some(context) = self.snapshot.selected
             && let Some(key) = self.cache.stable_room(context)
         {
-            self.cache.selection = Some((context.account.account, key));
+            self.cache.remember_selection(context.account.account, key);
         }
         self.cache.accounts.retain(|a| {
             state
@@ -656,6 +666,13 @@ impl Accounts {
                 .as_slice()
                 .iter()
                 .any(|s| s.summary.account == a.id && eligible(s))
+        });
+        self.cache.selections.retain(|(id, _)| {
+            state
+                .accounts
+                .as_slice()
+                .iter()
+                .any(|a| a.summary.account == *id)
         });
         self.cache.writes.retain(|w| {
             self.cache
@@ -1152,6 +1169,21 @@ impl Accounts {
             }
             account.hydrated = Some(scope);
             if self.snapshot.active_account == Some(scope) {
+                // Restore useful history immediately, before the account or
+                // room-list network probe has completed. This selects only a
+                // presentation identity and confers no protocol authority.
+                if self.cache.selection.is_none() && self.snapshot.selected.is_none() {
+                    self.cache.selection = snapshot
+                        .histories
+                        .as_slice()
+                        .iter()
+                        .filter(|h| {
+                            !h.messages.as_slice().is_empty()
+                                && snapshot.rooms.as_slice().iter().any(|r| r.key == h.room)
+                        })
+                        .max_by_key(|h| h.saved_at)
+                        .map(|h| (scope.account, h.room.clone()));
+                }
                 self.snapshot.conversations = rows;
                 self.snapshot.conversation_list = ConversationListState {
                     content: ContentState::Ready,
@@ -1161,6 +1193,42 @@ impl Accounts {
         }
     }
     pub(super) fn restore_cache_selection(&mut self) {
+        if self.snapshot.selected.is_none()
+            && let Some(scope) = self.snapshot.active_account
+            && self
+                .cache
+                .selection
+                .as_ref()
+                .is_some_and(|(id, _)| *id != scope.account)
+        {
+            self.cache.selection = self
+                .cache
+                .selections
+                .iter()
+                .find(|(id, _)| *id == scope.account)
+                .cloned();
+        }
+        // Hydration can finish before startup chooses its active account. Make
+        // the initial choice here, after activation, rather than only during
+        // the earlier one-shot hydration pass.
+        if self.cache.selection.is_none()
+            && self.snapshot.selected.is_none()
+            && let Some(scope) = self.snapshot.active_account
+            && let Some(snapshot) = self.cache.loaded(scope.account)
+        {
+            self.cache.selection = snapshot
+                .histories
+                .as_slice()
+                .iter()
+                .filter(|h| {
+                    !h.messages.as_slice().is_empty()
+                        && self.snapshot.conversations.as_slice().iter().any(|r| {
+                            r.context.account == scope && r.navigation_key.as_ref() == Some(&h.room)
+                        })
+                })
+                .max_by_key(|h| h.saved_at)
+                .map(|h| (scope.account, h.room.clone()));
+        }
         let Some((account, key)) = &self.cache.selection else {
             return;
         };
@@ -1884,6 +1952,42 @@ mod tests {
         cached.kind = CachedRoomKind::Group;
         assert_eq!(row_at(&cached, context, 101).presence, Presence::Unknown);
     }
+    fn cached_history() -> CacheHistory {
+        use talk_adapters::identity::CachedMessage;
+        CacheHistory {
+            room: stable(),
+            messages: page([CachedMessage {
+                attachments: Page::empty(),
+                locations: Page::empty(),
+                id: 7,
+                author: text("Synthetic actor"),
+                actor_key: None,
+                text: text("Cached original"),
+                own: true,
+                timestamp: 1,
+                expires_at: None,
+                edited: false,
+                deleted: false,
+                system: false,
+                voice_message: false,
+                system_event: None,
+                pin_notice: false,
+                truncated: false,
+                replyable: true,
+                parent: None,
+                thread: None,
+                thread_replies: 0,
+                reactions: Page::empty(),
+            }]),
+            pins: Page::empty(),
+            pin_messages: Page::empty(),
+            threads: Page::empty(),
+            pins_loaded: false,
+            older: None,
+            latest: Some(7),
+            saved_at: history::now_unix(),
+        }
+    }
     fn install(model: &mut Accounts, scope: AccountScope) {
         model.cache.next_generation = 1;
         model.cache.accounts.push(Account {
@@ -2093,7 +2197,6 @@ mod tests {
     }
     #[test]
     fn selected_cached_room_rebinds_after_its_synthetic_binding_has_been_retired() {
-        use talk_adapters::identity::{CacheHistory, CachedMessage};
         use talk_core::protocol::{
             Message, MessageId, MessageKind,
             messaging::{MessageDetails, MessagingResult},
@@ -2103,39 +2206,7 @@ mod tests {
         let scope = model.snapshot.active_account.unwrap();
         install(&mut model, scope);
         model.background.sync(&[scope], Instant::now());
-        let history = CacheHistory {
-            room: stable(),
-            messages: page([CachedMessage {
-                attachments: Page::empty(),
-                locations: Page::empty(),
-                id: 7,
-                author: text("Synthetic actor"),
-                actor_key: None,
-                text: text("Cached original"),
-                own: true,
-                timestamp: 1,
-                expires_at: None,
-                edited: false,
-                deleted: false,
-                system: false,
-                voice_message: false,
-                system_event: None,
-                pin_notice: false,
-                truncated: false,
-                replyable: true,
-                parent: None,
-                thread: None,
-                thread_replies: 0,
-                reactions: Page::empty(),
-            }]),
-            pins: Page::empty(),
-            pin_messages: Page::empty(),
-            threads: Page::empty(),
-            pins_loaded: false,
-            older: None,
-            latest: Some(7),
-            saved_at: history::now_unix(),
-        };
+        let history = cached_history();
         model.cache.accounts[0].snapshot.as_mut().unwrap().histories = page([history.clone()]);
         model.restore_cache_views();
         let cached = model.snapshot.conversations.as_slice()[0].context;
@@ -2591,5 +2662,25 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+    #[test]
+    fn startup_selects_retained_history_when_hydration_precedes_account_activation() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        install(&mut model, scope);
+        let mut cached = cached_history();
+        cached.saved_at = history::now_unix();
+        model.cache.accounts[0].snapshot.as_mut().unwrap().histories = page([cached]);
+        model.snapshot.active_account = None;
+        model.snapshot.selected = None;
+        model.cache.selection = None;
+        model.background.sync(&[scope], Instant::now());
+        model.restore_cache_views();
+        model.snapshot.active_account = Some(scope);
+        model.snapshot.conversations = model.background.account(scope).unwrap().rooms.clone();
+        model.restore_cache_selection();
+        assert!(model.snapshot.selected.is_some());
+        assert!(!model.snapshot.messages.as_slice().is_empty());
     }
 }

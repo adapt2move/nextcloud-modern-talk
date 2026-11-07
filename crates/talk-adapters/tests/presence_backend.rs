@@ -482,10 +482,40 @@ async fn signaling_typing_is_room_scoped_and_respects_privacy() {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     assert!(restarted, "new typing should become visible after idle");
+
+    bob.request(
+        context(bob_scope),
+        ProtocolRequest::TypingActivity {
+            conversation: bob_room,
+            active: false,
+        },
+    )
+    .await
+    .unwrap();
+    let end = Instant::now() + Duration::from_secs(4);
+    let mut cleared = false;
+    while Instant::now() < end {
+        if let ProtocolReply::Typing(observation) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            .unwrap()
+            && observation.running
+            && observation.people.as_slice().is_empty()
+        {
+            cleared = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(cleared, "stop or expiry clears the indicator");
     // The live HPB socket must resume after a network/suspend hint, rather than
     // waiting for its heartbeat to time out or requiring another room join.
     runtime.network_changed();
     let resumed_at = Instant::now();
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let mut resumed = false;
     while resumed_at.elapsed() < Duration::from_secs(15) {
         let _ = bob
@@ -516,35 +546,11 @@ async fn signaling_typing_is_room_scoped_and_respects_privacy() {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     assert!(resumed, "HPB typing must recover after a connectivity hint");
+    eprintln!(
+        "HPB_NETWORK_RECOVERY_MS={}",
+        resumed_at.elapsed().as_millis()
+    );
 
-    bob.request(
-        context(bob_scope),
-        ProtocolRequest::TypingActivity {
-            conversation: bob_room,
-            active: false,
-        },
-    )
-    .await
-    .unwrap();
-    let end = Instant::now() + Duration::from_secs(4);
-    let mut cleared = false;
-    while Instant::now() < end {
-        if let ProtocolReply::Typing(observation) = alice
-            .request(
-                context(alice_scope),
-                ProtocolRequest::PollTyping(alice_room),
-            )
-            .await
-            .unwrap()
-            && observation.running
-            && observation.people.as_slice().is_empty()
-        {
-            cleared = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(300)).await;
-    }
-    assert!(cleared, "stop or expiry clears the indicator");
     bob.request(
         context(bob_scope),
         ProtocolRequest::SetPreference {

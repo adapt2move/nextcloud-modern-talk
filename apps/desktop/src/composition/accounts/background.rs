@@ -77,11 +77,12 @@ pub(super) struct Account {
     live: Option<Result<protocol::AccountLiveState, IdentityError>>,
     first_transport_failure: Option<ErrorKind>,
     transport_failures: u8,
+    transport_version: u64,
     background_paused_until: Option<Instant>,
     member_counts: Vec<MemberCount>,
     names_next: Instant,
     pub(super) metadata: conversations::Metadata,
-    pub(super) rooms: Page<ConversationView, 100>,
+    pub(super) rooms: Page<ConversationView, 256>,
     pub(super) state: ConversationListState,
 }
 #[derive(Default)]
@@ -89,6 +90,21 @@ pub(super) struct Background {
     accounts: Vec<Account>,
 }
 impl Background {
+    pub(super) fn resume(&mut self, now: Instant) {
+        for a in &mut self.accounts {
+            a.background_paused_until = None;
+            for kind in Observation::ALL {
+                let i = kind.index();
+                a.due[i] = a
+                    .retry_not_before
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(now)
+                    .max(now);
+            }
+        }
+    }
     pub(super) fn sync(&mut self, scopes: &[AccountScope], now: Instant) {
         self.accounts.retain(|a| scopes.contains(&a.scope));
         for &scope in scopes.iter().take(ACCOUNTS) {
@@ -106,6 +122,7 @@ impl Background {
                     live: None,
                     first_transport_failure: None,
                     transport_failures: 0,
+                    transport_version: 0,
                     background_paused_until: None,
                     member_counts: Vec::new(),
                     names_next: now,
@@ -129,7 +146,23 @@ impl Background {
         self.account(scope)
             .is_none_or(|a| a.background_paused_until.is_none_or(|at| now >= at))
     }
-    fn transport_observed(&mut self, scope: AccountScope, success: bool, now: Instant) {
+    pub(super) fn transport_result(
+        &mut self,
+        scope: AccountScope,
+        version: u64,
+        success: bool,
+        now: Instant,
+    ) {
+        let Some(account) = self.account_mut(scope) else {
+            return;
+        };
+        if version < account.transport_version {
+            return;
+        }
+        account.transport_version = version;
+        self.transport_observed(scope, success, now);
+    }
+    pub(super) fn transport_observed(&mut self, scope: AccountScope, success: bool, now: Instant) {
         if let Some(a) = self.account_mut(scope) {
             if success {
                 a.transport_failures = 0;
@@ -462,18 +495,20 @@ impl Purpose {
                 _,
                 _,
                 messaging::Work::Prefetch
-                | messaging::Work::Latest
-                | messaging::Work::Poll
                 | messaging::Work::Metadata
                 | messaging::Work::ThreadActivity,
             )
             | Self::Rooms(_)
+            | Self::Reference(..)
+            | Self::ParticipantIndex(..)
             | Self::MessageNotifications(_) => 2,
             Self::Message(
                 _,
                 _,
                 _,
                 messaging::Work::History
+                | messaging::Work::Poll
+                | messaging::Work::Latest
                 | messaging::Work::Older
                 | messaging::Work::Thread
                 | messaging::Work::ThreadOlder(_)
@@ -494,7 +529,8 @@ impl Purpose {
     }
     pub(super) fn room(self) -> Option<ConversationRef> {
         match self {
-            Self::ParticipantIndex(c, _)
+            Self::QueuedSetting(c, _)
+            | Self::ParticipantIndex(c, _)
             | Self::Reference(c, _, _, _)
             | Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
@@ -936,23 +972,6 @@ impl Accounts {
         scope: AccountScope,
         result: Result<RuntimeReply, IdentityError>,
     ) {
-        match &result {
-            Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(list)))
-                if list.scope == scope && valid_rooms(list) =>
-            {
-                self.background
-                    .transport_observed(scope, true, Instant::now())
-            }
-            Err(IdentityError::Request(
-                ErrorKind::Transport
-                | ErrorKind::Deadline
-                | ErrorKind::ServerUnavailable
-                | ErrorKind::RateLimited,
-            )) => self
-                .background
-                .transport_observed(scope, false, Instant::now()),
-            _ => (),
-        }
         let list = match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(list)))
                 if list.scope == scope && valid_rooms(&list) =>
@@ -1868,6 +1887,12 @@ mod tests {
 #[cfg(test)]
 mod cooldown_tests {
     use super::*;
+    fn scope(id: u128) -> AccountScope {
+        AccountScope {
+            account: AccountId::from_local(id),
+            runtime: talk_core::ids::RuntimeGeneration::from_local(1),
+        }
+    }
     #[test]
     fn repeated_transport_failures_pause_only_the_affected_accounts_background_work() {
         let now = Instant::now();
@@ -1900,5 +1925,26 @@ mod cooldown_tests {
         };
         owner.sync(&[replacement, b], now);
         assert!(owner.background_ready(replacement, now));
+    }
+    #[test]
+    fn circuit_ignores_stale_completions_and_resume_reopens_background_without_losing_server_cooldown()
+     {
+        let now = Instant::now();
+        let mut owner = Background::default();
+        owner.sync(&[scope(1), scope(2)], now);
+        owner.transport_result(scope(1), 1, false, now);
+        owner.transport_result(scope(1), 2, false, now);
+        assert!(!owner.background_ready(scope(1), now));
+        assert!(owner.background_ready(scope(2), now));
+        owner.transport_result(scope(1), 1, true, now);
+        assert!(!owner.background_ready(scope(1), now));
+        let retry = now + Duration::from_secs(45);
+        owner.account_mut(scope(1)).unwrap().retry_not_before[0] = Some(retry);
+        owner.resume(now);
+        assert!(owner.background_ready(scope(1), now));
+        assert_eq!(owner.account(scope(1)).unwrap().due[0], retry);
+        owner.transport_result(scope(1), 3, true, now);
+        owner.transport_result(scope(1), 2, false, now);
+        assert!(owner.background_ready(scope(1), now));
     }
 }

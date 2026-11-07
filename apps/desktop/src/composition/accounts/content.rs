@@ -109,6 +109,27 @@ fn is_avatar(target: &view::AssetTarget) -> bool {
             | view::AssetTarget::Reference { .. }
     )
 }
+impl ContentOwner {
+    pub(super) fn priority(&self, operation: OperationId) -> u8 {
+        self.jobs
+            .iter()
+            .find(|job| job.operation == operation)
+            .map_or(0, |job| {
+                if job.mutation {
+                    0
+                } else if job.request.0 == 0 {
+                    2
+                } else {
+                    1
+                }
+            })
+    }
+    pub(super) fn disposable(&self, operation: OperationId) -> bool {
+        self.jobs
+            .iter()
+            .any(|job| job.operation == operation && !job.mutation)
+    }
+}
 impl Accounts {
     /// A fresh account listing invalidates all cloud previews from the former
     /// listing, including pending decode/network work. No old file grant or
@@ -478,7 +499,13 @@ impl Accounts {
                 self.start_poll(request, wire::PollCommand::DeleteDraft(poll))
             }
             A::Vote { poll, options } => {
-                self.start_poll(request, wire::PollCommand::Vote { poll, options })
+                let context = self.snapshot.selected.ok_or(SubmitError::StaleScope)?;
+                self.queue_message_action(
+                    request,
+                    context,
+                    &talk_core::ui::messaging::MessageAction::VotePoll { poll, options },
+                )
+                .unwrap_or(Err(SubmitError::StaleScope))
             }
             A::ClosePoll(poll) => self.start_poll(request, wire::PollCommand::Close(poll)),
         }
@@ -910,12 +937,20 @@ impl Accounts {
             .new_operation_id(job.account)
             .map_err(submit_error)?;
         job.operation = operation;
-        self.request(
-            job.account,
+        let account = job.account;
+        // The owner publishes the bounded descriptor before nonblocking lane
+        // admission so automatic poll discovery cannot masquerade as user work.
+        self.content_owner.jobs.push(job);
+        if let Err(error) = self.request(
+            account,
             ProtocolRequest::Content { operation, command },
             Purpose::Content(operation),
-        )?;
-        self.content_owner.jobs.push(job);
+        ) {
+            self.content_owner
+                .jobs
+                .retain(|job| job.operation != operation);
+            return Err(error);
+        }
         Ok(())
     }
     pub(super) fn complete_content(
@@ -1136,6 +1171,14 @@ impl Accounts {
                     Some((job.request, Completion::ServerAccepted));
             }
             Ok(wire::ContentResult::Poll(poll)) => {
+                if self
+                    .snapshot
+                    .content_panel
+                    .vote_failure
+                    .is_some_and(|(id, _)| id == poll.id)
+                {
+                    self.snapshot.content_panel.vote_failure = None;
+                }
                 if self
                     .content_owner
                     .refresh_poll
@@ -2206,7 +2249,7 @@ fn availability_view(a: protocol::conversation::ActionAvailability) -> Availabil
         allowed: a.allowed,
     }
 }
-fn poll_view(p: wire::Poll) -> view::PollView {
+pub(super) fn poll_view(p: wire::Poll) -> view::PollView {
     view::PollView {
         id: p.id,
         question: p.question,

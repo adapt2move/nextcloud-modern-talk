@@ -1,6 +1,11 @@
 //! Account connection failures shared by login, accounts and the composer.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
     (
+        "Auf diesem Server nicht verfügbar.",
+        "This feature is unavailable on this server.",
+        "Esta función no está disponible en este servidor.",
+    ),
+    (
         "Dein Entwurf bleibt erhalten. Nachrichten werden nicht automatisch gesendet.",
         "Your draft is preserved. Messages will not be sent automatically.",
         "Se conserva tu borrador. Los mensajes no se enviarán automáticamente.",
@@ -34,6 +39,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Dieser Entwurf bleibt nur für diese Sitzung erhalten.",
         "This draft is kept for this session only.",
         "Este borrador se conserva solo durante esta sesión.",
+    ),
+    (
+        "Mikrofon, Kamera und Freigabe bleiben beim erneuten Verbinden aus.",
+        "Microphone, camera and screen sharing stay off while reconnecting.",
+        "El micrófono, la cámara y la pantalla compartida permanecen apagados al reconectar.",
     ),
     (
         "Offline – Änderungen werden gesendet, sobald du wieder online bist",

@@ -2792,10 +2792,11 @@ impl Desktop {
             text
         } else {
             let handles = if permitted {
-                (0..self
-                    .text_selection
-                    .read(cx)
-                    .link_count(message.body.as_str()))
+                (0..message
+                    .metadata
+                    .prepared
+                    .as_ref()
+                    .map_or(0, |p| p.document().links.as_slice().len()))
                     .map(|ordinal| {
                         // A timeline row and a rendered thread copy must never
                         // share focus ownership, even for the same message.
@@ -2813,6 +2814,7 @@ impl Desktop {
                 Vec::new()
             };
             text.rich(message.body.as_str(), f32::from(self.scale) / 100.)
+                .prepared(message.metadata.prepared.clone())
                 .links(context, message.local_id, message.body.clone(), handles)
         }
     }

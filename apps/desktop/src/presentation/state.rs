@@ -988,6 +988,7 @@ pub(super) mod tests {
         };
         let context = context(1);
         let row = ConversationView {
+            action_error: None,
             context,
             navigation_key: None,
             title: Text::new("Synthetic room").unwrap(),
@@ -1019,6 +1020,7 @@ pub(super) mod tests {
             call_scope: None,
         };
         PresentationSnapshot {
+            pending_intents: 0,
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
@@ -2085,6 +2087,7 @@ pub(super) mod tests {
             call: talk_core::ui::CallGeneration::from_local(1),
         };
         let mut row = ConversationView {
+            action_error: None,
             tags: None,
             context: c,
             navigation_key: None,

@@ -592,7 +592,7 @@ impl Desktop {
                 });
             if let Some((_, _, poll)) = vote {
                 self.content_ui.pending_vote = None;
-                if completion == Completion::ServerAccepted {
+                if matches!(completion, Completion::ServerAccepted | Completion::Queued) {
                     self.content_ui.selections.retain(|(id, _)| *id != poll);
                     self.content_ui.vote_error = None;
                     self.begin_surface_reveal(("poll-results", poll as usize).into());
@@ -1071,6 +1071,13 @@ impl Desktop {
                         |d, error| d.child(self.hint(self.l(error))),
                     ),
             )
+    }
+    fn can_queue_vote(&self, poll: &PollView) -> bool {
+        !poll.closed
+            && poll.vote.implemented
+            && poll.vote.server != talk_core::ui::presentation::FeatureSupport::Unsupported
+            && poll.vote.allowed != talk_core::ui::Decision::Denied
+            && (poll.vote.enabled() || self.local_message_intents())
     }
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
@@ -1712,7 +1719,7 @@ impl Desktop {
                     .iter()
                     .find(|p| p.id == poll)
                     && self.content_scope_current()
-                    && current.vote.enabled()
+                    && self.can_queue_vote(current)
                     && !current.closed
                     && !self.poll_submission_blocked()
                 {
@@ -1743,8 +1750,8 @@ impl Desktop {
             }
             Action::SubmitVote(poll) => {
                 if self.content_scope_current()
-                    && self.snapshot.content == ContentState::Ready
-                    && !self.media_offline()
+                    && (self.local_message_intents()
+                        || self.snapshot.content == ContentState::Ready && !self.media_offline())
                     && !self.poll_submission_blocked()
                     && let Some((_, options)) = self
                         .content_ui
@@ -2573,7 +2580,7 @@ impl Desktop {
         };
         for option in poll.options.as_slice().iter().take(count) {
             let selected = selection.contains(&option.id);
-            let enabled = poll.vote.enabled()
+            let enabled = self.can_queue_vote(poll)
                 && !poll.closed
                 && !self.poll_submission_blocked()
                 && toggled_poll_votes(poll.max_votes, selection.iter().copied(), option.id)
@@ -2662,7 +2669,7 @@ impl Desktop {
             .selections
             .iter()
             .find(|(id, _)| *id == poll.id);
-        if !poll.closed && poll.vote.enabled() && changed_vote.is_some() {
+        if self.can_queue_vote(poll) && changed_vote.is_some() {
             body = body.child(
                 self.button(
                     ("poll-vote-submit", poll.id as usize),
@@ -2676,8 +2683,9 @@ impl Desktop {
                     },
                     ButtonStyle::Primary,
                     !self.poll_submission_blocked()
-                        && self.snapshot.content == ContentState::Ready
-                        && !self.media_offline()
+                        && (self.local_message_intents()
+                            || self.snapshot.content == ContentState::Ready
+                                && !self.media_offline())
                         && self
                             .content_ui
                             .selections
@@ -2688,11 +2696,17 @@ impl Desktop {
                 ),
             );
         }
+        if let Some((id, reason)) = self.snapshot.content_panel.vote_failure
+            && id == poll.id
+        {
+            body=body.child(self.hint(self.l(super::state::error_label(talk_core::ui::SubmitError::Unavailable(reason)).unwrap_or("Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen."))))
+                .child(self.button(("poll-vote-reload",poll.id as usize),"Erneut laden",ButtonStyle::Quiet,!self.media_offline(),LocalAction::Content(Action::Command(ContentAction::RefreshPoll(poll.id))),cx));
+        }
         if self.content_ui.vote_error == Some(poll.id) {
             body = body
                 .child(self.hint(self.l("Deine Auswahl bleibt erhalten. Bitte erneut versuchen.")));
         }
-        if !poll.closed && self.media_offline() {
+        if !poll.closed && self.media_offline() && !self.local_message_intents() {
             body = body.child(self.hint(self.l("Verbinde dich erneut, um abzustimmen.")));
         }
         if let Some((id, uncertain)) = self.content_ui.close_error

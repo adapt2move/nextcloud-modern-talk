@@ -26,7 +26,7 @@ mod thumbnails;
 pub use intent::{OutboxIntent, OutboxOptions, OutboxPrivateReply};
 pub use presence::{CACHE_PRESENCE_LIFETIME, CacheUserStatus, CachedPresence};
 
-pub const CACHE_ROOM_LIMIT: usize = 100;
+pub const CACHE_ROOM_LIMIT: usize = 256;
 pub const CACHE_HISTORY_LIMIT: usize = 32;
 pub const OUTBOX_LIMIT: usize = 64;
 pub const CACHE_LIFETIME: u64 = 30 * 24 * 60 * 60;
@@ -250,6 +250,12 @@ pub struct CacheHistory {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutboxKind {
+    MarkRead,
+    ShareFile,
+    Favorite,
+    Archived,
+    Notifications,
+    PollVote,
     Send,
     Edit,
     Delete,
@@ -267,6 +273,12 @@ pub enum OutboxKind {
 impl OutboxKind {
     fn code(self) -> i64 {
         match self {
+            Self::MarkRead => 18,
+            Self::ShareFile => 17,
+            Self::Favorite => 13,
+            Self::Archived => 14,
+            Self::Notifications => 15,
+            Self::PollVote => 16,
             Self::Send => 0,
             Self::Edit => 1,
             Self::Delete => 2,
@@ -284,6 +296,12 @@ impl OutboxKind {
     }
     fn parse(code: i64) -> Result<Self> {
         Ok(match code {
+            18 => Self::MarkRead,
+            17 => Self::ShareFile,
+            13 => Self::Favorite,
+            14 => Self::Archived,
+            15 => Self::Notifications,
+            16 => Self::PollVote,
             0 => Self::Send,
             1 => Self::Edit,
             2 => Self::Delete,
@@ -529,7 +547,7 @@ impl Store {
         prune(&mut db, now)?;
         let tx = sql(db.transaction())?;
         let existing: Vec<String> = {
-            let mut statement = sql(tx.prepare("SELECT room FROM rooms LIMIT 101"))?;
+            let mut statement = sql(tx.prepare("SELECT room FROM rooms LIMIT 257"))?;
             let mut rows = sql(statement.query([]))?;
             let mut keys = Vec::new();
             while let Some(row) = sql(rows.next())? {
@@ -782,7 +800,8 @@ impl Store {
         ))?;
         sql(tx.commit())
     }
-    /// Failed drafts are replaced and admitted in one transaction: capacity or
+    /// Failed drafts and explicit replacements of uncertain unread markers are
+    /// replaced and admitted in one transaction: capacity or
     /// storage failure leaves the original intact, including at 64 records.
     pub(super) fn replace(
         &self,
@@ -796,7 +815,9 @@ impl Store {
             || record.phase != OutboxPhase::Queued
             || !matches!(
                 record.kind,
-                OutboxKind::Send
+                OutboxKind::MarkRead
+                    | OutboxKind::MarkUnread
+                    | OutboxKind::Send
                     | OutboxKind::Edit
                     | OutboxKind::Schedule
                     | OutboxKind::EditScheduled
@@ -819,10 +840,17 @@ impl Store {
             .iter()
             .find(|e| e.record.operation == record.operation);
         if let Some(old) = prior {
-            if old.record.phase != OutboxPhase::Failed
-                || old.record.room != record.room
-                || old.record.kind != record.kind
-                || old.record.payload != record.payload
+            let unread_replacement = old.record.kind == OutboxKind::MarkUnread
+                && matches!(
+                    old.record.phase,
+                    OutboxPhase::Dispatched | OutboxPhase::Uncertain
+                )
+                && matches!(record.kind, OutboxKind::MarkUnread | OutboxKind::MarkRead);
+            if old.record.room != record.room
+                || !unread_replacement
+                    && (old.record.phase != OutboxPhase::Failed
+                        || old.record.kind != record.kind
+                        || old.record.payload != record.payload)
             {
                 return Err(DataError::InvalidInput);
             }
@@ -996,7 +1024,7 @@ fn prune(db: &mut Connection, now: u64) -> Result<()> {
     sql(tx.commit())
 }
 fn read_rooms(db: &Connection, now: u64) -> Result<Page<CacheRoom, CACHE_ROOM_LIMIT>> {
-    let mut query=sql(db.prepare("SELECT room,saved,bytes FROM rooms WHERE length(bytes)<=?1 ORDER BY position,room LIMIT 101"))?;
+    let mut query=sql(db.prepare("SELECT room,saved,bytes FROM rooms WHERE length(bytes)<=?1 ORDER BY position,room LIMIT 257"))?;
     let mut rows = sql(query.query([META_BYTES as i64]))?;
     let mut result = Page::empty();
     let mut expired = Vec::new();

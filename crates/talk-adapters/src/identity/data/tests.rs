@@ -1051,3 +1051,33 @@ fn room_order_and_newest_fifty_messages_survive_reopen_with_the_existing_byte_ce
     assert_eq!(loaded.histories.as_slice()[0].messages.as_slice().len(), 50);
     assert_eq!(loaded.histories.as_slice()[0].messages.as_slice()[0].id, 51);
 }
+
+#[test]
+fn only_an_uncertain_unread_marker_can_be_atomically_superseded_by_a_read_intent() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let previous = OperationId::from_local(1);
+    let old = OutboxRecord::from_intent(previous, fixture.room.clone(), &OutboxIntent::MarkUnread)
+        .unwrap();
+    store.enqueue(&old, 100).unwrap();
+    let replacement = OutboxRecord::from_intent(
+        OperationId::from_local(2),
+        fixture.room.clone(),
+        &OutboxIntent::MarkRead { message: 8 },
+    )
+    .unwrap();
+    assert_eq!(
+        store.replace(previous, &replacement, 101),
+        Err(DataError::InvalidInput)
+    );
+    store.set_phase(previous, OutboxPhase::Dispatched).unwrap();
+    let admitted = store.replace(previous, &replacement, 101).unwrap();
+    assert_eq!(admitted.record, replacement);
+    assert_eq!(
+        store.replace(previous, &replacement, 101).unwrap(),
+        admitted
+    );
+    let reopened = fixture.store().load(101).unwrap().outbox;
+    assert_eq!(reopened.as_slice().len(), 1);
+    assert_eq!(reopened.as_slice()[0].record, replacement);
+}

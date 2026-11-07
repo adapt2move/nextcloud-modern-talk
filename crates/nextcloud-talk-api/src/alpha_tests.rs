@@ -410,7 +410,7 @@ async fn binary_download_streams_beyond_json_ceiling_in_bounded_writes() {
     assert_eq!(bytes, 1024 * 1024);
     assert_eq!(sink.bytes, 1024 * 1024);
     assert!(sink.largest <= files::FILE_CHUNK_BYTES);
-    assert_eq!(MAX_RESPONSE_BYTES, 256 * 1024);
+    assert_eq!(MAX_RESPONSE_BYTES, 1024 * 1024);
 }
 #[tokio::test]
 async fn binary_limits_and_create_only_conflict_do_not_weaken_json_or_replay() {

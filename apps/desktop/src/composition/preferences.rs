@@ -42,9 +42,18 @@ pub struct Services {
 }
 impl Services {
     pub fn start(connect_accounts: bool) -> Result<Rc<Self>, PreferenceError> {
+        Self::start_with_config(connect_accounts, None)
+    }
+    pub(super) fn start_with_config(
+        connect_accounts: bool,
+        config: Option<talk_adapters::identity::RuntimeConfig>,
+    ) -> Result<Rc<Self>, PreferenceError> {
         let preferences = SettingsRuntime::start()?;
         let media = talk_adapters::media::MediaService::new();
-        let accounts = connect_accounts.then(|| super::accounts::Accounts::start(media.clone()));
+        let accounts = connect_accounts.then(|| match config {
+            Some(config) => super::accounts::Accounts::start_with_config(media.clone(), config),
+            None => super::accounts::Accounts::start(media.clone()),
+        });
         let notifications = if let Some(accounts) = &accounts {
             NotificationRuntime::start_with_dispatcher(
                 preferences.snapshot().active.notifications,

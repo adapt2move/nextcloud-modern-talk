@@ -195,7 +195,7 @@ impl Desktop {
         self.snapshot.conversation_list.content == ContentState::Ready
             && match row.organization.favorites {
                 FeatureSupport::Supported => {
-                    row.organization.favorite_change == Decision::Allowed && row.favorite.is_some()
+                    row.organization.favorite_change != Decision::Denied && row.favorite.is_some()
                 }
                 FeatureSupport::Unsupported => {
                     row.navigation_key.is_some()
@@ -206,7 +206,7 @@ impl Desktop {
                             .iter()
                             .any(|a| a.scope == row.context.account && a.navigation_key.is_some())
                 }
-                FeatureSupport::Unknown => false,
+                FeatureSupport::Unknown => row.navigation_key.is_some() && row.favorite.is_some(),
             }
     }
     pub(super) fn sidebar(&self, narrow: bool, cx: &Context<Self>) -> Div {
@@ -1032,6 +1032,20 @@ impl Desktop {
                     scoped_id(namespace, context, 0, 1),
                     ("star-filled", "Favorit"),
                     (13., t.accent),
+                    row_focus.clone(),
+                    cx,
+                ))
+            })
+            .when_some(row.action_error, |d, reason| {
+                d.child(self.status_icon(
+                    scoped_id(
+                        "sidebar-action-error",
+                        context,
+                        u128::from(namespace != "room"),
+                        0,
+                    ),
+                    ("info", super::toast::copy(reason)),
+                    (12., t.warning),
                     row_focus,
                     cx,
                 ))
@@ -1196,7 +1210,7 @@ impl Desktop {
                                 ),
                                 ButtonStyle::Quiet,
                                 Availability::when(
-                                    row.archive == Decision::Allowed && row.archived.is_some(),
+                                    row.archive != Decision::Denied && row.archived.is_some(),
                                     "Der Archivstatus kann derzeit nicht geändert werden.",
                                 ),
                                 LocalAction::Archive(context, row.archived != Some(true)),

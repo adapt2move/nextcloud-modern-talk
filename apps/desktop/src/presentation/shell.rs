@@ -741,6 +741,7 @@ impl Desktop {
             .flex_col()
             .gap_2()
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
+            .children(if thread==(self.overlay==Some(Overlay::Thread)) {self.action_hint_view(cx)} else {None})
             .children(if thread {
                 self.thread_composer_context(cx)
             } else {
@@ -905,11 +906,6 @@ impl Desktop {
                     .flatten()
                     .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),
             )
-            .children(if thread {
-                None
-            } else {
-                self.offline_footer(row.context, cx)
-            })
             .when(self.draft_storage_unavailable == Some(row.context), |d| {
                 d.child(self.hint(self.l("Dieser Entwurf bleibt nur für diese Sitzung erhalten.")))
             })

@@ -288,6 +288,7 @@ pub enum MessagingCommand {
     },
     /// Share an already existing account file; result reconciles by reference.
     ShareExistingFile {
+        voice_message: bool,
         path: Text<16384>,
         caption: Text<4096>,
         options: ComposeOptions,

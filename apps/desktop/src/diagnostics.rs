@@ -36,6 +36,7 @@ pub(crate) enum Operation {
     Application,
     #[cfg(debug_assertions)]
     FeedbackStartup,
+    FeedbackStartupMessages,
     #[cfg(debug_assertions)]
     FeedbackSwitch,
     #[cfg(debug_assertions)]
@@ -70,6 +71,7 @@ impl Operation {
             Self::Application => "application",
             #[cfg(debug_assertions)]
             Self::FeedbackStartup => "feedback_startup_us",
+            Self::FeedbackStartupMessages => "feedback_startup_messages_us",
             #[cfg(debug_assertions)]
             Self::FeedbackSwitch => "feedback_switch_us",
             #[cfg(debug_assertions)]

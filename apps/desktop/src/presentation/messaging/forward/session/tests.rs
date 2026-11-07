@@ -52,6 +52,7 @@ fn message() -> MessageView {
 fn snapshot() -> PresentationSnapshot {
     let source = room(1);
     let row = |context| ConversationView {
+        action_error: None,
         context,
         navigation_key: None,
         title: Text::new("Synthetic conversation").unwrap(),
@@ -95,6 +96,7 @@ fn snapshot() -> PresentationSnapshot {
         },
     )]);
     PresentationSnapshot {
+        pending_intents: 0,
         content_panel: Default::default(),
         file_export: None,
         create_panel: None,

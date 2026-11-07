@@ -15,6 +15,8 @@ mod federation;
 mod feedback;
 mod focus;
 pub mod input;
+#[cfg(feature = "dev-probes")]
+mod latency_probe;
 pub mod localization;
 mod messaging;
 mod motion;
@@ -452,6 +454,10 @@ pub struct Desktop {
     pending_feedback_focus: bool,
     pending_navigation_focus: Option<bool>,
     diagnostic_frames: u8,
+    #[cfg(debug_assertions)]
+    latency_probe: bool,
+    #[cfg(feature = "dev-probes")]
+    perf_probe: Option<latency_probe::PerfRun>,
     return_focus: Option<FocusHandle>,
     prejoin_return_focus: Option<CallScope>,
     pending_prejoin_return: Option<CallScope>,
@@ -819,6 +825,10 @@ impl Desktop {
             pending_feedback_focus: false,
             pending_navigation_focus: None,
             diagnostic_frames: 0,
+            #[cfg(debug_assertions)]
+            latency_probe: false,
+            #[cfg(feature = "dev-probes")]
+            perf_probe: None,
             return_focus: None,
             prejoin_return_focus: None,
             pending_prejoin_return: None,
@@ -2442,7 +2452,7 @@ impl Desktop {
                 if self.snapshot.conversation_list.content == ContentState::Ready
                     && self.snapshot.conversations.as_slice().iter().any(|r| {
                         r.context == context
-                            && r.archive == Decision::Allowed
+                            && r.archive != Decision::Denied
                             && r.archived == Some(!archived)
                     })
                     && let Some(request) = self.archive_request.checked_add(1)
@@ -3290,8 +3300,21 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_frame(window, cx);
         #[cfg(debug_assertions)]
-        self.port.observe_rendered(&self.snapshot);
+        if self.latency_probe {
+            let snapshot = self.snapshot.clone();
+            let view = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                if view
+                    .update(cx, |view, _| view.port.observe_rendered(&snapshot))
+                    .is_err()
+                {
+                    println!("DEV_FRAME_UNAVAILABLE");
+                }
+            });
+        }
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;
@@ -3683,7 +3706,6 @@ impl Render for Desktop {
             .flatten()
             .map(|dialog| self.dialog_backdrop(motion::DialogSurface::AccountRemoval, dialog));
         let incoming_card = incoming.then(|| self.incoming(cx));
-        let action_toast = self.action_toast_view(window, cx);
         let message_menu = self.message_menu_popup(window, cx);
         let composer_menu = self.composer_menu_popup(window, cx);
         let pin_motion_overlay = self.pin_motion_overlay(cx);
@@ -3796,6 +3818,7 @@ impl Render for Desktop {
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
             .child(self.window_chrome(window, shell_visible, cx))
+            .children(self.connection_banner())
             .child(
                 div()
                     .relative()
@@ -3805,7 +3828,6 @@ impl Render for Desktop {
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
                     .when_some(incoming_card, |d, card| d.child(card))
-                    .when_some(action_toast, |d, toast| d.child(toast))
                     .when_some(message_menu, |d, menu| d.child(menu))
                     .when_some(composer_menu, |d, menu| d.child(menu))
                     .when_some(pin_motion_overlay, |d, motion| d.child(motion)),

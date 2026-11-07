@@ -47,11 +47,10 @@ impl Accounts {
                 .find(|a| a.scope == batch.context.account)
                 .map_or("", |a| a.self_name.as_str());
             for file in &batch.files {
-                let Some(outgoing) = file
-                    .outgoing
-                    .as_ref()
-                    .filter(|_| file.view.server_message.is_none())
-                else {
+                let Some(outgoing) = file.outgoing.as_ref().filter(|o| {
+                    file.view.server_message.is_none()
+                        && o.operation.is_none_or(|op| !self.outbox.contains(op))
+                }) else {
                     continue;
                 };
                 let mut row = MessageView {

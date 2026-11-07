@@ -1,4 +1,4 @@
-//! One transient action failure above the chat, without changing its layout.
+//! One bounded, room-scoped inline action failure in the composer.
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, scoped_id},
@@ -88,7 +88,7 @@ impl Toasts {
     }
 }
 
-fn copy(error: MessageActionError) -> &'static str {
+pub(super) fn copy(error: MessageActionError) -> &'static str {
     let MessageActionError::Failed(reason) = error else {
         return "Ergebnis unklar. Vor erneutem Ändern neu laden.";
     };
@@ -99,7 +99,8 @@ fn copy(error: MessageActionError) -> &'static str {
         UnavailableReason::Connection(failure) => super::state::connection_failure_copy(failure).1,
         UnavailableReason::PermissionDenied => "Keine Berechtigung für diese Aktion.",
         UnavailableReason::ReauthenticationRequired => "Bitte erneut anmelden.",
-        UnavailableReason::Unsupported | UnavailableReason::Unconfigured => {
+        UnavailableReason::Unsupported => "Auf diesem Server nicht verfügbar.",
+        UnavailableReason::Unconfigured => {
             "Diese Aktion ist in diesem Client noch nicht verfügbar."
         }
         UnavailableReason::Busy => {
@@ -204,7 +205,7 @@ impl Desktop {
         true
     }
 
-    pub(super) fn action_toast_view(&self, window: &Window, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn action_hint_view(&self, cx: &Context<Self>) -> Option<Div> {
         let toast = self.action_toasts.current.filter(|toast| {
             Some(toast.key.context) == self.snapshot.selected
                 && !self.update_restart_pending
@@ -222,19 +223,9 @@ impl Desktop {
         })?;
         Some(
             div()
-                .absolute()
-                .right_4()
-                .bottom_4()
-                .occlude()
-                .w(self
-                    .sp(360.)
-                    .min((window.viewport_size().width - px(32.)).max(px(1.))))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(self.theme.border)
-                .bg(self.theme.surface)
-                .shadow_lg()
-                .p_3()
+                .w_full()
+                .flex_none()
+                .py_1()
                 .flex()
                 .items_start()
                 .gap_2()
