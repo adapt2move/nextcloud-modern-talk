@@ -164,7 +164,7 @@ impl Desktop {
             .justify_center()
             .when(selected && !radio, |d| {
                 d.bg(self.theme.accent)
-                    .child(self.scaled_icon("check", 15., self.theme.on_accent))
+                    .child(self.scaled_icon("check", 14., self.theme.on_accent))
             })
             .when(selected && radio, |d| {
                 d.child(div().size(px(10.)).rounded_full().bg(self.theme.accent))

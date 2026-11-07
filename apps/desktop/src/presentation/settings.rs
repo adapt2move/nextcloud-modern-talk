@@ -309,7 +309,7 @@ impl Desktop {
         } else {
             FontWeight::NORMAL
         })
-        .child(self.scaled_icon(symbol, 17., self.theme.muted))
+        .child(self.scaled_icon(symbol, 16., self.theme.muted))
         .child(self.l(label).to_owned())
     }
     /// Every page starts with the same title scale; descriptions stay one quiet line.

@@ -12,6 +12,8 @@ use talk_core::ui::presentation::{
     TagEdit, TagKind,
 };
 
+const SECTION_ICON_SIZE: f32 = 14.;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Section {
     Personal,
@@ -530,7 +532,7 @@ impl Desktop {
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(self.sp(12.))
                     .text_color(t.sidebar_secondary)
-                    .child(self.scaled_icon("star-filled", 12., t.accent))
+                    .child(self.scaled_icon("star-filled", SECTION_ICON_SIZE, t.accent))
                     .child(self.l("Favoriten")),
             );
             visible += favorites.len();
@@ -593,7 +595,7 @@ impl Desktop {
                         } else {
                             "chevron-down"
                         },
-                        12.,
+                        SECTION_ICON_SIZE,
                         t.muted,
                     ))
                     .child(
@@ -656,7 +658,7 @@ impl Desktop {
                         } else {
                             "chevron-down"
                         },
-                        12.,
+                        SECTION_ICON_SIZE,
                         t.muted,
                     ))
                     .child(
@@ -715,7 +717,7 @@ impl Desktop {
                     } else {
                         "chevron-down"
                     },
-                    12.,
+                    SECTION_ICON_SIZE,
                     t.muted,
                 ))
                 .child(self.l(section.key())),
@@ -992,13 +994,13 @@ impl Desktop {
             })
             .when(
                 row.kind == ConversationKind::Direct && row.organization.classified == Some(true),
-                |d| d.child(self.scaled_icon("lock", 12., t.muted)),
+                |d| d.child(self.scaled_icon("lock", 14., t.muted)),
             )
             .when(row.call_active == Some(true), |d| {
                 let mut badge = d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 2),
                     ("headphones", "Anruf läuft"),
-                    (13., t.success),
+                    (14., t.success),
                     row_focus.clone(),
                     cx,
                 ));
@@ -1027,7 +1029,7 @@ impl Desktop {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 4),
                     ("bell-off", "Nachrichten stummgeschaltet"),
-                    (13., t.muted),
+                    (14., t.muted),
                     row_focus.clone(),
                     cx,
                 ))
@@ -1036,7 +1038,7 @@ impl Desktop {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 1),
                     ("star-filled", "Favorit"),
-                    (13., t.accent),
+                    (14., t.accent),
                     row_focus,
                     cx,
                 ))

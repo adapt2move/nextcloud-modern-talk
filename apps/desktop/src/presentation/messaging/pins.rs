@@ -199,7 +199,7 @@ impl Desktop {
                 .child(self.status_icon(
                     scoped_id("pin-banner-label", context, selected, 0),
                     ("pin", "Angeheftet"),
-                    (15., theme.accent),
+                    (14., theme.accent),
                     None,
                     cx,
                 ))

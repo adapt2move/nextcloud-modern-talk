@@ -268,7 +268,7 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.scaled_icon("clock", 12., t.muted))
+                    .child(self.scaled_icon("clock", 14., t.muted))
                     .child(self.hint(self.l("Erinnerung"))),
             );
         }

@@ -238,7 +238,7 @@ impl Desktop {
             .gap_2()
             .child(self.scaled_icon(
                 "info",
-                17.,
+                16.,
                 if toast.reason == MessageActionError::Uncertain {
                     self.theme.warning
                 } else {
