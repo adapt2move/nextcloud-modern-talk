@@ -37,6 +37,26 @@ def exercise(scenario, env, xid, out, label, large=False):
             for field in ('left','top','width','height'):r[field]=str(int(r[field])//2)
         return path, words, normalized(' '.join(r['text'] for r in words))
 
+    def poll_option_hits(path):
+        # Whole-dialog OCR sometimes groups the outlined fields into graphics.
+        # At this inspected fixture size, OCR their interiors separately; click
+        # only an option whose placeholder is actually recognized.
+        if scenario not in ('poll-dialog', 'poll-drafts'):
+            return []
+        size = run(['identify', '-format', '%w %h', str(path)], env).stdout.split()
+        if size != ['1280', '800']:
+            return []
+        hits = []
+        crop_path = out / f'{label}-ocr-option.png'
+        for y in (282, 334):
+            run(['convert', str(path), '-crop', f'200x22+389+{y}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop_path)], env)
+            found = normalized(run(['tesseract', str(crop_path), 'stdout', '--psm', '7'], env).stdout)
+            if 'antwortoption' in found.replace(' ', ''):
+                hits.append((469, y + 11))
+        crop_path.unlink()
+        return hits
+
     def expect(name, required=(), absent=(), footer_height=120, include_footer_words=False):
         path, words, text = observe()
         text += normalized(run(["tesseract",str(path),"stdout","--psm","6"],env).stdout)
@@ -104,6 +124,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
             field_path.unlink()
+        if 'Antwortoption' in required and poll_option_hits(path):
+            text += ' antwortoption'
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -190,6 +212,8 @@ def exercise(scenario, env, xid, out, label, large=False):
             hit = choices[0] if first else choices[-1]
             x = int(hit['left']) + int(hit['width']) // 2
             y = int(hit['top']) + int(hit['height']) // 2
+        elif word == 'Antwortoption' and (hits := poll_option_hits(path)):
+            x, y = hits[0] if first else hits[-1]
         elif inspected_point is not None:
             # Colored call controls are not reliably recognized by Tesseract.
             # These points were inspected on actual captures at the exact size.
