@@ -10,11 +10,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Checking invitation …",
         "Comprobando invitación …",
     ),
-    (
-        "Einladungen ({n})",
-        "Invitations ({n})",
-        "Invitaciones ({n})",
-    ),
+    ("Einladungen", "Invitations", "Invitaciones"),
     (
         "Föderierte Einladungen",
         "Federated invitations",

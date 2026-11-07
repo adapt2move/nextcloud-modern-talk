@@ -320,9 +320,9 @@ impl Desktop {
                     }),
                 |sidebar, view| {
                     sidebar.child(
-                        self.button(
+                        self.button_with_leading_icon(
                             "nav-federation",
-                            "",
+                            ("Einladungen", "users"),
                             ButtonStyle::Quiet,
                             true,
                             LocalAction::Open(Overlay::Federation),
@@ -330,11 +330,30 @@ impl Desktop {
                         )
                         .w_full()
                         .justify_start()
-                        .child(self.scaled_icon("users", 18., self.theme.text))
-                        .child(self.lf(
-                            "Einladungen ({n})",
-                            &[("n", &view.invitations.as_slice().len().to_string())],
-                        )),
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .flex_none()
+                                .min_w(px(18.))
+                                .h(px(18.))
+                                .px_1()
+                                .rounded_full()
+                                .bg(t.accent)
+                                .text_color(t.on_accent)
+                                .font_family("Google Sans Code")
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(px(11.))
+                                .line_height(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_center()
+                                .child(if view.invitations.as_slice().len() > 99 {
+                                    "99+".to_owned()
+                                } else {
+                                    view.invitations.as_slice().len().to_string()
+                                }),
+                        ),
                     )
                 },
             )
