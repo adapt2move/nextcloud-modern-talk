@@ -471,6 +471,27 @@ impl Accounts {
                         target: *target,
                     }
                 }
+                UiIntent::SetCallRecording { call, start } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || view.recording_control != Some(*start)
+                        || view.recording_pending
+                        || view.recording_uncertain
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::SetRecording {
+                        call: *call,
+                        start: *start,
+                    }
+                }
                 UiIntent::EndCallForEveryone(call) => {
                     let view = self
                         .snapshot
@@ -619,6 +640,7 @@ impl Accounts {
                 | UiIntent::SetCamera { .. }
                 | UiIntent::MuteCallParticipant { .. }
                 | UiIntent::EndCallForEveryone(_)
+                | UiIntent::SetCallRecording { .. }
                 | UiIntent::RingCallParticipant { .. }
                 | UiIntent::SetCallHand { .. }
                 | UiIntent::SendCallReaction { .. }
@@ -712,6 +734,9 @@ impl Accounts {
             share: MediaState::Unavailable,
             screen_stage: None,
             recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+            recording_control: None,
+            recording_pending: false,
+            recording_uncertain: false,
             hand_supported: false,
             hand_raised: false,
             reactions: Page::empty(),
@@ -925,6 +950,9 @@ fn project(
                 talk_core::ui::presentation::CallRecordingState::Unknown
             }
         },
+        recording_control: value.recording_control,
+        recording_pending: value.recording_pending,
+        recording_uncertain: value.recording_uncertain,
         hand_supported: value.hand_supported,
         hand_raised: value.hand_raised,
         reactions: value.reactions.clone(),
@@ -1059,6 +1087,9 @@ mod action_tests {
                 screen: DeviceState::Off,
                 peers: 0,
                 recording: talk_core::policy::RecordingState::Unknown,
+                recording_control: None,
+                recording_pending: false,
+                recording_uncertain: false,
                 hand_supported: false,
                 hand_raised: false,
                 reactions: Page::empty(),

@@ -144,6 +144,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-speaker",
     "call-screen-stage",
     "call-recording",
+    "call-recording-confirm",
     "call-end-confirm",
     "call-reactions",
     "call-active",
@@ -831,6 +832,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-speaker"
             | "call-screen-stage"
             | "call-recording"
+            | "call-recording-confirm"
             | "call-end-confirm"
             | "call-reactions"
             | "sharing"
@@ -916,6 +918,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 talk_core::ui::presentation::CallRecordingState::Unknown
             },
+            recording_control: match scenario {
+                "call-participants-raised" | "call-recording-confirm" => Some(true),
+                "call-recording" => Some(false),
+                _ => None,
+            },
+            recording_pending: false,
+            recording_uncertain: false,
             hand_supported: matches!(
                 scenario,
                 "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
@@ -1971,6 +1980,9 @@ impl NativeDesktopPort for DevelopmentPort {
                     share: MediaState::Unavailable,
                     screen_stage: None,
                     recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+                    recording_control: None,
+                    recording_pending: false,
+                    recording_uncertain: false,
                     hand_supported: false,
                     hand_raised: false,
                     reactions: Page::empty(),
@@ -1988,6 +2000,20 @@ impl NativeDesktopPort for DevelopmentPort {
                         page(participants())
                     },
                 });
+            }
+            UiIntent::SetCallRecording { call, start } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.recording_control == Some(start)
+                            && !view.recording_pending
+                            && !view.recording_uncertain
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.recording_pending = true;
             }
             UiIntent::EndCallForEveryone(call) => {
                 let view = self
