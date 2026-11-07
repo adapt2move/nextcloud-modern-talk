@@ -98,6 +98,23 @@ fn retryable(reason: talk_core::ui::UnavailableReason) -> bool {
     )
 }
 
+fn directory_failure_message(reason: talk_core::ui::UnavailableReason) -> Option<&'static str> {
+    use talk_core::ui::{UnavailableReason, presentation::ConnectionFailure};
+    match reason {
+        UnavailableReason::Unsupported => {
+            Some("Personensuche wird auf diesem Server nicht unterstützt.")
+        }
+        UnavailableReason::PermissionDenied
+        | UnavailableReason::Connection(ConnectionFailure::AccessDenied) => {
+            Some("Du darfst das Personenverzeichnis nicht durchsuchen.")
+        }
+        UnavailableReason::ReauthenticationRequired => {
+            Some("Verbinde dein Konto erneut, um Personen zu suchen.")
+        }
+        _ => None,
+    }
+}
+
 impl Desktop {
     pub(super) fn switcher_input_changed(&mut self, cx: &mut Context<Self>) {
         let query = self.search.read(cx).content.trim().to_lowercase();
@@ -266,14 +283,6 @@ impl Desktop {
         self.switcher.failure_reason = None;
     }
 
-    pub(super) fn retry_switcher_people(&mut self, cx: &mut Context<Self>) {
-        self.switcher.failures = 0;
-        self.switcher.last_failure = None;
-        self.switcher.failure_reason = None;
-        self.directory_query = None;
-        self.schedule_switcher_directory(cx);
-    }
-
     pub(super) fn switcher_results(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_1();
         let targets = self.switcher_targets();
@@ -405,35 +414,17 @@ impl Desktop {
                     Some(*account) == self.snapshot.active_account && query == &self.switcher.query
                 })
             && let Some(reason) = self.switcher.failure_reason
+            && let Some(message) = directory_failure_message(reason)
         {
-            let message = match reason {
-                talk_core::ui::UnavailableReason::Unsupported => {
-                    "Personensuche wird auf diesem Server nicht unterstützt."
-                }
-                talk_core::ui::UnavailableReason::PermissionDenied => {
-                    "Du darfst das Personenverzeichnis nicht durchsuchen."
-                }
-                talk_core::ui::UnavailableReason::ReauthenticationRequired => {
-                    "Verbinde dein Konto erneut, um Personen zu suchen."
-                }
-                _ => "Personensuche ist vorübergehend nicht verfügbar.",
-            };
             body = body.child(self.hint(self.l(message)));
-            if retryable(reason) && self.switcher.failures >= 2 {
-                body = body.child(self.button(
-                    "switcher-retry",
-                    "Erneut versuchen",
-                    ButtonStyle::Secondary,
-                    true,
-                    LocalAction::RetrySwitcherPeople,
-                    cx,
-                ));
-            }
         }
         if !self.active_account_connected() && !self.switcher.query.is_empty() {
             body = body.child(self.hint(self.l("Personensuche benötigt eine Verbindung.")));
         }
-        if targets.is_empty() {
+        if targets.is_empty()
+            && (self.search_kind == SearchKind::Conversations
+                || self.switcher.failure_reason.is_none())
+        {
             body = body.child(self.hint(self.l("Keine passenden Gespräche oder Personen.")));
         }
         body
@@ -442,8 +433,11 @@ impl Desktop {
 
 #[cfg(test)]
 mod tests {
-    use super::{Switcher, room_score, score};
-    use talk_core::ui::{UnavailableReason, presentation::RequestId};
+    use super::{Switcher, directory_failure_message, room_score, score};
+    use talk_core::ui::{
+        UnavailableReason,
+        presentation::{ConnectionFailure, RequestId},
+    };
     #[test]
     fn rejected_directory_admission_retries_twice_and_deduplicates_completions() {
         let mut state = Switcher::default();
@@ -455,6 +449,12 @@ mod tests {
         let mut unsupported = Switcher::default();
         assert!(!unsupported.record_failure(RequestId(1), UnavailableReason::Unsupported));
         assert_eq!(unsupported.failures, 0);
+        assert!(directory_failure_message(UnavailableReason::Unsupported).is_some());
+        assert_eq!(directory_failure_message(UnavailableReason::Busy), None);
+        assert_eq!(
+            directory_failure_message(UnavailableReason::Connection(ConnectionFailure::TimedOut)),
+            None
+        );
     }
     #[test]
     fn fuzzy_matching_prefers_prefix_and_preserves_unicode() {

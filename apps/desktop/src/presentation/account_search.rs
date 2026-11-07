@@ -2,11 +2,14 @@
 use super::{ButtonStyle, Desktop, LocalAction, input::TextInput};
 use gpui::{Context, Div, Entity, FontWeight, HighlightStyle, StyledText, div, prelude::*};
 use talk_core::ui::{
-    Text,
+    AccountScope, Text, UnavailableReason,
     conversation::{AccountPersonRef, RemoteState},
     presentation::{ConversationRef, RequestId, UiIntent},
-    search::{Action, Filters, Hit},
+    search::{Action, Filters, Hit, Panel},
 };
+
+const UNSUPPORTED_SEARCH: &str =
+    "Die Nachrichtensuche oder der gewählte Filter wird auf diesem Server nicht unterstützt.";
 
 pub(super) struct AccountSearchUi {
     pub person: Entity<TextInput>,
@@ -121,6 +124,37 @@ fn highlight(text: &str, query: &str, color: gpui::Hsla) -> StyledText {
         )
     }))
 }
+
+fn unsupported_search(
+    panel: Option<&Panel>,
+    account: Option<AccountScope>,
+    filters: &Filters,
+) -> bool {
+    panel.is_some_and(|panel| {
+        Some(panel.account) == account
+            && panel.filters == *filters
+            && matches!(
+                panel.state,
+                RemoteState::Failed(_, UnavailableReason::Unsupported)
+            )
+    })
+}
+
+fn search_failure_message(reason: UnavailableReason) -> Option<&'static str> {
+    use talk_core::ui::presentation::ConnectionFailure;
+    match reason {
+        UnavailableReason::Unsupported => Some(UNSUPPORTED_SEARCH),
+        UnavailableReason::PermissionDenied
+        | UnavailableReason::Connection(ConnectionFailure::AccessDenied) => {
+            Some("Du darfst diese Nachrichtensuche nicht verwenden.")
+        }
+        UnavailableReason::ReauthenticationRequired => {
+            Some("Verbinde dein Konto erneut, um Nachrichten zu suchen.")
+        }
+        _ => None,
+    }
+}
+
 impl Desktop {
     fn account_search_filters(&self, cx: &Context<Self>) -> Result<Filters, bool> {
         let start = self.account_search_ui.since.read(cx).content.trim();
@@ -179,6 +213,9 @@ impl Desktop {
                 return;
             }
         };
+        if unsupported_search(self.snapshot.search_panel.as_ref(), Some(account), &filters) {
+            return;
+        }
         let Some(next) = self.account_search_ui.request.checked_add(1) else {
             return;
         };
@@ -192,7 +229,14 @@ impl Desktop {
         });
     }
     pub(super) fn next_account_search(&mut self, cx: &Context<Self>) {
-        if !self.account_search_current(cx) {
+        if !self.account_search_current(cx)
+            || self.snapshot.search_panel.as_ref().is_some_and(|panel| {
+                matches!(
+                    panel.state,
+                    RemoteState::Failed(_, UnavailableReason::Unsupported)
+                )
+            })
+        {
             return;
         }
         let Some(account) = self.snapshot.active_account else {
@@ -369,6 +413,14 @@ impl Desktop {
     }
     pub(super) fn account_search_body(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_2();
+        let filters = self.account_search_filters(cx);
+        let unsupported = filters.as_ref().is_ok_and(|filters| {
+            unsupported_search(
+                self.snapshot.search_panel.as_ref(),
+                self.snapshot.active_account,
+                filters,
+            )
+        });
         let room_label = self
             .account_search_ui
             .room
@@ -580,6 +632,9 @@ impl Desktop {
                 }
             }
         }
+        if unsupported {
+            body = body.child(self.hint(self.l(UNSUPPORTED_SEARCH)));
+        }
         body = body.child(
             self.button(
                 "account-search-submit",
@@ -587,7 +642,8 @@ impl Desktop {
                 ButtonStyle::Primary,
                 self.active_account_connected()
                     && !self.search.read(cx).content.trim().is_empty()
-                    && self.account_search_filters(cx).is_ok()
+                    && filters.is_ok()
+                    && !unsupported
                     && self
                         .snapshot
                         .search_panel
@@ -607,9 +663,11 @@ impl Desktop {
             if panel.state.pending() {
                 body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
             }
-            if matches!(panel.state, RemoteState::Failed(..)) {
-                body = body
-                    .child(self.hint(self.l("Die Nachrichtensuche ist derzeit nicht verfügbar.")));
+            if let RemoteState::Failed(_, reason) = panel.state
+                && reason != UnavailableReason::Unsupported
+                && let Some(message) = search_failure_message(reason)
+            {
+                body = body.child(self.hint(self.l(message)));
             }
             if panel.loaded && panel.hits.as_slice().is_empty() {
                 body = body.child(self.hint(self.l("Keine Nachrichten gefunden.")));
@@ -669,7 +727,7 @@ impl Desktop {
                     ))),
                 );
             }
-            if panel.more {
+            if panel.more && !unsupported {
                 body = body.child(self.button(
                     "account-search-more",
                     "Weitere Ergebnisse",
@@ -685,7 +743,63 @@ impl Desktop {
 }
 #[cfg(test)]
 mod tests {
-    use super::date;
+    use super::{date, search_failure_message, unsupported_search};
+    use talk_core::ui::{
+        AccountId, AccountScope, Page, RuntimeGeneration, Text, UnavailableReason,
+        conversation::RemoteState,
+        presentation::{ConnectionFailure, RequestId},
+        search::{Filters, Panel},
+    };
+
+    #[test]
+    fn unsupported_filters_are_gated_per_account_and_transient_failures_stay_quiet() {
+        let account = AccountScope {
+            account: AccountId::from_local(1),
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let filters = Filters {
+            conversation: None,
+            person: None,
+            from_self: false,
+            since: None,
+            until: None,
+        };
+        let panel = Panel {
+            account,
+            request: RequestId(1),
+            term: Text::new("map").unwrap(),
+            filters: filters.clone(),
+            state: RemoteState::Failed(RequestId(1), UnavailableReason::Unsupported),
+            hits: Page::empty(),
+            loaded: false,
+            more: false,
+        };
+        assert!(unsupported_search(Some(&panel), Some(account), &filters));
+        let other_account = AccountScope {
+            runtime: RuntimeGeneration::from_local(2),
+            ..account
+        };
+        assert!(!unsupported_search(
+            Some(&panel),
+            Some(other_account),
+            &filters
+        ));
+        let other_filters = Filters {
+            from_self: true,
+            ..filters
+        };
+        assert!(!unsupported_search(
+            Some(&panel),
+            Some(account),
+            &other_filters
+        ));
+        assert!(search_failure_message(UnavailableReason::Unsupported).is_some());
+        assert_eq!(search_failure_message(UnavailableReason::Busy), None);
+        assert_eq!(
+            search_failure_message(UnavailableReason::Connection(ConnectionFailure::TimedOut)),
+            None
+        );
+    }
     #[test]
     fn calendar_validation_rejects_impossible_dates_and_reversed_values_can_be_compared() {
         assert!(date("2024-02-29", false).is_ok());

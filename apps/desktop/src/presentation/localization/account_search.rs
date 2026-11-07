@@ -11,9 +11,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Introduce un intervalo de fechas válido.",
     ),
     (
-        "Die Nachrichtensuche ist derzeit nicht verfügbar.",
-        "Message search is currently unavailable.",
-        "La búsqueda de mensajes no está disponible en este momento.",
+        "Die Nachrichtensuche oder der gewählte Filter wird auf diesem Server nicht unterstützt.",
+        "This server does not support message search or the selected filter.",
+        "Este servidor no admite la búsqueda de mensajes o el filtro seleccionado.",
+    ),
+    (
+        "Du darfst diese Nachrichtensuche nicht verwenden.",
+        "You cannot use this message search.",
+        "No tienes permiso para usar esta búsqueda de mensajes.",
     ),
     ("JJJJ-MM-TT", "YYYY-MM-DD", "AAAA-MM-DD"),
     (
@@ -38,6 +43,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Suche und wähle eine Person für den Filter.",
         "Find and select a person for the filter.",
         "Busca y selecciona una persona para el filtro.",
+    ),
+    (
+        "Verbinde dein Konto erneut, um Nachrichten zu suchen.",
+        "Reconnect your account to search messages.",
+        "Vuelve a conectar tu cuenta para buscar mensajes.",
     ),
     ("Von mir", "From me", "Enviados por mí"),
     ("Weitere Ergebnisse", "More results", "Más resultados"),

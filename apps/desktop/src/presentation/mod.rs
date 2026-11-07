@@ -180,7 +180,6 @@ pub enum LocalAction {
     DiscoverJoin(ConversationRef),
     ToggleReference(ConversationRef, u128, u16),
     OpenReference(ConversationRef, u128, u16),
-    RetrySwitcherPeople,
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
@@ -1267,7 +1266,6 @@ impl Desktop {
                 self.search_kind = kind;
                 self.schedule_switcher_directory(cx);
             }
-            LocalAction::RetrySwitcherPeople => self.retry_switcher_people(cx),
             LocalAction::AccountSearchSubmit => self.start_account_search(cx),
             LocalAction::AccountSearchMore => self.next_account_search(cx),
             LocalAction::AccountSearchFindPerson => self.find_account_search_person(cx),

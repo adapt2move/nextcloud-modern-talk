@@ -50,11 +50,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "La búsqueda de personas requiere conexión.",
     ),
     (
-        "Personensuche ist vorübergehend nicht verfügbar.",
-        "People search is temporarily unavailable.",
-        "La búsqueda de personas no está disponible temporalmente.",
-    ),
-    (
         "Personensuche wird auf diesem Server nicht unterstützt.",
         "This server does not support people search.",
         "Este servidor no admite la búsqueda de personas.",
