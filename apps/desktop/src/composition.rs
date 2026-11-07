@@ -261,6 +261,11 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     if options.dev_latency {
         println!("DEV_STAGE window");
     }
+    // Admit local cache reads before font registration occupies the UI thread.
+    // The identity/data workers can hydrate while native fonts are prepared.
+    if let Some(accounts) = &services.accounts {
+        accounts.borrow_mut().prepare_startup();
+    }
     if let Err(error) = cx.text_system().add_fonts(vec![
         Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Regular.ttf")),
         Cow::Borrowed(include_bytes!("../assets/fonts/GoogleSans-Medium.ttf")),

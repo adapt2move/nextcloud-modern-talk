@@ -1152,7 +1152,12 @@ impl Desktop {
             return;
         }
         if !self.snapshot.message_panel.as_ref().is_some_and(|p| {
-            p.context == context && p.availability(MessageFeature::ReadReceipts).enabled()
+            p.context == context
+                && read_marker_intent_allowed(
+                    self.snapshot.content,
+                    p.availability(MessageFeature::ReadReceipts),
+                    self.local_message_intents(),
+                )
         }) {
             return;
         }
@@ -3325,6 +3330,22 @@ fn thread_reply_feature_allowed(
             && value.allowed != Decision::Denied
 }
 
+// Local read-marker intent is separate from permission to expose read receipts.
+// An eligible cached visible row may stage its marker; dispatch still rechecks
+// current privacy/policy, and delivery indicators retain their strict feature gate.
+fn read_marker_intent_allowed(
+    content: ContentState,
+    value: talk_core::ui::conversation::Availability,
+    queue_available: bool,
+) -> bool {
+    value.enabled() && content == ContentState::Ready
+        || queue_available
+            && matches!(content, ContentState::Ready | ContentState::Offline)
+            && value.implemented
+            && value.server != talk_core::ui::presentation::FeatureSupport::Unsupported
+            && value.allowed != Decision::Denied
+}
+
 fn feature_allows_intent(
     content: ContentState,
     value: talk_core::ui::conversation::Availability,
@@ -3371,6 +3392,49 @@ fn message_mutation_allowed(
 mod tests {
     use super::*;
 
+    #[test]
+    fn cached_visible_read_can_queue_without_granting_public_receipt_support() {
+        use talk_core::ui::conversation::Availability;
+        use talk_core::ui::presentation::FeatureSupport;
+        let unknown = Availability::UNKNOWN;
+        assert!(read_marker_intent_allowed(
+            ContentState::Offline,
+            unknown,
+            true
+        ));
+        assert!(!feature_allows_intent(
+            ContentState::Offline,
+            unknown,
+            MessageFeature::ReadReceipts,
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            unknown,
+            false
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Denied,
+            unknown,
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            Availability {
+                allowed: Decision::Denied,
+                ..unknown
+            },
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            Availability {
+                server: FeatureSupport::Unsupported,
+                ..unknown
+            },
+            true
+        ));
+    }
     #[test]
     fn offline_thread_reply_stages_from_an_observed_root_without_stale_authority() {
         use talk_core::ui::conversation::Availability;
