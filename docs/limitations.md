@@ -76,8 +76,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   Scheduled creation has no operation correlation and may remain uncertain.
   Reminders are server-owned; there is no standalone local OS reminder fallback.
   The account-wide list and translated text are bounded session caches and do not
-  survive a restart. A reminder for a room absent from the bounded room list is
-  omitted and the list indicates that it may be incomplete. Notifications without
+  survive a restart. Talk 24/25 returns at most ten upcoming reminders without
+  pagination; a full result is marked potentially incomplete. A reminder for a
+  room absent from the bounded room list is omitted with the same indication. Notifications without
   a structured message identifier are suppressed. Notification activation is
   available on Linux notification daemons with action support and via the macOS
   helper; native delivery and click-through still need platform qualification.

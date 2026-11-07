@@ -81,11 +81,9 @@ impl Desktop {
             );
         }
         if !view.complete {
-            body = body.child(
-                div()
-                    .pt_2()
-                    .child(self.hint(self.l("Einige Erinnerungen sind noch nicht verfügbar."))),
-            );
+            body = body.child(div().pt_2().child(
+                self.hint(self.l("Einige Erinnerungen werden möglicherweise nicht angezeigt.")),
+            ));
         }
         body
     }

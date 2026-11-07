@@ -28,9 +28,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Este mensaje es demasiado largo para editarlo aquí.",
     ),
     (
-        "Einige Erinnerungen sind noch nicht verfügbar.",
-        "Some reminders are not available yet.",
-        "Algunos recordatorios aún no están disponibles.",
+        "Einige Erinnerungen werden möglicherweise nicht angezeigt.",
+        "Some reminders may not be shown.",
+        "Es posible que algunos recordatorios no se muestren.",
     ),
     (
         "Erinnerung bearbeiten",

@@ -564,7 +564,7 @@ pub struct AccountRemindersView {
     pub scope: AccountScope,
     pub support: FeatureSupport,
     pub state: ContentState,
-    /// False if the server returned reminders in rooms outside the observed list.
+    /// False if the server limit was reached or a reminder's room is unavailable.
     pub complete: bool,
     pub reminders: Page<AccountReminderView, 100>,
 }

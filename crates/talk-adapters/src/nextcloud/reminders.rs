@@ -26,6 +26,11 @@ impl NextcloudClient {
         else {
             return Err(self.error(ErrorKind::Malformed));
         };
+        // Talk 24/25's Reminder::NUM_UPCOMING_REMINDERS is ten and the
+        // endpoint has no pagination. A full page may omit later reminders.
+        if values.len() >= 10 {
+            result.complete = false;
+        }
         for value in values {
             let Some(room) = self.rooms.iter().find(|room| room.token == value.token) else {
                 // The room list can be partial. Never turn an unbound token into

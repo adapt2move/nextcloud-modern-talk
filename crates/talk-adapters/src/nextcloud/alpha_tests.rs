@@ -915,6 +915,37 @@ async fn account_reminders_do_not_require_a_selected_room_and_keep_unknown_rooms
 }
 
 #[tokio::test]
+async fn full_upcoming_reminder_page_is_not_claimed_complete() {
+    for count in [9, 10] {
+        let mut capabilities = caps(35);
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("upcoming-reminders"));
+        let reminders: Vec<_> = (1..=count)
+            .map(|id| json!({"roomToken":"testroom", "messageId":id, "reminderTimestamp":200}))
+            .collect();
+        let server = Server::start(vec![
+            Reply::data(capabilities),
+            Reply::data(json!(reminders)),
+        ])
+        .await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        bind(&mut client);
+        let ProtocolReply::UpcomingReminders(result) = client
+            .request(context(&runtime), ProtocolRequest::UpcomingReminders)
+            .await
+            .unwrap()
+        else {
+            panic!("expected reminders")
+        };
+        assert_eq!(result.reminders.as_slice().len(), count);
+        assert_eq!(result.complete, count < 10);
+    }
+}
+
+#[tokio::test]
 async fn translation_requires_provider_detection_and_matching_source() {
     for major in [34, 35] {
         for case in ["disabled", "no-detection", "changed", "translated"] {

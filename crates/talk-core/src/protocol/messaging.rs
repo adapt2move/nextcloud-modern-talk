@@ -70,7 +70,7 @@ pub struct MessageReminder {
 pub struct AccountReminders {
     pub scope: crate::ids::AccountScope,
     pub supported: bool,
-    /// False when the server returned a room which has not been bound locally.
+    /// False when the server limit is reached or a room is not bound locally.
     pub complete: bool,
     pub reminders: Page<MessageReminder, 100>,
 }
