@@ -496,12 +496,21 @@ impl Purpose {
                 _,
                 messaging::Work::Prefetch
                 | messaging::Work::Metadata
-                | messaging::Work::ThreadActivity,
+                | messaging::Work::ThreadActivity
+                | messaging::Work::ScheduledPoll
+                | messaging::Work::TranslationOptions
+                | messaging::Work::SummaryStatus
+                | messaging::Work::Typing,
             )
             | Self::Rooms(_)
             | Self::Reference(..)
             | Self::ParticipantIndex(..)
-            | Self::MessageNotifications(_) => 2,
+            | Self::MessageNotifications(_)
+            | Self::AccountReminders(..)
+            | Self::FederationInvitations(..)
+            | Self::DiscoverProbe(..)
+            | Self::Typing(..) => 2,
+            Self::IncomingCalls(_) | Self::LiveEvents(_) | Self::Threads(..) | Self::Tags(_) => 1,
             Self::Message(
                 _,
                 _,
@@ -512,6 +521,10 @@ impl Purpose {
                 | messaging::Work::Older
                 | messaging::Work::Thread
                 | messaging::Work::ThreadOlder(_)
+                | messaging::Work::ThreadRoot(_)
+                | messaging::Work::ThreadInfo(_)
+                | messaging::Work::Pins
+                | messaging::Work::Recovery
                 | messaging::Work::Context(_)
                 | messaging::Work::UnreadContext(_),
             ) => 1,
@@ -1887,6 +1900,38 @@ mod tests {
 #[cfg(test)]
 mod cooldown_tests {
     use super::*;
+    #[test]
+    fn automatic_observation_cannot_take_the_mutation_lane() {
+        let context = ConversationRef {
+            account: scope(1),
+            conversation: talk_core::ids::ConversationId {
+                account: scope(1).account,
+                host: talk_core::ids::HostId::from_local(1),
+                local: 1,
+            },
+        };
+        let message =
+            |work| Purpose::Message(RequestId(0), context, OperationId::from_local(1), work);
+        let mutation = message(messaging::Work::Send).priority();
+        for automatic in [
+            Purpose::Rooms(scope(1)),
+            Purpose::IncomingCalls(scope(1)),
+            Purpose::AccountReminders(scope(1), 1),
+            Purpose::FederationInvitations(scope(1), 1),
+            message(messaging::Work::ScheduledPoll),
+            message(messaging::Work::ThreadActivity),
+            message(messaging::Work::Pins),
+            message(messaging::Work::TranslationOptions),
+            message(messaging::Work::SummaryStatus),
+            message(messaging::Work::Typing),
+        ] {
+            assert!(automatic.priority() > mutation);
+        }
+        assert!(
+            message(messaging::Work::Latest).priority()
+                < message(messaging::Work::Prefetch).priority()
+        );
+    }
     fn scope(id: u128) -> AccountScope {
         AccountScope {
             account: AccountId::from_local(id),

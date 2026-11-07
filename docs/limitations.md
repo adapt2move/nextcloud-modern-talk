@@ -112,7 +112,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   can proceed. Four likely ordinary rooms can be prefetched, one at a time, in a
   60-second planning window; account changes cancel speculative work.
 - A resume gap over five seconds or a changed local route/source address interrupts
-  stale HTTP/HPB work and requests catch-up. A bounded route observation runs every
+  stale HTTP/HPB work and requests a fresh newest-page history snapshot before
+  resuming long polling. Retained history stays visible during revalidation;
+  old or failed completions cannot release the catch-up fence. A successful
+  authenticated history or room-list read clears transient reachability feedback,
+  without clearing an authentication failure or renewing permission. A bounded route observation runs every
   two seconds outside GPUI. This detects source-address and Linux route changes;
   a handover that preserves both is observed through transport failure/heartbeat,
   not an OS-specific network API. Recovery never renews media or room authority.

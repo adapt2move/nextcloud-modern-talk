@@ -790,6 +790,9 @@ impl Accounts {
                 }
             }
         }
+        if let Some(context) = self.snapshot.selected {
+            self.history.request_catchup(context);
+        }
         self.message_poll_at = Instant::now();
         self.background.resume(Instant::now());
         self.touch();
@@ -863,6 +866,7 @@ impl Accounts {
         // A deliberate send gets the next free admission before asset/poll work.
         self.tick_queued_send(Instant::now());
         self.tick_queued_read(Instant::now());
+        self.poll_messages();
         self.tick_content();
         self.tick_file_work();
         self.tick_account_search();
@@ -878,7 +882,6 @@ impl Accounts {
         self.tick_summary();
         self.tick_breakout_leave();
         self.tick_calls();
-        self.poll_messages();
         self.tick_prefetch();
         self.tick_participant_index();
         self.tick_references();

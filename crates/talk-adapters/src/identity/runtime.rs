@@ -1078,6 +1078,43 @@ fn next_job(waiting: &[Job]) -> Option<usize> {
         .min_by_key(|(_, job)| job.priority)
         .map(|(index, _)| index)
 }
+fn clears_reachability(
+    error: Option<ErrorKind>,
+    scope: AccountScope,
+    request: &ProtocolRequest,
+    reply: &ProtocolReply,
+) -> bool {
+    use talk_core::protocol::messaging::{MessagingCommand as M, MessagingResult as R};
+    if !matches!(
+        error,
+        Some(ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable)
+    ) {
+        return false;
+    }
+    match (request, reply) {
+        (ProtocolRequest::ListConversations, ProtocolReply::Conversations(list)) => {
+            list.scope == scope
+        }
+        (
+            ProtocolRequest::Messaging {
+                conversation,
+                operation,
+                command: M::History { .. } | M::Poll { .. },
+            },
+            ProtocolReply::Messaging {
+                conversation: returned,
+                operation: returned_operation,
+                result: R::Messages { .. },
+            },
+        ) => {
+            conversation.account == scope.account
+                && conversation == returned
+                && operation == returned_operation
+        }
+        _ => false,
+    }
+}
+
 fn preemptible(command: &RuntimeCommand) -> bool {
     use talk_core::protocol::{content::ContentCommand as C, messaging::MessagingCommand as M};
     matches!(
@@ -1956,6 +1993,17 @@ impl Worker {
                             ProtocolRequest::ProbeAccount | ProtocolRequest::InspectAccount
                         ) {
                             self.health_probe = None;
+                            self.connection_error = None;
+                            self.publish_current()?;
+                        } else if clears_reachability(
+                            self.connection_error,
+                            *scope,
+                            request,
+                            &reply,
+                        ) {
+                            // A fresh timeline/list response proves transport recovery,
+                            // not a new sign-in grant. Keep any pending auth verification;
+                            // confirmed rejection and cancellation remain irreversible.
                             self.connection_error = None;
                             self.publish_current()?;
                         }
@@ -2963,5 +3011,78 @@ mod tests {
             account: scope.account,
             command: super::super::data::DataCommand::Load
         }));
+    }
+}
+
+#[cfg(test)]
+mod reachability_tests {
+    use super::*;
+    use talk_core::ids::{ConversationId, HostId, OperationId};
+    use talk_core::protocol::messaging::{MessagingCommand, MessagingResult};
+    #[test]
+    fn fresh_history_clears_only_transient_reachability_and_never_cached_or_mismatched_results() {
+        let conversation = ConversationId {
+            account: AccountId::from_local(1),
+            host: HostId::from_local(1),
+            local: 1,
+        };
+        let operation = OperationId::from_local(1);
+        let scope = AccountScope {
+            account: conversation.account,
+            runtime: talk_core::ids::RuntimeGeneration::from_local(1),
+        };
+        let request = ProtocolRequest::Messaging {
+            conversation,
+            operation,
+            command: MessagingCommand::History {
+                before: None,
+                thread: None,
+            },
+        };
+        let reply = ProtocolReply::Messaging {
+            conversation,
+            operation,
+            result: MessagingResult::Messages {
+                capabilities: None,
+                messages: Page::empty(),
+                cursor: None,
+                common_read: None,
+            },
+        };
+        assert!(clears_reachability(
+            Some(ErrorKind::Transport),
+            scope,
+            &request,
+            &reply
+        ));
+        for kind in [
+            ErrorKind::ReauthenticationRequired,
+            ErrorKind::WrongScope,
+            ErrorKind::Cancelled,
+            ErrorKind::ServerAccessDenied,
+            ErrorKind::RateLimited,
+        ] {
+            assert!(!clears_reachability(Some(kind), scope, &request, &reply));
+        }
+        assert!(!clears_reachability(
+            Some(ErrorKind::Transport),
+            scope,
+            &ProtocolRequest::SendStatus(operation),
+            &reply
+        ));
+        let mismatched = ProtocolRequest::Messaging {
+            conversation,
+            operation: OperationId::from_local(2),
+            command: MessagingCommand::History {
+                before: None,
+                thread: None,
+            },
+        };
+        assert!(!clears_reachability(
+            Some(ErrorKind::Transport),
+            scope,
+            &mismatched,
+            &reply
+        ));
     }
 }

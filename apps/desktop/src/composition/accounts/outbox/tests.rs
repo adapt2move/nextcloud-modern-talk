@@ -2111,3 +2111,52 @@ fn replacing_an_uncertain_unread_marker_keeps_the_old_intent_until_disk_commit()
         );
     }
 }
+
+#[test]
+fn resume_keeps_cached_content_and_forces_a_fresh_catchup_page_before_long_polling() {
+    let (mut model, context, _) = model();
+    observe(&mut model, context, 1, [details(context, 2, "cached")]);
+    model.project_history(context);
+    let retained = model.snapshot.messages.clone();
+    assert_eq!(
+        model
+            .history
+            .get(context)
+            .unwrap()
+            .poll_cursor(Instant::now()),
+        Some(2)
+    );
+    model.network_resumed(false);
+    model.project_history(context);
+    assert_eq!(model.snapshot.messages, retained);
+    assert_eq!(
+        model
+            .history
+            .get(context)
+            .unwrap()
+            .poll_cursor(Instant::now()),
+        None
+    );
+    assert!(model.history.get(context).unwrap().loaded);
+    observe(
+        &mut model,
+        context,
+        2,
+        [
+            details(context, 2, "cached"),
+            details(context, 3, "catchup"),
+        ],
+    );
+    model.project_history(context);
+    assert_eq!(model.snapshot.messages.as_slice().len(), 2);
+    assert_eq!(
+        model
+            .snapshot
+            .messages
+            .as_slice()
+            .iter()
+            .filter(|m| m.local_id == 2)
+            .count(),
+        1
+    );
+}
