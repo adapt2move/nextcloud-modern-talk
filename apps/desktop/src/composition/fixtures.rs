@@ -53,6 +53,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reminder-time",
     "chat-reminder-menu",
     "account-reminders",
+    "account-reminders-partial",
     "federation-invitations",
     "federation-pending",
     "chat-schedule-time",
@@ -324,7 +325,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         return state;
     }
-    if scenario == Some("account-reminders") {
+    if matches!(
+        scenario,
+        Some("account-reminders" | "account-reminders-partial")
+    ) {
         use talk_core::ui::presentation::{
             AccountReminderView, AccountRemindersView, FeatureSupport,
         };
@@ -354,7 +358,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             scope: scope(),
             support: FeatureSupport::Supported,
             state: ContentState::Ready,
-            complete: true,
+            complete: scenario != Some("account-reminders-partial"),
             reminders: page(reminders),
         });
         return state;
