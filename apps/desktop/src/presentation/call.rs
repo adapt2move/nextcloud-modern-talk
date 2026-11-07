@@ -268,7 +268,7 @@ impl Desktop {
         let show_chat = joined && super::docked_call_chat(wide, self.call_chat_open, self.overlay);
         let show_people = joined && wide && self.call_participants_open && self.overlay.is_none();
         let (stage_height, feature_height, _filmstrip_height) =
-            stage_metrics(f32::from(window.viewport_size().height));
+            stage_metrics(f32::from(window.viewport_size().height), self.scale);
         let rail_width = 160. * f32::from(self.scale) / 100.;
         let feature_height = (feature_height - (rail_width * 9. / 16. - 90.)).max(74.);
         let status = match call.stage {
@@ -1671,8 +1671,11 @@ fn media_label(microphone: bool, state: MediaState) -> &'static str {
     }
 }
 
-fn stage_metrics(window_height: f32) -> (f32, f32, f32) {
-    let available = (window_height - 250.).max(180.);
+fn stage_metrics(window_height: f32, scale: u16) -> (f32, f32, f32) {
+    // The header gains height with text scaling; reserve that before fitting a
+    // single large tile or a shared surface and its participant rail.
+    let extra_header = ((f32::from(scale) / 100.) - 1.).max(0.) * 40.;
+    let available = (window_height - 250. - extra_header).max(180.);
     let filmstrip = 90.;
     let feature = (available - filmstrip - 16.).max(74.);
     (available, feature, filmstrip)
@@ -1708,9 +1711,13 @@ mod gallery_tests {
     #[test]
     fn shared_stage_and_filmstrip_fit_at_minimum_window_height() {
         for height in [580., 800.] {
-            let (available, feature, filmstrip) = stage_metrics(height);
-            assert!(feature + filmstrip + 16. <= available);
-            assert_eq!(filmstrip, 90.);
+            for scale in [100, 200] {
+                let (available, feature, filmstrip) = stage_metrics(height, scale);
+                let rail = filmstrip * f32::from(scale) / 100.;
+                let feature = (feature - (rail - filmstrip)).max(74.);
+                assert!(feature + rail + 16. <= available);
+            }
+            assert!(stage_metrics(height, 200).0 < stage_metrics(height, 100).0);
         }
     }
 
