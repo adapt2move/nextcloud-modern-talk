@@ -2285,18 +2285,24 @@ impl Desktop {
                     })
                 });
                 area.child(
-                    div().absolute().right_4().bottom_4().child(self.button(
-                        "jump-unread",
-                        "Zu ungelesenen springen",
-                        ButtonStyle::Secondary,
-                        if loading {
-                            Availability::pending()
-                        } else {
-                            Availability::when(unread_target.is_some() || self.snapshot.content == ContentState::Ready, "Die Verbindung ist derzeit nicht bereit.")
-                        },
-                        LocalAction::MessageIn(context, Action::JumpUnread),
-                        cx,
-                    )),
+                    div().absolute().right_4().bottom_4().child(
+                        self.button(
+                            "jump-unread",
+                            "Zu ungelesenen springen",
+                            ButtonStyle::Secondary,
+                            if loading {
+                                Availability::pending()
+                            } else {
+                                Availability::when(unread_target.is_some() || self.snapshot.content == ContentState::Ready, "Die Verbindung ist derzeit nicht bereit.")
+                            },
+                            LocalAction::MessageIn(context, Action::JumpUnread),
+                            cx,
+                        )
+                        .rounded_full()
+                        .border_1()
+                        .border_color(self.theme.border)
+                        .shadow_sm(),
+                    ),
                 )
             })
     }
