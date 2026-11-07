@@ -92,10 +92,14 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
         return acknowledgements[sequence]
     async def ready(action="state"):
         deadline=time.monotonic()+150
+        diagnosed=False
         if action != "state": await act(action)
         while time.monotonic()<deadline:
             state=await act("state")
             if len(state)==3 and int(state[0])>=2 and (action=="state" or int(state[1])>0) and state[2]=="ready": return state
+            if not diagnosed and time.monotonic() >= deadline-140:
+                await act("diagnose")
+                diagnosed=True
             await asyncio.sleep(.2)
         await act("diagnose")
         raise RuntimeError("Native content did not become ready")
