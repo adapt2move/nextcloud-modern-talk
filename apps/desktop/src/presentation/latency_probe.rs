@@ -199,7 +199,47 @@ impl Desktop {
             _ => None,
         };
         if let Some(intent) = intent {
-            self.handle(LocalAction::Intent(intent), window, cx);
+            match intent {
+                UiIntent::Message {
+                    context,
+                    action: MessageAction::Send { body, .. },
+                    ..
+                } => {
+                    self.composer.update(cx, |input, cx| {
+                        input.set_value(body.as_str());
+                        cx.notify();
+                    });
+                    let before = self.drafts.probe_request_sequence();
+                    self.handle(LocalAction::Send, window, cx);
+                    let after = self.drafts.probe_request_sequence();
+                    println!(
+                        "DEV_INPUT {action} {}",
+                        if after > before { after } else { 0 }
+                    );
+                    let _ = context;
+                }
+                UiIntent::Message {
+                    action: message, ..
+                } if !matches!(message, MessageAction::Send { .. }) => {
+                    let request = self.submit_message(message);
+                    println!("DEV_INPUT {action} {}", request.map_or(0, |r| r.0));
+                    if action == "mark-read"
+                        && request.is_some()
+                        && let Some(context) = selected
+                    {
+                        self.release_unread_hold(context);
+                    }
+                }
+                intent => {
+                    let request = match &intent {
+                        UiIntent::Message { request, .. }
+                        | UiIntent::SetFavorite { request, .. } => request.0,
+                        _ => 0,
+                    };
+                    self.handle(LocalAction::Intent(intent), window, cx);
+                    println!("DEV_INPUT {action} {request}");
+                }
+            }
         }
         self.refresh(cx);
         cx.notify();

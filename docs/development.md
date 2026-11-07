@@ -244,3 +244,24 @@ User macOS testing is final-only after the assigned agent-side work and a prepar
 ## Maintaining pins
 
 [Action metadata](../tools/release/actions.json) records workflow pins; update commits only after checking official upstream source and runtime requirements. Retain actual runner image/SDK versions. Dependency changes need their owner's coordination and affected verification. See GitHub's [workflow security guidance](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions).
+
+The default-off `dev-probes` desktop feature provides a private lab profile and
+bounded native latency/frame probes. Build the ordinary release profile with
+assertions enabled (`RUSTFLAGS="-C debug-assertions=yes"`) and
+`--features dev-probes`; this diagnostic build is not a distribution artifact.
+`--dev-seed PROFILE FIXTURE` imports only an owner-private, literal-loopback
+synthetic lab account, using the ordinary private-file account provider.
+`--dev-profile PROFILE --dev-latency` opens it through normal composition and
+records content after native frame callbacks. The feature never reads fixture
+credentials into presentation or enables GPUI test support.
+
+`tests/lab/native_latency.py --state PRIVATE_LAB_STATE --binary BUILT_BINARY
+--output NEW_EVIDENCE_DIRECTORY` owns an isolated Xvfb display, two synthetic
+rooms and three request-latency modes. `--recovery` adds a separate profile,
+a disconnected relay and a 61-second SIGSTOP/SIGCONT interval; it checks catch-up
+IDs and retirement of the queued send. `--performance --samples 1` instead seeds
+200 rooms and over 1,000 mixed messages, verifies actual server counts, and runs
+three 60-second native frame workloads. Preparation is outside timed intervals.
+The runner preserves failed observations and private fixtures remain in `/run`
+until cleanup. Keep native diagnostics separate from CPU-heavy build jobs.
+See [performance](quality/performance.md) for boundaries and qualification limits.

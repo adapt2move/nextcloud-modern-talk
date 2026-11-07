@@ -105,20 +105,40 @@ Comparisons require identical hardware, OS, versions, features, account/history,
 
 ## Offline responsiveness diagnostics
 
-Debug builds record bounded content-free `feedback_*_us` events through the existing
-local diagnostic owner: account composition creation to first room/message content,
-admitted room-open to a render with retained messages, and admitted send, reaction,
-read or favorite action to a changed prepared projection. Each `count` is elapsed
-microseconds. At most 16 interaction starts are retained; overflow is `dropped`
-and a 30-second timeout is `failed`, never a completed latency sample. Rejected
-admission has no sample. No message text, room/account identity or emoji enters
-these records. The release build has no observation seam or metric state.
+With the explicit `dev-probes` build feature and `--dev-latency` flag, assertion-enabled
+builds record bounded content-free `feedback_*_us` events through the existing
+local diagnostic owner. The boundaries are account composition creation to the
+first native after-frame observation with room rows or messages, admitted room-open
+to a frame with retained messages, and admitted send, reaction, room mark-unread or
+favorite action to changed visible feedback. Room mark-unread includes its queued
+indicator even when the room was already unread. At most 16 starts are retained;
+overflow is dropped and a 30-second timeout is failed. Rejected admission has no
+sample. No message text, room/account identity or emoji is logged. Normal builds
+and normal startup leave this seam disabled.
 
-These are render-entry observations, not compositor/display presentation or frame
-times. An unrelated change in the same projection can satisfy a signature; validate
-the intended operation and final counts separately. Startup begins at account owner
-creation, excluding process launch, loader and GPUI setup. Do not use these events
-alone to claim Q.PERF acceptance.
+`tests/lab/native_latency.py` launches the real binary on an owned X11 display
+against r34/r35 lab accounts. It seeds through the ordinary private provider owner,
+warms eligible disk history, then restarts the process at normal, +1.5 s and +4 s
+request latency. Its startup observation also records the parent's process-launch
+boundary; the internal diagnostic alone excludes the loader/GPUI setup. Raw missing
+and incomplete samples remain in the output. `--recovery` adds dropped connectivity,
+an offline send, a 61-second SIGSTOP/SIGCONT interval and duplicate/catch-up checks.
+`--performance --samples 1` prepares exactly 200 rooms and a validated 1,000+ message
+corpus containing images, polls, voice and threads, then runs 60-second native scrolling,
+switcher and sidebar frame probes. Scrolling advances 24 pixels per completed frame,
+up for 30 seconds and down for 30 seconds; switcher frames alternate open/closed.
+Each mode has an 18,000-frame hard bound and reports failure if it ends early. The loaded timeline remains bounded to 100 rows.
+
+These are native after-frame callbacks, not physical display presentation. Small
+synthetic Linux/Xvfb/Mesa runs diagnose regressions; they do not establish the longer
+Mac/hardware workloads or tail percentiles required by Q.PERF. Preserve the resolved
+feature graph, source/binary hashes, raw sample counts, failures and process RSS/high
+water values. Build and prepare fixtures before timing, with no concurrent build jobs.
+Chat Markdown is prepared in batches of 32 sources outside the UI thread. One selected
+room owns at most 256 derived documents/1 MiB of source; source and scope checks reject
+late preparation after edits or selection changes. Original text remains readable
+while formatting is prepared. Image/video decoding also stays on the existing bounded
+background path; prepared Markdown and decoder output are not added to disk history.
 
 `tests/lab/resilience.py` retains six adapter-completion samples per profile/mode
 (normal, +1.5 seconds, +4 seconds, slow-poll configuration and intermittent faults).
@@ -129,3 +149,5 @@ headers and credentials are never included in timing records. Compilation and
 fixture setup are outside each recorded interval; process/compiler contention and
 server startup can still affect results. Retain failures and raw small samples,
 report ranges/medians and completion counts, and do not infer tail percentiles.
+
+Native mutation observations carry the local UI request ID. The runner matches each measured gesture to its admitted intent; automatic read observations are retained separately and cannot count as a gesture completing. Read/unread probes use the ordinary message submission helper, including its unread hold.

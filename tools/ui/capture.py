@@ -39,6 +39,7 @@ def capture(args, before_runtime_cleanup=None):
     manifest = {"schema": 1, "kind": "compiled GPUI native X11 UI development evidence", "backend_connected": False,
         "media_engine_attached": False, "media_frames": False, "platform_qualified": False,
         "preference_scope": "fresh private XDG configuration/data per scenario",
+        "locale_override": args.locale,
         "binary_sha256": sha(binary), "source_files": source_manifest(root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
@@ -69,6 +70,7 @@ def capture(args, before_runtime_cleanup=None):
                 theme = parts[2] if len(parts) > 2 else "blue"
                 label = f"{scenario}-{appearance}-{theme}"
                 command = [str(binary), "--ui-scenario", scenario, "--ui-appearance", appearance, "--ui-theme", theme, "--ui-font-metrics", "--ui-scale", str(args.scale)]
+                if args.locale: command += ["--ui-locale",args.locale]
                 if args.scale != 100: label += f"-{args.scale}pct"
                 # UI actions use the real preference writer. A saved sidebar
                 # filter or setting from one case must not affect another case,
@@ -88,8 +90,15 @@ def capture(args, before_runtime_cleanup=None):
                             if app.poll() is not None:
                                 raise RuntimeError(f"Native app exited {app.returncode}; inspect {label}.log")
                             probe = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(app.pid)], env=env, text=True, capture_output=True, timeout=2)
+                            if probe.returncode != 0 or not probe.stdout.strip():
+                                # Some X11 backends do not advertise _NET_WM_PID.
+                                # The owned display contains exactly one fixture window.
+                                probe=subprocess.run(["xdotool","search","--name","^Talk — FICTITIOUS DATA · UI development$"],env=env,text=True,capture_output=True,timeout=2)
                             if probe.returncode == 0 and probe.stdout.strip():
-                                xid = probe.stdout.strip().splitlines()[0]
+                                windows=probe.stdout.strip().splitlines()
+                                if len(windows)!=1:raise RuntimeError("Ambiguous fixture window on owned display")
+                                xid=windows[0]
+                                run(["xdotool","windowmap","--sync",xid],env)
                                 break
                             time.sleep(0.1)
                         if xid is None:
@@ -160,6 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--scenarios", default="server,browser,storage,expired,chat,chat:dark,settings,settings:dark:sage,incoming,prejoin,call,direct-call,voice,gate,offline,denied")
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
+    parser.add_argument("--locale",choices=["en","de","es"])
     parser.add_argument("--scale", type=int, choices=[100,125,150,200], default=100)
     parser.add_argument("--interactions", action="store_true", help="Run native keyboard/mouse checks; requires tesseract-ocr")
     capture(parser.parse_args())

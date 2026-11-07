@@ -25,9 +25,15 @@ class FaultRelay(Relay):
     def __init__(self, host, port, control):
         super().__init__(host, port)
         self.control = control
-        self.injected = {mode: 0 for mode in ("500", "403", "offline", "latency-1500", "latency-4000", "slow-poll", "intermittent")}
+        self.injected = {mode: 0 for mode in ("500", "403", "offline", "latency-1500", "latency-4000", "slow-poll", "intermittent", "disconnected")}
         self.requests = 0
         self.chat_reads = 0
+
+    async def disconnect(self):
+        # An owned lab network transition also drops already admitted sockets.
+        active=list(self.tasks)
+        for task in active: task.cancel()
+        await asyncio.gather(*active,return_exceptions=True)
 
     async def connection(self, reader, writer):
         if len(self.tasks) >= 8:
@@ -55,6 +61,9 @@ class FaultRelay(Relay):
                     # Deterministic, content-free fault cadence. Only reads are
                     # faulted: this is not a safe mutation-replay simulator.
                     mode = ("502", "504", "offline")[(self.chat_reads // 3) % 3]
+            if mode == "disconnected":
+                self.injected[mode] += 1
+                return
             if len(line) == 3 and line[0] == b"GET" and b"/api/v1/chat/" in line[1] and mode in ("500", "403", "offline", "502", "504"):
                 self.injected[mode] = self.injected.get(mode, 0) + 1
                 if mode != "offline":

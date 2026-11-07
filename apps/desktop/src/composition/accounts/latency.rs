@@ -9,6 +9,7 @@ pub(super) struct Start {
     stable: Option<talk_core::preferences::navigation::NavigationRoomKey>,
     metric: DiagnosticOperation,
     signature: u128,
+    request: u64,
 }
 impl Start {
     pub(super) fn intent(intent: &UiIntent, snapshot: &PresentationSnapshot) -> Option<Self> {
@@ -43,6 +44,12 @@ impl Start {
                 .and_then(|r| r.navigation_key.clone()),
             metric,
             signature: signature(snapshot, context, metric),
+            request: match intent {
+                UiIntent::Message { request, .. }
+                | UiIntent::SendDraft { request, .. }
+                | UiIntent::SetFavorite { request, .. } => request.0,
+                _ => 0,
+            },
         })
     }
 }
@@ -66,7 +73,7 @@ impl Default for Metrics {
         }
     }
 }
-fn emit(metric: DiagnosticOperation, at: Instant, outcome: DiagnosticOutcome) {
+fn emit(metric: DiagnosticOperation, at: Instant, outcome: DiagnosticOutcome, request: u64) {
     let operation = match metric {
         DiagnosticOperation::FeedbackStartup => "startup",
         DiagnosticOperation::FeedbackStartupMessages => "startup-messages",
@@ -78,7 +85,7 @@ fn emit(metric: DiagnosticOperation, at: Instant, outcome: DiagnosticOutcome) {
         _ => "other",
     };
     println!(
-        "DEV_METRIC {operation} {} {}",
+        "DEV_METRIC {operation} {} {} {request}",
         at.elapsed().as_micros(),
         if matches!(outcome, DiagnosticOutcome::Ready) {
             "ready"
@@ -145,7 +152,7 @@ impl Metrics {
         if let Some(start) = start {
             if self.pending.len() == 16 {
                 let old = self.pending.remove(0);
-                emit(old.metric, old.at, DiagnosticOutcome::Dropped);
+                emit(old.metric, old.at, DiagnosticOutcome::Dropped, old.request);
             }
             self.pending.push(start);
         }
@@ -162,6 +169,7 @@ impl Metrics {
                 DiagnosticOperation::FeedbackStartup,
                 at,
                 DiagnosticOutcome::Ready,
+                0,
             );
         }
         if !snapshot.messages.as_slice().is_empty()
@@ -171,6 +179,7 @@ impl Metrics {
                 DiagnosticOperation::FeedbackStartupMessages,
                 at,
                 DiagnosticOutcome::Ready,
+                0,
             );
         }
         self.pending.retain(|p| {
@@ -195,10 +204,10 @@ impl Metrics {
                 _ => visible && signature(snapshot, context, p.metric) != p.signature,
             };
             if ready {
-                emit(p.metric, p.at, DiagnosticOutcome::Ready);
+                emit(p.metric, p.at, DiagnosticOutcome::Ready, p.request);
                 false
             } else if p.at.elapsed() >= Duration::from_secs(30) {
-                emit(p.metric, p.at, DiagnosticOutcome::Failed);
+                emit(p.metric, p.at, DiagnosticOutcome::Failed, p.request);
                 false
             } else {
                 true

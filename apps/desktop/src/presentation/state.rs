@@ -472,6 +472,10 @@ impl Drafts {
             .iter()
             .any(|d| d.context == context && d.uncertain)
     }
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_request_sequence(&self) -> u64 {
+        self.next_request
+    }
     pub fn pending(&self, context: ConversationRef) -> bool {
         self.entries
             .iter()
