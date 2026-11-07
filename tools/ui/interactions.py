@@ -56,6 +56,12 @@ def exercise(scenario, env, xid, out, label, large=False):
                  '-colorspace', 'gray', '-threshold', '75%', str(banner_path)], env)
             text += normalized(run(['tesseract', str(banner_path), 'stdout', '--psm', '7'], env).stdout)
             banner_path.unlink()
+        if scenario == 'accounts' and '-dark-' in label and (width, height) == (1280, 800):
+            dialog_path = out / f'{label}-ocr-account-dialog.png'
+            run(['convert', str(path), '-crop', '440x380+420+230', '+repage', '-resize', '300%',
+                 '-colorspace', 'gray', '-negate', '-auto-level', str(dialog_path)], env)
+            text += normalized(run(['tesseract', str(dialog_path), 'stdout', '--psm', '6'], env).stdout)
+            dialog_path.unlink()
         if scenario == 'poll-dialog' and (width, height) == (1280, 800) and any(
                 term in ('TEAMESSEN', 'GARTEN', 'WERKSTATT') for term in required):
             # The small field text can be missed by whole-window OCR. Inspect
