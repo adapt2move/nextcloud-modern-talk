@@ -173,7 +173,7 @@ impl Desktop {
                     div()
                         .flex()
                         .flex_col()
-                        .child(self.collection_skeleton(Skeleton::Messages)),
+                        .child(self.collection_skeleton(Skeleton::Messages, "shell-messages")),
                 );
             }
             return self.content_card(

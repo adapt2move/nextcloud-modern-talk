@@ -4,8 +4,12 @@ use gpui::{Animation, AnimationExt, AnyElement, Div, ElementId, div, prelude::*}
 use std::time::{Duration, Instant};
 mod reveal;
 
-const REVEAL: Duration = Duration::from_millis(140);
-const CONTROL: Duration = Duration::from_millis(110);
+pub(super) const REVEAL: Duration = Duration::from_millis(140);
+pub(super) const CONTROL: Duration = Duration::from_millis(110);
+pub(super) const SHIMMER: Duration = Duration::from_millis(1_600);
+pub(super) const PIN_FLIGHT: Duration = Duration::from_millis(300);
+pub(super) const PIN_SHRED: Duration = Duration::from_millis(220);
+pub(super) const PIN_SCROLL: Duration = Duration::from_millis(280);
 const DIALOG: Duration = REVEAL;
 const DIALOG_SURFACES: usize = 20;
 
@@ -85,6 +89,44 @@ pub(super) fn count_frame(counter: &Option<std::rc::Rc<std::cell::Cell<u64>>>) {
 pub(super) enum TriggerKind {
     Switch(bool),
     Reveal,
+    Pulse,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum UnreadUpdate {
+    Retire,
+    Keep,
+    Admit(talk_core::ui::presentation::ConversationRef),
+}
+
+/// A projection baseline, account change or newly loaded room is not an
+/// incoming unread event. Retain at most one decoration for the window.
+pub(super) fn unread_update(
+    previous: &talk_core::ui::presentation::PresentationSnapshot,
+    next: &talk_core::ui::presentation::PresentationSnapshot,
+    reduced: bool,
+) -> UnreadUpdate {
+    use talk_core::ui::presentation::ContentState;
+    if reduced
+        || previous.active_account.is_none()
+        || previous.active_account != next.active_account
+        || previous.conversation_list.content != ContentState::Ready
+        || next.conversation_list.content != ContentState::Ready
+    {
+        return UnreadUpdate::Retire;
+    }
+    next.conversations
+        .as_slice()
+        .iter()
+        .find_map(|row| {
+            previous
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|old| old.context == row.context && row.unread > old.unread)
+                .map(|_| UnreadUpdate::Admit(row.context))
+        })
+        .unwrap_or(UnreadUpdate::Keep)
 }
 
 /// One recent deliberate action per window, never a per-control cache.
@@ -111,9 +153,58 @@ impl MotionTrigger {
         (self.id == *id && matches!(self.kind, TriggerKind::Reveal) && elapsed < REVEAL)
             .then_some(elapsed)
     }
+
+    fn pulse_elapsed(&self, id: &ElementId, now: Instant) -> Option<Duration> {
+        let elapsed = now.saturating_duration_since(self.admitted);
+        (self.id == *id && matches!(self.kind, TriggerKind::Pulse) && elapsed < CONTROL)
+            .then_some(elapsed)
+    }
 }
 
 impl Desktop {
+    /// A short wash responds to a deliberate send or reaction without moving
+    /// the native control or implying that the underlying operation succeeded.
+    pub(super) fn action_pulse(&self, id: ElementId, color: gpui::Hsla, radius: f32) -> AnyElement {
+        let admitted = self
+            .motion_trigger
+            .as_ref()
+            .filter(|trigger| trigger.pulse_elapsed(&id, Instant::now()).is_some())
+            .map(|trigger| trigger.admitted);
+        reveal::ActionReveal::new(
+            gpui::SharedString::from(format!("action-pulse:{id}")).into(),
+            div()
+                .absolute()
+                .inset(gpui::px(2.))
+                .rounded(gpui::px(radius))
+                .bg(color),
+            admitted,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .kind(reveal::Kind::Pulse)
+        .into_any_element()
+    }
+
+    pub(super) fn unread_badge(
+        &self,
+        id: ElementId,
+        context: talk_core::ui::presentation::ConversationRef,
+        badge: Div,
+    ) -> AnyElement {
+        let admitted = self
+            .unread_pop
+            .filter(|(room, at)| *room == context && at.elapsed() < REVEAL)
+            .map(|(_, at)| at);
+        reveal::ActionReveal::new(
+            id,
+            badge,
+            admitted,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .kind(reveal::Kind::Badge)
+        .into_any_element()
+    }
     /// The live recording indicator becomes static under Reduce Motion.
     pub(super) fn recording_dot(&self) -> AnyElement {
         let dot = div()
@@ -554,5 +645,42 @@ mod tests {
             motion.reveal_elapsed(&ElementId::from("other"), admitted),
             None
         );
+    }
+
+    #[test]
+    fn unread_pop_requires_an_increase_in_the_same_ready_account() {
+        let previous = crate::presentation::state::tests::draft_snapshot();
+        let mut next = previous.clone();
+        let mut row = next.conversations.as_slice()[0].clone();
+        row.unread = 1;
+        let mut rows = talk_core::ui::Page::empty();
+        rows.try_push(row.clone()).unwrap();
+        next.conversations = rows;
+        assert_eq!(
+            unread_update(&previous, &next, false),
+            UnreadUpdate::Admit(row.context)
+        );
+        assert_eq!(unread_update(&previous, &next, true), UnreadUpdate::Retire);
+        assert_eq!(unread_update(&next, &next, false), UnreadUpdate::Keep);
+        next.active_account = None;
+        assert_eq!(unread_update(&previous, &next, false), UnreadUpdate::Retire);
+        next.active_account = previous.active_account;
+        next.conversation_list.content = talk_core::ui::presentation::ContentState::Offline;
+        assert_eq!(unread_update(&previous, &next, false), UnreadUpdate::Retire);
+    }
+
+    #[test]
+    fn action_pulse_is_scoped_and_has_a_finite_deadline() {
+        let now = Instant::now();
+        let id = ElementId::from("send");
+        let pulse = MotionTrigger {
+            id: id.clone(),
+            kind: TriggerKind::Pulse,
+            admitted: now,
+        };
+        assert_eq!(pulse.pulse_elapsed(&id, now), Some(Duration::ZERO));
+        assert_eq!(pulse.pulse_elapsed(&id, now + CONTROL), None);
+        assert_eq!(pulse.pulse_elapsed(&ElementId::from("another"), now), None);
+        assert_eq!(pulse.reveal_elapsed(&id, now), None);
     }
 }

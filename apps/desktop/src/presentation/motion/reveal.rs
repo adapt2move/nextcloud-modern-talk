@@ -1,7 +1,7 @@
 //! A stable native ancestor before, during and after an action reveal. GPUI
 //! keeps pending mouse presses under that ancestor; removing an animation
 //! wrapper when its timer expires would discard an in-progress click.
-use super::{DIALOG, REVEAL, count_frame};
+use super::{CONTROL, DIALOG, REVEAL, count_frame};
 use gpui::{
     AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, Pixels, Window, prelude::*,
@@ -46,6 +46,8 @@ pub(super) enum Kind {
     Panel,
     ThreadPanel,
     Backdrop,
+    Pulse,
+    Badge,
 }
 
 /// One timing record per mounted page or menu, retired by GPUI on unmount.
@@ -107,10 +109,10 @@ impl Element for ActionReveal {
             global_id.expect("identified reveal element"),
             |state: Option<Timing>, window| {
                 let mut timing = state.unwrap_or_default();
-                timing.duration = if self.kind == Kind::Page {
-                    REVEAL
-                } else {
-                    DIALOG
+                timing.duration = match self.kind {
+                    Kind::Page | Kind::Badge => REVEAL,
+                    Kind::Pulse => CONTROL,
+                    _ => DIALOG,
                 };
                 if self.kind != Kind::Page && self.requested.is_none() {
                     timing.admitted = None;
@@ -129,6 +131,13 @@ impl Element for ActionReveal {
                         .left(gpui::px(12. * (1. - eased)))
                         .opacity(0.85 + 0.15 * eased),
                     Kind::Backdrop => child.opacity(0.65 + 0.35 * eased),
+                    Kind::Pulse => child
+                        .inset(gpui::px(2. + 3. * (1. - eased)))
+                        .opacity(progress.map_or(0., |p| (std::f32::consts::PI * p).sin())),
+                    Kind::Badge => child
+                        .relative()
+                        .top(gpui::px(-3. * (1. - eased)))
+                        .opacity(0.65 + 0.35 * eased),
                 }
                 .into_any_element();
                 if progress.is_some() {

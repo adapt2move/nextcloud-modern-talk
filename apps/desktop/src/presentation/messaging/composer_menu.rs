@@ -32,6 +32,7 @@ impl Choice {
 struct Session {
     generation: u64,
     target: Option<Target>,
+    opened: Option<Instant>,
 }
 impl Session {
     fn open(&mut self, context: ConversationRef, thread: Option<u128>) -> Option<Target> {
@@ -42,6 +43,7 @@ impl Session {
             generation: self.generation,
         };
         self.target = Some(target);
+        self.opened = Some(Instant::now());
         Some(target)
     }
     fn accepts(&self, target: Target, selected: Option<ConversationRef>) -> bool {
@@ -77,6 +79,7 @@ impl Menu {
     }
     fn clear(&mut self) {
         self.session.target = None;
+        self.session.opened = None;
         self.pending_focus = false;
         self.return_focus = None;
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
@@ -441,27 +444,30 @@ impl Desktop {
                         )
                     })
                     .child(
-                        self.control(
-                            id.clone(),
-                            if item.choice == Choice::Silent && silent {
-                                ButtonStyle::Secondary
-                            } else {
-                                ButtonStyle::Quiet
-                            },
-                            item.availability.hinted(),
-                            LocalAction::Content(
-                                crate::presentation::content::Action::ComposerChoice(
-                                    target,
-                                    item.choice,
+                        self.style_list_row(
+                            self.control(
+                                id.clone(),
+                                if item.choice == Choice::Silent && silent {
+                                    ButtonStyle::Secondary
+                                } else {
+                                    ButtonStyle::Quiet
+                                },
+                                item.availability.hinted(),
+                                LocalAction::Content(
+                                    crate::presentation::content::Action::ComposerChoice(
+                                        target,
+                                        item.choice,
+                                    ),
                                 ),
+                                cx,
                             ),
-                            cx,
+                            super::super::controls::RowSize::Regular,
                         )
                         .w_full()
                         .min_w_0()
                         .justify_start()
                         .gap_2()
-                        .child(self.scaled_icon(item.icon, 15., self.theme.muted))
+                        .child(self.scaled_icon(item.icon, 16., self.theme.muted))
                         .child(div().min_w_0().truncate().child(self.l(item.label)))
                         .when(item.choice == Choice::Silent && silent, |d| {
                             d.child(self.scaled_icon("check", 14., self.theme.accent))
@@ -478,7 +484,16 @@ impl Desktop {
             Popup {
                 target,
                 geometry,
-                child: body.into_any_element(),
+                child: self.reveal_observation(
+                    scoped_id(
+                        "composer-popup-reveal",
+                        target.context,
+                        0,
+                        u128::from(target.generation),
+                    ),
+                    div().child(body),
+                    self.content_ui.composer_menu.session.opened,
+                ),
                 width,
             }
             .into_any_element(),

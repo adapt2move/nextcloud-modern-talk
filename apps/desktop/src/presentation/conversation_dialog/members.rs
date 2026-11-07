@@ -894,7 +894,7 @@ impl Desktop {
                     panel.members_loaded || !panel.members.as_slice().is_empty(),
                 )
             {
-                return body.child(self.collection_skeleton(Skeleton::Rows));
+                return body.child(self.collection_skeleton(Skeleton::Rows, "members-initial"));
             }
             return body.child(self.hint(self.l(unavailable(availability))));
         }
@@ -902,7 +902,7 @@ impl Desktop {
             Some(panel.state),
             panel.members_loaded || !panel.members.as_slice().is_empty(),
         ) {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "members-pending"));
         }
         if panel.members_loaded && panel.members.as_slice().is_empty() {
             body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
@@ -1068,7 +1068,7 @@ impl Desktop {
             Some(panel.bots_state),
             panel.bots_loaded || !panel.bots.as_slice().is_empty(),
         ) {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "guests"));
         }
         for bot in panel.bots.as_slice() {
             let availability = if bot.enabled.is_some() {
@@ -1175,7 +1175,7 @@ impl Desktop {
         }
         let loading = self.room_ui.members.preview_loading(panel.state);
         if loading && !self.room_ui.members.preview_visible() {
-            return body.child(self.collection_skeleton(Skeleton::Rows));
+            return body.child(self.collection_skeleton(Skeleton::Rows, "invitations"));
         }
         if !self.room_ui.members.preview_visible() {
             return body;

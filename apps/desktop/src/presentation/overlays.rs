@@ -616,7 +616,8 @@ impl Desktop {
                 CallRingOutcome::Failed => "Stummschaltung nicht möglich",
             })));
         }
-        let mut row = div()
+        let mut row = self
+            .style_list_row(div(), super::controls::RowSize::Detailed)
             .flex()
             .items_center()
             .gap_3()
@@ -641,7 +642,7 @@ impl Desktop {
     }
     fn participant_row(&self, p: &ParticipantView) -> Div {
         let t = self.theme;
-        div()
+        self.style_list_row(div(), super::controls::RowSize::Detailed)
             .flex()
             .items_center()
             .gap_3()

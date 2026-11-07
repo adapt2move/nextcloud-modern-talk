@@ -2,7 +2,7 @@
 use std::time::{Duration, Instant};
 use talk_core::ui::presentation::{DeliveryState, MessageView};
 
-pub(super) const ENTRY: Duration = Duration::from_millis(200);
+pub(super) const ENTRY: Duration = crate::presentation::motion::REVEAL;
 const FOLLOW: Duration = Duration::from_millis(75);
 const MAX_ENTRIES: usize = 100; // The snapshot's existing message-page bound.
 // A large append settles together instead of moving many rows at once.

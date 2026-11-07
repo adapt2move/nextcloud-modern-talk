@@ -748,7 +748,9 @@ impl Desktop {
                     .is_ok_and(|filters| filters == p.filters)
         }) {
             if panel.state.pending() {
-                body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+                body = body.child(
+                    self.collection_skeleton(super::controls::Skeleton::Rows, "account-search"),
+                );
             }
             if let RemoteState::Failed(_, reason) = panel.state
                 && reason != UnavailableReason::Unsupported

@@ -10,7 +10,9 @@ pub(super) use crate::presentation::controls::forms::RowSize;
 pub(super) use crate::presentation::controls::material::{Materials, Texture};
 pub(super) use crate::presentation::controls::material::{glass, glass_corners};
 pub(super) use crate::presentation::controls::skeletons::Skeleton;
-pub(super) use crate::presentation::controls::surfaces::{CONTENT_RADIUS, CardStyle};
+pub(super) use crate::presentation::controls::surfaces::{
+    CONTENT_RADIUS, CardStyle, inner_highlight,
+};
 use gpui::{
     Context, Div, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, SharedString, Stateful,
     div, prelude::*, px, svg,
@@ -767,6 +769,7 @@ impl Desktop {
         let hover_id = id.clone();
         let anchor_id = id.clone();
         let click_id = id.clone();
+        let pulse_id = id.clone();
         let anchors = self.navigation.hints.clone();
         let hovered = self.hover_hints.displayed(&id);
         let hover_epoch = self.hover_hints.epoch();
@@ -774,6 +777,13 @@ impl Desktop {
         let anchor_focus = focus.clone();
         let enabled = availability.enabled && focus.is_some();
         let (bg, fg) = control_colors(t, style, enabled);
+        let pulse_action = matches!(
+            &action,
+            LocalAction::Send
+                | LocalAction::SendThread
+                | LocalAction::MessageIn(_, super::messaging::Action::React(..))
+                | LocalAction::Message(super::messaging::Action::React(..))
+        );
         let room_row = matches!(&action, LocalAction::Navigate(_));
         let navigation_row = matches!(style, ButtonStyle::Quiet)
             && (room_row || matches!(&action, LocalAction::Destination(_)));
@@ -860,6 +870,14 @@ impl Desktop {
                         .rounded(px(corner_radius))
                         .bg(background),
                 )
+            })
+            .when(pulse_action, |d| {
+                let color = if matches!(style, ButtonStyle::Primary) {
+                    t.on_accent.opacity(0.3)
+                } else {
+                    t.accent.opacity(0.18)
+                };
+                d.child(self.action_pulse(pulse_id, color, corner_radius))
             })
             .when(
                 pointer_hovered && enabled && !self.background_inert && geometry.hover_background,
@@ -956,6 +974,17 @@ impl Desktop {
                             kind: super::motion::TriggerKind::Switch(from),
                             admitted: Instant::now(),
                         });
+                    } else if !this.reduced_motion
+                        && !this.update_restart_pending
+                        && !this.projection_blocked
+                        && pulse_action
+                    {
+                        this.motion_trigger = Some(super::motion::MotionTrigger {
+                            id: click_id.clone(),
+                            kind: super::motion::TriggerKind::Pulse,
+                            admitted: Instant::now(),
+                        });
+                        cx.notify();
                     }
                 }))
             })

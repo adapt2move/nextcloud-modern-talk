@@ -42,7 +42,7 @@ impl From<Option<Overlay>> for Surface {
 }
 impl Feedback {
     pub(super) fn dismiss_theme(self, theme: super::Theme) -> super::Theme {
-        let foreground = self.tone.role().foreground();
+        let foreground = self.tone.role().foreground(theme);
         super::Theme {
             sidebar_secondary: foreground,
             hover: gpui::Hsla {

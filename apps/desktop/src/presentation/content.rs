@@ -2954,7 +2954,9 @@ impl Desktop {
                             .min_h(px(28.))
                             .h(px(28.))
                             .px_1()
-                            .text_size(self.sp(12.)),
+                            .text_size(self.sp(12.))
+                            .text_color(self.theme.selected_text)
+                            .hover(|style| style.underline()),
                         )
                     }),
             );

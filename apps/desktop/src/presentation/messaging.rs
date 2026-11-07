@@ -2135,7 +2135,7 @@ impl Desktop {
                 )))
             };
         } else if state.initial_loading() || context_pending {
-            body = body.child(self.collection_skeleton(Skeleton::Messages));
+            body = body.child(self.collection_skeleton(Skeleton::Messages, "messages"));
         } else {
             body = body.child(div().flex_1());
         }
@@ -2518,7 +2518,7 @@ impl Desktop {
                         .rounded_full()
                         .border_1()
                         .border_color(self.theme.border)
-                        .shadow_sm(),
+                        .shadow(self.theme.elevation(super::theme::Elevation::Popover)),
                     ),
                 )
             })
@@ -2653,7 +2653,7 @@ impl Desktop {
                     !panel.shared_files.as_slice().is_empty()
                 };
                 if !has_content {
-                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                    body = body.child(self.collection_skeleton(Skeleton::Rows, "shared-content"));
                 }
             }
             talk_core::ui::conversation::RemoteState::Failed(_, _) => {

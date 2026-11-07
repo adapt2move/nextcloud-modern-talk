@@ -344,7 +344,7 @@ impl Desktop {
                     self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        BannerRole::Warning.foreground(),
+                        BannerRole::Warning.foreground(self.theme),
                     ),
                 )
                 .flex_none()
@@ -654,6 +654,12 @@ impl Desktop {
                             },
                         ))
                 };
+                let tile_base = if pip && participant.self_user {
+                    t.stage
+                } else {
+                    t.stage_panel
+                };
+                let dark_stage = super::Theme { dark: true, ..t };
                 let tile = div()
                     .relative()
                     .min_w_0()
@@ -677,19 +683,30 @@ impl Desktop {
                     .border_color(if participant.speaking {
                         stage_speaking_color(t)
                     } else {
-                        t.stage_panel
+                        gpui::rgba(0xffffff12).into()
                     })
+                    .shadow(dark_stage.elevation(super::theme::Elevation::Raised))
                     .group("call-tile")
                     .when(call.stage == CallStage::Reconnecting, |d| d.opacity(0.7))
-                    .bg(if pip && participant.self_user {
-                        t.stage
-                    } else {
-                        t.stage_panel
+                    .bg(tile_base)
+                    .when(!t.reduced_transparency, |tile| {
+                        tile.bg(gpui::linear_gradient(
+                            180.,
+                            gpui::linear_color_stop(
+                                gpui::Hsla {
+                                    l: (tile_base.l + 0.015).min(1.),
+                                    ..tile_base
+                                },
+                                0.,
+                            ),
+                            gpui::linear_color_stop(tile_base, 1.),
+                        ))
                     })
                     .children(
                         self.materials
                             .layer(super::controls::Texture::Tile, t.reduced_transparency),
                     )
+                    .child(super::controls::inner_highlight(dark_stage, 12.))
                     .flex()
                     .flex_col()
                     .items_center()

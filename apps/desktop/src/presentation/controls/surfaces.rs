@@ -173,7 +173,10 @@ impl Desktop {
     }
 }
 
-fn inner_highlight(theme: crate::presentation::Theme, radius: f32) -> Div {
+pub(in crate::presentation) fn inner_highlight(
+    theme: crate::presentation::Theme,
+    radius: f32,
+) -> Div {
     div()
         .absolute()
         .inset(px(1.))

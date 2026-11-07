@@ -84,7 +84,7 @@ impl Desktop {
             return self.loading_row(self.l("Konto wird verbunden …"));
         }
         if state.initial_loading() {
-            return self.collection_skeleton(Skeleton::Rows);
+            return self.collection_skeleton(Skeleton::Rows, "collection-rows");
         }
         if state.state == ContentState::Offline {
             if !self.offline_notice_visible() {

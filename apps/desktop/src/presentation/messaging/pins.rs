@@ -7,7 +7,7 @@ mod overlay;
 use crate::presentation::messaging::pins::motion::{Activity, Kind, Motion, Ticket};
 use std::time::Duration;
 
-const CYCLE: Duration = Duration::from_millis(170);
+const CYCLE: Duration = crate::presentation::motion::REVEAL;
 
 #[derive(Default)]
 pub(super) struct Pins {

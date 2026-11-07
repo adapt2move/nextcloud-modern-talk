@@ -1034,30 +1034,28 @@ impl Desktop {
                 ))
             })
             .when(row.unread > 0, |d| {
-                d.child(
-                    if row.unread_direct_mention == Some(true)
-                        || matches!(
-                            row.kind,
-                            ConversationKind::Direct | ConversationKind::NoteToSelf
-                        )
-                    {
-                        self.count_badge(format!(
-                            "{}{}",
-                            if row.unread_direct_mention == Some(true) {
-                                "@ "
-                            } else {
-                                ""
-                            },
-                            if row.unread > 99 {
-                                "99+".to_owned()
-                            } else {
-                                row.unread.to_string()
-                            }
-                        ))
-                    } else {
-                        div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
-                    },
-                )
+                let badge = if row.unread_direct_mention == Some(true)
+                    || matches!(
+                        row.kind,
+                        ConversationKind::Direct | ConversationKind::NoteToSelf
+                    ) {
+                    self.count_badge(format!(
+                        "{}{}",
+                        if row.unread_direct_mention == Some(true) {
+                            "@ "
+                        } else {
+                            ""
+                        },
+                        if row.unread > 99 {
+                            "99+".to_owned()
+                        } else {
+                            row.unread.to_string()
+                        }
+                    ))
+                } else {
+                    div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
+                };
+                d.child(self.unread_badge(scoped_id(namespace, context, 0, 8), context, badge))
             });
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.

@@ -329,6 +329,7 @@ pub struct Desktop {
     hovered_control: Option<gpui::ElementId>,
     reduced_motion: bool,
     motion_trigger: Option<motion::MotionTrigger>,
+    unread_pop: Option<(ConversationRef, Instant)>,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -736,6 +737,7 @@ impl Desktop {
             hovered_control: None,
             reduced_motion: settings_port.reduced_motion(),
             motion_trigger: None,
+            unread_pop: None,
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
@@ -1060,6 +1062,7 @@ impl Desktop {
         if self.reduced_motion != reduced_motion {
             self.reduced_motion = reduced_motion;
             self.motion_trigger = None;
+            self.unread_pop = None;
             cx.notify();
         }
         self.refresh_preferences(cx);
@@ -1094,6 +1097,13 @@ impl Desktop {
             ));
             cx.notify();
             return;
+        }
+        match motion::unread_update(&self.snapshot, &next, self.reduced_motion) {
+            motion::UnreadUpdate::Retire => self.unread_pop = None,
+            motion::UnreadUpdate::Keep => {}
+            motion::UnreadUpdate::Admit(context) => {
+                self.unread_pop = Some((context, Instant::now()))
+            }
         }
         self.projection_blocked = false;
         self.call_recovery

@@ -21,6 +21,7 @@ struct Key {
 struct Toast {
     key: Key,
     reason: MessageActionError,
+    admitted: Instant,
     expires: Instant,
 }
 
@@ -72,6 +73,7 @@ impl Toasts {
                 self.current = Some(Toast {
                     key,
                     reason,
+                    admitted: now,
                     expires: now + LIFETIME,
                 });
             }
@@ -220,9 +222,9 @@ impl Desktop {
                 )
                 && Instant::now() < toast.expires
         })?;
-        Some(
-            self.style_floating_surface(
-                div().absolute().right_4().bottom_4().occlude().w(self
+        let surface = self
+            .style_floating_surface(
+                div().relative().occlude().w(self
                     .sp(360.)
                     .min((window.viewport_size().width - px(32.)).max(px(1.)))),
                 self.theme.surface,
@@ -268,7 +270,22 @@ impl Desktop {
                 )
                 .size(px(28.))
                 .min_h(px(28.)),
-            ),
+            );
+        Some(
+            div()
+                .absolute()
+                .right_4()
+                .bottom_4()
+                .child(self.reveal_observation(
+                    scoped_id(
+                        "action-toast-reveal",
+                        toast.key.context,
+                        u128::from(toast.key.id),
+                        0,
+                    ),
+                    surface,
+                    Some(toast.admitted),
+                )),
         )
     }
 }

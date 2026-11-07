@@ -928,7 +928,9 @@ impl Desktop {
         };
         let Some(d) = panel.details.as_ref() else {
             if initial_room_load(Some(panel.state), false) {
-                return page.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+                return page.child(
+                    self.collection_skeleton(super::controls::Skeleton::Rows, "room-settings"),
+                );
             }
             return page.child(self.button(
                 "room-load-details",

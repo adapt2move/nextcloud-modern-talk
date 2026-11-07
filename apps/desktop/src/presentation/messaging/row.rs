@@ -728,10 +728,10 @@ impl Desktop {
                             // One surface frames the tools without changing row geometry.
                             .rounded(px(8.))
                             .group_hover(action_group.clone(), |s| {
-                                s.bg(t.surface).border_1().border_color(t.border).shadow_sm()
+                                s.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
                             })
                             .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
-                                d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
+                                d.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
                             })
                             .when(thread, |d| d.top_0().right_2())
                             .when(!thread, |d| { d.top(px(-20.)).right(if m.own {

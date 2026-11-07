@@ -116,7 +116,9 @@ impl Desktop {
             ));
         }
         let Some(panel) = panel else {
-            return body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+            return body.child(
+                self.collection_skeleton(super::controls::Skeleton::Rows, "discover-initial"),
+            );
         };
         if panel.uncertain {
             body = body.child(self.loading_row(self.l("Der Beitritt wird überprüft.")));
@@ -130,7 +132,9 @@ impl Desktop {
                 }),
             ));
         } else if panel.state.pending() && !panel.loaded {
-            body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+            body = body.child(
+                self.collection_skeleton(super::controls::Skeleton::Rows, "discover-pending"),
+            );
         }
         let mut shown = 0;
         for room in panel.rooms.as_slice().iter().filter(|room| {
@@ -171,34 +175,37 @@ impl Desktop {
                     ));
             }
             body = body.child(
-                self.style_card(div(), super::controls::CardStyle::Raised)
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .p_3()
-                    .child(details)
-                    .child(
-                        self.button(
-                            super::controls::scoped_id("discover-join", room.context, 0, 0),
-                            if joining {
-                                "Beitritt läuft …"
-                            } else {
-                                "Beitreten"
-                            },
-                            ButtonStyle::Secondary,
-                            Availability::when(
-                                self.active_account_connected()
-                                    && !busy
-                                    && room.join == Decision::Allowed,
-                                reason,
-                            ),
-                            LocalAction::DiscoverJoin(room.context),
-                            cx,
-                        )
-                        .border_1()
-                        .border_color(self.theme.input_border)
-                        .rounded(px(8.)),
-                    ),
+                self.style_card(
+                    self.style_list_row(div(), super::controls::RowSize::Detailed),
+                    super::controls::CardStyle::Raised,
+                )
+                .flex()
+                .items_center()
+                .gap_3()
+                .p_3()
+                .child(details)
+                .child(
+                    self.button(
+                        super::controls::scoped_id("discover-join", room.context, 0, 0),
+                        if joining {
+                            "Beitritt läuft …"
+                        } else {
+                            "Beitreten"
+                        },
+                        ButtonStyle::Secondary,
+                        Availability::when(
+                            self.active_account_connected()
+                                && !busy
+                                && room.join == Decision::Allowed,
+                            reason,
+                        ),
+                        LocalAction::DiscoverJoin(room.context),
+                        cx,
+                    )
+                    .border_1()
+                    .border_color(self.theme.input_border)
+                    .rounded(px(8.)),
+                ),
             );
         }
         if panel.loaded && shown == 0 && !panel.state.pending() {

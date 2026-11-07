@@ -284,7 +284,7 @@ impl Desktop {
                         .as_ref()
                         .is_some_and(|request| request.loading(panel))
                 {
-                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                    body = body.child(self.collection_skeleton(Skeleton::Rows, "creation-people"));
                 }
                 for person in panel.people.as_slice() {
                     body = body.child(
@@ -426,7 +426,7 @@ impl Desktop {
                     .is_some_and(|r| r.loading(panel))
                     && panel.people.as_slice().is_empty()
                 {
-                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                    body = body.child(self.collection_skeleton(Skeleton::Rows, "creation-invite"));
                 }
                 for person in panel.people.as_slice().iter().take(8) {
                     let selected = panel.invites.as_slice().iter().any(|p| p.id == person.id);

@@ -198,8 +198,10 @@ impl Desktop {
                     label =
                         label.child(div().text_ellipsis().child(self.hint(description.as_str())));
                 }
+                let hover_group: gpui::SharedString = format!("{identity}:hover").into();
                 let card: Div = self
                     .style_card(div(), super::controls::CardStyle::Outlined)
+                    .group(hover_group.clone())
                     .flex()
                     .items_center()
                     .gap_2()
@@ -226,20 +228,29 @@ impl Desktop {
                         .justify_start()
                         .child(label),
                     )
-                    .child(self.icon_button(
-                        super::messaging::row::surface_id(
-                            "reference-hide",
-                            context,
-                            message.local_id,
-                            u128::from(preview.ordinal),
-                            thread,
-                        ),
-                        ("x", "Vorschau verbergen"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::ToggleReference(context, message.local_id, preview.ordinal),
-                        cx,
-                    ));
+                    .child(
+                        self.icon_button(
+                            super::messaging::row::surface_id(
+                                "reference-hide",
+                                context,
+                                message.local_id,
+                                u128::from(preview.ordinal),
+                                thread,
+                            ),
+                            ("x", "Vorschau verbergen"),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::ToggleReference(
+                                context,
+                                message.local_id,
+                                preview.ordinal,
+                            ),
+                            cx,
+                        )
+                        .opacity(0.)
+                        .group_hover(hover_group, |button| button.opacity(1.))
+                        .focus(|button| button.opacity(1.)),
+                    );
                 let arrived = self
                     .reference_ui
                     .arrival
