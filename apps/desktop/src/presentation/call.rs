@@ -1227,6 +1227,7 @@ impl Desktop {
                         )
                         .min_w(px(44.))
                         .min_h(px(44.))
+                        .font_family(call_emoji_font())
                         .text_size(self.sp(28.))
                         .p_1(),
                     );
@@ -1546,6 +1547,7 @@ impl Desktop {
             .absolute()
             .left(gpui::relative(0.5))
             .bottom(gpui::relative(0.5))
+            .font_family(call_emoji_font())
             .text_size(self.sp(34.))
             .child(reaction.emoji.as_str().to_owned());
         Some(if fixture {
@@ -1704,6 +1706,17 @@ fn stage_metrics(window_height: f32, scale: u16) -> (f32, f32, f32) {
     let filmstrip = 90.;
     let feature = (available - filmstrip - 16.).max(74.);
     (available, feature, filmstrip)
+}
+
+// Use the same system color-emoji family for the tray and floating reactions.
+fn call_emoji_font() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Apple Color Emoji"
+    } else if cfg!(target_os = "windows") {
+        "Segoe UI Emoji"
+    } else {
+        "Noto Color Emoji"
+    }
 }
 
 // The stage remains dark in both app appearances. Lift the existing success
