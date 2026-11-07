@@ -35,13 +35,21 @@ def exercise(scenario, env, xid, out, label, large=False):
             for field in ('left','top','width','height'):r[field]=str(int(r[field])//2)
         return path, words, normalized(' '.join(r['text'] for r in words))
 
-    def expect(name, required=(), absent=()):
+    def expect(name, required=(), absent=(), footer_height=120, include_footer_words=False):
         path, words, text = observe()
         text += normalized(run(["tesseract",str(path),"stdout","--psm","6"],env).stdout)
         width,height=map(int,run(["identify","-format","%w %h",str(path)],env).stdout.split())
         ocr_path=out/f"{label}-ocr-footer.png"
-        run(["convert",str(path),"-crop",f"{width}x120+0+{height-120}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
+        footer_height = min(footer_height, height)
+        run(["convert",str(path),"-crop",f"{width}x{footer_height}+0+{height-footer_height}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
+        if include_footer_words:
+            tsv = run(["tesseract",str(ocr_path),"stdout","--psm","6","tsv"],env).stdout
+            for word in csv.DictReader(io.StringIO(tsv), delimiter='\t'):
+                if word.get('text', '').strip():
+                    word['left'] = str(int(word['left']) // 3)
+                    word['top'] = str(int(word['top']) // 3 + height - footer_height)
+                    words.append(word)
         ocr_path.unlink()
         for term in required:
             if normalized(term).replace(' ', '') not in text.replace(' ', ''):
@@ -197,7 +205,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(1.5)
         expect('thread composer accepts text', ['THREADDRAFT'])
         key('Return')
-        words = expect('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'])
+        words = expect('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'], footer_height=200, include_footer_words=True)
+        if not any(normalized(word['text']) == 'nicht' and int(word['left']) >= after - 10 for word in words):
+            raise AssertionError('Thread submission feedback did not appear beside its composer')
         if any(normalized(word['text']) == 'nicht' and int(word['left']) < after - 10 for word in words):
             raise AssertionError('Thread submission feedback appeared in the main composer')
         log = (out / f'{label}.log').read_text()
