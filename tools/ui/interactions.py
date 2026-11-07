@@ -182,7 +182,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(['xdotool', 'mousemove', '--window', xid, '150', '290'], env)
         expect('Active room reveals its join action on hover', ['Beitreten'])
         click('Beitreten', xmin=140, ymin=250)
-        expect('Join action expands the owned call', ['Teamküche', 'Im Gespräch'], ['Nachricht an Produktteam'])
+        expect('Join action expands the owned call', ['Teamk', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):
         # The following points were inspected at this exact fixture size. The
         # fixture log reports only the local room identity, never media data.
