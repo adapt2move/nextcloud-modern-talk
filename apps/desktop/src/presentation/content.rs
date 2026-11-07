@@ -1795,99 +1795,99 @@ impl Desktop {
         if options_interacted && self.content_ui.question.read(cx).content.trim().is_empty() {
             body = body.child(self.hint(self.l("Gib eine Frage ein.")));
         }
-        if self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled()
+        if self.content_scope_current()
+            && self.snapshot.content_panel.poll_drafts_manage.enabled()
+            && self.content_ui.drafts_open
         {
-            if self.content_ui.drafts_open {
-                if self
-                    .snapshot
-                    .content_panel
-                    .poll_drafts
-                    .as_slice()
-                    .is_empty()
-                {
-                    let label = match self.snapshot.content_panel.poll_state {
-                        RemoteState::Loading(_) | RemoteState::Saving(_) => {
-                            "Umfrageentwürfe werden geladen …"
-                        }
-                        RemoteState::Failed(_, _) | RemoteState::Uncertain(_) => {
-                            "Umfrageentwürfe konnten nicht geladen werden."
-                        }
-                        RemoteState::Idle => "Keine Umfrageentwürfe vorhanden.",
-                    };
-                    body = body.child(self.hint(self.l(label)));
-                    if matches!(
-                        self.snapshot.content_panel.poll_state,
-                        RemoteState::Failed(_, _)
-                    ) {
-                        body = body.child(self.button(
-                            "poll-drafts-retry",
-                            "Erneut laden",
-                            ButtonStyle::Quiet,
-                            online,
-                            LocalAction::Content(Action::Command(ContentAction::RefreshPollDrafts)),
-                            cx,
-                        ));
+            if self
+                .snapshot
+                .content_panel
+                .poll_drafts
+                .as_slice()
+                .is_empty()
+            {
+                let label = match self.snapshot.content_panel.poll_state {
+                    RemoteState::Loading(_) | RemoteState::Saving(_) => {
+                        "Umfrageentwürfe werden geladen …"
                     }
+                    RemoteState::Failed(_, _) | RemoteState::Uncertain(_) => {
+                        "Umfrageentwürfe konnten nicht geladen werden."
+                    }
+                    RemoteState::Idle => "Keine Umfrageentwürfe vorhanden.",
+                };
+                body = body.child(self.hint(self.l(label)));
+                if matches!(
+                    self.snapshot.content_panel.poll_state,
+                    RemoteState::Failed(_, _)
+                ) {
+                    body = body.child(self.button(
+                        "poll-drafts-retry",
+                        "Erneut laden",
+                        ButtonStyle::Quiet,
+                        online,
+                        LocalAction::Content(Action::Command(ContentAction::RefreshPollDrafts)),
+                        cx,
+                    ));
                 }
-                for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
-                    let id = entry.id;
-                    let mut actions =
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap_1()
-                            .child(self.button(
-                                ("poll-draft-use", id as usize),
-                                "Für neue Umfrage verwenden",
-                                ButtonStyle::Quiet,
-                                !busy,
-                                LocalAction::Content(Action::LoadDraft { id, edit: false }),
-                                cx,
-                            ));
-                    if self.snapshot.content_panel.poll_drafts_edit.enabled() {
-                        actions = actions.child(self.button(
-                            ("poll-draft-edit", id as usize),
-                            "Entwurf bearbeiten",
+            }
+            for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
+                let id = entry.id;
+                let mut actions =
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_1()
+                        .child(self.button(
+                            ("poll-draft-use", id as usize),
+                            "Für neue Umfrage verwenden",
                             ButtonStyle::Quiet,
                             !busy,
-                            LocalAction::Content(Action::LoadDraft { id, edit: true }),
+                            LocalAction::Content(Action::LoadDraft { id, edit: false }),
                             cx,
                         ));
-                    }
-                    actions = if self.content_ui.delete_draft == Some(id) {
-                        actions
-                            .child(self.hint(self.l("Diesen Entwurf löschen?")))
-                            .child(self.button(
-                                ("poll-draft-delete-confirm", id as usize),
-                                "Entwurf endgültig löschen",
-                                ButtonStyle::Quiet,
-                                !busy && online,
-                                LocalAction::Content(Action::DeleteDraft(id)),
-                                cx,
-                            ))
-                    } else {
-                        actions.child(self.button(
-                            ("poll-draft-delete", id as usize),
-                            "Entwurf löschen",
+                if self.snapshot.content_panel.poll_drafts_edit.enabled() {
+                    actions = actions.child(self.button(
+                        ("poll-draft-edit", id as usize),
+                        "Entwurf bearbeiten",
+                        ButtonStyle::Quiet,
+                        !busy,
+                        LocalAction::Content(Action::LoadDraft { id, edit: true }),
+                        cx,
+                    ));
+                }
+                actions = if self.content_ui.delete_draft == Some(id) {
+                    actions
+                        .child(self.hint(self.l("Diesen Entwurf löschen?")))
+                        .child(self.button(
+                            ("poll-draft-delete-confirm", id as usize),
+                            "Entwurf endgültig löschen",
                             ButtonStyle::Quiet,
-                            !busy,
-                            LocalAction::Content(Action::ConfirmDeleteDraft(id)),
+                            !busy && online,
+                            LocalAction::Content(Action::DeleteDraft(id)),
                             cx,
                         ))
-                    };
-                    body = body.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .p_3()
-                            .bg(self.theme.subtle)
-                            .rounded(px(8.))
-                            .child(entry.draft.question.as_str().to_owned())
-                            .child(actions),
-                    );
-                }
+                } else {
+                    actions.child(self.button(
+                        ("poll-draft-delete", id as usize),
+                        "Entwurf löschen",
+                        ButtonStyle::Quiet,
+                        !busy,
+                        LocalAction::Content(Action::ConfirmDeleteDraft(id)),
+                        cx,
+                    ))
+                };
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .bg(self.theme.subtle)
+                        .rounded(px(8.))
+                        .child(entry.draft.question.as_str().to_owned())
+                        .child(actions),
+                );
             }
         }
         if self.content_ui.editing_draft.is_some() {
