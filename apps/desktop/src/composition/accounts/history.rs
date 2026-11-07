@@ -229,8 +229,8 @@ impl History {
         if let Some((expires, _, capabilities)) = &self.capabilities {
             if Instant::now() < *expires {
                 super::messaging::project_capabilities(panel, capabilities);
-            } else if self.offline {
-                // The last capability bit is only a staging hint while offline.
+            } else {
+                // The last capability bit is only a local staging hint.
                 // Discard grants; dispatch always obtains current server policy.
                 let mut prior = MessagePanel::new(self.context);
                 super::messaging::project_capabilities(&mut prior, capabilities);
@@ -239,7 +239,11 @@ impl History {
                 if value.allowed == Decision::Allowed {
                     value.allowed = Decision::Unknown;
                 }
-                let _ = panel.features.try_push((feature, value));
+                if value.implemented
+                    && value.server != talk_core::ui::presentation::FeatureSupport::Unknown
+                {
+                    let _ = panel.features.try_push((feature, value));
+                }
             }
         }
     }

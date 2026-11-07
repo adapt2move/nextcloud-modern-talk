@@ -824,8 +824,10 @@ impl Desktop {
             );
         }
         let can_rename = details.rename == talk_core::ui::Decision::Allowed
-            || self.snapshot.content == ContentState::Offline
-                && self.local_message_intents()
+            || matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            ) && self.local_message_intents()
                 && details.rename != talk_core::ui::Decision::Denied;
         if can_rename {
             body = if self.thread_renaming {

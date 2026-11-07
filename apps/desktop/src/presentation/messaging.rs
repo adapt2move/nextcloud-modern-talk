@@ -1103,8 +1103,10 @@ impl Desktop {
     pub(super) fn can_start_thread(&self) -> bool {
         use talk_core::ui::presentation::FeatureSupport;
         self.message_feature_enabled(MessageFeature::Threads)
-            || self.snapshot.content == ContentState::Offline
-                && self.local_message_intents()
+            || matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            ) && self.local_message_intents()
                 && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                     Some(panel.context) == self.snapshot.selected
                         && panel.availability(MessageFeature::Threads).implemented
@@ -1118,8 +1120,10 @@ impl Desktop {
     pub(super) fn can_change_thread(&self, context: ConversationRef) -> bool {
         use talk_core::ui::presentation::FeatureSupport;
         self.message_feature_enabled(MessageFeature::Threads)
-            || self.snapshot.content == ContentState::Offline
-                && self.local_message_intents()
+            || matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            ) && self.local_message_intents()
                 && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                     panel.context == context
                         && panel.thread_details.is_some()
@@ -1133,8 +1137,10 @@ impl Desktop {
     pub(super) fn can_open_thread(&self, context: ConversationRef, root: u128) -> bool {
         use talk_core::ui::presentation::FeatureSupport;
         self.message_feature_enabled(MessageFeature::Threads)
-            || self.snapshot.content == ContentState::Offline
-                && self.snapshot.selected == Some(context)
+            || matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            ) && self.snapshot.selected == Some(context)
                 && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                     panel.context == context
                         && panel.availability(MessageFeature::Threads).server
@@ -3034,7 +3040,7 @@ fn thread_reply_feature_allowed(
 ) -> bool {
     use talk_core::ui::presentation::FeatureSupport;
     content == ContentState::Ready && value.enabled()
-        || content == ContentState::Offline
+        || matches!(content, ContentState::Ready | ContentState::Offline)
             && queue_available
             && observed_root
             && value.server != FeatureSupport::Unsupported
@@ -3134,7 +3140,7 @@ mod tests {
             true,
             true
         ));
-        assert!(!thread_reply_feature_allowed(
+        assert!(thread_reply_feature_allowed(
             ContentState::Ready,
             unknown,
             true,
