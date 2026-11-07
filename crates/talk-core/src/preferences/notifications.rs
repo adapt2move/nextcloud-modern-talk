@@ -46,6 +46,11 @@ impl NotificationSources {
 pub struct NotificationId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NotificationKind {
+    /// Authenticated server Talk diagnostic; ordinary policy, no activation target.
+    ServerTest {
+        scope: AccountScope,
+        id: NotificationId,
+    },
     Message {
         scope: AccountScope,
         conversation: ConversationId,
@@ -82,7 +87,7 @@ pub enum NotificationKind {
 impl NotificationKind {
     pub fn category(self) -> NotificationCategory {
         match self {
-            Self::Message { .. } => NotificationCategory::Messages,
+            Self::Message { .. } | Self::ServerTest { .. } => NotificationCategory::Messages,
             Self::ConferenceParticipantJoined { .. } | Self::MessageReminder { .. } => {
                 NotificationCategory::Important
             }
@@ -93,7 +98,8 @@ impl NotificationKind {
     }
     pub fn scope(self) -> Option<AccountScope> {
         match self {
-            Self::Message { scope, .. }
+            Self::ServerTest { scope, .. }
+            | Self::Message { scope, .. }
             | Self::MessageReminder { scope, .. }
             | Self::Calendar { scope, .. } => Some(scope),
             Self::IncomingCall { call } | Self::ConferenceParticipantJoined { call, .. } => {
@@ -149,7 +155,7 @@ impl NotificationKind {
             Self::Calendar { scope, id } => {
                 Some(NotificationActivation::OpenCalendar { scope, id })
             }
-            Self::Test { .. } => None,
+            Self::Test { .. } | Self::ServerTest { .. } => None,
         }
     }
 }
@@ -316,7 +322,9 @@ pub fn plan(
     NotificationPlan {
         banner: enabled
             && delivery.banners
-            && (event.minimized || event.kind.category() == NotificationCategory::IncomingCalls),
+            && (event.minimized
+                || matches!(event.kind, NotificationKind::ServerTest { .. })
+                || event.kind.category() == NotificationCategory::IncomingCalls),
         sound: enabled && delivery.sounds,
     }
 }

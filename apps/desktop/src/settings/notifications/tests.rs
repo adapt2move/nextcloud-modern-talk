@@ -797,3 +797,47 @@ fn linux_sound_only_does_not_escape_system_notification_focus_policy() {
     assert!(!args.iter().any(|s| s.contains("sound-name")));
     assert!(!args.iter().any(|s| s.contains("critical")));
 }
+
+#[test]
+fn server_diagnostics_require_a_current_source_and_deduplicate_without_actions() {
+    let a = scope(1, 1);
+    let kind = NotificationKind::ServerTest {
+        scope: a,
+        id: NotificationId(22),
+    };
+    let mut state = State::new(NotificationPreferences::default());
+    assert_eq!(
+        state.admit(event(1, kind), Instant::now()),
+        Err(NotificationError::SourceUnavailable)
+    );
+    state.update_sources(None, sources(a, 1)).unwrap();
+    state.admit(event(1, kind), Instant::now()).unwrap();
+    assert_eq!(
+        state.admit(event(2, kind), Instant::now()),
+        Err(NotificationError::Duplicate)
+    );
+    assert_eq!(kind.activation(), None);
+    let mut foreground = event(2, kind);
+    foreground.minimized = false;
+    assert!(
+        notifications::plan(
+            NotificationPreferences::default(),
+            &foreground,
+            SourceAvailability::Available
+        )
+        .banner
+    );
+    assert!(
+        !notifications::plan(
+            NotificationPreferences::default(),
+            &foreground,
+            SourceAvailability::Unknown
+        )
+        .banner
+    );
+    state.retire_source(a).unwrap();
+    assert_eq!(
+        state.admit(event(3, kind), Instant::now()),
+        Err(NotificationError::SourceUnavailable)
+    );
+}

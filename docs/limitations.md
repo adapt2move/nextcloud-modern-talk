@@ -290,6 +290,22 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Background discovery has bounded capacity. Calendar integration, all mention
   and thread-notification policies, and platform-native incoming-call actions
   remain incomplete. Unknown notification eligibility stays suppressed.
+  While running, admitted accounts poll message/reminder and incoming-call
+  notifications every three seconds on a healthy server; request time,
+  backpressure, server delivery/cron and retry delays add latency. Ordinary
+  message banners require a background window. Initial observation and gaps of
+  60 seconds or more establish a silent baseline rather than replaying history.
+  `occ notification:test-push --talk USER` both stores an
+  `admin_notification_talk` diagnostic in the Notifications API and attempts
+  mobile-device push. Fresh eligible diagnostics now use the ordinary Messages
+  category with fixed local text and no activation target. They need no mobile
+  push registration and can appear in the foreground. Sign in, allow notifications,
+  wait for the initial baseline, then run the command. Minimize/hide the app to
+  test real message banners with a DM, direct mention, incoming direct call, or due personal message reminder from
+  another session; avoid actively reading the receiving conversation elsewhere.
+  `occ notification:generate` creates general administrator notifications,
+  which this Talk-only client does not display. `notify_push` websocket hints
+  are not implemented; bounded polling works without that optional app.
   The direct-mention badge uses the server's boolean flag alongside the total
   unread-message count; the server does not expose a direct-mention count.
   macOS Notifications settings now separate local choices from observed OS

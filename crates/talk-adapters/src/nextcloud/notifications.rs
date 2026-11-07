@@ -85,6 +85,7 @@ impl NextcloudClient {
                 scope: context.scope,
                 source,
                 notices: Page::empty(),
+                server_tests: Page::empty(),
                 changed: false,
             },
         ))
@@ -100,6 +101,7 @@ impl NextcloudClient {
             scope: context.scope,
             source: talk_core::protocol::NotificationSourceState::Available,
             notices: Page::empty(),
+            server_tests: Page::empty(),
             changed: false,
         };
         if self
@@ -119,24 +121,56 @@ impl NextcloudClient {
             return Ok(ProtocolReply::MessageNotifications(result));
         }
         let after = self.message_notifications.cursor.unwrap_or(0);
-        let candidates: Vec<_> = list
+        // One shared cursor and batch budget for messages and diagnostics: a
+        // mixed response cannot skip one kind or replay the other.
+        let mut candidates: Vec<_> = list
             .messages
             .into_iter()
-            .filter(|n| n.id > after)
-            .take(BATCH)
+            .map(|n| (n.id, Ok(n)))
+            .chain(list.server_tests.into_iter().map(|n| (n.id, Err(n))))
+            .filter(|(id, _)| *id > after)
             .collect();
+        candidates.sort_unstable_by_key(|(id, _)| *id);
+        candidates.truncate(BATCH);
         result.changed = !candidates.is_empty();
         if candidates.is_empty() {
             self.message_notifications.cursor = Some(after.max(list.high_water));
             return Ok(ProtocolReply::MessageNotifications(result));
         }
-        let caps = self.capabilities(context).await?;
-        self.supported(&caps)?;
+        let caps = if candidates.iter().any(|(_, n)| n.is_ok()) {
+            let caps = self.capabilities(context).await?;
+            self.supported(&caps)?;
+            Some(caps)
+        } else {
+            None
+        };
         let mut observed_state = self.message_notifications.clone();
-        for notice in candidates {
+        for (id, candidate) in candidates {
+            let notice = match candidate {
+                Ok(notice) => notice,
+                Err(test) => {
+                    if test.eligible
+                        && test.timestamp >= self.message_notifications.since
+                        && test.timestamp.saturating_add(FRESH.as_secs()) >= unix_seconds()
+                    {
+                        result
+                            .server_tests
+                            .try_push(id)
+                            .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                    }
+                    observed_state.cursor = Some(id);
+                    continue;
+                }
+            };
             // Consume suppressed/invalid events too. A mute change must not replay
             // them later. A transport failure leaves this event for the next poll.
-            let observed = self.message_notice(context, &caps, &notice).await;
+            let observed = self
+                .message_notice(
+                    context,
+                    caps.as_ref().expect("message capabilities"),
+                    &notice,
+                )
+                .await;
             match observed {
                 Ok(Some(value)) => {
                     if notice.reminder

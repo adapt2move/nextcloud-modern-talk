@@ -215,6 +215,8 @@ pub struct MessageNotifications {
     pub scope: AccountScope,
     pub source: NotificationSourceState,
     pub notices: Page<MessageNotice, 4>,
+    /// Fresh server Talk diagnostic IDs, without conversation or action authority.
+    pub server_tests: Page<u64, 4>,
     /// New source events also request a full navigation reconciliation, even if
     /// local/server notification policy suppresses every banner.
     pub changed: bool,
