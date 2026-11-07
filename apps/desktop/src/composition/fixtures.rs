@@ -1291,6 +1291,7 @@ pub struct DevelopmentPort {
     pending: bool,
     intents: u8,
     chat_ux_send_diagnostics: u8,
+    hand_diagnostics: u8,
     busy_read_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
@@ -1361,6 +1362,7 @@ impl DevelopmentPort {
             ),
             intents: 0,
             chat_ux_send_diagnostics: 0,
+            hand_diagnostics: 0,
             busy_read_diagnostics: 0,
         }
     }
@@ -1421,17 +1423,23 @@ impl NativeDesktopPort for DevelopmentPort {
                 UiIntent::SetCamera { call, .. } => {
                     println!("UI_INTENT camera room={}", call.conversation.local)
                 }
-                UiIntent::SetCallHand { call, raised } => {
-                    println!(
-                        "UI_INTENT hand room={} raised={raised}",
-                        call.conversation.local
-                    )
-                }
                 UiIntent::ShareScreen(call) => {
                     println!("UI_INTENT share room={}", call.conversation.local)
                 }
                 _ => (),
             }
+        }
+        // Background fixture dispatches can exhaust the general quota before
+        // the native call-panel keyboard probe runs. This remains bounded and
+        // records only a local room identity and the explicit hand state.
+        if self.hand_diagnostics < 8
+            && let UiIntent::SetCallHand { call, raised } = &intent
+        {
+            self.hand_diagnostics += 1;
+            println!(
+                "UI_INTENT hand room={} raised={raised}",
+                call.conversation.local
+            );
         }
         // Content probes can exhaust the general quota before a user sends.
         // Reserve four send diagnostics for the explicit chat interaction fixture.
