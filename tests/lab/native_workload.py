@@ -75,7 +75,12 @@ def _seed(lab, rooms):
             ids.add(number)
             if message.get('messageType')=='voice-message': counts['voice']+=1
             if message.get('threadId',0) or message.get('threadTitle'): counts['threads']+=1
-            for value in message.get('messageParameters',{}).values():
+            # PHP emits [] for an empty map. Nonempty parameter collections
+            # must still be objects; do not discard malformed rich content.
+            parameters = message.get('messageParameters') or {}
+            if not isinstance(parameters, dict) or any(not isinstance(value, dict) for value in parameters.values()):
+                raise RuntimeError('Unexpected synthetic rich-message parameters')
+            for value in parameters.values():
                 if value.get('type')=='talk-poll': counts['polls']+=1
                 if value.get('type')=='file' and value.get('mimetype','').startswith('image/'):counts['images']+=1
         before=min(int(item['id']) for item in page)
