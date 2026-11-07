@@ -2345,6 +2345,26 @@ impl Render for Desktop {
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()
+            .capture_action(cx.listener(|this, _: &input::Up, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    this.switcher_move(-1);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &input::Down, window, cx| {
+                if this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !this.input_composing(cx)
+                {
+                    this.switcher_move(1);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let composing = this.input_composing(cx);
                 if event.keystroke.key != "f7" {
