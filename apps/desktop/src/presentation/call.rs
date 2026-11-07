@@ -129,7 +129,9 @@ impl Desktop {
         let preview=div().flex_1().min_w_0().flex().flex_col().gap_4()
             .child(self.title(self.l("Bereit, wenn du es bist.")))
             .child(self.hint(self.l("Wähle, wie du beitreten möchtest.")))
-            .child(div().h(px(304.)).w_full().rounded(px(12.)).bg(t.stage_panel).text_color(t.stage_text).flex().flex_col().items_center().justify_center().gap_4()
+            .child(self.style_card(div().relative(), super::controls::CardStyle::Inset).h(px(304.)).w_full().bg(t.stage_panel).text_color(t.stage_text).flex().flex_col().items_center().justify_center().gap_4()
+                .children(self.materials.layer(super::controls::Texture::Tile, t.reduced_transparency))
+                .child(super::controls::inner_highlight(super::Theme { dark: true, ..t }, 12.))
                 .child(self.avatar(self.snapshot.accounts.as_slice().iter().find(|a|Some(a.scope)==self.snapshot.active_account).map_or("?",|a|a.initials.as_str()),true))
                 .child(div().font_weight(FontWeight::MEDIUM).child(self.l("Deine Kamera ist nicht aktiv")))
                 .child(div().text_size(self.sp(13.)).text_color(t.stage_muted).child(self.l("Noch keine Vorschau verfügbar"))))
@@ -403,11 +405,10 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .child(
-                        div()
+                        self.style_card(div(), super::controls::CardStyle::Raised)
                             .w_full()
                             .max_w(px(480.))
                             .p_6()
-                            .rounded(px(12.))
                             .bg(if t.dark { t.stage_panel } else { t.surface })
                             .border_1().border_color(if t.dark { gpui::rgb(0x52677f).into() } else { t.border })
                             .text_color(if t.dark { t.stage_text } else { t.text })
@@ -542,13 +543,20 @@ impl Desktop {
                 .max(160.);
                 stage = stage.child(
                     div().w_full().flex().justify_center().child(
-                        div()
+                        self.style_card(div().relative(), super::controls::CardStyle::Inset)
                             .w(px(width))
                             .h(px(width * 9. / 16.))
                             .flex_none()
-                            .rounded(px(12.))
                             .bg(t.stage_panel)
-                            .child(visual),
+                            .child(visual)
+                            .children(
+                                self.materials
+                                    .layer(super::controls::Texture::Tile, t.reduced_transparency),
+                            )
+                            .child(super::controls::inner_highlight(
+                                super::Theme { dark: true, ..t },
+                                12.,
+                            )),
                     ),
                 );
             }
@@ -702,11 +710,6 @@ impl Desktop {
                             gpui::linear_color_stop(tile_base, 1.),
                         ))
                     })
-                    .children(
-                        self.materials
-                            .layer(super::controls::Texture::Tile, t.reduced_transparency),
-                    )
-                    .child(super::controls::inner_highlight(dark_stage, 12.))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -714,6 +717,11 @@ impl Desktop {
                     .gap_2()
                     .p_4()
                     .child(visual)
+                    .children(
+                        self.materials
+                            .layer(super::controls::Texture::Tile, t.reduced_transparency),
+                    )
+                    .child(super::controls::inner_highlight(dark_stage, 12.))
                     .when(call.stage == CallStage::Reconnecting, |d| {
                         d.child(
                             div()
@@ -748,7 +756,7 @@ impl Desktop {
                         },
                     ))
                     .child(
-                        div()
+                        self.style_tonal_chip(div())
                             .absolute()
                             .bottom(px(8.))
                             .left(px(8.))
@@ -762,8 +770,8 @@ impl Desktop {
                                 .max(0.)))
                             .px_2()
                             .py_1()
-                            .rounded(px(8.))
                             .bg(gpui::rgba(0x00000073))
+                            .text_color(t.stage_text)
                             .min_w_0()
                             .flex()
                             .items_center()
@@ -812,15 +820,14 @@ impl Desktop {
                     )
                     .when(pinned == Some(participant.local_id), |tile| {
                         tile.child(
-                            div()
+                            self.style_tonal_chip(div())
                                 .absolute()
                                 .top(px(8.))
                                 .left(px(8.))
                                 .px_2()
                                 .py_1()
-                                .rounded(px(8.))
                                 .bg(gpui::rgba(0x00000073))
-                                .text_size(self.sp(12.))
+                                .text_color(t.stage_text)
                                 .child(self.l("Angeheftet")),
                         )
                     })

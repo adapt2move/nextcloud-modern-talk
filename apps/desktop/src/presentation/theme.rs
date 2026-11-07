@@ -186,8 +186,8 @@ impl Theme {
             ],
         };
         let (disabled, hover, segment) = match (dark, sage) {
-            (false, false) => (0x4a5b73, 0xeaf0f8, 0xffffff),
-            (false, true) => (0x4c584e, 0xeef1eb, 0xffffff),
+            (false, false) => (0x4f6078, 0xeaf0f8, 0xffffff),
+            (false, true) => (0x515d53, 0xeef1eb, 0xffffff),
             (true, false) => (0x9fb2c9, 0x293646, 0x2e3b4d),
             (true, true) => (0x9bafa1, 0x2d3a32, 0x33413a),
         };

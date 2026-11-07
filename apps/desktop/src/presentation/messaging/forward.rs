@@ -692,12 +692,7 @@ impl Desktop {
                     }))
                     .child(
                         self.dialog_header()
-                            .child(
-                                div()
-                                    .text_size(self.sp(20.))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(self.l("Weiterleiten")),
-                            )
+                            .child(self.style_dialog_title(div()).child(self.l("Weiterleiten")))
                             .child(self.icon_button(
                                 dialog_id("forward-close", target),
                                 ("x", "Schließen"),

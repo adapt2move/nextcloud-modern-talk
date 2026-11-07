@@ -40,7 +40,7 @@ include its upstream license and patch provenance, separately from project code.
 Distributors must include the project license, this notice, the font notices,
 and applicable dependency notices.
 Synthetic people and organization data are available only through an explicit
-`--ui-scenario` development option and labeled in every application view.
+`--ui-scenario` development option; capture manifests identify that evidence.
 
 Functional SVG icons use Lucide 0.468.0, pinned to commit
 `f12b0de177fbc2a6795e99be065887e72b237123`. All functional icons retain their

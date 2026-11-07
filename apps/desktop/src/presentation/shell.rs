@@ -275,6 +275,7 @@ impl Desktop {
                     bottom_right: px(0.),
                 })
             }))
+            .child(super::controls::inner_highlight(h, CONTENT_RADIUS))
             .text_color(h.text)
             .flex_none()
             .flex()
@@ -786,7 +787,7 @@ impl Desktop {
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
             .child(
                 self.composer_frame()
-                    .child(self.field_ring(input.focus_handle(cx), 10.))
+                    .child(self.field_ring(input.focus_handle(cx), 12.))
                     .border_color(if input.read(cx).rejected {
                         t.danger
                     } else {

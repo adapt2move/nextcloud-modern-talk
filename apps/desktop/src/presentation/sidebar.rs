@@ -227,13 +227,16 @@ impl Desktop {
             .px(px(12.))
             .pt(px(14.))
             .pb(px(10.))
+            .border_r_1()
+            .border_color(t.border)
             .children(
                 (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
             )
             .children(
                 self.materials
                     .layer(super::controls::Texture::Grain, t.reduced_transparency),
-            );
+            )
+            .child(super::controls::inner_highlight(t, 0.));
         if self
             .preferences
             .active

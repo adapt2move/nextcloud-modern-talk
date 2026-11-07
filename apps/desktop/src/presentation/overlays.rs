@@ -367,7 +367,8 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .flex_1()
-                                        .text_size(self.sp(if side { 16. } else { 20. }))
+                                        .when(side, |title| self.style_panel_title(title))
+                                        .when(!side, |title| self.style_dialog_title(title))
                                         // Keep the single-word consent title visible when
                                         // large text leaves little room beside the close control.
                                         .when(overlay == Overlay::RecordingConsent, |title| {
@@ -382,7 +383,6 @@ impl Desktop {
                                             ),
                                             |title| title.line_height(self.sp(30.)),
                                         )
-                                        .font_weight(FontWeight::BOLD)
                                         .child(header_title),
                                 )
                                 .when(overlay == Overlay::CreatePoll, |d| {
@@ -832,31 +832,21 @@ impl Desktop {
     }
     pub(super) fn state_note(&self, symbol: &'static str, title: &str, detail: &str) -> Div {
         let t = self.theme;
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_3()
-            .py_6()
-            .px_3()
-            .text_center()
-            .child(
-                div()
-                    .size(px(52.))
-                    .rounded(px(16.))
-                    .bg(t.subtle)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(self.scaled_icon(symbol, 26., t.accent)),
-            )
-            .child(
-                div()
-                    .text_size(self.sp(18.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l(title).to_owned()),
-            )
-            .child(self.hint(self.l(detail)))
+        self.empty_state(
+            div()
+                .size(px(52.))
+                .rounded(px(16.))
+                .bg(t.subtle)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.scaled_icon(symbol, 26., t.accent)),
+            self.l(title).to_owned(),
+            self.l(detail),
+        )
+        .gap_3()
+        .py_6()
+        .px_3()
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col();

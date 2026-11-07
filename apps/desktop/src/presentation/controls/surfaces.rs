@@ -15,6 +15,14 @@ pub(in crate::presentation) enum CardStyle {
 }
 
 impl Desktop {
+    pub(in crate::presentation) fn style_dialog_title<T: Styled>(&self, title: T) -> T {
+        title
+            .text_size(self.sp(20.))
+            .line_height(self.sp(28.))
+            .font_weight(gpui::FontWeight(650.))
+            .text_color(self.theme.text)
+    }
+
     pub(in crate::presentation) fn style_panel_title<T: Styled>(&self, title: T) -> T {
         title
             .text_size(self.sp(18.))

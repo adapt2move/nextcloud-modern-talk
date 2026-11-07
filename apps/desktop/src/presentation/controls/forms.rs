@@ -17,7 +17,7 @@ impl Desktop {
             .relative()
             .min_h(px(96.))
             .p_3()
-            .rounded(px(10.))
+            .rounded(px(12.))
             .border_1()
             .border_color(self.theme.input_border)
             .bg(self.theme.surface)

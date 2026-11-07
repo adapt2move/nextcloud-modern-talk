@@ -407,7 +407,7 @@ impl Desktop {
                             ),
                             ControlGeometry::inset_background(
                                 0.,
-                                7.,
+                                6.,
                                 4.,
                                 if r.own {
                                     t.selected

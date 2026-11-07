@@ -282,9 +282,7 @@ impl Desktop {
             .child(content)
     }
     pub(super) fn dialog_title(&self, title: &str) -> Div {
-        div()
-            .text_size(self.sp(20.))
-            .font_weight(FontWeight::MEDIUM)
+        self.style_dialog_title(div())
             .child(self.l(title).to_owned())
     }
     /// Navigation entries: icon first, then label; selection is a quiet tint.

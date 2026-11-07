@@ -1553,16 +1553,17 @@ impl Desktop {
             .child(label)
     }
 
-    pub(super) fn tonal_chip(&self, label: impl Into<SharedString>) -> Div {
-        let label: SharedString = label.into();
-        div()
-            .flex_none()
-            .rounded(px(6.))
+    pub(super) fn style_tonal_chip<T: Styled>(&self, chip: T) -> T {
+        chip.rounded(px(6.))
             .bg(self.theme.selected)
             .px_1()
             .text_size(self.sp(12.))
             .text_color(self.theme.selected_text)
-            .child(label)
+    }
+
+    pub(super) fn tonal_chip(&self, label: impl Into<SharedString>) -> Div {
+        let label: SharedString = label.into();
+        self.style_tonal_chip(div().flex_none()).child(label)
     }
     pub fn avatar(&self, initials: &str, large: bool) -> Div {
         self.person_avatar(initials, if large { 72. } else { 36. })
@@ -1846,15 +1847,12 @@ mod tests {
                     for parent in [t.surface, t.subtle, t.canvas, t.chrome_end] {
                         let drawn = if bg.a == 0. { parent } else { bg };
                         let ratio = contrast(fg, drawn);
-                        assert!(
-                            (2.0..=3.6).contains(&ratio),
-                            "{palette:?}/{appearance:?}: {ratio}"
-                        );
-                        assert!(
-                            ratio < contrast(t.muted, drawn) * 0.7,
-                            "unavailable must remain weaker than active"
-                        );
+                        assert!(ratio >= 4.5, "{palette:?}/{appearance:?}: {ratio}");
                         let (active_bg, active_fg) = control_colors(t, style, true);
+                        assert!(
+                            bg != active_bg || fg != active_fg,
+                            "unavailable and active control styles must differ"
+                        );
                         let active_drawn = if active_bg.a == 0. { parent } else { active_bg };
                         let active_ratio = contrast(active_fg, active_drawn);
                         assert!(
