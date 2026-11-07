@@ -352,3 +352,5 @@ Report reproducible problems without credentials, private server details or
 message contents. Security issues follow [SECURITY.md](../SECURITY.md).
 
 HTTP JSON ingress also has a 131,072-node structure budget, a 64-level depth bound and a 1 MiB response byte bound (previously 256 KiB). This accommodates complete 256-room metadata responses; typed endpoint bounds still reject oversized lists without granting reconciliation authority.
+
+A status change with a relative expiry whose acknowledgement is lost remains uncertain: matching status text alone cannot prove that the requested timer was installed. It is not automatically written again.

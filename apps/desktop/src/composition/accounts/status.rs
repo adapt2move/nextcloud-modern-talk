@@ -29,27 +29,52 @@ impl Retry {
         self.due = Some(Instant::now() + Duration::from_millis(100));
     }
 }
-fn confirmed(change: &Change, values: &AccountPreferences) -> bool {
+fn confirmed(change: &Change, values: &AccountPreferences, uncertain: bool) -> bool {
+    let expiry = |after| match after {
+        talk_core::preferences::account::StatusClearAfter::Never => values
+            .status_message
+            .as_ref()
+            .is_none_or(|m| m.clear_at.is_none()),
+        // A read cannot prove which relative expiry a lost write installed.
+        // Do not confirm an old identical text with a different timer, or replay it.
+        _ => {
+            !uncertain
+                && values
+                    .status_message
+                    .as_ref()
+                    .is_some_and(|m| m.clear_at.is_some())
+        }
+    };
     match change {
         Change::UserPresence(value) => values.user_presence == Some(*value),
         Change::StatusMessage(StatusMessageChange::Clear) => values
             .status_message
             .as_ref()
             .is_none_or(|m| m.icon.is_none() && m.message.is_none()),
-        Change::StatusMessage(StatusMessageChange::Custom { icon, message, .. }) => {
-            values.status_message.as_ref().is_some_and(|m| {
-                m.icon == *icon && m.message.as_ref().map_or("", |s| s.as_str()) == message.as_str()
-            })
-        }
-        Change::StatusMessage(StatusMessageChange::Predefined { id, .. }) => values
-            .predefined_statuses
-            .as_ref()
-            .and_then(|all| all.as_slice().iter().find(|p| &p.id == id))
-            .is_some_and(|p| {
-                values.status_message.as_ref().is_some_and(|m| {
-                    m.icon.as_ref() == Some(&p.icon) && m.message.as_ref() == Some(&p.message)
+        Change::StatusMessage(StatusMessageChange::Custom {
+            icon,
+            message,
+            clear_after,
+        }) => {
+            expiry(*clear_after)
+                && values.status_message.as_ref().is_some_and(|m| {
+                    m.icon == *icon
+                        && m.message.as_ref().map_or("", |s| s.as_str()) == message.as_str()
                 })
-            }),
+        }
+        Change::StatusMessage(StatusMessageChange::Predefined { id, clear_after }) => {
+            expiry(*clear_after)
+                && values
+                    .predefined_statuses
+                    .as_ref()
+                    .and_then(|all| all.as_slice().iter().find(|p| &p.id == id))
+                    .is_some_and(|p| {
+                        values.status_message.as_ref().is_some_and(|m| {
+                            m.icon.as_ref() == Some(&p.icon)
+                                && m.message.as_ref() == Some(&p.message)
+                        })
+                    })
+        }
         _ => false,
     }
 }
@@ -76,7 +101,11 @@ impl Accounts {
                 if reply.values.user_status_enabled != Some(true) {
                     failure = Some(AccountPreferenceError::Unavailable);
                 } else if reply.values.user_status_observed {
-                    if confirmed(&self.status_retry[index].change, &reply.values) {
+                    if confirmed(
+                        &self.status_retry[index].change,
+                        &reply.values,
+                        self.status_retry[index].read,
+                    ) {
                         values = Some(reply.values.clone());
                     } else if self.status_retry[index].read {
                         failure = Some(AccountPreferenceError::Uncertain);
@@ -228,5 +257,65 @@ mod tests {
             &Err(ErrorKind::PermissionDenied.into())
         ));
         assert_eq!(model.status_retry.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod expiry_tests {
+    use super::*;
+    use talk_core::preferences::account::{
+        AccountPreferenceResult, StatusClearAfter, StatusMessage,
+    };
+    #[test]
+    fn an_identical_status_text_cannot_confirm_an_unknown_relative_expiry() {
+        let mut model = crate::composition::accounts::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        let request = PreferenceRequest(9);
+        let change = Change::StatusMessage(StatusMessageChange::Custom {
+            icon: None,
+            message: text("Same status"),
+            clear_after: StatusClearAfter::ThirtyMinutes,
+        });
+        let values = AccountPreferences {
+            scope,
+            send_read_receipts: None,
+            share_typing_status: None,
+            attachment_folder: None,
+            attachments_allowed: None,
+            conversation_subfolders: None,
+            user_status_enabled: Some(true),
+            user_presence: None,
+            user_status_observed: true,
+            user_status_emoji: None,
+            predefined_statuses: None,
+            status_message: Some(StatusMessage {
+                icon: None,
+                message: Some(text("Same status")),
+                clear_at: Some(7200),
+            }),
+        };
+        model.preferences.push(AccountPreferenceSnapshot {
+            scope,
+            values: Some(values.clone()),
+            state: AccountPreferenceState::Saving { request },
+        });
+        model.status_retry.push(Retry::new(scope, request, change));
+        model.complete_status(scope, request, &Err(ErrorKind::Uncertain.into()));
+        model.complete_status(
+            scope,
+            request,
+            &Ok(RuntimeReply::Protocol(ProtocolReply::Preferences(
+                AccountPreferenceResult { request, values },
+            ))),
+        );
+        assert!(model.status_retry.is_empty());
+        assert_eq!(
+            model.preferences[0].state,
+            AccountPreferenceState::Failed {
+                request,
+                error: AccountPreferenceError::Uncertain
+            }
+        );
     }
 }
