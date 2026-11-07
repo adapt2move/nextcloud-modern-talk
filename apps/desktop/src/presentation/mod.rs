@@ -2245,7 +2245,10 @@ impl Desktop {
                     self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
-                    if self.destination == SidebarDestination::Inbox {
+                    if matches!(
+                        self.destination,
+                        SidebarDestination::Inbox | SidebarDestination::Threads
+                    ) {
                         self.destination = SidebarDestination::Conversations;
                     }
                     if self.overlay == Some(Overlay::Search) {

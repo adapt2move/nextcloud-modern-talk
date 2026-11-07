@@ -377,6 +377,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape closes settings and restores draft', ['DRAFTALPHA'], ['Einstellungen'])
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
+    elif scenario == 'thread-list':
+        expect('subscribed threads page is visible', ['Threads', 'Design review'])
+        click('Designteam', ymin=250)
+        expect_settled('sidebar conversation leaves the Threads page',
+                       ['Nachricht an Designteam'], ['Design review'])
     elif scenario == 'thread':
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
