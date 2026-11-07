@@ -107,7 +107,11 @@ impl Desktop {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
                                 - 66.)
-                                .min(632.)))
+                                .min(if overlay == Overlay::Search {
+                                    700.
+                                } else {
+                                    632.
+                                })))
                         })
                         .flex()
                         .flex_col()

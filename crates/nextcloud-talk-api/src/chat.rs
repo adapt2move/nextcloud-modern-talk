@@ -261,6 +261,8 @@ pub struct SearchHit {
     pub token: String,
     pub title: String,
     pub excerpt: String,
+    pub actor_type: Option<String>,
+    pub actor_id: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub enum Response {
@@ -386,6 +388,8 @@ pub(crate) fn decode(kind: ResponseKind, v: &Value) -> Result<crate::Reply, Erro
                     token,
                     title: required(e, "title", 256)?,
                     excerpt: required(e, "subline", 4096)?,
+                    actor_type: string(e["attributes"].get("actorType"), 128)?,
+                    actor_id: string(e["attributes"].get("actorId"), 512)?,
                 })
             })?;
             let cursor = match v.get("cursor") {

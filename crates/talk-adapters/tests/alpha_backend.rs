@@ -532,6 +532,34 @@ async fn released_server_messaging_and_room_controls() {
         panic!("account search reply")
     };
     assert!(found.hits.as_slice().iter().any(|hit| hit.message == first));
+    for (since, until) in [
+        (Some("2090-01-01T00:00:00Z"), None),
+        (None, Some("2020-01-01T00:00:00Z")),
+    ] {
+        let query = talk_core::protocol::search::Query {
+            term: text("Alpha edited"),
+            conversation: Some(id),
+            person: None,
+            from_self: false,
+            since: since.map(text),
+            until: until.map(text),
+            cursor: None,
+        };
+        let ProtocolReply::SearchMessages(outside) = client
+            .request(context(&runtime), ProtocolRequest::SearchMessages(query))
+            .await
+            .expect("date-filtered search")
+        else {
+            panic!("search")
+        };
+        assert!(
+            !outside
+                .hits
+                .as_slice()
+                .iter()
+                .any(|hit| hit.message == first)
+        );
+    }
     let own_query = talk_core::protocol::search::Query {
         term: text("Alpha edited"),
         conversation: None,

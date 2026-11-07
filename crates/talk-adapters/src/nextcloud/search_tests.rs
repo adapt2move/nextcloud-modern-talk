@@ -91,3 +91,27 @@ async fn account_search_rejects_wrong_room_and_missing_filter_before_query() {
         assert_eq!(server.count(), 2);
     }
 }
+
+#[tokio::test]
+async fn account_search_rechecks_sender_when_server_returns_unfiltered_entries() {
+    let server = Server::start(vec![Reply::data(capabilities()), Reply::data(providers()), Reply::data(json!({"entries":[
+        {"title":"Me","subline":"Synthetic match","attributes":{"conversation":"testroom","messageId":"7","actorType":"users","actorId":"fixture_user"}},
+        {"title":"Other","subline":"Synthetic match","attributes":{"conversation":"testroom","messageId":"8","actorType":"users","actorId":"other"}},
+        {"title":"Unknown","subline":"Synthetic match","attributes":{"conversation":"testroom","messageId":"9"}}
+    ],"cursor":50}))]).await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let room = bind(&mut client);
+    let mut search = query(Some(room));
+    search.from_self = true;
+    let ProtocolReply::SearchMessages(results) = client
+        .request(context(&runtime), ProtocolRequest::SearchMessages(search))
+        .await
+        .unwrap()
+    else {
+        panic!("search")
+    };
+    assert_eq!(results.hits.as_slice().len(), 1);
+    assert_eq!(results.hits.as_slice()[0].message.sequence, 7);
+    assert_eq!(results.cursor.unwrap().as_str(), "50");
+}

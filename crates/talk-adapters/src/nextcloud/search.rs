@@ -60,6 +60,9 @@ impl NextcloudClient {
         } else {
             person
         };
+        // Talk 24 can advertise the person filter but return other actors.
+        // Verify the bounded provider metadata before projecting any hit.
+        let selected_person = person.clone();
         let request = api::search::Query {
             term: query.term.as_str().into(),
             conversation: room,
@@ -78,6 +81,12 @@ impl NextcloudClient {
         let empty = hits.is_empty();
         let mut out = Page::empty();
         for hit in hits {
+            if selected_person.as_ref().is_some_and(|person| {
+                hit.actor_type.as_deref() != Some("users")
+                    || hit.actor_id.as_deref() != Some(person.as_str())
+            }) {
+                continue;
+            }
             let Some(room) = self.rooms.iter().find(|r| r.token == hit.token) else {
                 continue;
             };

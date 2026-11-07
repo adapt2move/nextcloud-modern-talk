@@ -368,7 +368,7 @@ impl Desktop {
         }
     }
     pub(super) fn account_search_body(&self, cx: &Context<Self>) -> Div {
-        let mut body = div().flex().flex_col().gap_3();
+        let mut body = div().flex().flex_col().gap_2();
         let room_label = self
             .account_search_ui
             .room
@@ -659,7 +659,7 @@ impl Desktop {
                     .flex_col()
                     .items_start()
                     .px_3()
-                    .py_2()
+                    .py_1()
                     .when(selected == Some(target), |d| d.bg(self.theme.selected))
                     .child(self.hint(hit.title.as_str()))
                     .child(div().text_size(self.sp(14.)).child(highlight(

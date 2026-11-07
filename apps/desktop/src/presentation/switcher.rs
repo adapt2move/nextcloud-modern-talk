@@ -54,12 +54,11 @@ fn score(name: &str, query: &str) -> Option<usize> {
     Some(256 + skipped)
 }
 
-fn room_score(room: &talk_core::ui::presentation::ConversationView, query: &str) -> Option<usize> {
-    score(room.title.as_str(), query)
+fn room_score(title: &str, names: &[talk_core::ui::Text<256>], query: &str) -> Option<usize> {
+    score(title, query)
         .into_iter()
         .chain(
-            room.participant_names
-                .as_slice()
+            names
                 .iter()
                 .filter_map(|name| score(name.as_str(), query).map(|value| value + 8)),
         )
@@ -172,7 +171,7 @@ impl Desktop {
                 .enumerate()
                 .filter(|(_, r)| Some(r.context.account) == self.snapshot.active_account)
                 .filter_map(|(index, r)| {
-                    room_score(r, query)
+                    room_score(r.title.as_str(), r.participant_names.as_slice(), query)
                         .map(|score| (score, std::cmp::Reverse(r.last_activity), index, r.context))
                 })
                 .collect();
@@ -428,15 +427,9 @@ mod tests {
     }
     #[test]
     fn group_matches_observed_participant_names_without_a_title_match() {
-        let fixture = crate::composition::fixtures::snapshot(Some("search-navigation"));
-        let room = fixture
-            .conversations
-            .as_slice()
-            .iter()
-            .find(|room| room.title.as_str() == "Produktteam")
-            .unwrap();
-        assert_eq!(score(room.title.as_str(), "fischer"), None);
-        assert!(room_score(room, "fischer").is_some());
-        assert_eq!(room_score(room, "unknown person"), None);
+        let names = [talk_core::ui::Text::new("Mara Fischer").unwrap()];
+        assert_eq!(score("Produktteam", "fischer"), None);
+        assert!(room_score("Produktteam", &names, "fischer").is_some());
+        assert_eq!(room_score("Produktteam", &names, "unknown person"), None);
     }
 }
