@@ -132,6 +132,7 @@ pub struct MessagingCapabilities {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SummaryOffer {
+    /// Sequence zero means the unread range starts before the first message.
     pub from: MessageId,
     pub unread: u32,
 }

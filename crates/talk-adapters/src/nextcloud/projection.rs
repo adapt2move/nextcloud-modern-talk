@@ -16,6 +16,7 @@ impl Project for Room {
         value["breakoutRoomMode"] = json!(self.breakout_mode);
         value["breakoutRoomStatus"] = json!(self.breakout_status);
         value["lastReadMessage"] = json!(self.last_read);
+        value["summaryOffset"] = json!(self.summary_offset);
         value["lastCommonReadMessage"] = json!(self.common_read);
         value
     }

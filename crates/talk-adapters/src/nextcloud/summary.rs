@@ -39,7 +39,10 @@ impl NextcloudClient {
             .retain(|binding| binding.expires > Instant::now());
         match command {
             C::Summarize { from } => {
-                let offset = self.message_scope(from, conversation)?;
+                if from.conversation != conversation {
+                    return Err(self.error(ErrorKind::WrongScope));
+                }
+                let offset = from.sequence;
                 if self.summaries.iter().any(|item| item.handle == operation) {
                     return Err(self.error(ErrorKind::Conflict));
                 }

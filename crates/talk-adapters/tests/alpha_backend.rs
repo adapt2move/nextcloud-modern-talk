@@ -826,6 +826,22 @@ async fn released_server_messaging_and_room_controls() {
         M::ReadReminder(first),
     )
     .await;
+    let MR::Reminder(Some(edited_reminder)) = m(
+        &mut client,
+        &runtime,
+        id,
+        1160,
+        "reminder-edit",
+        M::Reminder {
+            message: first,
+            timestamp: Some(now + 5400),
+        },
+    )
+    .await
+    else {
+        panic!("updated reminder")
+    };
+    assert_eq!(edited_reminder.timestamp, now + 5400);
     m(
         &mut client,
         &runtime,

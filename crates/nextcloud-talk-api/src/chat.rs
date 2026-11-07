@@ -582,7 +582,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     let mut kind = Kind::Ack;
     match c {
         C::Summarize { from } => {
-            positive(*from)?;
+            // Talk 24/25 clamps the first-unread marker to zero before querying.
             route.push_str("/summarize");
             method = Method::POST;
             f.push(("fromMessageId", from.to_string()));

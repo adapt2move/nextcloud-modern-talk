@@ -55,10 +55,7 @@ impl Accounts {
         if !panel.availability(MessageFeature::Summary).enabled() {
             return Err(SubmitError::StaleScope);
         }
-        let from = u64::try_from(*from)
-            .ok()
-            .filter(|from| *from > 0)
-            .ok_or(SubmitError::StaleScope)?;
+        let from = u64::try_from(*from).map_err(|_| SubmitError::StaleScope)?;
         let now = Instant::now();
         self.summary.job = Some(Job {
             context,

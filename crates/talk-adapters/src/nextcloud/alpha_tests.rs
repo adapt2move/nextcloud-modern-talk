@@ -982,7 +982,13 @@ async fn translation_requires_provider_detection_and_matching_source() {
 #[tokio::test]
 async fn summary_requires_capability_threshold_and_correlated_task() {
     for major in [34, 35] {
-        for case in ["not-advertised", "below-threshold", "ready", "wrong-owner"] {
+        for case in [
+            "not-advertised",
+            "below-threshold",
+            "ready",
+            "first-unread",
+            "wrong-owner",
+        ] {
             let mut capabilities = caps(major);
             if case != "not-advertised" {
                 capabilities["capabilities"]["spreed"]["features"]
@@ -993,10 +999,14 @@ async fn summary_requires_capability_threshold_and_correlated_task() {
             capabilities["capabilities"]["spreed"]["config"]["chat"]["summary-threshold"] =
                 json!(100);
             let mut data = room();
-            data["lastReadMessage"] = json!(7);
+            data["lastReadMessage"] = if case == "first-unread" {
+                json!(-2)
+            } else {
+                json!(7)
+            };
             data["unreadMessages"] = json!(if case == "below-threshold" { 99 } else { 120 });
             let mut replies = vec![Reply::data(capabilities.clone()), Reply::data(data.clone())];
-            if matches!(case, "ready" | "wrong-owner") {
+            if matches!(case, "ready" | "first-unread" | "wrong-owner") {
                 replies.extend([
                     Reply::data(capabilities.clone()), Reply::data(data.clone()),
                     Reply::envelope(201, "ok", 201, json!({"taskId":44, "nextOffset":17})),
@@ -1027,9 +1037,14 @@ async fn summary_requires_capability_threshold_and_correlated_task() {
             };
             assert_eq!(
                 projected.summary_offer.is_some(),
-                matches!(case, "ready" | "wrong-owner")
+                matches!(case, "ready" | "first-unread" | "wrong-owner")
             );
-            if matches!(case, "ready" | "wrong-owner") {
+            if matches!(case, "ready" | "first-unread" | "wrong-owner") {
+                let offset = if case == "first-unread" { 0 } else { 7 };
+                assert_eq!(
+                    projected.summary_offer.as_ref().unwrap().from.sequence,
+                    offset
+                );
                 let handle = OperationId::from_local(2);
                 let start = client
                     .request(
@@ -1040,7 +1055,7 @@ async fn summary_requires_capability_threshold_and_correlated_task() {
                             command: M::Summarize {
                                 from: MessageId {
                                     conversation,
-                                    sequence: 7,
+                                    sequence: offset,
                                 },
                             },
                         },
@@ -1071,6 +1086,10 @@ async fn summary_requires_capability_threshold_and_correlated_task() {
                 assert!(String::from_utf8_lossy(&observed[4]).starts_with(
                     "POST /cloud/ocs/v2.php/apps/spreed/api/v1/chat/testroom/summarize"
                 ));
+                assert!(
+                    String::from_utf8_lossy(&observed[4])
+                        .contains(&format!("fromMessageId={offset}"))
+                );
                 assert!(
                     String::from_utf8_lossy(&observed[7])
                         .starts_with("GET /cloud/ocs/v2.php/taskprocessing/task/44")

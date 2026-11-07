@@ -317,8 +317,8 @@ impl NextcloudClient {
                     .and_then(|threshold| {
                         let unread =
                             u32::try_from(wire::integer(data.get("unreadMessages"))?).ok()?;
-                        let sequence = wire::integer(data.get("lastReadMessage"))?;
-                        (unread >= threshold && sequence > 0).then_some(SummaryOffer {
+                        let sequence = wire::integer(data.get("summaryOffset"))?;
+                        (unread >= threshold).then_some(SummaryOffer {
                             from: MessageId {
                                 conversation: room.id,
                                 sequence,

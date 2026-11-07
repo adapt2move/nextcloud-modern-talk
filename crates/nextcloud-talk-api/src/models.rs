@@ -109,6 +109,8 @@ pub struct Room {
     pub archived: Option<bool>,
     pub unread: Option<u64>,
     pub last_read: Option<u64>,
+    /// Summary accepts zero for Talk's negative "first unread" sentinels.
+    pub summary_offset: Option<u64>,
     pub common_read: Option<u64>,
     pub last_activity: Option<u64>,
     pub has_call: Option<bool>,
@@ -166,6 +168,13 @@ impl Room {
             archived: v.get("isArchived").and_then(Value::as_bool),
             unread: integer(v.get("unreadMessages")),
             last_read: integer(v.get("lastReadMessage")),
+            summary_offset: integer(v.get("lastReadMessage")).or_else(|| {
+                match v.get("lastReadMessage") {
+                    Some(Value::Number(n)) if matches!(n.as_i64(), Some(-2 | -1)) => Some(0),
+                    Some(Value::String(s)) if matches!(s.as_str(), "-2" | "-1") => Some(0),
+                    _ => None,
+                }
+            }),
             common_read: integer(v.get("lastCommonReadMessage")),
             last_activity: integer(v.get("lastActivity")),
             has_call: v.get("hasCall").and_then(Value::as_bool),
@@ -603,6 +612,12 @@ mod message_tests {
             assert_eq!(decoded.last_read, expected);
             assert_eq!(decoded.common_read, expected);
         }
+        room["lastReadMessage"] = json!(-2);
+        let decoded = Room::decode(&room).unwrap();
+        assert_eq!(decoded.last_read, None);
+        assert_eq!(decoded.summary_offset, Some(0));
+        room["lastReadMessage"] = json!(-9);
+        assert_eq!(Room::decode(&room).unwrap().summary_offset, None);
     }
 
     #[test]
