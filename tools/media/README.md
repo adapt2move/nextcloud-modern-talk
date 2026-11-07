@@ -67,13 +67,25 @@ Do not run two browser drivers concurrently on the same endpoints.
 
 `trace_signaling.py` accepts the same arguments and observes bounded HPB message
 metadata while forwarding unchanged bytes. It records hashed routing identities,
-message kinds and error codes, never hello credentials, SDP or candidates.
+message kinds and error codes, plus HTTP call/room mutation methods and relative
+times. It never records HTTP paths, headers, bodies, hello credentials, SDP or
+candidates. The HTTP observer skips bodies, stops observing unsupported framing
+and shares the finite transcript capacity; it does not alter forwarded traffic.
 Full HPB replacement with an existing Talk 25 web peer has a known automatic
 recovery failure, documented in [known limitations](../../docs/limitations.md#servers-and-calls).
 Run `session-replaced` without extra flags to retain that result. A separate
 `--rejoin-web-peer-after-replacement` fixture explicitly operates the web peer's
 leave/join controls after native fresh admission; its result must be reported
 separately from automatic recovery.
+
+For diagnosis only, `--refresh-web-peer-flags-after-replacement` reasserts the
+owned synthetic web participant's AV call flags after native fresh admission,
+without leaving or rejoining the web call. It is mutually exclusive with peer
+rejoin and never counts as automatic native recovery. The report records the
+intervention's HTTP status and sets `automatic_recovery_fixture` to false.
+Use it to distinguish HPB's in-call subscription gate from a publisher or SDP
+failure; the web client's obsolete peer routes may remain even after this gate
+is restored. This option changes the peer fixture, not production client behavior.
 
 For the Linux portal probe, use an unprivileged disposable user, its own private
 manifest/credentials/TLS files, and an executable that user can read and run.

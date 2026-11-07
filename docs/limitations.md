@@ -58,12 +58,19 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   recovery waits for a valid replacement poll rather than claiming continuity
   from REST success alone.
 - Full HPB process replacement with an existing Talk 25.0.6 web peer currently
-  can fail automatic media recovery in the r35 lab. The web peer publishes under
-  a new signaling identity but also requests obsolete identities, and HPB denies
-  native subscription requests despite advertised in-call flags. The native
-  fresh admission remains blocked rather than bypassing that denial. An explicit
-  web-peer call leave/rejoin restores AV in the exercised case. This is separate
-  from the qualified interruption/resume of a surviving HPB session.
+  can fail automatic media recovery in the r35 lab. On a fresh hello the web
+  client's REST call join can precede its new HPB room acknowledgement. HPB
+  2.1.1 restores its subscription gate from backend in-call changes, separately
+  from the participant list it broadcasts. The new web session can therefore
+  appear in-call and publish while HPB still rejects subscriptions to it. The
+  native client waits for its room acknowledgement, makes a fresh admission,
+  publishes and requests offers using the current mapped peer identity; that
+  does not repair the other session's HPB gate. The web client can also retain
+  obsolete peer identities after its fresh hello. Native retries remain bounded
+  and do not bypass server denial or mutate another participant's call flags.
+  An explicit web-peer call leave/rejoin restores AV in the exercised case.
+  This is separate from the qualified interruption/resume of a surviving HPB
+  session; automatic replacement with this peer remains unqualified.
 - Guest/federated media and required call E2EE remain unavailable.
 
 ## Messages and background activity
