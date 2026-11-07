@@ -77,6 +77,23 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> String {
         self.enable_latency_probe();
+        if action == "diagnose" {
+            println!(
+                "DEV_HEALTH {:?} {:?} {:?} {:?}",
+                self.snapshot
+                    .accounts
+                    .as_slice()
+                    .first()
+                    .map(|a| (a.connection, a.connection_failure)),
+                self.snapshot
+                    .saved_accounts
+                    .as_slice()
+                    .first()
+                    .map(|a| a.phase),
+                self.snapshot.conversation_list.content,
+                self.snapshot.login.phase,
+            );
+        }
         if matches!(action, "perf-scroll" | "perf-switcher" | "perf-sidebar") {
             self.perf_probe = Some(PerfRun {
                 mode: match action {

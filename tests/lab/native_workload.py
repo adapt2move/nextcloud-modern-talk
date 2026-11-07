@@ -74,7 +74,8 @@ def _seed(lab, rooms):
             if number in ids: raise RuntimeError('Duplicate server history ID')
             ids.add(number)
             if message.get('messageType')=='voice-message': counts['voice']+=1
-            if message.get('threadId',0) or message.get('threadTitle'): counts['threads']+=1
+            thread = message.get('threadId')
+            if isinstance(thread, int) and thread > 0 or message.get('threadTitle'): counts['threads']+=1
             # PHP emits [] for an empty map. Nonempty parameter collections
             # must still be objects; do not discard malformed rich content.
             parameters = message.get('messageParameters') or {}
