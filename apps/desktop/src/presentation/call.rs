@@ -365,7 +365,9 @@ impl Desktop {
                     ),
             );
         }
-        if let CallStage::Required(gate) = call.stage {
+        if let CallStage::Required(gate) = call.stage
+            && self.overlay != Some(Overlay::RecordingConsent)
+        {
             let (title, description) = match gate {
                 RequiredGate::MicrophonePermission => (
                     "Mikrofonfreigabe erforderlich",
@@ -1513,17 +1515,20 @@ impl Desktop {
             r.context.account == call.scope.account
                 && r.context.conversation == call.scope.conversation
         });
-        let mut body = div().size_full().flex().flex_col().child(
-            div()
-                .flex_none()
-                .px_4()
-                .py_4()
-                .border_b_1()
-                .border_color(t.border)
-                .font_weight(FontWeight::MEDIUM)
-                .text_size(self.sp(16.))
-                .child(call.title.as_str().to_owned()),
-        );
+        let mut body = div().size_full().flex().flex_col();
+        if self.overlay != Some(Overlay::CallChat) {
+            body = body.child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_4()
+                    .border_b_1()
+                    .border_color(t.border)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(self.sp(16.))
+                    .child(call.title.as_str().to_owned()),
+            );
+        }
         if let Some(row) = row {
             body = body
                 .child(self.conversation_search(cx))

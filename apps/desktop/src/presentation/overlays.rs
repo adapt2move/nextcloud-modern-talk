@@ -51,6 +51,14 @@ impl Desktop {
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
+        let header_title = if matches!(overlay, Overlay::CallParticipants | Overlay::CallChat) {
+            self.snapshot.call.as_ref().map_or_else(
+                || self.l(title).to_owned(),
+                |call| call.title.as_str().to_owned(),
+            )
+        } else {
+            self.l(title).to_owned()
+        };
         let body = match overlay {
             Overlay::Files => self.shared_contents(cx),
             Overlay::CloudFiles => self.cloud_files_body(cx),
@@ -187,7 +195,7 @@ impl Desktop {
                                             |title| title.line_height(self.sp(30.)),
                                         )
                                         .font_weight(FontWeight::BOLD)
-                                        .child(self.l(title)),
+                                        .child(header_title),
                                 )
                                 .when(overlay == Overlay::CreatePoll, |d| {
                                     d.children(self.poll_drafts_header(cx))
