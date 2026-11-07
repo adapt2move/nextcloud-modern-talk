@@ -844,6 +844,7 @@ impl Desktop {
         let entry = super::state::call_entry(row, self.snapshot.content);
         let can_join = row.call_active == Some(true) && entry.is_some();
         div()
+            .relative()
             .flex_none()
             .group("room-call-row")
             .flex()
@@ -867,8 +868,12 @@ impl Desktop {
                         LocalAction::JoinRoomCall(scope),
                         cx,
                     )
+                    .absolute()
+                    .right(px(2.))
+                    .top(px(0.))
                     .text_size(self.sp(11.))
                     .px_1()
+                    .bg(if selected { t.selected } else { t.sidebar })
                     .opacity(0.)
                     .group_hover("room-call-row", |s| s.opacity(1.))
                     .focus(|s| s.opacity(1.)),
