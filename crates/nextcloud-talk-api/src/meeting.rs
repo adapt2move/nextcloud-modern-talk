@@ -371,6 +371,92 @@ impl MeetingModerationWriter {
         Ok(AcceptedForProcessing)
     }
 
+    /// Request a server-side video recording change after fresh policy and
+    /// session observations. A receipt is not proof of the resulting state;
+    /// callers must reconcile and must never replay an uncertain request.
+    pub async fn set_recording(
+        &mut self,
+        context: &OperationContext,
+        start: bool,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || !caps.supports("recording-v1")
+            || caps.call_enabled != Some(true)
+            || caps.recording_enabled != Some(true)
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        let valid_recording_state = if start {
+            room.recording_status == Some(0)
+        } else {
+            matches!(room.recording_status, Some(1..=4))
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !matches!(room.participant_type, Some(1 | 2))
+            || room
+                .attributes
+                .is_none_or(|attributes| attributes & !31 != 0 || attributes & 4 != 0)
+            || !valid_recording_state
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v1/recording/{}",
+            self.binding.room.as_str()
+        );
+        let form = if start {
+            vec![("status", "1".to_owned())]
+        } else {
+            Vec::new()
+        };
+        self.transport
+            .ocs(
+                &context,
+                if start { Method::POST } else { Method::DELETE },
+                &route,
+                &[],
+                &form,
+                false,
+            )
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
     /// One deliberate ring request. Fresh room, capability and session facts
     /// are checked on this lane immediately before dispatch; success is only a
     /// server receipt and never proves a notification was delivered or heard.
