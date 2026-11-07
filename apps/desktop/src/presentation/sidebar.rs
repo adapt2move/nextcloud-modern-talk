@@ -790,7 +790,12 @@ impl Desktop {
                         && call.scope.conversation == context.conversation
                         && matches!(call.stage, talk_core::ui::presentation::CallStage::Active)
                 }) {
-                    let mut avatars = div().flex().items_center().gap_1();
+                    let mut avatars = div()
+                        .relative()
+                        .group_hover("room-call-row", |style| style.right(px(6.)))
+                        .flex()
+                        .items_center()
+                        .gap_1();
                     for person in call.participants.as_slice().iter().take(2) {
                         avatars = avatars.child(self.person_avatar(person.initials.as_str(), 18.));
                     }
