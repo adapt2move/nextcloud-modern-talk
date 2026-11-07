@@ -1803,10 +1803,9 @@ impl Accounts {
         }
         if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_))
             && completion == Completion::ServerAccepted
+            && self.refresh_threads(context.account).is_err()
         {
-            if self.refresh_threads(context.account).is_err() {
-                self.hint_thread_refresh(context.account, Instant::now());
-            }
+            self.hint_thread_refresh(context.account, Instant::now());
         }
         if work == Work::History
             && completion != Completion::ServerAccepted
