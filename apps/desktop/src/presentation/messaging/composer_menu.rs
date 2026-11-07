@@ -94,6 +94,11 @@ struct Item {
 }
 
 impl Desktop {
+    fn composer_menu_target_current(&self, target: Target) -> bool {
+        target.thread.is_none()
+            || self.overlay == Some(Overlay::Thread)
+                && self.thread_parent == target.thread.map(|root| (target.context, root))
+    }
     fn composer_menu_context_current(&self) -> bool {
         self.composer_available()
             && self.snapshot.selected.is_some_and(|context| {
@@ -119,12 +124,7 @@ impl Desktop {
                 .session
                 .accepts(target, self.snapshot.selected)
             || !self.composer_menu_context_current()
-            || target.thread
-                != (self.overlay == Some(Overlay::Thread))
-                    .then_some(self.thread_parent)
-                    .flatten()
-                    .filter(|(context, _)| Some(*context) == self.snapshot.selected)
-                    .map(|(_, root)| root)
+            || !self.composer_menu_target_current(target)
         {
             return Vec::new();
         }
@@ -219,6 +219,7 @@ impl Desktop {
 
     pub(in crate::presentation) fn toggle_composer_menu(
         &mut self,
+        thread: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -232,7 +233,9 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
-        let thread = (self.overlay == Some(Overlay::Thread))
+        let thread = thread
+            .then_some(self.overlay == Some(Overlay::Thread))
+            .filter(|active| *active)
             .then_some(self.thread_parent)
             .flatten()
             .filter(|(parent, _)| *parent == context)
@@ -326,6 +329,7 @@ impl Desktop {
     pub(in crate::presentation) fn composer_menu_anchor(
         &self,
         context: ConversationRef,
+        thread: bool,
     ) -> impl IntoElement {
         let geometry = self.content_ui.composer_menu.geometry.clone();
         let target = self
@@ -333,7 +337,7 @@ impl Desktop {
             .composer_menu
             .session
             .target
-            .filter(|target| target.context == context);
+            .filter(|target| target.context == context && target.thread.is_some() == thread);
         gpui::canvas(
             move |bounds, _, _| {
                 if let Some(target) = target {
@@ -364,12 +368,7 @@ impl Desktop {
                     .session
                     .accepts(target, self.snapshot.selected)
                 || !self.composer_menu_context_current()
-                || target.thread
-                    != (self.overlay == Some(Overlay::Thread))
-                        .then_some(self.thread_parent)
-                        .flatten()
-                        .filter(|(context, _)| Some(*context) == self.snapshot.selected)
-                        .map(|(_, root)| root)
+                || !self.composer_menu_target_current(target)
                 || self.message_ui.menu.target().is_some()
                 || !window.is_window_active()
                 || self.update_restart_pending
@@ -716,6 +715,18 @@ mod tests {
                 local,
             },
         }
+    }
+    #[test]
+    fn switching_composer_panes_retires_old_targets_in_the_same_room() {
+        let mut session = Session::default();
+        let main = session.open(room(1), None).unwrap();
+        let thread = session.open(room(1), Some(10)).unwrap();
+        assert!(!session.accepts(main, Some(room(1))));
+        assert!(session.accepts(thread, Some(room(1))));
+        assert_eq!(thread.thread, Some(10));
+        let next = session.open(room(1), Some(11)).unwrap();
+        assert!(!session.accepts(thread, Some(room(1))));
+        assert!(session.accepts(next, Some(room(1))));
     }
     #[test]
     fn reopened_and_replaced_room_reject_old_popup_callbacks() {

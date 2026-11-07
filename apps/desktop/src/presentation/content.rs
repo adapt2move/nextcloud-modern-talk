@@ -40,7 +40,7 @@ pub(crate) enum Action {
     BrowserRetry,
     BrowserSort(talk_core::ui::content::FileSort),
     BrowserStageSelection,
-    Menu,
+    Menu(bool),
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
     AddOption,
@@ -1531,7 +1531,7 @@ impl Desktop {
                     }
                 }
             }
-            Action::Menu => self.toggle_composer_menu(window, cx),
+            Action::Menu(thread) => self.toggle_composer_menu(thread, window, cx),
             Action::ComposerChoice(target, choice) => {
                 self.choose_composer_menu(target, choice, window, cx);
             }
@@ -1796,7 +1796,6 @@ impl Desktop {
                 self.content_ui.voice_error = None;
                 self.content_ui.voice_auto_send = None;
                 if self.composer_available()
-                    && self.overlay != Some(Overlay::Thread)
                     && !self.drafts.target(context).new_thread
                     && self.drafts.target(context).private_reply.is_none()
                     && Some(context) == self.snapshot.selected

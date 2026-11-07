@@ -789,10 +789,10 @@ impl Desktop {
                                                 ButtonStyle::Quiet
                                             },
                                             options_availability,
-                                            LocalAction::Content(super::content::Action::Menu),
+                                            LocalAction::Content(super::content::Action::Menu(thread)),
                                             cx,
                                         )
-                                        .child(self.composer_menu_anchor(row.context)),
+                                        .child(self.composer_menu_anchor(row.context, thread)),
                                     )
                                     .child(self.icon_button(
                                         emoji_id,

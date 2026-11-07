@@ -3634,7 +3634,7 @@ mod interaction_tests {
     }
     #[test]
     fn voice_owns_the_composer_until_recording_or_review_retires() {
-        for overlay in [None, Some(Overlay::CallChat)] {
+        for overlay in [None, Some(Overlay::CallChat), Some(Overlay::Thread)] {
             assert!(composer_allowed(overlay, false, false, false));
             assert!(!composer_allowed(overlay, false, false, true));
             assert!(composer_allowed(overlay, false, false, false));

@@ -76,7 +76,6 @@ impl Desktop {
             && !input.composing()
             && !input.content.trim().is_empty()
             && self.composer_available()
-            && self.overlay != Some(super::Overlay::Thread)
             && self.message_ui.editing.is_none()
             && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Typing)
             && self
