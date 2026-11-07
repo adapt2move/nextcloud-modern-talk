@@ -208,7 +208,6 @@ impl Desktop {
             return self.settings_view(window, cx);
         }
         let overlay = self.overlay.expect("overlay selected");
-        let t = self.theme;
         let side = matches!(
             overlay,
             Overlay::RoomInfo
@@ -397,22 +396,17 @@ impl Desktop {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
                 .flex_1()
-                .when(overlay != Overlay::Thread, |d| d.p_6())
+                .p_4()
                 .child(body)
                 .into_any_element()
         };
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
+        self.dialog_scrim()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(
                 self.dialog_panel(
                     DialogSurface::Overlay(overlay),
-                    div()
+                    self.dialog_shell_surface()
                         .w_full()
                         .max_w(px(width))
                         .max_h_full()
@@ -423,12 +417,21 @@ impl Desktop {
                         .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
                         .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
                         .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
-                        .when(overlay == Overlay::Create, |d| {
-                            d.h(px((f32::from(window.viewport_size().height)
-                                - super::window_chrome::HEIGHT
-                                - 40.)
-                                .min(720.)))
-                        })
+                        .when(
+                            matches!(
+                                overlay,
+                                Overlay::Create
+                                    | Overlay::CloudFiles
+                                    | Overlay::CreatePoll
+                                    | Overlay::PollDetails
+                            ),
+                            |d| {
+                                d.h(px((f32::from(window.viewport_size().height)
+                                    - super::window_chrome::HEIGHT
+                                    - 66.)
+                                    .min(632.)))
+                            },
+                        )
                         .when(!side, |d| {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
@@ -447,52 +450,33 @@ impl Desktop {
                         })
                         .flex()
                         .flex_col()
-                        .bg(t.surface)
-                        .rounded(px(13.))
-                        .border_1()
-                        .border_color(t.border)
-                        .shadow_lg()
                         .track_focus(&self.modal_focus)
                         .tab_group()
                         .occlude()
                         .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_3()
-                                .px_6()
-                                .py_4()
-                                .border_b_1()
-                                .border_color(t.border)
-                                .when(overlay == Overlay::Thread, |header| {
-                                    header.child(self.thread_heading(cx))
-                                })
-                                .when(overlay != Overlay::Thread, |header| {
-                                    header.child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .text_size(self.sp(if side { 18. } else { 24. }))
-                                            // Keep the single-word consent title visible when
-                                            // large text leaves little room beside the close control.
-                                            .when(overlay == Overlay::RecordingConsent, |title| {
-                                                title.flex_1().text_size(self.sp(24.).min(px(40.)))
-                                            })
-                                            .when(
-                                                matches!(
-                                                    overlay,
-                                                    Overlay::ConfirmRecording
-                                                        | Overlay::ConfirmEndCall
-                                                        | Overlay::RecordingConsent
-                                                ),
-                                                |title| title.line_height(self.sp(30.)),
-                                            )
-                                            .font_weight(FontWeight::BOLD)
-                                            .child(self.l(title)),
-                                    )
-                                })
+                            self.dialog_header()
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .text_size(self.sp(20.))
+                                        // Keep the single-word consent title visible when
+                                        // large text leaves little room beside the close control.
+                                        .when(overlay == Overlay::RecordingConsent, |title| {
+                                            title.flex_1().text_size(self.sp(24.).min(px(40.)))
+                                        })
+                                        .when(
+                                            matches!(
+                                                overlay,
+                                                Overlay::ConfirmRecording
+                                                    | Overlay::ConfirmEndCall
+                                                    | Overlay::RecordingConsent
+                                            ),
+                                            |title| title.line_height(self.sp(30.)),
+                                        )
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(self.l(title)),
+                                )
                                 .when(overlay == Overlay::CreatePoll, |d| {
                                     d.children(self.poll_drafts_header(cx))
                                 })
@@ -516,8 +500,12 @@ impl Desktop {
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
                         })
-                        .when(overlay == Overlay::CreatePoll, |d| {
-                            d.child(self.poll_creation_footer(cx))
+                        .when(
+                            overlay == Overlay::CreatePoll && !self.poll_drafts_open(),
+                            |d| d.child(self.poll_creation_footer(cx)),
+                        )
+                        .when(overlay == Overlay::CloudFiles, |d| {
+                            d.child(self.cloud_files_footer(cx))
                         })
                         .when(
                             self.feedback_visible()
@@ -1189,7 +1177,7 @@ impl Desktop {
                         .child(self.hint(&format!(
                             "{} · {}",
                             m.author.as_str(),
-                            m.time_label.as_str()
+                            super::localization::display_time(self.locale, m.time_label.as_str())
                         )));
                 }
             }

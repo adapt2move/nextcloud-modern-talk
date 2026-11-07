@@ -213,7 +213,7 @@ impl Desktop {
                 .when(drafts.len() > 1, |row| row
                     .child(self.icon_button(scoped_id("failed-previous", context, 0, 0), ("arrow-left", "Vorheriger Entwurf"), ButtonStyle::Quiet,
                         Availability::available(), action(RecoveryAction::Previous(operation)), cx))
-                    .child(div().font_family("Google Sans Code").text_size(self.sp(11.)).child(format!("{}/{}", index + 1, drafts.len())))
+                    .child(div().font_family("Google Sans Code").text_size(self.sp(12.)).child(format!("{}/{}", index + 1, drafts.len())))
                     .child(self.icon_button(scoped_id("failed-next", context, 0, 0), ("arrow-right", "Nächster Entwurf"), ButtonStyle::Quiet,
                         Availability::available(), action(RecoveryAction::Next(operation)), cx))))
             .child(div().max_h(self.sp(60.)).overflow_hidden().text_size(self.sp(13.)).line_height(self.sp(20.))

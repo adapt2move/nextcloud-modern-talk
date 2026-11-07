@@ -140,7 +140,7 @@ pub(super) struct DialogFrame {
 const DIALOG_WIDTH: f32 = 842.;
 const DIALOG_HEIGHT: f32 = 632.;
 const DIALOG_RAIL: f32 = 211.;
-const DIALOG_PADDING: f32 = 24.;
+const DIALOG_PADDING: f32 = 16.;
 impl Desktop {
     pub(super) fn dialog_narrow(&self, window: &Window) -> bool {
         window.viewport_size().width < px(900.) || self.scale >= 150
@@ -173,7 +173,7 @@ impl Desktop {
                     .flex_1()
                     .min_h_0()
                     .px(px(DIALOG_PADDING))
-                    .pt(px(20.))
+                    .pt(px(DIALOG_PADDING))
                     .pb(px(DIALOG_PADDING))
                     .child(frame.page),
             )
@@ -188,67 +188,52 @@ impl Desktop {
                         .child(footer),
                 )
             });
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .relative()
-                    .occlude()
-                    .w(px(width))
-                    .h(px(height))
-                    .min_h_0()
-                    .rounded(px(13.))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(t.border)
-                    .shadow_xl()
-                    .bg(t.surface)
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .flex()
-                    .when(narrow, |d| d.flex_col())
-                    .child(frame.navigation)
-                    .child(page)
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(8.))
-                            .right(px(8.))
-                            .child(self.icon_button(
-                                frame.close.0,
-                                ("x", frame.close.1),
-                                ButtonStyle::Quiet,
-                                Availability::available(),
-                                LocalAction::Close,
-                                cx,
-                            )),
-                    )
-                    .map(|mut panel| {
-                        // Preserve the frame ID without a Stateful wrapper: the
-                        // shared motion owner accepts the existing Div itself.
-                        panel.interactivity().element_id = Some(frame.id.into());
-                        match self.overlay.filter(|overlay| {
-                            matches!(
-                                overlay,
-                                Overlay::Settings
-                                    | Overlay::Accounts
-                                    | Overlay::RoomInfo
-                                    | Overlay::Participants
-                            )
-                        }) {
-                            Some(overlay) => {
-                                self.dialog_panel(DialogSurface::Overlay(overlay), panel)
-                            }
-                            None => panel.into_any_element(),
-                        }
-                    }),
-            )
+        self.dialog_scrim().items_center().justify_center().child(
+            self.dialog_shell_surface()
+                .relative()
+                .occlude()
+                .w(px(width))
+                .h(px(height))
+                .min_h_0()
+                .overflow_hidden()
+                .track_focus(&self.modal_focus)
+                .tab_group()
+                .flex()
+                .when(narrow, |d| d.flex_col())
+                .child(frame.navigation)
+                .child(page)
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(8.))
+                        .child(self.icon_button(
+                            frame.close.0,
+                            ("x", frame.close.1),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::Close,
+                            cx,
+                        )),
+                )
+                .map(|mut panel| {
+                    // Preserve the frame ID without a Stateful wrapper: the
+                    // shared motion owner accepts the existing Div itself.
+                    panel.interactivity().element_id = Some(frame.id.into());
+                    match self.overlay.filter(|overlay| {
+                        matches!(
+                            overlay,
+                            Overlay::Settings
+                                | Overlay::Accounts
+                                | Overlay::RoomInfo
+                                | Overlay::Participants
+                        )
+                    }) {
+                        Some(overlay) => self.dialog_panel(DialogSurface::Overlay(overlay), panel),
+                        None => panel.into_any_element(),
+                    }
+                }),
+        )
     }
     /// Wide navigation. The header names the dialog and, where relevant, its context.
     pub(super) fn dialog_rail(
@@ -298,7 +283,7 @@ impl Desktop {
     }
     pub(super) fn dialog_title(&self, title: &str) -> Div {
         div()
-            .text_size(self.sp(16.))
+            .text_size(self.sp(20.))
             .font_weight(FontWeight::MEDIUM)
             .child(self.l(title).to_owned())
     }

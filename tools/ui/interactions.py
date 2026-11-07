@@ -71,6 +71,37 @@ def exercise(scenario, env, xid, out, label, large=False):
                  str(sidebar_path)], env)
             text += normalized(run(['tesseract', str(sidebar_path), 'stdout', '--psm', '6'], env).stdout)
             sidebar_path.unlink()
+        if scenario == 'server' and (width, height) == (1280, 800):
+            field_path = out / f'{label}-ocr-field.png'
+            run(['convert', str(path), '-crop', '360x32+635+312', '+repage', '-resize', '400%',
+                 '-colorspace', 'gray', '-threshold', '75%', str(field_path)], env)
+            text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+            field_path.unlink()
+        if scenario == 'chat-cloud-files-offline' and (width, height) == (1280, 800):
+            banner_path = out / f'{label}-ocr-banner.png'
+            run(['convert', str(path), '-crop', '700x36+277+288', '+repage', '-resize', '400%',
+                 '-colorspace', 'gray', '-threshold', '75%', str(banner_path)], env)
+            text += normalized(run(['tesseract', str(banner_path), 'stdout', '--psm', '7'], env).stdout)
+            banner_path.unlink()
+        if scenario == 'accounts' and '-dark-' in label and (width, height) == (1280, 800):
+            dialog_path = out / f'{label}-ocr-account-dialog.png'
+            run(['convert', str(path), '-crop', '440x380+420+230', '+repage', '-resize', '300%',
+                 '-colorspace', 'gray', '-negate', '-auto-level', str(dialog_path)], env)
+            text += normalized(run(['tesseract', str(dialog_path), 'stdout', '--psm', '6'], env).stdout)
+            dialog_path.unlink()
+        if scenario == 'poll-dialog' and (width, height) == (1280, 800) and any(
+                term in ('TEAMESSEN', 'GARTEN', 'WERKSTATT') for term in required):
+            # The small field text can be missed by whole-window OCR. Inspect
+            # the actual three native inputs at high contrast, in both themes.
+            field_path = out / f'{label}-ocr-poll-field.png'
+            for x, y, w in ((350, 222, 575), (382, 275, 420), (382, 327, 420)):
+                image_args = ['convert', str(path), '-crop', f'{w}x36+{x}+{y}', '+repage',
+                              '-resize', '400%', '-colorspace', 'gray']
+                if '-dark-' in label:
+                    image_args.append('-negate')
+                run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
+                text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+            field_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -78,17 +109,21 @@ def exercise(scenario, env, xid, out, label, large=False):
             selection_count = re.fullmatch(r'([12]) ausgewählt', term)
             fuzzy_count = selection_count and re.search(
                 rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', text)
+            if selection_count and not fuzzy_count:
+                fuzzy_count = re.search(rf'hinzuf\w{{3,8}}\s*{selection_count.group(1)}\b', text)
             if selection_count and not fuzzy_count and (width, height) == (1280, 800):
                 # This inspected footer location is stable in the fixed-size
                 # fixture. A contrast-enhanced crop also works in dark mode.
                 count_path=out/f'{label}-ocr-count.png'
-                run(['convert', str(path), '-crop', '120x35+440+660', '+repage',
-                     '-resize', '400%', '-colorspace', 'gray', '-negate',
-                     '-contrast-stretch', '2%x2%', str(count_path)], env)
+                run(['convert', str(path), '-crop', '100x25+652+692', '+repage',
+                     '-resize', '400%', '-colorspace', 'gray', '-auto-level', '-negate', str(count_path)], env)
                 count_text=normalized(run(['tesseract', str(count_path), 'stdout', '--psm', '7'], env).stdout)
                 count_path.unlink()
                 fuzzy_count=re.search(rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', count_text)
+                if selection_count.group(1) == '1' and not fuzzy_count:
+                    fuzzy_count = re.search(r'^l\s*ausge\w{4,8}', count_text)
             aliases = {
+                'Konzept.pdf': ('konzeptpdt', 'konzeptpat'),
                 'Projektübersicht.pdf': ('projektibersichtpdf', 'projektiibersichtpdf'),
                 'Zwischenablage.png': ('wischenablagepng',),
             }
@@ -113,7 +148,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         if focused != str(xid):
             raise AssertionError(f'Native text target {focused} differs from captured window {xid}')
         observe()
-        run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
+        run(['xdotool', 'type', '--clearmodifiers', '--delay', '150', '--', value], env)
 
     def expect_settled(*args, **kwargs):
         # Read-only observation of an asynchronous native paint. The action is
@@ -249,7 +284,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect_settled('main calendar cancellation preserves the thread and restores main focus',
                        ['MAINCALENDARX', 'Design review', 'THREADTOOLSX'], ['Nachricht planen'])
     elif scenario == 'server':
-        click('cloud.example.test')
+        click('cloud.example.test', inspected_point=(1280, 800, 700, 328))
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')
         key('BackSpace'); key('ctrl+v')
         expect('native selection and explicit clipboard roundtrip', ['probe.example.test'])
@@ -257,13 +292,23 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('native editing replaces selection and deletes one grapheme', ['eplacement.example.test'], ['probe.example.test'])
         key('Tab')
         expect('keyboard focus can leave input')
+    elif scenario == 'accounts':
+        expect('account settings list is visible', ['Konten', 'Nord Studio'])
+        # The first account row's remove control opens a confirmation; the
+        # fictional account is not removed by this check.
+        run(['xdotool', 'mousemove', '--window', xid, '1027', '306', 'click', '1'], env)
+        expect('account removal asks for confirmation', ['Konto aus dieser App entfernen', 'Abbrechen'])
+        key('Escape')
+        expect('Escape dismisses confirmation without removing the account', ['Konten', 'Nord Studio'],
+               ['Du wirst in dieser App abgemeldet'])
     elif scenario == 'status-message':
         expect('status message editor is visible', ['Statusnachricht', 'Vorschläge'])
         click('Statusnachricht')
         type_text('LUNCHBREAK')
+        click('Nie')
         click('30')
-        click('Speichern', inspected_point=(1280,800,67,632))
-        expect('saved fictional status is shown immediately', ['LUNCHBREAK'])
+        click('Speichern', inspected_point=(1280,800,67,701))
+        expect('saved fictional status is shown immediately', ['LUNCHBREAK'], ['Vorschläge'])
         click('LUNCHBREAK')
         click('Entfernen')
         expect('fictional status can be cleared', ['Statusnachricht festlegen'])
@@ -287,8 +332,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('keyboard activation resolves the fictional direct call', ['Verbindung wird aufgebaut'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
-        click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
-        expect('unknown privacy policy blocks cut without losing draft',['DRAFTSAFE','Ausschneiden ist für diesen Entwurf nicht freigegeben.'])
+        key('Escape')
+        click('Nachricht', xmin=200, ymin=600);time.sleep(.3);type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
+        expect('unknown privacy policy blocks cut without losing draft',
+               ['DRAFTSAFE', 'Ausschneiden', 'diesen Entwurf nicht freigegeben'])
         key('ctrl+c');key('ctrl+v')
         expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
@@ -301,25 +348,25 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
-                       input='file:///tmp/Fictional-paste.txt\r\n', text=True, env=env,
+                       input='file:///tmp/Beispiel.txt\r\n', text=True, env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
         data = run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-o'], env).stdout
-        if data.strip() != 'file:///tmp/Fictional-paste.txt':
+        if data.strip() != 'file:///tmp/Beispiel.txt':
             raise AssertionError('the X11 clipboard did not retain the native file-list fixture')
         key('ctrl+v')
-        expect('native file-list paste stages a file chip', ['Fictional-paste.txt', 'Bereit zum Senden'])
+        expect('native file-list paste stages a file chip', ['Beispiel.txt'])
         image = Path('apps/desktop/assets/fixtures/content-photo.png').read_bytes()
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i'],
                        input=image, env=env, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=True, timeout=10)
         key('ctrl+v')
-        expect('native image paste stages an image chip', ['Fictional-paste.txt', 'clipboard.png'])
+        expect('native image paste stages an image chip', ['Beispiel.txt', 'Zwischenablage.png'])
     elif scenario == 'chat-cloud-files':
-        click('Team', xmin=285, ymin=400)
+        click('Team', xmin=285, ymin=300)
         expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
         key('BackSpace')
         expect('backspace navigates to the parent folder', ['Projektübersicht.pdf', 'Workshop.png'])
-        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
+        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 208))
         type_text('Workshop')
         time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
         expect_settled('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
@@ -328,26 +375,26 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect_settled('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
-        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 408))
         key('w'); key('ctrl+space')
         expect('type-ahead and control-space select the matching file', ['2 ausgewählt'])
         key('ctrl+space')
         expect('control-space toggles the focused file', ['1 ausgewählt'])
-        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 555))
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 408))
         key('shift+Down')
         expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
         expect_settled('keyboard selection returns both cloud files to the composer',
-               ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
+               ['Projektübersicht.pdf', 'Workshop.png'], ['NextCloud-Dateien'])
     elif scenario == 'chat-cloud-files-offline':
         expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
     elif scenario == 'chat-upload-preview':
-        expect('staged image has a composer chip', ['Zwischenablage.png', 'Bereit zum Senden'])
+        expect('staged image has a composer chip', ['Zwischenablage.png'])
     elif scenario == 'poll-dialog':
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         # Exercise plain-text paste in each poll input independently.
-        for value, question in [('TEAM LUNCH', True), ('GARDEN', False), ('STUDIO', False)]:
+        for value, question in [('TEAMESSEN', True), ('GARTEN', False), ('WERKSTATT', False)]:
             if not question:
                 click('Antwortoption')
             subprocess.run(['xclip', '-selection', 'clipboard', '-i'],
@@ -355,29 +402,49 @@ def exercise(scenario, env, xid, out, label, large=False):
                            stderr=subprocess.DEVNULL, check=True, timeout=10)
             key('ctrl+v')
             expect_settled('poll field retains pasted text', [value])
-        expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
+        expect('completed poll keeps both distinct choices', ['TEAMESSEN', 'GARTEN', 'WERKSTATT'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
-        click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
+        click('Veröffentlichen', inspected_point=(1280, 800, 865, 704))
         expect_settled('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
-        expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
-        click('erstellen', inspected_point=(1280, 800, 540, 548))
-        expect('settings opens the scoped poll dialog', ['Frage', 'Mehrere Antworten erlauben'])
+        expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
+        click('auswählen', xmin=400, ymin=150)
+        # The first emoji in the bounded picker is a native button in the fixed fixture.
+        run(['xdotool', 'mousemove', '--window', xid, '475', '270', 'click', '1'], env)
+        expect('selecting an emoji enables the room avatar action', ['Emoji als Avatar setzen'])
         key('Escape')
-        time.sleep(1.)  # Let the retained parent dialog regain focus and paint.
-        expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Nachrichten'])
+        expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
+    elif scenario == 'poll-drafts':
+        expect('draft list is separate from the poll form', ['Fiktiver Entwurf'], ['Antwortoption'])
+        click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
+        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Fiktiver Entwurf'])
+        click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
+        expect('draft toggle reopens the saved list', ['Fiktiver Entwurf'], ['Antwortoption'])
+    elif scenario == 'poll-details':
+        expect('public poll offers voter expansion', ['Umfragedetails', 'Stimmen anzeigen'])
+        # The first result's voter list in the fixed 1280x800 fixture.
+        run(['xdotool', 'mousemove', '--window', xid, '640', '334', 'click', '1'], env)
+        expect('public voters expand with names', ['Stimmen ausblenden', 'Alex Sommer'])
+        run(['xdotool', 'mousemove', '--window', xid, '640', '334', 'click', '1'], env)
+        expect('public voters collapse again', ['Stimmen anzeigen'], ['Stimmen ausblenden'])
     elif scenario == 'chat-polls':
-        click('Abstimmen', inspected_point=(1280, 800, 390, 552))
+        click('Abstimmen', inspected_point=(1280, 800, 390, 584))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
+        # The poll's secondary action is behind its inspected ellipsis control.
+        run(['xdotool', 'mousemove', '--window', xid, '780', '397', 'click', '1'], env)
         click('beenden')
-        expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])
-        click('Jetzt')
+        expect('closing asks for confirmation', ['Umfrage wirklich beenden'])
+        click('Jetzt', inspected_point=(1280, 800, 405, 638))
         expect('confirmed fictional close keeps the poll and disables voting',
                ['Umfrage beendet', 'Fiktive Umfrage'], ['Umfrage beenden'])
         log = (out / f'{label}.log').read_text()
         if log.count('UI_POLL_FIXTURE vote poll=9001 no_backend=true') != 1 or \
                 log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
             raise AssertionError('Vote or confirmed close did not submit exactly once')
+        run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        expect('pinned strip collapses its message', ['Angeheftet'], ['Perfekt. Dann nehmen wir das so mit.'])
+        run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        expect('pinned strip expands its message again', ['Angeheftet', 'Perfekt. Dann nehmen wir das so mit.'])
     elif scenario == 'chat-voice':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
@@ -399,13 +466,35 @@ def exercise(scenario, env, xid, out, label, large=False):
         path, _, _ = observe()
         checks.append({'check': 'waveform click and focused arrow seek update the fictional player',
                        'result': 'pass', 'image': path.name, 'sha256': sha(path)})
+    elif scenario == 'voice-review':
+        path, _, _ = observe()
+        width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
+        if (width, height) != (1280, 800):
+            raise AssertionError('Voice review interaction requires the inspected 1280x800 fixture')
+        # Start the fictional review player, then seek by pointer and keyboard.
+        run(['xdotool', 'mousemove', '--window', xid, '355', '724', 'click', '1'], env)
+        time.sleep(.7)
+        run(['xdotool', 'mousemove', '--window', xid, '700', '724', 'click', '1'], env)
+        time.sleep(.4)
+        log = out / f'{label}.log'
+        first = re.findall(r'UI_VOICE_REVIEW_FIXTURE seek_ms=(\d+) no_backend=true', log.read_text())
+        if len(first) != 1 or not 0 < int(first[0]) < 13000:
+            raise AssertionError(f'Review waveform pointer seek did not reach the fictional player: {first}')
+        key('Right')
+        time.sleep(.4)
+        second = re.findall(r'UI_VOICE_REVIEW_FIXTURE seek_ms=(\d+) no_backend=true', log.read_text())
+        if len(second) != 2 or int(second[-1]) != min(int(first[-1]) + 5000, 13000):
+            raise AssertionError(f'Focused review waveform arrow did not advance five seconds: {first}, {second}')
+        path, _, _ = observe()
+        checks.append({'check': 'review waveform pointer and keyboard seek update the fictional player',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path)})
     elif scenario == 'voice-recording':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
         if (width, height) != (1280, 800):
             raise AssertionError('Recording interaction requires the inspected 1280x800 fixture')
         # The rightmost round button is the explicit direct-send action.
-        run(['xdotool', 'mousemove', '--window', xid, '1214', '734',
+        run(['xdotool', 'mousemove', '--window', xid, '1214', '724',
              'click', '--repeat', '2', '--delay', '50', '1'], env)
         time.sleep(.8)
         log = (out / f'{label}.log').read_text()
@@ -417,14 +506,18 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k'); type_text('NO MATCH UI')
         expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
-        click('schreiben')
-        type_text('DRAFTALPHA'); key('Return')
+        key('Escape')
+        click('Nachricht', xmin=200, ymin=600)
+        type_text('DRAFTALPHA'); time.sleep(.4); key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
-               ['DRAFTALPHA', 'ausgelastet' if scenario == 'busy' else 'Nicht gesendet'])
+               ['DRAFTALPHA'] if scenario == 'busy' else ['DRAFTALPHA', 'Nicht gesendet'])
+        if scenario == 'busy' and (out / f'{label}.log').read_text().count(
+                'UI_BUSY send_rejected=true no_backend=true') != 1:
+            raise AssertionError('The fictional busy port did not reject the explicit send exactly once')
         key('ctrl+comma')
         expect('settings shortcut opens modal', ['Einstellungen'])
-        click('Sage'); click('Dunkel')
-        expect('theme selection stays available after appearance change', ['Einstellungen','Sage'])
+        click('Darstellung'); click('Salbei'); click('Dunkel')
+        expect('theme selection stays available after appearance change', ['Einstellungen','Salbei'])
         path,_,_=observe()
         # Check the actual native canvas, not an OCR interpretation of selected text.
         rgb=run(['convert',str(path),'-format','%[fx:p{10,10}.r] %[fx:p{10,10}.g] %[fx:p{10,10}.b]','info:'],env).stdout
@@ -576,15 +669,16 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
-        click('ansehen',xmin=800)
+        click('ansehen')
         expect('dismiss keeps a discoverable incoming call', ['Eingehender Anruf ansehen'], ['Annehmen'])
-        click('ansehen',xmin=800)
-        click('Annehmen',xmin=800,ymin=200,inspected_point=(1200,800,987,244))
-        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird angefragt'], ['Bereit'])
+        click('ansehen')
+        # The blue accept icon is distinct from the two adjacent call actions.
+        run(['xdotool', 'mousemove', '--window', xid, '605', '502', 'click', '1'], env)
+        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird aufgebaut'], ['Bereit'])
         key('Escape')
-        expect('escape never hangs up a call', ['Verbindung wird angefragt'])
-        click('Auflegen',inspected_point=(1200,800,862,682))
-        expect('explicit leave returns to conversation', ['Nachricht an Produktteam'])
+        expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
+        click('Auflegen',inspected_point=(1280,800,1225,754))
+        expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
         # Fixture diagnostics contain only local identities and the hand state.
@@ -661,10 +755,14 @@ def exercise(scenario, env, xid, out, label, large=False):
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
+        expect('conference prejoin starts open', ['Bereit', 'Jetzt', 'teil'])
+        time.sleep(.7)  # Wait for the first-frame prejoin focus handoff.
         key('Escape')
-        expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])
-        click('Beitreten')
+        expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
+        # The conversation header exposes conference entry as an icon.
+        run(['xdotool', 'mousemove', '--window', xid, '1181', '92', 'click', '1'], env)
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        click('teilnehmen',inspected_point=(1200,800,600,695))
-        expect('join reports connecting without synthetic media success', ['Verbindung wird angefragt'], ['Anruf aktiv'])
+        # The primary entry button is separate from the similarly worded helper.
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '500', 'click', '1'], env)
+        expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks

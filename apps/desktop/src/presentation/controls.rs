@@ -1,8 +1,10 @@
 //! Private native control vocabulary; all icons are fixed embedded SVG assets.
+mod feedback;
 mod forms;
 mod skeletons;
 mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
+pub(super) use crate::presentation::controls::feedback::BannerRole;
 pub(super) use crate::presentation::controls::skeletons::Skeleton;
 pub(super) use crate::presentation::controls::surfaces::CONTENT_RADIUS;
 use gpui::{
@@ -256,7 +258,14 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
 fn switch_colors(t: super::Theme, enabled: bool, value: Option<bool>) -> (Hsla, Hsla) {
     match (enabled, value) {
         (true, Some(true)) => (t.accent, t.on_accent),
-        (true, _) => (t.muted, t.surface),
+        (true, _) => (
+            if t.dark {
+                gpui::rgb(0x3a4a63).into()
+            } else {
+                gpui::rgb(0x8493a8).into()
+            },
+            gpui::white(),
+        ),
         (false, _) => (t.subtle, t.disabled_fg),
     }
 }
@@ -1391,8 +1400,8 @@ impl Desktop {
             .justify_center()
             .bg(bg)
             .text_color(fg)
-            .text_size(px(extent * 0.36))
-            .line_height(px(extent * 0.5))
+            .text_size(px((extent * 0.36).max(12.)))
+            .line_height(px((extent * 0.5).max(18.)))
             .font_weight(FontWeight::MEDIUM)
             .child(initials.to_owned())
     }

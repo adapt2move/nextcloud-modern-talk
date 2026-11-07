@@ -235,6 +235,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Sal del modo de respuesta o de envío especial antes de enviar archivos.",
     ),
     (
+        "Zwischenablage.{extension}",
+        "Clipboard.{extension}",
+        "Portapapeles.{extension}",
+    ),
+    (
         "Öffne die Datei erneut aus dem Gespräch.",
         "Open the file again from the conversation.",
         "Vuelve a abrir el archivo desde la conversación.",

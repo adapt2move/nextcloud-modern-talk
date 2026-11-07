@@ -54,7 +54,7 @@ impl Desktop {
                 }
             });
         if row.kind == ConversationKind::Direct {
-            self.avatar_with_presence(avatar, row.presence, 12., t.surface)
+            self.avatar_with_presence(avatar, row.presence, 36., t.surface)
         } else {
             avatar
         }
@@ -65,21 +65,24 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        dot_size: f32,
+        avatar_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
             return avatar;
         }
+        // The requested diameter excludes the two-point surface ring. Half of
+        // the footprint sits outside on each axis, keeping initials unobscured.
+        let diameter = if avatar_size < 32. { 8. } else { 10. };
+        let footprint = diameter + 4.;
         div().flex_none().relative().child(avatar).child(
             div()
                 .absolute()
-                .right(px(-1.))
-                .bottom(px(-1.))
-                .size(px(dot_size))
+                .right(px(-footprint / 2.))
+                .bottom(px(-footprint / 2.))
+                .size(px(footprint))
                 .rounded_full()
-                .when(dot_size < 10., |dot| dot.border_1())
-                .when(dot_size >= 10., |dot| dot.border_2())
+                .border_2()
                 .border_color(background)
                 .bg(self.theme.presence_dot(presence)),
         )
@@ -746,11 +749,6 @@ impl Desktop {
             .flex_col()
             .gap_2()
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
-            .children(if thread {
-                self.thread_composer_context(cx)
-            } else {
-                self.composer_context(cx)
-            })
             .child(
                 div()
                     .min_h(px(96.))
@@ -781,6 +779,7 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .gap_2()
+                    .children(if thread { self.thread_composer_context(cx) } else { self.composer_context(cx) })
                     .when(!unloaded, |d| d.child(input.clone()))
                     .when(unloaded, |d| {
                         d.child(self.hint(self.l(crate::presentation::input::RICH_REJECTION)))
@@ -865,7 +864,7 @@ impl Desktop {
                                             d.child(self.icon_button(
                                                 if thread { "thread-voice-start" } else { "voice-start" },
                                                 ("mic", "Sprachnachricht aufnehmen"),
-                                                ButtonStyle::Quiet,
+                                                ButtonStyle::Primary,
                                                 if thread { Availability::when(false, "Anhänge in Threads sind noch nicht verfügbar.") } else { ready.into() },
                                                 LocalAction::Content(
                                                     super::content::Action::VoiceStart(row.context),
@@ -1036,8 +1035,8 @@ impl Desktop {
             .iter()
             .find(|a| a.scope == call.scope.account)
             .map_or("Konto unbekannt", |a| a.label.as_str());
-        div().absolute().inset_0().occlude().bg(t.scrim).flex().items_center().justify_center().p_5()
-            .child(self.scroll_area(super::navigation::Region::Call).max_h_full().w_full().max_w(px(420.)).rounded(px(16.)).bg(t.surface).border_1().border_color(t.border).shadow_lg().p_6()
+        self.dialog_scrim().items_center().justify_center().p_5()
+            .child(self.style_dialog_shell(self.scroll_area(super::navigation::Region::Call)).max_h_full().w_full().max_w(px(420.)).p_6()
                 .child(div().flex().flex_col().items_center().gap_4().text_center()
                     .child(div().flex().items_center().gap_2().child(self.scaled_icon("phone",16.,t.muted)).child(self.hint(self.l("Eingehender Direktanruf"))))
                     .child(self.avatar(call.participants.as_slice().iter().find(|p|!p.self_user).map_or("?",|p|p.initials.as_str()),true))

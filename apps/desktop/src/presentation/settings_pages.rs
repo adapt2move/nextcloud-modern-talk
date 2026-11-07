@@ -181,10 +181,16 @@ impl Desktop {
                 } = &self.updates.state
                 {
                     page = page.child(self.hint(&self.lf(
-                        "{received} von {total} MiB heruntergeladen.",
+                        "{received} von {total} heruntergeladen.",
                         &[
-                            ("received", &format!("{:.1}", *received as f64 / 1_048_576.)),
-                            ("total", &format!("{:.1}", *total as f64 / 1_048_576.)),
+                            (
+                                "received",
+                                &super::localization::file_size(self.locale, Some(*received)),
+                            ),
+                            (
+                                "total",
+                                &super::localization::file_size(self.locale, Some(*total)),
+                            ),
                         ],
                     )));
                 }

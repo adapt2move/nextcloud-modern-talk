@@ -13,6 +13,7 @@ const CYCLE: Duration = Duration::from_millis(170);
 pub(super) struct Pins {
     context: Option<ConversationRef>,
     selected: Option<u128>,
+    collapsed: bool,
     motion: Rc<RefCell<Motion>>,
     viewport: Option<gpui::Size<gpui::Pixels>>,
     focus: Option<FocusHandle>,
@@ -31,6 +32,7 @@ impl Pins {
     fn reconcile(&mut self, context: Option<ConversationRef>, ids: &[u128]) {
         if context != self.context {
             self.context = context;
+            self.collapsed = false;
             self.selected = ids.first().copied();
             self.motion.borrow_mut().clear();
         } else if self.selected.is_none_or(|id| !ids.contains(&id)) {
@@ -123,6 +125,12 @@ impl Desktop {
         );
     }
 
+    pub(super) fn toggle_pin_strip(&mut self, context: ConversationRef) {
+        if self.message_ui.pins.context == Some(context) {
+            self.message_ui.pins.collapsed = !self.message_ui.pins.collapsed;
+        }
+    }
+
     pub(in crate::presentation) fn pin_banner(
         &self,
         context: ConversationRef,
@@ -177,9 +185,9 @@ impl Desktop {
         Some(
             div()
                 .flex_none()
-                .min_h(px(44.))
+                .min_h(px(32.))
                 .px_6()
-                .py_1()
+                .py_0()
                 .flex()
                 .items_center()
                 .gap_3()
@@ -189,29 +197,56 @@ impl Desktop {
                 .relative()
                 .child(self.pin_header_anchor(context, selected))
                 .child(self.scaled_icon("pin", 15., theme.accent))
+                .child(self.hint(self.l("Angeheftet")))
+                .when(!pins.collapsed, |d| {
+                    d.child(
+                        self.control(
+                            scoped_id("pin-banner-open", context, selected, 0),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::MessageIn(context, Action::Locate(selected)),
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .justify_start()
+                        .min_h(px(32.))
+                        .px_1()
+                        .py_0()
+                        .child(animated),
+                    )
+                })
+                .when(pins.collapsed, |d| d.child(div().flex_1()))
                 .child(
-                    self.control(
-                        scoped_id("pin-banner-open", context, selected, 0),
+                    self.icon_button(
+                        scoped_id("pin-banner-collapse", context, 0, 0),
+                        (
+                            if pins.collapsed {
+                                "chevron-down"
+                            } else {
+                                "chevron-up"
+                            },
+                            if pins.collapsed {
+                                "Angeheftete Nachricht anzeigen"
+                            } else {
+                                "Angeheftete Nachricht einklappen"
+                            },
+                        ),
                         ButtonStyle::Quiet,
                         Availability::available(),
-                        LocalAction::MessageIn(context, Action::Locate(selected)),
+                        LocalAction::MessageIn(context, Action::TogglePinStrip),
                         cx,
                     )
-                    .flex_1()
-                    .min_w_0()
-                    .justify_start()
-                    .min_h(px(32.))
-                    .px_1()
-                    .py_0()
-                    .child(animated),
+                    .size(px(32.))
+                    .min_h(px(32.)),
                 )
-                .when(rows.len() > 1, |banner| {
+                .when(!pins.collapsed && rows.len() > 1, |banner| {
                     banner
                         .child(
                             div()
                                 .flex_none()
                                 .font_family("Google Sans Code")
-                                .text_size(self.sp(11.))
+                                .text_size(self.sp(12.))
                                 .text_color(theme.text)
                                 .child(format!("{} / {}", index + 1, rows.len())),
                         )

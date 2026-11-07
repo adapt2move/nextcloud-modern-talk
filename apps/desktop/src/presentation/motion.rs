@@ -118,7 +118,7 @@ impl Desktop {
     /// mounted only during capture and becomes static under Reduce Motion.
     pub(super) fn recording_dot(&self) -> AnyElement {
         let dot = div()
-            .size(gpui::px(8.))
+            .size(gpui::px(10.))
             .rounded_full()
             .bg(self.theme.danger);
         if self.reduced_motion {

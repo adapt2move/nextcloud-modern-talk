@@ -1656,7 +1656,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 3
             } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
                 2
-            } else if scenario == "room" {
+            } else if matches!(scenario, "room" | "prejoin") {
                 4
             } else {
                 1
@@ -2979,6 +2979,10 @@ impl NativeDesktopPort for DevelopmentPort {
                 action: talk_core::ui::messaging::MessageAction::Send { .. },
             } => {
                 if self.busy || self.snapshot.submission.is_some() {
+                    if self.busy && self.chat_ux_send_diagnostics < 4 {
+                        self.chat_ux_send_diagnostics += 1;
+                        println!("UI_BUSY send_rejected=true no_backend=true");
+                    }
                     return Err(SubmitError::Busy);
                 }
                 if self.snapshot.selected != Some(context) {
@@ -3129,8 +3133,8 @@ impl NativeDesktopPort for DevelopmentPort {
                         for file in panel.uploads.as_slice().iter().filter(|f| !f.submitted) {
                             let row = message(
                                 file.message_id(),
-                                "Fictional author",
-                                "FA",
+                                "Alex Sommer",
+                                "AS",
                                 "10:00",
                                 if first { caption.as_str() } else { "" },
                                 true,

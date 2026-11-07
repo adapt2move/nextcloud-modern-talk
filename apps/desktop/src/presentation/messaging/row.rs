@@ -89,12 +89,6 @@ impl Desktop {
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
-        let poll_message = m
-            .metadata
-            .rich
-            .as_slice()
-            .iter()
-            .any(|object| matches!(object.kind.as_str(), "poll" | "talk-poll"));
         let person_source = |name| {
             if thread {
                 crate::presentation::people_card::Source::ThreadMessage(context, m.local_id, name)
@@ -104,6 +98,8 @@ impl Desktop {
         };
         let row_id = |name, extra| surface_id(name, context, m.local_id, extra, thread);
         let action_group: gpui::SharedString = row_id("message-actions", 0).to_string().into();
+        let time_label =
+            crate::presentation::localization::display_time(self.locale, m.time_label.as_str());
         if compact_system_message(m) {
             let status = call_status(m);
             let color = if status.is_some_and(|(_, failed)| failed) {
@@ -126,7 +122,7 @@ impl Desktop {
                         row.child(self.scaled_icon(symbol, 14., color))
                     })
                     .child(self.message_text(m, thread, cx))
-                    .child(self.hint(m.time_label.as_str())),
+                    .child(self.hint(&time_label)),
             );
         }
         let upload = self
@@ -194,7 +190,7 @@ impl Desktop {
                             ),
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
-                        .child(metadata(m.time_label.as_str()))
+                        .child(metadata(&time_label))
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
                         }),
@@ -460,7 +456,7 @@ impl Desktop {
                                             .px(px(6.))
                                             .h(reaction_height)
                                             .text_color(if r.own { t.accent } else { t.muted })
-                                            .text_size(self.sp(11.))
+                                            .text_size(self.sp(12.))
                                             .line_height(self.sp(16.))
                                             .child(r.emoji.as_str().to_owned())
                                             .child(r.count.to_string()),
@@ -664,12 +660,11 @@ impl Desktop {
                     div()
                         .w(px(36.))
                         .flex_none()
-                        .text_size(self.sp(10.))
+                        .text_size(self.sp(12.))
                         .line_height(self.sp(20.))
                         .text_color(t.muted)
                         .child(
-                            m.time_label
-                                .as_str()
+                            time_label
                                 .split_whitespace()
                                 .next()
                                 .unwrap_or("")
@@ -695,7 +690,7 @@ impl Desktop {
                                         && row.title.as_str() == m.author.as_str()
                                 }).map(|row| row.presence))
                                 .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
-                            10., t.surface,
+                            36., t.surface,
                         ), cx,
                     ).into_any_element()
                 })
@@ -745,16 +740,9 @@ impl Desktop {
                                         d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
                                     })
                             })
-                            .when(!thread && (!m.own || poll_message), |d| d.top(px(8.)).right(px(8.)))
-                            .when(!thread && m.own && !poll_message, |d| {
-                                // Centre the 34 px action beside the 20 sp status.
-                                d.bottom(
-                                    px(if continuation { 3. } else { 12. }) + self.sp(10.)
-                                        - px(17.),
-                                )
-                                // Own-message status keeps the far-right column even
-                                // on compact continuations; actions sit to its left.
-                                .right(px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. }))
+                            .when(!thread, |d| { d.top(px(-20.)).right(if m.own {
+                                px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
+                            } else { px(8.) })
                             })
                             .flex()
                             .gap_1()

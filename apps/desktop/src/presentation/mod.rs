@@ -193,6 +193,9 @@ pub enum LocalAction {
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
     ToggleOwnStatus,
     EditStatusMessage,
+    ToggleStatusEmoji,
+    ToggleStatusExpiry,
+    SelectStatusEmoji(&'static str),
     BackStatusMenu,
     SaveStatusMessage,
     ClearStatusMessage,
@@ -417,6 +420,8 @@ pub struct Desktop {
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
     own_status_open: bool,
     own_status_editing: bool,
+    own_status_emoji_open: bool,
+    own_status_expiry_open: bool,
     own_status_message_input: Entity<TextInput>,
     own_status_icon_input: Entity<TextInput>,
     own_status_clear_after: talk_core::preferences::account::StatusClearAfter,
@@ -791,6 +796,8 @@ impl Desktop {
             account_preference_error: None,
             own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
             own_status_editing: development && probe == Probe::StatusMessage,
+            own_status_emoji_open: false,
+            own_status_expiry_open: false,
             own_status_message_input,
             own_status_icon_input,
             own_status_clear_after: talk_core::preferences::account::StatusClearAfter::Never,
@@ -2747,13 +2754,27 @@ impl Desktop {
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
             LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
             LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
+            LocalAction::ToggleStatusExpiry => {
+                self.own_status_expiry_open = !self.own_status_expiry_open
+            }
+            LocalAction::ToggleStatusEmoji => {
+                self.own_status_emoji_open = !self.own_status_emoji_open
+            }
+            LocalAction::SelectStatusEmoji(emoji) => {
+                self.own_status_icon_input
+                    .update(cx, |input, _| input.set_context_value(emoji));
+                self.own_status_emoji_open = false;
+            }
             LocalAction::BackStatusMenu => {
                 self.own_status_editing = false;
                 self.own_status_focus = true;
             }
             LocalAction::SaveStatusMessage => self.save_status_message(cx),
             LocalAction::ClearStatusMessage => self.clear_status_message(cx),
-            LocalAction::SelectStatusExpiry(choice) => self.own_status_clear_after = choice,
+            LocalAction::SelectStatusExpiry(choice) => {
+                self.own_status_clear_after = choice;
+                self.own_status_expiry_open = false;
+            }
             LocalAction::SelectPredefinedStatus(index) => self.select_predefined_status(index, cx),
             LocalAction::SetOwnStatus(choice) => self.set_own_status(choice, cx),
             LocalAction::ReloadAccountPreferences => self.load_account_preferences(cx),
@@ -3757,6 +3778,26 @@ impl Render for Desktop {
                 {
                     cx.stop_propagation();
                     cx.notify();
+                    return;
+                }
+                // Application settings must be routed before a focused text
+                // input can consume its modified keystroke. Keep IME and incoming
+                // call priority identical to the ordinary application handler.
+                let modifiers = event.keystroke.modifiers;
+                let primary = if cfg!(target_os = "macos") {
+                    modifiers.platform
+                } else {
+                    modifiers.control
+                };
+                if !composing
+                    && !this.incoming_visible()
+                    && event.keystroke.key == ","
+                    && primary
+                    && !modifiers.shift
+                    && !modifiers.alt
+                    && !(cfg!(target_os = "macos") && modifiers.control)
+                {
+                    this.key(event, window, cx);
                     return;
                 }
                 cx.notify();

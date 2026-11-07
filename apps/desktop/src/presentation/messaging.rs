@@ -65,6 +65,7 @@ pub(crate) enum Action {
     Translate(u128),
     HideTranslation(u128),
     CyclePin { current: u128, forward: bool },
+    TogglePinStrip,
     Schedule,
     EditScheduled(u128),
     ToggleScheduled,
@@ -1766,6 +1767,7 @@ impl Desktop {
             Action::ToggleSearch => self.toggle_conversation_search(window, cx),
             Action::CloseSearch => self.close_conversation_search(window, cx),
             Action::CyclePin { current, forward } => self.cycle_pin(context, current, forward),
+            Action::TogglePinStrip => self.toggle_pin_strip(context),
             Action::Locate(id) => {
                 self.message_ui.unread_jump = None;
                 if self.locate_message_smooth(context, id) {
@@ -2676,9 +2678,9 @@ impl Desktop {
         {
             let context = panel.context;
             body = body.child(self.hint(&format!(
-                "{} {} MiB",
+                "{} {}",
                 self.l("Maximale Dateigröße:"),
-                panel.file_limit / 1024 / 1024
+                super::localization::file_size(self.locale, Some(panel.file_limit))
             )));
             for message in panel.shared_files.as_slice() {
                 for (index, object) in message
@@ -2958,7 +2960,10 @@ impl Desktop {
                     };
                     let label = deadline
                         .and_then(|timestamp| self.settings_port.local_datetime(timestamp))
-                        .map(|time| format!("{} · {}", time.as_str(), scheduled.body.as_str()))
+                        .and_then(|time| {
+                            super::localization::local_datetime(self.locale, time.as_str())
+                        })
+                        .map(|time| format!("{} · {}", time, scheduled.body.as_str()))
                         .unwrap_or_else(|| scheduled.body.as_str().to_owned());
                     let label = if scheduled.timestamp == 0 {
                         format!("{} · {}", self.l("Senden fehlgeschlagen"), label)
@@ -2966,50 +2971,46 @@ impl Desktop {
                         label
                     };
                     let confirmed = u64::try_from(scheduled.id).is_ok();
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .pl_3()
-                        .pr_1()
-                        .py_1()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(self.sp(13.))
-                                .child(label),
-                        )
-                        .child(self.button(
-                            scoped_id("schedule-edit", context, scheduled.id, 0),
-                            "Bearbeiten",
-                            ButtonStyle::Quiet,
-                            if !scheduled.editable {
-                                Availability::when(
-                                    false,
-                                    "Dieser Text ist für die Bearbeitung zu lang.",
-                                )
-                            } else {
-                                self.message_available(MessageFeature::Schedules)
-                            },
-                            LocalAction::MessageIn(context, Action::EditScheduled(scheduled.id)),
-                            cx,
-                        ))
-                        .child(self.button(
-                            scoped_id("schedule-cancel", context, scheduled.id, 0),
-                            "Planung abbrechen",
-                            ButtonStyle::Quiet,
-                            if !confirmed {
-                                Availability::when(false, "Die Planung wird noch gespeichert.")
-                            } else {
-                                self.message_available(MessageFeature::Schedules)
-                            },
-                            LocalAction::MessageIn(
-                                context,
-                                Action::Command(MessageAction::CancelScheduled(scheduled.id)),
-                            ),
-                            cx,
-                        ))
+                    self.composer_list_row(
+                        label,
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(self.button(
+                                scoped_id("schedule-edit", context, scheduled.id, 0),
+                                "Bearbeiten",
+                                ButtonStyle::Quiet,
+                                if !scheduled.editable {
+                                    Availability::when(
+                                        false,
+                                        "Dieser Text ist für die Bearbeitung zu lang.",
+                                    )
+                                } else {
+                                    self.message_available(MessageFeature::Schedules)
+                                },
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::EditScheduled(scheduled.id),
+                                ),
+                                cx,
+                            ))
+                            .child(self.button(
+                                scoped_id("schedule-cancel", context, scheduled.id, 0),
+                                "Planung abbrechen",
+                                ButtonStyle::Quiet,
+                                if !confirmed {
+                                    Availability::when(false, "Die Planung wird noch gespeichert.")
+                                } else {
+                                    self.message_available(MessageFeature::Schedules)
+                                },
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::Command(MessageAction::CancelScheduled(scheduled.id)),
+                                ),
+                                cx,
+                            )),
+                    )
                 })
                 .collect();
             if !scheduled.is_empty() {
@@ -3024,7 +3025,10 @@ impl Desktop {
                     self.composer_list_row(
                         self.settings_port
                             .local_datetime(reminder.timestamp)
-                            .map(|time| format!("{} · {}", self.l("Erinnerung"), time.as_str()))
+                            .and_then(|time| {
+                                super::localization::local_datetime(self.locale, time.as_str())
+                            })
+                            .map(|time| format!("{} · {}", self.l("Erinnerung"), time))
                             .unwrap_or_else(|| self.l("Erinnerung").to_owned()),
                         self.button(
                             ("reminder-cancel", reminder.message as usize),

@@ -60,12 +60,14 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Este formato de imagen no es compatible.",
     ),
     ("Eine Ebene nach oben", "Up one level", "Subir un nivel"),
+    ("Erstellen", "Create", "Crear"),
     (
         "Für diesen Bereich sind offline keine Dateien gespeichert.",
         "No files are saved offline for this location.",
         "No hay archivos guardados sin conexión para esta ubicación.",
     ),
     ("Größe", "Size", "Tamaño"),
+    ("Hochladen", "Upload", "Subir"),
     (
         "In NextCloud öffnen",
         "Open in NextCloud",
@@ -83,15 +85,22 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Ordner auswählen", "Choose folder", "Elegir carpeta"),
     ("Sortieren nach", "Sort by", "Ordenar por"),
+    ("Sortieren: {name}", "Sort: {name}", "Ordenar: {name}"),
     (
         "Sortierung gilt für diese Seite.",
         "Sorting applies to this page.",
         "La ordenación se aplica a esta página.",
     ),
+    ("Suche löschen", "Clear search", "Borrar búsqueda"),
     (
         "Vom Computer hochladen",
         "Upload from computer",
         "Subir desde el ordenador",
+    ),
+    (
+        "Wähle mindestens eine Datei aus.",
+        "Select at least one file.",
+        "Selecciona al menos un archivo.",
     ),
     ("Zuletzt", "Recent", "Recientes"),
     (

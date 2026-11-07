@@ -50,6 +50,8 @@ impl Desktop {
         self.own_status_clear_after = StatusClearAfter::Never;
         self.own_status_message_error = false;
         self.own_status_editing = true;
+        self.own_status_emoji_open = false;
+        self.own_status_expiry_open = false;
         self.own_status_message_input.focus_handle(cx).focus(window);
     }
 
@@ -210,97 +212,24 @@ impl Desktop {
                     .trim()
                     .is_empty();
         let can_save = ready && (has_draft || self.visible_status_message().is_some());
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_size(self.sp(13.))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(self.l("Statusnachricht")),
-                    )
-                    .child(self.icon_button(
-                        "status-message-back",
-                        ("x", "Zurück"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::BackStatusMenu,
-                        cx,
-                    )),
-            )
-            .child(
-                self.input_surface(&self.own_status_message_input, cx)
-                    .child(self.own_status_message_input.clone()),
-            );
-        if values.is_some_and(|v| v.user_status_emoji == Some(true)) {
-            body = body.child(
-                self.input_surface(&self.own_status_icon_input, cx)
-                    .child(self.own_status_icon_input.clone()),
-            );
-        }
-        if self.own_status_message_error {
-            body = body.child(
-                self.hint(self.l("Bitte verwende höchstens 80 Zeichen und keine Zeilenumbrüche.")),
-            );
-        }
-        body = body.child(self.hint(self.l("Status löschen nach"))).child(
-            div().flex().flex_wrap().gap_1().children(
-                [
-                    (StatusClearAfter::Never, "Nie"),
-                    (StatusClearAfter::ThirtyMinutes, "30 Minuten"),
-                    (StatusClearAfter::OneHour, "1 Stunde"),
-                    (StatusClearAfter::FourHours, "4 Stunden"),
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(i, (choice, label))| {
-                    self.button(
-                        ("status-expiry", i),
-                        label,
-                        if choice == self.own_status_clear_after {
-                            ButtonStyle::Secondary
-                        } else {
-                            ButtonStyle::Quiet
-                        },
-                        ready,
-                        LocalAction::SelectStatusExpiry(choice),
-                        cx,
-                    )
-                    .when(choice == self.own_status_clear_after, |d| {
-                        d.border_1().border_color(t.accent)
-                    })
-                }),
-            ),
-        );
-        body = body.child(
+        let mut body = div().flex().flex_col().gap_2().p_3().child(
             div()
                 .flex()
-                .gap_1()
-                .child(self.button(
-                    "save-status-message",
-                    "Speichern",
-                    ButtonStyle::Primary,
-                    Availability::when(can_save, "Kein Status gesetzt."),
-                    LocalAction::SaveStatusMessage,
-                    cx,
-                ))
-                .child(self.button(
-                    "clear-status-message",
-                    "Entfernen",
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_size(self.sp(13.))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(self.l("Statusnachricht")),
+                )
+                .child(self.icon_button(
+                    "status-message-back",
+                    ("x", "Zurück"),
                     ButtonStyle::Quiet,
-                    Availability::when(
-                        ready && self.visible_status_message().is_some(),
-                        "Kein Status gesetzt.",
-                    ),
-                    LocalAction::ClearStatusMessage,
+                    Availability::available(),
+                    LocalAction::BackStatusMenu,
                     cx,
                 )),
         );
@@ -328,17 +257,148 @@ impl Desktop {
                 );
             }
         }
-        div()
+        body = body.child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_h(px(40.))
+                .rounded(px(8.))
+                .border_1()
+                .border_color(t.input_border)
+                .bg(t.subtle)
+                .when(
+                    values.is_some_and(|v| v.user_status_emoji == Some(true)),
+                    |d| {
+                        let icon = self.own_status_icon_input.read(cx).content.clone();
+                        d.child(
+                            self.button(
+                                "status-emoji-picker",
+                                if icon.is_empty() {
+                                    "💬".to_owned()
+                                } else {
+                                    icon.to_string()
+                                },
+                                ButtonStyle::Quiet,
+                                ready,
+                                LocalAction::ToggleStatusEmoji,
+                                cx,
+                            )
+                            .min_h(px(32.))
+                            .px_1(),
+                        )
+                    },
+                )
+                .child(
+                    self.input_surface(&self.own_status_message_input, cx)
+                        .flex_1()
+                        .border_0()
+                        .child(self.own_status_message_input.clone()),
+                ),
+        );
+        if self.own_status_emoji_open {
+            body = body.child(
+                div().flex().flex_wrap().gap_1().children(
+                    ["💬", "😊", "🏠", "🎯", "☕", "🌴"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, emoji)| {
+                            self.button(
+                                ("status-emoji", i),
+                                emoji,
+                                ButtonStyle::Quiet,
+                                ready,
+                                LocalAction::SelectStatusEmoji(emoji),
+                                cx,
+                            )
+                        }),
+                ),
+            );
+        }
+        if self.own_status_message_error {
+            body = body.child(
+                self.hint(self.l("Bitte verwende höchstens 80 Zeichen und keine Zeilenumbrüche.")),
+            );
+        }
+        let expiry_label = match self.own_status_clear_after {
+            StatusClearAfter::Never => "Nie",
+            StatusClearAfter::ThirtyMinutes => "30 Minuten",
+            StatusClearAfter::OneHour => "1 Stunde",
+            StatusClearAfter::FourHours => "4 Stunden",
+        };
+        body = body
+            .child(
+                self.button(
+                    "status-expiry-toggle",
+                    self.lf("Löschen nach: {time}", &[("time", self.l(expiry_label))]),
+                    ButtonStyle::Secondary,
+                    ready,
+                    LocalAction::ToggleStatusExpiry,
+                    cx,
+                )
+                .child(self.scaled_icon("chevron-down", 16., t.muted)),
+            )
+            .when(self.own_status_expiry_open, |body| {
+                body.child(
+                    div().flex().flex_wrap().gap_1().children(
+                        [
+                            (StatusClearAfter::Never, "Nie"),
+                            (StatusClearAfter::ThirtyMinutes, "30 Minuten"),
+                            (StatusClearAfter::OneHour, "1 Stunde"),
+                            (StatusClearAfter::FourHours, "4 Stunden"),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, (choice, label))| {
+                            self.button(
+                                ("status-expiry", i),
+                                label,
+                                if choice == self.own_status_clear_after {
+                                    ButtonStyle::Secondary
+                                } else {
+                                    ButtonStyle::Quiet
+                                },
+                                ready,
+                                LocalAction::SelectStatusExpiry(choice),
+                                cx,
+                            )
+                        }),
+                    ),
+                )
+            });
+        body = body.child(
+            div()
+                .flex()
+                .gap_1()
+                .child(self.button(
+                    "save-status-message",
+                    "Speichern",
+                    ButtonStyle::Primary,
+                    Availability::when(can_save, "Kein Status gesetzt."),
+                    LocalAction::SaveStatusMessage,
+                    cx,
+                ))
+                .when(self.visible_status_message().is_some(), |d| {
+                    d.child(self.button(
+                        "clear-status-message",
+                        "Entfernen",
+                        ButtonStyle::Quiet,
+                        Availability::when(
+                            ready && self.visible_status_message().is_some(),
+                            "Kein Status gesetzt.",
+                        ),
+                        LocalAction::ClearStatusMessage,
+                        cx,
+                    ))
+                }),
+        );
+        self.context_menu_surface()
             .absolute()
             .bottom(px(58.))
             .left_0()
             .right_0()
             .occlude()
             .rounded(px(12.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .shadow_lg()
             .child(
                 self.scroll_area(super::navigation::Region::Overlay)
                     .max_h(px(480.))

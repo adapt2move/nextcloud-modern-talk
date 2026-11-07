@@ -12,6 +12,16 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Angeheftet", "Pinned", "Fijado"),
     (
+        "Angeheftete Nachricht anzeigen",
+        "Show pinned message",
+        "Mostrar mensaje fijado",
+    ),
+    (
+        "Angeheftete Nachricht einklappen",
+        "Collapse pinned message",
+        "Contraer mensaje fijado",
+    ),
+    (
         "Angeheftete Nachricht lösen",
         "Unpin message",
         "Desfijar mensaje",

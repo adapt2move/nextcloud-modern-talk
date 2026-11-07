@@ -5,6 +5,64 @@ use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 12.;
 
 impl Desktop {
+    pub(in crate::presentation) fn dialog_scrim(&self) -> Div {
+        div()
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(self.theme.scrim)
+            .flex()
+    }
+
+    pub(in crate::presentation) fn selected_row_color(
+        &self,
+        selected: bool,
+        fallback: gpui::Hsla,
+    ) -> gpui::Hsla {
+        if selected {
+            self.theme.selected
+        } else {
+            fallback
+        }
+    }
+
+    /// Common opaque dialog panel; callers own geometry, contents and focus.
+    pub(in crate::presentation) fn dialog_shell_surface(&self) -> Div {
+        self.style_dialog_shell(div())
+    }
+    pub(in crate::presentation) fn style_dialog_shell<T: Styled>(&self, surface: T) -> T {
+        surface
+            .bg(self.theme.surface)
+            .rounded(px(13.))
+            .border_1()
+            .border_color(self.theme.border)
+            .shadow_lg()
+    }
+    pub(in crate::presentation) fn dialog_header(&self) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_4()
+            .py_4()
+            .border_b_1()
+            .border_color(self.theme.border)
+    }
+    pub(in crate::presentation) fn dialog_footer(&self) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_end()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .border_t_1()
+            .border_color(self.theme.border)
+    }
     pub(in crate::presentation) fn context_menu_surface(&self) -> Div {
         div()
             .flex()

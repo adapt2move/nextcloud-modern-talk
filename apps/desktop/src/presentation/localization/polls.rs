@@ -67,9 +67,34 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede reproducir la grabación aquí.",
     ),
     (
+        "Die Berechtigung ist derzeit nicht verfügbar.",
+        "Permission is currently unavailable.",
+        "El permiso no está disponible en este momento.",
+    ),
+    (
+        "Die Option ist bereits an erster Stelle.",
+        "The option is already first.",
+        "La opción ya está en primer lugar.",
+    ),
+    (
+        "Die Option ist bereits an letzter Stelle.",
+        "The option is already last.",
+        "La opción ya está en último lugar.",
+    ),
+    (
+        "Die Stimmenzahl entspricht bereits der Anzahl der Optionen.",
+        "The vote limit already matches the number of options.",
+        "El límite de votos ya coincide con el número de opciones.",
+    ),
+    (
         "Die Umfrage konnte nicht beendet werden. Bitte erneut versuchen.",
         "The poll could not be closed. Please try again.",
         "No se pudo finalizar la encuesta. Inténtalo de nuevo.",
+    ),
+    (
+        "Die maximale Anzahl an Optionen ist erreicht.",
+        "The maximum number of options has been reached.",
+        "Se ha alcanzado el número máximo de opciones.",
     ),
     (
         "Diesen Entwurf löschen?",
@@ -106,6 +131,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Introduce una pregunta.",
     ),
     (
+        "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein.",
+        "Enter a question and at least two distinct options.",
+        "Introduce una pregunta y al menos dos opciones distintas.",
+    ),
+    (
         "Höchstens {n} Stimmen",
         "At most {n} votes",
         "Hasta {n} votos",
@@ -132,6 +162,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen.",
         "Microphone access denied. Allow access in system settings.",
         "Acceso al micrófono denegado. Permítelo en los ajustes del sistema.",
+    ),
+    (
+        "Mindestens zwei Antwortoptionen sind erforderlich.",
+        "At least two answer options are required.",
+        "Se requieren al menos dos opciones de respuesta.",
     ),
     ("Nach oben", "Move up", "Subir"),
     ("Nach unten", "Move down", "Bajar"),
@@ -163,6 +198,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     ("Stimme zurückziehen", "Withdraw vote", "Retirar voto"),
+    ("Stimmen anzeigen", "Show voters", "Mostrar votantes"),
+    ("Stimmen ausblenden", "Hide voters", "Ocultar votantes"),
+    (
+        "Teilnehmende können mehr als eine Antwort wählen.",
+        "Participants can choose more than one answer.",
+        "Los participantes pueden elegir más de una respuesta.",
+    ),
     (
         "Umfrage erneut prüfen",
         "Check poll again",

@@ -693,6 +693,7 @@ impl Desktop {
     pub(crate) fn close_room_dialog_state(&mut self) {
         self.cancel_member_csv_pick();
         self.room_ui.confirmation = None;
+        self.room_ui.avatar_picker_open = false;
         self.room_ui.members.reset();
         self.room_ui.pending_member_focus = None;
     }
@@ -931,7 +932,7 @@ impl Desktop {
                                         30.,
                                     ),
                                     member.presence,
-                                    10.,
+                                    30.,
                                     self.theme.surface,
                                 ))
                                 .child(

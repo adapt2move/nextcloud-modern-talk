@@ -46,6 +46,13 @@
       "transformation": "none"
     },
     {
+      "asset": "bar-chart-2.svg",
+      "upstream_path": "icons/chart-no-axes-column.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chart-no-axes-column.svg",
+      "sha256": "4276b34a07295ac22ebb09687bdec9cb9683547bf8d56969166e19a6a13fbdd7",
+      "transformation": "none"
+    },
+    {
       "asset": "bell-off.svg",
       "upstream_path": "icons/bell-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell-off.svg",
@@ -113,6 +120,13 @@
       "upstream_path": "icons/clock.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/clock.svg",
       "sha256": "ede96d40554848eaa512664b11e73def3960cd60c260efa59ca9ccc1bbe8ec9c",
+      "transformation": "none"
+    },
+    {
+      "asset": "cloud-off.svg",
+      "upstream_path": "icons/cloud-off.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/cloud-off.svg",
+      "sha256": "0d11a5038ae6eab3514a6c557516c55f47e199086772c6024f321b7469c13484",
       "transformation": "none"
     },
     {

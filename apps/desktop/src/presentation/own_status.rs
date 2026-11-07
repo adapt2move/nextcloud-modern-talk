@@ -185,17 +185,14 @@ impl Desktop {
                 _ => None,
             })
         });
-        let mut menu = div()
+        let mut menu = self
+            .context_menu_surface()
             .absolute()
             .bottom(px(58.))
             .left_0()
             .right_0()
             .occlude()
             .rounded(px(12.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .shadow_lg()
             .p_2()
             .flex()
             .flex_col()
@@ -294,7 +291,7 @@ impl Desktop {
                 })
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| self.l("Statusnachricht festlegen").to_owned());
-            menu = menu.child(
+            menu = menu.child(div().h(px(1.)).bg(t.border)).child(
                 self.button(
                     "edit-status-message",
                     "",
@@ -306,6 +303,7 @@ impl Desktop {
                 .w_full()
                 .justify_start()
                 .px_2()
+                .child(self.scaled_icon("chat", 16., t.muted))
                 .child(div().min_w_0().text_ellipsis().child(label)),
             );
         }

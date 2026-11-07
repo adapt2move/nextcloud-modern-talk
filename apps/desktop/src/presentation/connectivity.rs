@@ -1,6 +1,6 @@
 //! Notice timing only. Raw reachability still governs admission and queued work.
 use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{Context, Div, prelude::*, px};
 use std::time::{Duration, Instant};
 use talk_core::ui::{
     AccountScope,
@@ -133,35 +133,28 @@ impl Desktop {
         let (label, detail) = failure
             .map(super::state::connection_failure_copy)
             .unwrap_or(("Offline", ""));
-        let tint = if failure.is_some() {
-            self.theme.danger
-        } else {
-            self.theme.muted
-        };
         let availability = Availability::available().help(detail);
         let id = super::controls::scoped_id("connection-retry", context, 0, 0);
-        div()
-            .min_h(px(28.))
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_size(self.sp(12.))
-            .line_height(self.sp(18.))
-            .text_color(tint)
-            .child(self.scaled_icon(if failure.is_some() { "info" } else { "cloud" }, 14., tint))
-            .child(div().flex_1().min_w_0().child(self.l(label)))
-            .child(
-                self.icon_button(
-                    id,
-                    ("refresh", "Erneut laden"),
-                    ButtonStyle::Quiet,
-                    availability,
-                    LocalAction::Intent(UiIntent::Refresh(context)),
-                    cx,
-                )
-                .size(px(28.))
-                .min_h(px(28.)),
+        self.banner(
+            if failure.is_some() {
+                super::controls::BannerRole::Error
+            } else {
+                super::controls::BannerRole::Warning
+            },
+            self.l(label),
+        )
+        .child(
+            self.icon_button(
+                id,
+                ("refresh", "Erneut laden"),
+                ButtonStyle::Quiet,
+                availability,
+                LocalAction::Intent(UiIntent::Refresh(context)),
+                cx,
             )
+            .size(px(28.))
+            .min_h(px(28.)),
+        )
     }
 }
 

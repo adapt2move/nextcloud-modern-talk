@@ -101,7 +101,7 @@ impl Desktop {
                             )
                             .child(
                                 div()
-                                    .text_size(self.sp(11.))
+                                    .text_size(self.sp(12.))
                                     .text_color(t.muted)
                                     .child(status),
                             ),

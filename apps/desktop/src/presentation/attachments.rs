@@ -35,7 +35,11 @@ impl Render for DragLabel {
 pub(super) fn previewable(object: &RichObject) -> bool {
     matches!(object.mime_type.as_ref().map(|mime| mime.as_str()), Some(mime) if mime.starts_with("image/") || mime == "video/mp4" || mime == "video/webm" || mime == "application/pdf")
 }
-pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
+pub(super) fn file_detail(
+    locale: talk_core::preferences::Locale,
+    name: &str,
+    bytes: Option<u64>,
+) -> String {
     let extension = name
         .rsplit_once('.')
         .map(|(_, extension)| extension)
@@ -47,11 +51,10 @@ pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
         .unwrap_or("FILE")
         .to_ascii_uppercase();
     match bytes {
-        Some(bytes) if bytes >= 1024 * 1024 => {
-            format!("{extension} · {:.1} MiB", bytes as f64 / (1024. * 1024.))
-        }
-        Some(bytes) if bytes >= 1024 => format!("{extension} · {:.1} KiB", bytes as f64 / 1024.),
-        Some(bytes) => format!("{extension} · {bytes} B"),
+        Some(_) => format!(
+            "{extension} · {}",
+            super::localization::file_size(locale, bytes)
+        ),
         None => extension,
     }
 }
@@ -113,7 +116,8 @@ impl Desktop {
             }
             super::input::PastedContent::Image(extension, image) => (extension, image),
         };
-        if let Ok(name) = Text::new(&format!("clipboard.{extension}")) {
+        let name = self.lf("Zwischenablage.{extension}", &[("extension", extension)]);
+        if let Ok(name) = Text::new(&name) {
             self.submit_message(MessageAction::StageClipboardImage {
                 name,
                 image: image.clone(),
@@ -339,7 +343,11 @@ impl Desktop {
                                 .text_size(self.sp(13.))
                                 .child(source.name.as_str().to_owned()),
                         )
-                        .child(self.hint(&file_detail(source.name.as_str(), source.size))),
+                        .child(self.hint(&file_detail(
+                            self.locale,
+                            source.name.as_str(),
+                            source.size,
+                        ))),
                 ),
             )
             .child(self.attachment_download(reference, group, cx))
