@@ -306,7 +306,8 @@ impl Desktop {
                             .conversation_panel
                             .as_ref()
                             .filter(|p| {
-                                p.context.account == call.scope.account
+                                !p.details_stale
+                                    && p.context.account == call.scope.account
                                     && p.context.conversation == call.scope.conversation
                             })
                             .and_then(|p| p.details.as_ref())
