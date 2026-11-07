@@ -2197,8 +2197,10 @@ impl Desktop {
             self.freeze_for_update(window, cx);
             cx.notify();
             cx.stop_propagation();
-        } else if self.overlay.is_none()
-            && self.prejoin.is_none()
+        } else if matches!(
+            self.overlay,
+            None | Some(Overlay::CallParticipants | Overlay::CallChat)
+        ) && self.prejoin.is_none()
             && !self.incoming_visible()
             && !self.text_input_focused(window, cx)
             && registry_modifiers == Some(Modifiers::None)
