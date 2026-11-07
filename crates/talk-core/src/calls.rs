@@ -107,6 +107,7 @@ pub struct CallSession {
     consent_required: Option<bool>,
     accepted: bool,
     joined: bool,
+    existing_required: bool,
     grant: Option<Grant>,
 }
 impl CallSession {
@@ -127,8 +128,21 @@ impl CallSession {
             consent_required: None,
             accepted: false,
             joined: false,
+            existing_required: false,
             grant: None,
         })
+    }
+    /// A replaced signaling session gets fresh admission, never authority to
+    /// start a call that ended while disconnected. Consent/source choice retire.
+    pub fn recover(scope: CallScope, entry: Entry, mut wishes: MediaWishes) -> Result<Self, Gate> {
+        let mut call = Self::new(scope, entry)?;
+        wishes.screen = false;
+        call.accept(scope, wishes)?;
+        // Group-audio's initial camera-off default must not erase a camera
+        // choice the user made later in the already accepted call.
+        call.wishes = wishes;
+        call.existing_required = true;
+        Ok(call)
     }
     pub fn scope(&self) -> CallScope {
         self.scope
@@ -206,11 +220,11 @@ impl CallSession {
         Ok(())
     }
     /// Observed control loss invalidates admission immediately, not at a new
-    /// sliding deadline. Recovery never revives a microphone, camera or share.
+    /// sliding deadline. Mute/camera intent is retained; screen selection ends.
     pub fn disconnected(&mut self, scope: CallScope) -> Result<(), Gate> {
         self.check_live(scope)?;
         self.grant = None;
-        self.wishes = MediaWishes::default();
+        self.wishes.screen = false;
         self.phase = Phase::Reconnecting;
         Ok(())
     }
@@ -267,6 +281,12 @@ impl CallSession {
         let result = self.resolve(inputs, call_exists, support, devices, now);
         match result {
             Ok(grant) => {
+                // Source choice is not durable intent. Once policy or a device
+                // session narrows it away, a later permissive refresh cannot
+                // reopen a picker or republish the old source.
+                if !grant.publication().screen {
+                    self.wishes.screen = false;
+                }
                 self.grant = Some(grant);
                 if matches!(self.phase, Phase::Waiting(_) | Phase::Reconnecting) {
                     self.phase = Phase::Connecting;
@@ -275,7 +295,7 @@ impl CallSession {
             }
             Err(gate) => {
                 self.grant = None;
-                if self.accepted {
+                if self.accepted && self.phase != Phase::Ended {
                     self.phase = Phase::Waiting(gate);
                 }
                 Err(gate)
@@ -343,7 +363,10 @@ impl CallSession {
         {
             return Err(Gate::CallForbidden);
         }
-        if self.entry == Entry::IncomingDirect && !exists {
+        if (self.entry == Entry::IncomingDirect || self.existing_required) && !exists {
+            self.grant = None;
+            self.wishes = MediaWishes::default();
+            self.phase = Phase::Ended;
             return Err(Gate::CallEnded);
         }
         if room.lobby_closed && !room.permissions.bypass_lobby {
@@ -389,6 +412,7 @@ impl CallSession {
             screen: self.wishes.screen
                 && devices.screen_session
                 && support.screen
+                && config.video_supported
                 && room.permissions.publish_screen,
         };
         Ok(Grant {
@@ -417,6 +441,8 @@ pub enum Command {
     Reconnect(CallScope),
     Stop(CallScope),
     Observe(CallScope),
+    StartScreenShare(CallScope),
+    StopScreenShare(CallScope),
 }
 impl Command {
     pub fn scope(&self) -> CallScope {
@@ -425,7 +451,9 @@ impl Command {
             Self::Consent(call)
             | Self::Reconnect(call)
             | Self::Stop(call)
-            | Self::Observe(call) => *call,
+            | Self::Observe(call)
+            | Self::StartScreenShare(call)
+            | Self::StopScreenShare(call) => *call,
         }
     }
 }
@@ -449,6 +477,8 @@ pub struct MediaCounters {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Snapshot {
+    /// Retained user intent, distinct from current device/publication state.
+    pub wishes: MediaWishes,
     pub call: CallScope,
     pub entry: Entry,
     pub participants: crate::bounded::Page<Participant, 16>,
@@ -456,14 +486,45 @@ pub struct Snapshot {
     pub microphone: DeviceState,
     pub camera: DeviceState,
     pub screen: DeviceState,
+    pub sharing: SharingState,
     pub peers: u16,
     pub recording: RecordingState,
     pub counters: MediaCounters,
     pub revision: u64,
 }
 
+/// Source choice belongs to a single explicit share attempt. Sharing requires
+/// an encoded frame written to the screen connection; control readiness alone
+/// never makes capture live.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SharingState {
+    #[default]
+    Idle,
+    Choosing,
+    Starting,
+    Sharing,
+    Failed(ShareFailure),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShareFailure {
+    Unavailable,
+    Cancelled,
+    SourceClosed,
+    TimedOut,
+    PermissionDenied,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StreamKind {
+    #[default]
+    Camera,
+    Screen,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Participant {
+    pub participant: u128,
+    pub kind: StreamKind,
+    pub dimensions: Option<(u32, u32)>,
+    pub flowing: bool,
     pub local: u128,
     pub name: crate::bounded::Text<256>,
     pub microphone: bool,
@@ -720,7 +781,7 @@ mod tests {
         );
     }
     #[test]
-    fn reconnect_does_not_revive_capture_and_end_is_irreversible() {
+    fn continuity_preserves_requested_media_and_end_is_irreversible() {
         let mut c = accepted(Entry::OutgoingDirect);
         c.advance(&inputs(), exists(), support(), devices(), now(100))
             .unwrap();
@@ -730,12 +791,106 @@ mod tests {
         let g = c
             .advance(&inputs(), exists(), support(), devices(), now(101))
             .unwrap();
-        assert_eq!(g.publication(), MediaWishes::default());
+        assert_eq!(
+            g.publication(),
+            MediaWishes {
+                microphone: true,
+                camera: true,
+                screen: false
+            }
+        );
         c.ended(scope()).unwrap();
         assert_eq!(
             c.advance(&inputs(), exists(), support(), devices(), now(102)),
             Err(Gate::CallEnded)
         );
+    }
+    #[test]
+    fn screen_permission_restoration_does_not_restore_a_retired_share() {
+        let mut c = accepted(Entry::PreparedConference);
+        let mut p = inputs();
+        c.advance(&p, exists(), support(), devices(), now(100))
+            .unwrap();
+        if let Observed::Known { value, .. } = &mut p.room {
+            value.permissions.publish_screen = false;
+        }
+        assert!(
+            !c.advance(&p, exists(), support(), devices(), now(101))
+                .unwrap()
+                .publication()
+                .screen
+        );
+        assert!(!c.wishes().screen);
+        if let Observed::Known { value, .. } = &mut p.room {
+            value.permissions.publish_screen = true;
+        }
+        assert!(
+            !c.advance(&p, exists(), support(), devices(), now(102))
+                .unwrap()
+                .publication()
+                .screen
+        );
+    }
+    #[test]
+    fn replacement_requires_an_existing_call_and_cannot_transfer_source_or_consent() {
+        let mut c = CallSession::recover(
+            scope(),
+            Entry::GroupAudio,
+            MediaWishes {
+                microphone: false,
+                camera: true,
+                screen: true,
+            },
+        )
+        .unwrap();
+        assert!(!c.wishes().microphone);
+        assert!(c.wishes().camera);
+        assert!(!c.wishes().screen);
+        assert!(!c.recording_consent());
+        c.advance(&inputs(), exists(), support(), devices(), now(100))
+            .unwrap();
+        assert_eq!(
+            c.advance(
+                &inputs(),
+                known(false, Source::Conversation, 0),
+                support(),
+                devices(),
+                now(101)
+            ),
+            Err(Gate::CallEnded)
+        );
+        assert_eq!(c.phase(), Phase::Ended);
+        assert_eq!(c.wishes(), MediaWishes::default());
+        // Even a later new call in that room cannot revive this generation.
+        assert_eq!(
+            c.advance(&inputs(), exists(), support(), devices(), now(102)),
+            Err(Gate::CallEnded)
+        );
+    }
+    #[test]
+    fn reconnect_preserves_muted_intent_and_never_restarts_screen() {
+        let mut c = accepted(Entry::PreparedConference);
+        c.set_wishes(
+            scope(),
+            MediaWishes {
+                microphone: false,
+                camera: false,
+                screen: true,
+            },
+        )
+        .unwrap();
+        c.advance(&inputs(), exists(), support(), devices(), now(100))
+            .unwrap();
+        c.joined(scope()).unwrap();
+        c.disconnected(scope()).unwrap();
+        assert_eq!(c.wishes(), MediaWishes::default());
+        assert_eq!(c.phase(), Phase::Reconnecting);
+        let grant = c
+            .advance(&inputs(), exists(), support(), devices(), now(101))
+            .unwrap();
+        assert_eq!(grant.publication(), MediaWishes::default());
+        c.end(scope()).unwrap();
+        assert!(c.disconnected(scope()).is_err());
     }
     #[test]
     fn wrong_source_and_old_scope_never_revalidate() {

@@ -11,7 +11,7 @@ apt-get install -y --no-install-recommends build-essential pkg-config clang lld 
   libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev \
   libfontconfig1-dev libfreetype6-dev libssl-dev libdbus-1-dev libglib2.0-dev dbus-x11 \
   libasound2-dev libpulse-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-pipewire
 if [[ $# -eq 1 ]]; then
   exit 0
 fi

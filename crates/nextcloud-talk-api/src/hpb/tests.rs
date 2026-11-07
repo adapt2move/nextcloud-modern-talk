@@ -68,14 +68,18 @@ fn state(binding: AccountBinding) -> Shared {
             mcu: true,
             generation: 1,
             room: Some(Room {
+                replaced: Arc::new(AtomicBool::new(false)),
                 token: room(),
                 own: peer("talk-own"),
                 generation: 1,
                 cancellation: Cancellation::default(),
                 joined: true,
                 members: Vec::new(),
+                in_call: Vec::new(),
+                subscription_requests: Vec::new(),
                 selected: Vec::new(),
-                retired: Vec::new(),
+                retired_screens: Vec::with_capacity(32),
+                retired_subscriptions: Vec::with_capacity(64),
                 signals: VecDeque::new(),
                 signal_bytes: 0,
             }),
@@ -264,6 +268,112 @@ async fn typed_drain_is_scoped_and_internal_mode_is_explicit() {
 }
 
 #[test]
+fn only_current_correlated_subscription_denial_is_recoverable() {
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    {
+        let mut state = shared.state.lock().unwrap();
+        let room = state.room.as_mut().unwrap();
+        room.subscription_requests = vec!["old".into(), "current".into()];
+        room.selected.push(Selection {
+            request_id: Some("current".into()),
+            stream: StreamKind::Screen,
+            talk: peer("talk-other"),
+            sfu: peer("hpb-other"),
+            sid: None,
+            publisher: false,
+        });
+    }
+    let denied = |id: &str| json!({"id":id,"type":"error","error":{"code":"not_allowed"}});
+    shared.incoming(&denied("old")).unwrap();
+    assert!(
+        shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .is_empty()
+    );
+    shared.incoming(&denied("current")).unwrap();
+    shared.incoming(&denied("current")).unwrap();
+    {
+        let state = shared.state.lock().unwrap();
+        let room = state.room.as_ref().unwrap();
+        assert_eq!(room.signals.len(), 1);
+        assert!(
+            matches!(&room.signals[0].1, Event::SubscriptionRejected { from, stream: StreamKind::Screen } if from == &peer("talk-other"))
+        );
+        assert!(!room.cancellation.is_cancelled());
+    }
+    assert_eq!(
+        shared.incoming(&denied("unrelated")),
+        Err(ErrorKind::PermissionDenied)
+    );
+    assert_eq!(
+        shared.incoming(&json!({"id":"current","type":"error","error":{"code":"auth_failed"}})),
+        Err(ErrorKind::PermissionDenied)
+    );
+}
+
+#[test]
+fn room_mapping_waits_for_both_hpb_call_sessions_and_handles_event_order() {
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    let update = |users: Value| json!({"type":"event","event":{"target":"participants","type":"update","update":{"roomid":"testroom","users":users}}});
+    shared
+        .incoming(&update(json!([{"sessionId":"hpb-other","inCall":7}])))
+        .unwrap();
+    shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    {
+        let state = shared.state.lock().unwrap();
+        assert!(
+            state
+                .room
+                .as_ref()
+                .unwrap()
+                .signals
+                .iter()
+                .all(|(_, e)| !matches!(e, Event::SfuMembership(m) if !m.is_empty()))
+        );
+    }
+    shared
+        .incoming(&update(
+            json!([{"sessionId":"hpb-own","inCall":true},{"sessionId":"hpb-other","inCall":7}]),
+        ))
+        .unwrap();
+    {
+        let mut state = shared.state.lock().unwrap();
+        let room = state.room.as_mut().unwrap();
+        assert!(
+            room.signals
+                .iter()
+                .any(|(_, e)| matches!(e, Event::SfuMembership(m) if m == &[peer("talk-other")]))
+        );
+        assert!(room.selected.is_empty()); // Still no REST admission.
+        room.signals.clear();
+        room.signal_bytes = 0;
+    }
+    shared
+        .incoming(&update(
+            json!([{"sessionId":"hpb-own","inCall":1},{"sessionId":"hpb-other","inCall":0}]),
+        ))
+        .unwrap();
+    let state = shared.state.lock().unwrap();
+    assert!(
+        state
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .any(|(_, e)| matches!(e, Event::SfuMembership(m) if m.is_empty()))
+    );
+}
+
+#[test]
 fn mapping_never_selects_media_and_sfu_supplied_sid_is_required() {
     let (_client, binding, _) = account();
     let shared = state(binding);
@@ -291,10 +401,12 @@ fn mapping_never_selects_media_and_sfu_supplied_sid_is_required() {
                 .any(|(_, e)| matches!(e, Event::Signal { .. }))
         );
         room.selected.push(Selection {
+            stream: StreamKind::Camera,
             talk: peer("talk-other"),
             sfu: peer("hpb-other"),
             sid: None,
             publisher: false,
+            request_id: None,
         });
     }
     shared.incoming(&offer("sfu-created-sid")).unwrap();
@@ -502,6 +614,7 @@ async fn resume_preserves_current_route_but_lost_session_never_rejoins() {
     lose.send(()).unwrap();
     fresh_seen.await.unwrap();
     assert!(route.is_closed());
+    assert!(route.session_replaced());
     assert!(handle.shared.state.lock().unwrap().room.is_none());
     server.await.unwrap();
 }
@@ -516,6 +629,7 @@ async fn wrong_scope_cancelled_or_expired_actions_do_not_enter_command_queue() {
         commands,
     };
     let route = Route {
+        replaced: Arc::new(AtomicBool::new(false)),
         handle,
         generation: 1,
         cancellation: shared
@@ -577,4 +691,216 @@ async fn real_wss_native_roots() {
             assert_eq!(result.err(), Some(ErrorKind::Transport), "{name}");
         }
     }
+}
+
+#[test]
+fn screen_offer_and_stop_cannot_replace_camera_or_cross_membership() {
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    let offer = |sender: &str, kind: &str, sid: &str| json!({"type":"message","message":{"sender":{"type":"session","sessionid":sender},"data":{"type":"offer","roomType":kind,"sid":sid,"payload":{"type":"offer","sdp":"v=0\r\n"}}}});
+    shared
+        .incoming(&offer("unknown", "screen", "rogue"))
+        .unwrap();
+    shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    {
+        let mut state = shared.state.lock().unwrap();
+        state.room.as_mut().unwrap().selected.push(Selection {
+            stream: StreamKind::Camera,
+            talk: peer("talk-other"),
+            sfu: peer("hpb-other"),
+            sid: Some(Negotiation::parse("camera").unwrap()),
+            publisher: false,
+            request_id: None,
+        });
+    }
+    shared
+        .incoming(&offer("hpb-other", "screen", "screen"))
+        .unwrap();
+    shared.incoming(&json!({"type":"message","message":{"sender":{"type":"session","sessionid":"hpb-other"},"data":{"type":"unshareScreen","roomType":"screen"}}})).unwrap();
+    let state = shared.state.lock().unwrap();
+    let room = state.room.as_ref().unwrap();
+    assert_eq!(room.selected.len(), 2);
+    assert_eq!(room.selected[0].stream, StreamKind::Camera);
+    assert!(
+        room.selected[0]
+            .sid
+            .as_ref()
+            .unwrap()
+            .matches(&Negotiation::parse("camera").unwrap())
+    );
+    assert!(room.signals.iter().any(|(_, e)| matches!(
+        e,
+        Event::Signal {
+            stream: StreamKind::Screen,
+            ..
+        }
+    )));
+    assert!(
+        room.signals
+            .iter()
+            .any(|(_, e)| matches!(e, Event::ScreenStopped { .. }))
+    );
+    assert!(!room.cancellation.is_cancelled());
+}
+
+#[tokio::test]
+async fn incomplete_upgrade_during_restart_retries_transport_without_room_replay() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/signal", listener.local_addr().unwrap());
+    let (finish, finished) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        drop(stream); // EOF before the websocket upgrade response is complete.
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, false).await;
+        finished.await.unwrap();
+    });
+    let (_client, binding, _) = account();
+    let owner = Owner::start(binding, settings(&endpoint)).unwrap();
+    let handle = owner.handle();
+    wait_for(&handle.shared, |s| s.status == LiveState::Connected).await;
+    {
+        let state = handle.shared.state.lock().unwrap();
+        assert_eq!(state.first_transport_failure, Some(ErrorKind::Transport));
+        assert!(state.room.is_none());
+    }
+    finish.send(()).unwrap();
+    server.await.unwrap();
+}
+
+#[test]
+fn obsolete_subscriber_offer_cannot_bind_the_replacement_generation() {
+    let (_client, binding, _) = account();
+    let shared = Arc::new(state(binding));
+    let (commands, _) = mpsc::channel(1);
+    let cancellation = shared
+        .state
+        .lock()
+        .unwrap()
+        .room
+        .as_ref()
+        .unwrap()
+        .cancellation
+        .clone();
+    let route = Route {
+        replaced: Arc::new(AtomicBool::new(false)),
+        handle: Handle {
+            shared: shared.clone(),
+            commands,
+        },
+        generation: 1,
+        cancellation,
+    };
+    {
+        let mut state = shared.state.lock().unwrap();
+        let room = state.room.as_mut().unwrap();
+        room.selected.push(Selection {
+            stream: StreamKind::Camera,
+            talk: peer("talk-other"),
+            sfu: peer("hpb-other"),
+            sid: Some(Negotiation::parse("old").unwrap()),
+            publisher: false,
+            request_id: None,
+        });
+    }
+    route
+        .reset_subscription(&peer("talk-other"), StreamKind::Camera)
+        .unwrap();
+    {
+        let mut state = shared.state.lock().unwrap();
+        state.room.as_mut().unwrap().selected.push(Selection {
+            stream: StreamKind::Camera,
+            talk: peer("talk-other"),
+            sfu: peer("hpb-other"),
+            sid: None,
+            publisher: false,
+            request_id: None,
+        });
+    }
+    let offer = |sid: &str| json!({"type":"message","message":{"sender":{"type":"session","sessionid":"hpb-other"},"data":{"type":"offer","roomType":"video","sid":sid,"payload":{"type":"offer","sdp":"v=0\r\n"}}}});
+    shared.incoming(&offer("old")).unwrap();
+    assert!(
+        shared.state.lock().unwrap().room.as_ref().unwrap().selected[0]
+            .sid
+            .is_none()
+    );
+    shared.incoming(&offer("new")).unwrap();
+    assert!(
+        shared.state.lock().unwrap().room.as_ref().unwrap().selected[0]
+            .sid
+            .as_ref()
+            .is_some_and(|sid| sid.matches(&Negotiation::parse("new").unwrap()))
+    );
+}
+
+#[tokio::test]
+async fn stopped_camera_subscription_can_readmit_a_current_member_without_old_sid() {
+    let (_client, binding, runtime) = account();
+    let shared = Arc::new(state(binding));
+    let (commands, mut receive) = mpsc::channel(1);
+    let cancellation = shared
+        .state
+        .lock()
+        .unwrap()
+        .room
+        .as_ref()
+        .unwrap()
+        .cancellation
+        .clone();
+    let route = Route {
+        replaced: Arc::new(AtomicBool::new(false)),
+        handle: Handle {
+            shared: shared.clone(),
+            commands,
+        },
+        generation: 1,
+        cancellation,
+    };
+    {
+        let mut state = shared.state.lock().unwrap();
+        let room = state.room.as_mut().unwrap();
+        room.members.push(wire::Member {
+            sfu: peer("hpb-other"),
+            talk: peer("talk-other"),
+        });
+        room.selected.push(Selection {
+            stream: StreamKind::Camera,
+            talk: peer("talk-other"),
+            sfu: peer("hpb-other"),
+            sid: Some(Negotiation::parse("old").unwrap()),
+            publisher: false,
+            request_id: None,
+        });
+    }
+    route.remove_stream(&peer("talk-other"), StreamKind::Camera);
+    let writer = tokio::spawn(async move {
+        let Command::Send {
+            sid, signal, reply, ..
+        } = receive.recv().await.unwrap()
+        else {
+            panic!("subscription command");
+        };
+        assert!(sid.is_none() && signal.is_none());
+        reply.send(Ok(())).unwrap();
+    });
+    route
+        .request_offer(&context(&runtime, &shared), &peer("talk-other"))
+        .await
+        .unwrap();
+    writer.await.unwrap();
+    let offer = |sid: &str| json!({"type":"message","message":{"sender":{"type":"session","sessionid":"hpb-other"},"data":{"type":"offer","roomType":"video","sid":sid,"payload":{"type":"offer","sdp":"v=0\r\n"}}}});
+    shared.incoming(&offer("old")).unwrap();
+    assert!(
+        shared.state.lock().unwrap().room.as_ref().unwrap().selected[0]
+            .sid
+            .is_none()
+    );
+    shared.incoming(&offer("fresh")).unwrap();
+    assert!(
+        shared.state.lock().unwrap().room.as_ref().unwrap().selected[0]
+            .sid
+            .as_ref()
+            .unwrap()
+            .matches(&Negotiation::parse("fresh").unwrap())
+    );
 }

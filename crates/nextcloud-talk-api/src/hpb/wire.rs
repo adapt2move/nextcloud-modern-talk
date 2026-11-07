@@ -8,6 +8,7 @@ use crate::{
     models::RoomToken,
     signaling::{
         DescriptionKind, IceCandidate, Negotiation, PeerSession, SessionDescription, Signal,
+        StreamKind,
     },
 };
 use serde_json::{Value, json};
@@ -94,7 +95,7 @@ pub(super) fn hint(
 }
 pub(super) fn signal(
     value: &Value,
-) -> Result<Option<(PeerSession, Negotiation, Signal)>, ErrorKind> {
+) -> Result<Option<(PeerSession, Negotiation, Signal, StreamKind)>, ErrorKind> {
     let data = &value["data"];
     let Some(kind) = data["type"].as_str() else {
         return Ok(None);
@@ -109,9 +110,7 @@ pub(super) fn signal(
     if data.get("from").is_some() && data["from"].as_str() != Some(from.0.as_str()) {
         return Err(ErrorKind::WrongScope);
     }
-    if data["roomType"].as_str() != Some("video") {
-        return Err(ErrorKind::Unsupported);
-    }
+    let stream = StreamKind::parse(&data["roomType"])?;
     let sid = Negotiation::parse(text(&data["sid"], 64)?)?;
     let payload = &data["payload"];
     let signal = match kind {
@@ -150,14 +149,17 @@ pub(super) fn signal(
         }
         _ => return Ok(None),
     };
-    Ok(Some((from, sid, signal)))
+    Ok(Some((from, sid, signal, stream)))
 }
-pub(super) fn message(
+pub(super) fn stream_message(
     peer: &PeerSession,
     sid: Option<&Negotiation>,
     signal: Option<Signal>,
+    stream: StreamKind,
 ) -> Value {
     let mut data = match signal {
+        Some(Signal::StopScreen) => json!({"type":"unshareScreen"}),
+        Some(Signal::SendOffer) => json!({"type":"sendoffer"}),
         Some(Signal::Description(s)) => {
             let kind = if s.kind() == DescriptionKind::Offer {
                 "offer"
@@ -171,7 +173,7 @@ pub(super) fn message(
         }}}),
         None => json!({"type":"requestoffer"}),
     };
-    data["roomType"] = json!("video");
+    data["roomType"] = json!(stream.room_type());
     data["to"] = json!(peer.0.as_str());
     if let Some(sid) = sid {
         data["sid"] = json!(sid.0);

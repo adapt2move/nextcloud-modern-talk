@@ -8,13 +8,63 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 - Exercised server baselines are NextCloud 34.0.5 / Talk 24.0.6 and NextCloud
   35.0.2 / Talk 25.0.6. HPB checks use Talk 25.0.6, signaling 2.1.1 and Janus 1.3.0.
-- TURN over TCP/TLS and live TURN credential rotation are unavailable in the
-  pinned engine. Relay-required calls do not fall back to host candidates.
+- TURN over TCP/TLS is unavailable in the pinned async engine; live TURN
+  credential rotation is not integrated into established application peers.
+  The engine’s async `peer_connection/transport/turn_relayer.rs` rejects
+  secure TURN and non-UDP TURN URLs before allocation; parsing TCP/TLS URLs in
+  the core is insufficient. Supporting them requires an async transport with
+  TCP/TLS connection ownership, certificate validation and TURN stream framing,
+  followed by forced-relay media qualification. Relay-required calls do not fall
+  back to host candidates.
   UDP relay checks do not establish connectivity through every enterprise network.
-- Guest/federated media, required call E2EE, screen/system-audio sharing and
-  conference-scale qualification remain outside the supported profile.
-  A remote screen offer ends the unsupported call. Permission guidance is not
-  a sharing engine.
+- Screen streams use separate internal-signaling or HPB/Janus connections.
+  One remote screen is admitted, with VP8 decode up to 1920×1080; it takes
+  priority within the server's video limit. Cameras retain their smaller decode
+  profile. Unsupported/failed remote screen decoding retires that stream.
+- Linux publication uses the ScreenCast portal's per-session source selection
+  and PipeWire/GStreamer, without persisted sources or system audio. Sources
+  with missing geometry, odd dimensions or dimensions above 1920×1080 are
+  unavailable before capture admission. A matching desktop portal backend and
+  `gstreamer1.0-pipewire` are required; Xvfb alone supplies neither. The software
+  compositor probe uses an explicitly patched portal backend for SHM-only
+  capture; unmodified compositor/picker and permission-revocation qualification
+  remains necessary.
+- macOS publication uses the bundled ScreenCaptureKit helper and the system
+  content-sharing picker, with a three-buffer source queue, 1080p output and
+  10 fps. It needs an Apple SDK build and native qualification, including picker
+  cancellation, window closure, permission revocation and packaged identity.
+  Linux compilation does not qualify this path. Windows publication and system
+  audio remain unavailable. H.264 screen negotiation is not implemented; VP8 is
+  the offered codec.
+- Screen selection ends on call/control disconnection and cannot automatically
+  restart after recovery. Stale source callbacks cannot publish into a new share.
+  A call admits at most 32 retired remote screen negotiations; further remote
+  screen offers are ignored until a new call. Concurrent screen broadcasters
+  and conference-scale resource/performance qualification remain outside the
+  supported profile.
+- HPB socket resume preserves mute/camera intent and requires fresh policy before
+  publication resumes. ICE recovery has a finite retry budget and a 15-second
+  peer recovery deadline. A rejected HPB resume permits one fresh, scoped
+  admission after cleanup, retaining mute/camera intent and requiring the call
+  to still exist. Subscriptions also wait for HPB in-call readiness; an explicitly
+  rejected subscription can retry within the same bounded recovery window and
+  requires renewed policy. Full
+  network handover and Janus ICE recovery remain unqualified; other continuity
+  loss requires deliberate rejoin. Internal long-poll transport/server failures
+  have three bounded retries, explicit interruption/resume states and fresh policy
+  reconciliation. Lost signaling is not an empty successful poll; abandoned,
+  malformed or exhausted reads close the call.
+  A severed internal poll can remain active on the server for up to 30 seconds;
+  recovery waits for a valid replacement poll rather than claiming continuity
+  from REST success alone.
+- Full HPB process replacement with an existing Talk 25.0.6 web peer currently
+  can fail automatic media recovery in the r35 lab. The web peer publishes under
+  a new signaling identity but also requests obsolete identities, and HPB denies
+  native subscription requests despite advertised in-call flags. The native
+  fresh admission remains blocked rather than bypassing that denial. An explicit
+  web-peer call leave/rejoin restores AV in the exercised case. This is separate
+  from the qualified interruption/resume of a surviving HPB session.
+- Guest/federated media and required call E2EE remain unavailable.
 
 ## Messages and background activity
 

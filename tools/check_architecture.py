@@ -379,8 +379,12 @@ def check() -> None:
         platform = {target: {"dependencies": {dep: {"workspace": True} for dep in dependencies}}
                     for target, dependencies in platform_edges.items()}
         if name == "talk-adapters":
-            # Legacy fixtures must not unify the shipping D-Bus/credential graph.
+            # Legacy fixtures and the opt-in desktop portal capture probe must
+            # not expand the shipping adapter graph.
             platform['cfg(target_os = "linux")']["dev-dependencies"] = {
+                "ashpd": {"workspace": True},
+                "async-io": {"workspace": True},
+                "futures-lite": {"workspace": True},
                 "keyring-core": {"workspace": True},
                 "secret-service": {"workspace": True},
                 "zbus-secret-service-keyring-store": {"workspace": True},
@@ -421,7 +425,7 @@ def check() -> None:
         platform_edges = PLATFORM_EDGES if name == "talk-adapters" else DESKTOP_PLATFORM_EDGES if name == "talk-desktop" else {}
         expected_edges = GRAPH.get(name, (None, set()))[1] | set().union(*platform_edges.values())
         if name == "talk-adapters":
-            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store"}
+            expected_edges |= {"secret-service", "zbus-secret-service-keyring-store", "ashpd", "async-io", "futures-lite"}
         require({dep.split()[0] for dep in package.get("dependencies", [])} == expected_edges,
                 f"{name}: lockfile dependency mismatch")
     for package in packages:

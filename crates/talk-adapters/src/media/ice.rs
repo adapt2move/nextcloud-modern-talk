@@ -1,6 +1,6 @@
 //! Capabilities of the pinned async engine, not merely URI syntax. In released
-//! webrtc 0.21.1, transport/turn_relayer.rs rejects secure/non-UDP TURN and
-//! transport/stun_gatherer.rs rejects secure STUN. Do not pass those alternatives
+//! webrtc 0.21.1, peer_connection/transport/turn_relayer.rs rejects secure/non-UDP TURN and
+//! peer_connection/transport/stun_gatherer.rs rejects secure STUN. Do not pass those alternatives
 //! through and let its warnings silently imply supported traversal.
 use super::{Error, IceServer};
 use rtc::ice::url::{SchemeType, Url};

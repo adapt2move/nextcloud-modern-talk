@@ -7226,12 +7226,15 @@ name = "talk-adapters"
 version = "0.0.11"
 dependencies = [
  "apple-native-keyring-store",
+ "ashpd 0.13.13",
+ "async-io",
  "async-trait",
  "atomicwrites",
  "dbus-secret-service",
  "dirs 7.0.0",
  "exacl",
  "flate2",
+ "futures-lite 2.6.1",
  "futures-util",
  "getrandom 0.4.3",
  "gstreamer",

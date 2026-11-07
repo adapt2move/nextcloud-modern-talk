@@ -8,7 +8,10 @@ use talk_core::preferences::notifications::{
     NativeCallAction, NativeCallActions, NotificationError, NotificationEvent, NotificationKind,
 };
 use talk_core::ui::MediaIntent;
-use talk_core::ui::presentation::{CallStage, CallView, MediaState, ParticipantView, RequiredGate};
+use talk_core::ui::presentation::{
+    CallStage, CallStreamKind, CallView, MediaState, ParticipantView, RequiredGate,
+    ScreenShareFailure, ScreenShareState,
+};
 
 pub(super) struct CallEvents {
     event: Option<NotificationEvent>,
@@ -412,8 +415,14 @@ impl Accounts {
                         wishes: ui.wishes,
                     }
                 }
-                UiIntent::ShareScreen(_) => {
-                    return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                UiIntent::ShareScreen(call) => {
+                    let ui = self
+                        .call_ui
+                        .as_mut()
+                        .filter(|u| u.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    ui.wishes.screen = true;
+                    Command::StartScreenShare(*call)
                 }
                 UiIntent::StopScreen(call) => {
                     let ui = self
@@ -422,10 +431,7 @@ impl Accounts {
                         .filter(|u| u.scope == *call)
                         .ok_or(SubmitError::StaleScope)?;
                     ui.wishes.screen = false;
-                    Command::Change {
-                        call: *call,
-                        wishes: ui.wishes,
-                    }
+                    Command::StopScreenShare(*call)
                 }
                 UiIntent::ReconnectCall(call) => {
                     let ui = self
@@ -576,6 +582,8 @@ impl Accounts {
             microphone: MediaState::Off,
             camera: MediaState::Off,
             share: MediaState::Unavailable,
+            sharing: ScreenShareState::Idle,
+            streams: Page::empty(),
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -659,12 +667,7 @@ impl Accounts {
                     && value.call.conversation == requested.conversation =>
             {
                 ui.scope = value.call;
-                if matches!(
-                    value.phase,
-                    Phase::Reconnecting | Phase::Ended | Phase::Waiting(Gate::PolicyStale)
-                ) {
-                    ui.wishes = MediaWishes::default();
-                }
+                ui.wishes = value.wishes;
                 self.snapshot.call = Some(project(&value, &ui.title, ui.direct));
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -739,11 +742,45 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
         microphone: device(value.microphone),
         camera: device(value.camera),
         share: device(value.screen),
+        sharing: match value.sharing {
+            talk_core::calls::SharingState::Idle => ScreenShareState::Idle,
+            talk_core::calls::SharingState::Choosing => ScreenShareState::Choosing,
+            talk_core::calls::SharingState::Starting => ScreenShareState::Starting,
+            talk_core::calls::SharingState::Sharing => ScreenShareState::Sharing,
+            talk_core::calls::SharingState::Failed(reason) => {
+                ScreenShareState::Failed(match reason {
+                    talk_core::calls::ShareFailure::Unavailable => ScreenShareFailure::Unavailable,
+                    talk_core::calls::ShareFailure::Cancelled => ScreenShareFailure::Cancelled,
+                    talk_core::calls::ShareFailure::SourceClosed => {
+                        ScreenShareFailure::SourceClosed
+                    }
+                    talk_core::calls::ShareFailure::TimedOut => ScreenShareFailure::TimedOut,
+                    talk_core::calls::ShareFailure::PermissionDenied => {
+                        ScreenShareFailure::PermissionDenied
+                    }
+                })
+            }
+        },
+        streams: page(value.participants.as_slice().iter().map(|p| {
+            talk_core::ui::presentation::CallStreamView {
+                local_id: p.local,
+                participant: p.participant,
+                participant_name: text(p.name.as_str()),
+                kind: if p.kind == talk_core::calls::StreamKind::Screen {
+                    CallStreamKind::Screen
+                } else {
+                    CallStreamKind::Camera
+                },
+                dimensions: p.dimensions,
+                flowing: p.flowing,
+            }
+        })),
         participants: page(
             value
                 .participants
                 .as_slice()
                 .iter()
+                .filter(|p| p.kind == talk_core::calls::StreamKind::Camera)
                 .map(|p| ParticipantView {
                     local_id: p.local,
                     name: text(p.name.as_str()),
@@ -781,6 +818,7 @@ mod action_tests {
             scope: call.account,
             source: protocol::NotificationSourceState::Available,
             call: Some(Snapshot {
+                wishes: Default::default(),
                 call,
                 entry: Entry::IncomingDirect,
                 phase: Phase::Ringing,
@@ -788,6 +826,7 @@ mod action_tests {
                 microphone: DeviceState::Off,
                 camera: DeviceState::Off,
                 screen: DeviceState::Off,
+                sharing: talk_core::calls::SharingState::Idle,
                 peers: 0,
                 recording: talk_core::policy::RecordingState::Unknown,
                 counters: Default::default(),
@@ -796,6 +835,38 @@ mod action_tests {
             title: Some(text("Incoming fixture")),
             eligible: true,
         }
+    }
+    #[test]
+    fn reconnect_snapshot_preserves_intent_and_force_mute_updates_the_toggle() {
+        let mut model = super::super::tests::model();
+        let scope = call();
+        let invitation = invitation(scope);
+        let mut snapshot = invitation.call.clone().unwrap();
+        model.apply_incoming(
+            scope.account,
+            invitation,
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        snapshot.phase = Phase::Reconnecting;
+        snapshot.wishes = MediaWishes {
+            microphone: true,
+            camera: false,
+            screen: false,
+        };
+        model.complete_call(
+            scope,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(
+                snapshot.clone(),
+            ))),
+        );
+        assert!(model.call_ui.as_ref().unwrap().wishes.microphone);
+        snapshot.phase = Phase::Active;
+        snapshot.wishes.microphone = false;
+        model.complete_call(
+            scope,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(snapshot))),
+        );
+        assert!(!model.call_ui.as_ref().unwrap().wishes.microphone);
     }
     #[test]
     fn inactive_account_can_offer_without_selecting_or_capturing_and_other_errors_cannot_revoke_it()

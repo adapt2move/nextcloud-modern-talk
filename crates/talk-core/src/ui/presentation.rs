@@ -442,6 +442,39 @@ pub enum MediaState {
     Denied,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallStreamKind {
+    Camera,
+    Screen,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ScreenShareState {
+    #[default]
+    Idle,
+    Choosing,
+    Starting,
+    Sharing,
+    Failed(ScreenShareFailure),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScreenShareFailure {
+    Unavailable,
+    Cancelled,
+    SourceClosed,
+    TimedOut,
+    PermissionDenied,
+}
+/// Frame-free stream metadata. `local_id` addresses the media image handoff;
+/// `participant` identifies the camera/participant tile belonging to this source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallStreamView {
+    pub local_id: u128,
+    pub participant: u128,
+    pub participant_name: Text<128>,
+    pub kind: CallStreamKind,
+    pub dimensions: Option<(u32, u32)>,
+    pub flowing: bool,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
@@ -452,6 +485,8 @@ pub struct CallView {
     pub microphone: MediaState,
     pub camera: MediaState,
     pub share: MediaState,
+    pub sharing: ScreenShareState,
+    pub streams: Page<CallStreamView, 16>,
     pub participants: Page<ParticipantView, 16>,
 }
 

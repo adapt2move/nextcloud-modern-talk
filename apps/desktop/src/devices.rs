@@ -17,6 +17,7 @@ mod audio;
 mod call;
 mod camera;
 mod frames;
+mod screen;
 pub use frames::VideoFrame;
 
 use std::sync::{

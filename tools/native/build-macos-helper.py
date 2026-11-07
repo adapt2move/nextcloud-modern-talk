@@ -14,5 +14,6 @@ source = Path(__file__).resolve().parents[2] / 'native/macos/TalkNativeHelper.sw
 args.output.parent.mkdir(parents=True, exist_ok=True)
 subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-swift-version', '5', '-parse-as-library', '-O',
                 '-target', 'arm64-apple-macosx15.7', '-framework', 'AppKit',
-                '-framework', 'UserNotifications',
+                '-framework', 'UserNotifications', '-framework', 'ScreenCaptureKit',
+                '-framework', 'CoreMedia', '-framework', 'CoreVideo',
                 '-framework', 'CoreGraphics', str(source), '-o', str(args.output)], check=True)

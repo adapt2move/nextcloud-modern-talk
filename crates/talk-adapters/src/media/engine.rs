@@ -15,8 +15,8 @@ use rtc::{
     peer_connection::configuration::setting_engine::SctpMaxMessageSize,
     rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication,
     rtp_transceiver::rtp_sender::{
-        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
-        RtpCodecKind,
+        RTCPFeedback, RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters,
+        RTCRtpEncodingParameters, RtpCodecKind,
     },
     shared::marshal::Marshal,
 };
@@ -157,6 +157,7 @@ pub struct Counters {
     pub answers_sent: u64,
     pub audio_sent: u64,
     pub video_sent: u64,
+    pub video_transmitted: u64,
     pub audio_received: u64,
     pub audio_nonzero: u64,
     pub video_received: u64,
@@ -234,16 +235,24 @@ impl Outgoing {
             self.encoder = None;
         }
     }
-    async fn flush(&self, max: usize) -> Result<(), Error> {
+    async fn flush(
+        &self,
+        max: usize,
+        guard: Option<&(dyn Fn() -> bool + Send + Sync)>,
+    ) -> Result<u64, Error> {
         if !self.enabled {
-            return Ok(());
+            return Ok(0);
         }
         let Some(encoder) = &self.encoder else {
-            return Ok(());
+            return Ok(0);
         };
         // Only the owning call task can write, and each tick drains at most the
         // bounded encoder output queue. No send task can outlive publication.
+        let mut sent = 0;
         for _ in 0..3 {
+            if guard.is_some_and(|guard| !guard()) {
+                break;
+            }
             let Some((data, duration)) = encoder.encoded(max)? else {
                 break;
             };
@@ -263,6 +272,9 @@ impl Outgoing {
                 duration,
                 ..Sample::new(Instant::now())
             };
+            if guard.is_some_and(|guard| !guard()) {
+                break;
+            }
             tokio::time::timeout(
                 Duration::from_millis(50),
                 self.track.write_sample(self.ssrc, payload, &sample, &[]),
@@ -270,8 +282,9 @@ impl Outgoing {
             .await
             .map_err(|_| Error::Engine)?
             .map_err(|_| Error::Engine)?;
+            sent += 1;
         }
-        Ok(())
+        Ok(sent)
     }
 }
 struct Incoming {
@@ -279,7 +292,51 @@ struct Incoming {
     decoder: Option<Codec>,
     ssrc: u32,
     video: bool,
+    screen: bool,
+    packets: u64,
+    keyframes: u64,
+    feedback_ssrc: u32,
+    feedback_requests: u64,
     pli: Instant,
+}
+/// RFC 7741 descriptor and VP8 keyframe geometry, before native decode can
+/// allocate reference surfaces. Delta packets cannot establish a decoder.
+fn vp8_geometry(payload: &[u8]) -> Result<Option<(u32, u32)>, Error> {
+    let first = *payload.first().ok_or(Error::Malformed)?;
+    let mut offset = 1;
+    let mut byte = || {
+        let value = payload.get(offset).copied().ok_or(Error::Malformed);
+        offset += 1;
+        value
+    };
+    if first & 0x80 != 0 {
+        let extension = byte()?;
+        if extension & 0x80 != 0 && byte()? & 0x80 != 0 {
+            byte()?;
+        }
+        if extension & 0x40 != 0 {
+            byte()?;
+        }
+        if extension & 0x30 != 0 {
+            byte()?;
+        }
+    }
+    if first & 0x10 == 0 || first & 7 != 0 {
+        return Ok(None);
+    }
+    let data = payload.get(offset..).ok_or(Error::Malformed)?;
+    if data.first().ok_or(Error::Malformed)? & 1 != 0 {
+        return Ok(None);
+    }
+    if data.len() < 10 || data[3..6] != [0x9d, 0x01, 0x2a] {
+        return Err(Error::Malformed);
+    }
+    let width = u32::from(u16::from_le_bytes([data[6], data[7]]) & 0x3fff);
+    let height = u32::from(u16::from_le_bytes([data[8], data[9]]) & 0x3fff);
+    if width == 0 || height == 0 || width > 1920 || height > 1080 {
+        return Err(Error::Overloaded);
+    }
+    Ok(Some((width, height)))
 }
 impl Incoming {
     async fn pump(&mut self, enabled: bool) -> Result<(), Error> {
@@ -292,12 +349,30 @@ impl Incoming {
             };
             match event {
                 Some(TrackRemoteEvent::OnRtpPacket(packet)) if enabled => {
+                    self.packets = self.packets.saturating_add(1);
                     if packet.payload.len() > 4096 {
                         return Err(Error::Overloaded);
                     }
+                    // Padding-only probes carry no codec header. Once a decoder
+                    // exists, still pass them to the jitter buffer so valid RTP
+                    // sequence numbers are not mistaken for lost frame packets.
+                    if packet.payload.is_empty() && self.decoder.is_none() {
+                        continue;
+                    }
+                    self.ssrc = packet.header.ssrc;
+                    if self.video && !packet.payload.is_empty() {
+                        if vp8_geometry(&packet.payload)?.is_some() {
+                            self.keyframes = self.keyframes.saturating_add(1);
+                        } else if self.decoder.is_none() {
+                            continue;
+                        }
+                    }
                     if self.decoder.is_none() {
-                        self.decoder =
-                            Some(Codec::decoder(self.video, packet.header.payload_type)?);
+                        self.decoder = Some(Codec::decoder(
+                            self.video,
+                            packet.header.payload_type,
+                            self.screen,
+                        )?);
                     }
                     let bytes = packet.marshal().map_err(|_| Error::Malformed)?;
                     self.decoder
@@ -318,7 +393,7 @@ impl Incoming {
             tokio::time::timeout(
                 Duration::from_millis(50),
                 self.track.write_rtcp(vec![Box::new(PictureLossIndication {
-                    sender_ssrc: 0,
+                    sender_ssrc: self.feedback_ssrc,
                     media_ssrc: self.ssrc,
                 })]),
             )
@@ -326,6 +401,7 @@ impl Incoming {
             .map_err(|_| Error::Engine)?
             .map_err(|_| Error::Engine)?;
             self.pli = Instant::now();
+            self.feedback_requests = self.feedback_requests.saturating_add(1);
         }
         Ok(())
     }
@@ -344,6 +420,9 @@ pub struct NativePeer {
     remote_audio: Option<Incoming>,
     remote_video: Option<Incoming>,
     receive_video: bool,
+    publish_guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    audio_guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    screen: bool,
     channels: Vec<Channel>,
     pcm: VecDeque<[i16; 480]>,
     counters: Counters,
@@ -445,6 +524,18 @@ impl NativePeer {
         let video_codec = RTCRtpCodec {
             mime_type: "video/VP8".into(),
             clock_rate: 90_000,
+            // The local track codec also participates in SDP generation. Keep
+            // its repair feedback aligned with the installed NACK/PLI handlers.
+            rtcp_feedback: vec![
+                RTCPFeedback {
+                    typ: "nack".into(),
+                    parameter: String::new(),
+                },
+                RTCPFeedback {
+                    typ: "nack".into(),
+                    parameter: "pli".into(),
+                },
+            ],
             ..Default::default()
         };
         let mut media = MediaEngine::default();
@@ -512,6 +603,9 @@ impl NativePeer {
             remote_audio: None,
             remote_video: None,
             receive_video: true,
+            publish_guard: None,
+            audio_guard: None,
+            screen: false,
             channels: Vec::with_capacity(2),
             pcm: VecDeque::with_capacity(2),
             counters: Counters::default(),
@@ -534,6 +628,17 @@ impl NativePeer {
             peer.add_channel(channel).await?;
         }
         Ok(peer)
+    }
+    /// Rechecked after encoding and immediately before the RTP sample write.
+    pub fn set_publish_guard(&mut self, guard: Arc<dyn Fn() -> bool + Send + Sync>) {
+        self.publish_guard = Some(guard);
+    }
+    pub fn set_audio_guard(&mut self, guard: Arc<dyn Fn() -> bool + Send + Sync>) {
+        self.audio_guard = Some(guard);
+    }
+    /// Screen reception retains text resolution within the 1080p allocation class.
+    pub fn screen_profile(&mut self) {
+        self.screen = true;
     }
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
@@ -589,6 +694,20 @@ impl NativePeer {
         self.counters.offers_sent += 1;
         Ok(result)
     }
+    pub fn is_offerer(&self) -> bool {
+        self.counters.offers_sent > 0
+    }
+    pub async fn restart(&mut self) -> Result<protocol::SessionDescription, Error> {
+        self.check()?;
+        if self.role == Role::Subscriber {
+            return Err(Error::Unsupported);
+        }
+        tokio::time::timeout(Duration::from_secs(3), self.pc()?.restart_ice())
+            .await
+            .map_err(|_| Error::Engine)?
+            .map_err(|_| Error::Engine)?;
+        self.offer().await
+    }
     async fn local(
         &mut self,
         description: RTCSessionDescription,
@@ -607,6 +726,16 @@ impl NativePeer {
         *self.mid.lock().map_err(|_| Error::Engine)? = mid.to_owned();
         let result = protocol::SessionDescription::new(kind, &description.sdp)
             .map_err(|_| Error::Malformed)?;
+        #[cfg(feature = "backend-test")]
+        if self.screen {
+            eprintln!(
+                "screen local SDP PLI={}",
+                description
+                    .sdp
+                    .lines()
+                    .any(|l| l.starts_with("a=rtcp-fb:") && l.ends_with("nack pli"))
+            );
+        }
         tokio::time::timeout(
             Duration::from_secs(3),
             self.pc()?.set_local_description(description),
@@ -700,10 +829,14 @@ impl NativePeer {
     async fn poll(&mut self) -> Result<Option<Event>, Error> {
         self.check()?;
         if let Some(audio) = &self.audio {
-            audio.flush(4096).await?;
+            audio.flush(4096, self.audio_guard.as_deref()).await?;
         }
         if let Some(video) = &self.video {
-            video.flush(1_048_576).await?;
+            self.counters.video_transmitted = self.counters.video_transmitted.saturating_add(
+                video
+                    .flush(1_048_576, self.publish_guard.as_deref())
+                    .await?,
+            );
         }
         if let Some(audio) = &mut self.remote_audio {
             audio.pump(true).await?;
@@ -772,11 +905,24 @@ impl NativePeer {
                     if target.is_some() {
                         return Err(Error::Unsupported);
                     }
+                    let mut feedback_id = [0; 4];
+                    getrandom::fill(&mut feedback_id).map_err(|_| Error::Engine)?;
+                    // RTCP receiver feedback needs its own nonzero identity.
+                    // Janus must not see an anonymous sender or the remote RTP SSRC.
+                    let mut feedback_ssrc = u32::from_le_bytes(feedback_id).max(1);
+                    if feedback_ssrc == ssrc {
+                        feedback_ssrc = feedback_ssrc.wrapping_add(1).max(1);
+                    }
                     *target = Some(Incoming {
                         track,
                         decoder: None,
                         ssrc,
                         video,
+                        screen: self.screen,
+                        packets: 0,
+                        keyframes: 0,
+                        feedback_ssrc,
+                        feedback_requests: 0,
                         pli: Instant::now() - Duration::from_secs(2),
                     });
                 }
@@ -790,7 +936,11 @@ impl NativePeer {
         // HPB 2.1.1 assigns ID 1 to the ordinary audio/video publisher. This is
         // channel metadata only; the admitted subscription owns the identity.
         let known = matches!(label.as_str(), "status" | "simplewebrtc")
-            || (self.role == Role::Subscriber && label == "1");
+            || (self.role == Role::Subscriber
+                && (label == "1"
+                    || (self.screen
+                        && label.len() <= 20
+                        && label.bytes().all(|b| b.is_ascii_digit()))));
         if self.channels.len() >= 2 || !known || self.channels.iter().any(|c| c.label == label) {
             #[cfg(feature = "backend-test")]
             eprintln!(
@@ -852,8 +1002,8 @@ impl NativePeer {
         self.check()?;
         if frame.width == 0
             || frame.height == 0
-            || frame.width > 1280
-            || frame.height > 720
+            || frame.width > if self.screen { 1920 } else { 1280 }
+            || frame.height > if self.screen { 1080 } else { 720 }
             || frame.rgba.len() != frame.width as usize * frame.height as usize * 4
             || timestamp_us < 0
         {
@@ -864,12 +1014,20 @@ impl NativePeer {
             return Err(Error::Closed);
         }
         if video.encoder.as_ref().and_then(|c| c.dimensions) != Some((frame.width, frame.height)) {
-            video.encoder = Some(Codec::video_encoder(frame.width, frame.height)?);
+            video.encoder = Some(Codec::video_encoder(
+                frame.width,
+                frame.height,
+                self.screen,
+            )?);
         }
         video.encoder.as_ref().ok_or(Error::Engine)?.push(
             frame.rgba,
             Some(Duration::from_micros(timestamp_us as u64)),
-            Some(Duration::from_nanos(33_333_333)),
+            Some(if self.screen {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_nanos(33_333_333)
+            }),
         )?;
         self.counters.video_sent = self.counters.video_sent.saturating_add(1);
         Ok(())
@@ -932,6 +1090,20 @@ impl NativePeer {
             }
         }
     }
+    #[cfg(feature = "backend-test")]
+    pub fn video_packets(&self) -> u64 {
+        self.remote_video.as_ref().map_or(0, |v| v.packets)
+    }
+    #[cfg(feature = "backend-test")]
+    pub fn video_keyframes(&self) -> u64 {
+        self.remote_video.as_ref().map_or(0, |v| v.keyframes)
+    }
+    #[cfg(feature = "backend-test")]
+    pub fn video_feedback_requests(&self) -> u64 {
+        self.remote_video
+            .as_ref()
+            .map_or(0, |v| v.feedback_requests)
+    }
     pub fn receive_video(&mut self, enabled: bool) {
         self.receive_video = enabled;
         if !enabled && let Some(video) = &mut self.remote_video {
@@ -963,6 +1135,24 @@ impl Drop for NativePeer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vp8_header_bounds_apply_before_native_decode_and_include_extensions() {
+        let mut payload = vec![0x10, 0, 0, 0, 0x9d, 0x01, 0x2a, 0x80, 0x07, 0x38, 0x04];
+        assert_eq!(vp8_geometry(&payload), Ok(Some((1920, 1080))));
+        let mut extended = vec![0x90, 0xf0, 0x80, 1, 0, 0];
+        extended.extend_from_slice(&payload[1..]);
+        assert_eq!(vp8_geometry(&extended), Ok(Some((1920, 1080))));
+        for length in 1..extended.len() {
+            assert_eq!(vp8_geometry(&extended[..length]), Err(Error::Malformed));
+        }
+        payload[7] = 0x00;
+        payload[8] = 0x0f;
+        assert_eq!(vp8_geometry(&payload), Err(Error::Overloaded));
+        payload[1] = 1;
+        assert_eq!(vp8_geometry(&payload), Ok(None)); // Delta never creates a decoder.
+        assert_eq!(vp8_geometry(&[0, 1]), Ok(None)); // Partition continuation.
+        assert_eq!(vp8_geometry(&[]), Err(Error::Malformed));
+    }
 
     fn image(color: u8) -> VideoFrame {
         let mut rgba = vec![0; 320 * 240 * 4];
@@ -974,6 +1164,54 @@ mod tests {
             height: 240,
             rgba,
         }
+    }
+
+    #[tokio::test]
+    async fn one_static_screen_frame_decodes_without_following_capture_frames() {
+        let mut sender = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        let mut receiver = NativePeer::new(RtcConfiguration::default()).await.unwrap();
+        sender.screen_profile();
+        receiver.screen_profile();
+        let offer = sender.offer().await.unwrap();
+        let answer = receiver.remote(&offer).await.unwrap().unwrap();
+        sender.remote(&answer).await.unwrap();
+        sender.publish(false, true).unwrap();
+        let mut connected = [false; 2];
+        let mut sent = false;
+        let mut decoded = None;
+        let started = Instant::now();
+        let mut tick = tokio::time::interval(Duration::from_millis(10));
+        while started.elapsed() < Duration::from_secs(6) {
+            tick.tick().await;
+            while let Some(event) = sender.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => receiver.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[0] = s == PeerConnectionState::Connected,
+                }
+            }
+            while let Some(event) = receiver.event().await.unwrap() {
+                match event {
+                    Event::Candidate(c) => sender.candidate(&c).await.unwrap(),
+                    Event::Connection(s) => connected[1] = s == PeerConnectionState::Connected,
+                }
+            }
+            if !sent && connected.iter().all(|v| *v) {
+                sender
+                    .video(image(40), started.elapsed().as_micros() as i64)
+                    .unwrap();
+                sent = true;
+            }
+            if let Some(frame) = receiver.take_video() {
+                decoded = Some(frame);
+                break;
+            }
+        }
+        let frame =
+            decoded.expect("one static keyframe must leave the decoder without future input");
+        assert_eq!((frame.width, frame.height), (320, 240));
+        assert_eq!(sender.counters().video_sent, 1);
+        sender.close();
+        receiver.close();
     }
 
     #[tokio::test]
@@ -1002,6 +1240,7 @@ mod tests {
         let mut tick = tokio::time::interval(Duration::from_millis(10));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut frame = 0usize;
+        let mut restart_at = None;
         while start.elapsed() < Duration::from_secs(12) {
             tick.tick().await;
             while let Some(e) = a.event().await.expect("offerer event") {
@@ -1047,9 +1286,31 @@ mod tests {
                     && p.counters.video_received > 10
                     && p.counters.data_received > 0
             }) {
-                break;
+                if let Some((left, right)) = restart_at {
+                    if a.counters.video_received > left + 10
+                        && b.counters.video_received > right + 10
+                    {
+                        break;
+                    }
+                } else {
+                    let restart = a.restart().await.unwrap();
+                    let credentials = |sdp: &str| {
+                        sdp.lines()
+                            .find(|line| line.starts_with("a=ice-ufrag:"))
+                            .map(str::to_owned)
+                    };
+                    assert!(credentials(restart.as_str()) != credentials(offer.as_str()));
+                    let answer = b.remote(&restart).await.unwrap().unwrap();
+                    a.remote(&answer).await.unwrap();
+                    restart_at = Some((a.counters.video_received, b.counters.video_received));
+                }
             }
         }
+        assert!(
+            restart_at.is_some_and(|(left, right)| a.counters.video_received > left + 10
+                && b.counters.video_received > right + 10),
+            "decoded video continues after ICE restart"
+        );
         for (name, peer) in [("offerer", &mut a), ("answerer", &mut b)] {
             let c = peer.counters();
             eprintln!(

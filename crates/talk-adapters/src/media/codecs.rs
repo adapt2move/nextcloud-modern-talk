@@ -56,10 +56,12 @@ impl Codec {
             2880,
         )
     }
-    pub(super) fn video_encoder(width: u32, height: u32) -> Result<Self, Error> {
+    pub(super) fn video_encoder(width: u32, height: u32, screen: bool) -> Result<Self, Error> {
+        let fps = if screen { 10 } else { 30 };
+        let bitrate = if screen { 2_000_000 } else { 800_000 };
         let mut result = Self::new(
             &format!(
-                "appsrc name=input is-live=true format=time block=false caps=video/x-raw,format=RGBA,width={width},height={height},framerate=30/1 ! videoconvert ! video/x-raw,format=I420 ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate=800000 lag-in-frames=0 keyframe-max-dist=30 ! appsink name=output sync=false max-buffers=2 drop=true enable-last-sample=false"
+                "appsrc name=input is-live=true format=time block=false caps=video/x-raw,format=RGBA,width={width},height={height},framerate={fps}/1 ! videoconvert ! video/x-raw,format=I420 ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate={bitrate} lag-in-frames=0 keyframe-max-dist={fps} ! appsink name=output sync=false max-buffers=2 drop=true enable-last-sample=false"
             ),
             2,
             u64::from(width) * u64::from(height) * 8,
@@ -67,8 +69,15 @@ impl Codec {
         result.dimensions = Some((width, height));
         Ok(result)
     }
-    pub(super) fn decoder(video: bool, payload: u8) -> Result<Self, Error> {
-        let (media, name, clock, tail) = if video {
+    pub(super) fn decoder(video: bool, payload: u8, screen: bool) -> Result<Self, Error> {
+        let (media, name, clock, tail) = if video && screen {
+            (
+                "video",
+                "VP8",
+                90_000,
+                "rtpvp8depay ! vp8dec threads=2 ! videoconvert ! videoscale ! video/x-raw,format=RGBA,width=[2,1920],height=[2,1080],pixel-aspect-ratio=1/1",
+            )
+        } else if video {
             (
                 "video",
                 "VP8",
@@ -83,14 +92,38 @@ impl Codec {
                 "rtpopusdepay ! opusdec plc=true ! audioconvert ! audioresample ! audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=1",
             )
         };
-        Self::new(
+        let latency = if video && screen { 100 } else { 30 };
+        // A static screen may supply one complete frame. Sink preroll must not
+        // hold that frame waiting for further input before samples can be read.
+        let result = Self::new(
             &format!(
-                "appsrc name=input is-live=true format=time do-timestamp=true block=false caps=application/x-rtp,media={media},encoding-name={name},clock-rate={clock},payload={payload} ! rtpjitterbuffer latency=30 drop-on-latency=true max-dropout-time=100 max-misorder-time=100 ! {tail} ! appsink name=output sync=false max-buffers={} drop=true enable-last-sample=false",
+                "appsrc name=input is-live=true format=time do-timestamp=true block=false caps=application/x-rtp,media={media},encoding-name={name},clock-rate={clock},payload={payload} ! rtpjitterbuffer latency={latency} drop-on-latency=true max-dropout-time=1000 max-misorder-time=100 ! {tail} ! appsink name=output sync=false async=false max-buffers={} drop=true enable-last-sample=false",
                 if video { 2 } else { 3 }
             ),
-            if video { 64 } else { 5 },
-            if video { 131_072 } else { 20_480 },
-        )
+            if video && screen {
+                1024
+            } else if video {
+                64
+            } else {
+                5
+            },
+            if video && screen {
+                1_048_576
+            } else if video {
+                131_072
+            } else {
+                20_480
+            },
+        )?;
+        if screen {
+            // Janus can deliver an entire screen keyframe in a burst. Keep one
+            // admitted compressed frame, not just the camera's small RTP batch;
+            // dropping its beginning makes every subsequent delta undecodable.
+            result
+                .source
+                .set_max_time(gst::ClockTime::from_mseconds(100));
+        }
+        Ok(result)
     }
     pub(super) fn push(
         &self,
@@ -152,8 +185,8 @@ impl Codec {
         let (width, height) = (info.width(), info.height());
         if width == 0
             || height == 0
-            || width > 640
-            || height > 360
+            || width > 1920
+            || height > 1080
             || info.format() != gstreamer_video::VideoFormat::Rgba
         {
             return Err(Error::Malformed);

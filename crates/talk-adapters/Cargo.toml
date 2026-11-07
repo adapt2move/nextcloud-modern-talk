@@ -44,6 +44,10 @@ zbus.workspace = true
 
 # The old provider creates compatibility fixtures; it is not a shipping provider.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+# The opt-in media driver exercises the desktop's actual portal capture owner.
+ashpd.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
 keyring-core.workspace = true
 secret-service.workspace = true
 zbus-secret-service-keyring-store.workspace = true

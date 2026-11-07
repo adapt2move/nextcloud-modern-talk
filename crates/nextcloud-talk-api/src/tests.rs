@@ -384,6 +384,7 @@ async fn meeting_protocol_uses_typed_signals_and_retires_stale_handle() {
         .unwrap();
     assert_eq!(batch.events().len(), 1);
     let signaling::Event::Signal {
+        stream: signaling::StreamKind::Camera,
         from,
         negotiation: received,
         signal: signaling::Signal::Description(sdp),
@@ -815,4 +816,81 @@ async fn unstructured_http_refusals_preserve_safe_causes_without_claiming_revoca
     assert!(
         matches!(owner.request(&context(&clock), Request::Rooms).await, Err(error) if error.kind == ErrorKind::PermissionDenied)
     );
+}
+
+#[test]
+fn internal_screen_offer_and_payload_free_stop_preserve_camera_batch() {
+    use signaling::{Event, StreamKind};
+    let msg = |kind: &str, stream: &str| json!({"type":"message","data":json!({"to":"local","from":"remote","sid":"separate-screen","roomType":stream,"type":kind,"payload":{"type":kind,"sdp":"v=0\r\n"}}).to_string()});
+    let stop = json!({"type":"message","data":json!({"to":"local","from":"remote","sid":"separate-screen","roomType":"screen","type":"unshareScreen"}).to_string()});
+    let batch = signaling::parse_batch(
+        &json!([msg("offer", "screen"), stop, msg("answer", "video")]),
+        "local",
+        1,
+    )
+    .unwrap();
+    assert!(matches!(
+        batch.events()[0],
+        Event::Signal {
+            stream: StreamKind::Screen,
+            ..
+        }
+    ));
+    assert!(matches!(batch.events()[1], Event::ScreenStopped { .. }));
+    assert!(matches!(
+        batch.events()[2],
+        Event::Signal {
+            stream: StreamKind::Camera,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn internal_poll_failure_reports_interruption_then_resume_without_new_authority() {
+    let mut replies = join_replies();
+    replies.extend([
+        (503, "unavailable".into(), Duration::ZERO),
+        reply(json!([signal_row("own-session")])),
+    ]);
+    let server = Server::start(replies).await;
+    let (mut client, runtime) = client(&server);
+    let handle = join(&mut client, &runtime).await;
+    let (mut reader, _writer, stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+    let failed = reader.poll(&context(&runtime)).await.unwrap();
+    assert!(matches!(
+        failed.events(),
+        [signaling::Event::TransportInterrupted]
+    ));
+    assert!(!stop.is_closed());
+    let resumed = reader.poll(&context(&runtime)).await.unwrap();
+    assert!(matches!(
+        resumed.events(),
+        [
+            signaling::Event::TransportResumed,
+            signaling::Event::Signal { .. }
+        ]
+    ));
+    drop(reader);
+    assert!(
+        stop.is_closed(),
+        "abandoning a poll owner still closes the route"
+    );
+}
+
+#[tokio::test]
+async fn internal_poll_recovery_exhaustion_closes_route() {
+    let mut replies = join_replies();
+    replies.extend((0..4).map(|_| (503, "unavailable".into(), Duration::ZERO)));
+    let server = Server::start(replies).await;
+    let (mut client, runtime) = client(&server);
+    let handle = join(&mut client, &runtime).await;
+    let (mut reader, _writer, stop) = client.open_meeting(&context(&runtime), handle).unwrap();
+    for _ in 0..3 {
+        assert!(reader.poll(&context(&runtime)).await.is_ok());
+        assert!(!stop.is_closed());
+    }
+    assert!(reader.poll(&context(&runtime)).await.is_err());
+    assert!(stop.is_closed());
+    assert_eq!(server.count(), 7);
 }

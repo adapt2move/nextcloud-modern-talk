@@ -19,6 +19,11 @@ pub struct MeetingStop {
     hpb: Option<crate::hpb::Route>,
 }
 impl MeetingStop {
+    /// Only a rejected HPB resume can request a fresh call admission. Removal,
+    /// local stop and protocol/auth failures never imply this authority.
+    pub fn session_replaced(&self) -> bool {
+        self.hpb.as_ref().is_some_and(|r| r.session_replaced())
+    }
     pub fn close(&self) {
         self.lifetime.close();
         if let Some(route) = &self.hpb {
@@ -79,6 +84,8 @@ impl CancellationSignal for Combined {
 }
 
 pub struct MeetingReader {
+    interrupted: bool,
+    failures: u8,
     transport: Transport,
     binding: Arc<Binding>,
 }
@@ -89,6 +96,7 @@ pub struct MeetingWriter {
     leave_started: bool,
 }
 struct PeerBudget {
+    stream: StreamKind,
     peer: PeerSession,
     negotiation: Negotiation,
     descriptions: u8,
@@ -142,6 +150,8 @@ impl Client {
         self.call_generation = None;
         Ok((
             MeetingReader {
+                interrupted: false,
+                failures: 0,
                 transport: reader,
                 binding: binding.clone(),
             },
@@ -182,14 +192,45 @@ impl MeetingReader {
             "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
             self.binding.room.as_str()
         );
-        let response = self.transport.signaling_poll(&context, &route).await?;
+        let response = match self.transport.signaling_poll(&context, &route).await {
+            Ok(response) => response,
+            Err(error)
+                if self.failures < 3
+                    && matches!(
+                        error.kind,
+                        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::ServerUnavailable
+                    ) =>
+            {
+                self.binding.lifetime.validate(&context)?;
+                self.failures += 1;
+                self.interrupted = true;
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    250u64 << (self.failures - 1),
+                ))
+                .await;
+                self.binding.lifetime.validate(&context)?;
+                // A lost destructive poll may have consumed signaling. This is
+                // an interruption, never a successful empty poll or renewed
+                // membership grant. The actor suspends publication and refreshes
+                // all authority; an incomplete peer exchange has a recovery bound.
+                guard.1 = true;
+                return Ok(SignalBatch {
+                    events: vec![Event::TransportInterrupted],
+                });
+            }
+            Err(error) => return Err(error),
+        };
         self.binding.lifetime.validate(&context)?;
-        let batch = crate::signaling::parse_batch(
+        let mut batch = crate::signaling::parse_batch(
             &response.data,
             &self.binding.session,
             self.binding.room_id,
         )
         .map_err(|kind| self.binding.error(kind))?;
+        self.failures = 0;
+        if std::mem::take(&mut self.interrupted) {
+            batch.events.insert(0, Event::TransportResumed);
+        }
         guard.1 = true;
         Ok(batch)
     }
@@ -254,12 +295,60 @@ impl MeetingWriter {
         context: &OperationContext,
         peer: &PeerSession,
     ) -> Result<(), Error> {
+        self.request_stream_offer(context, peer, StreamKind::Camera)
+            .await
+    }
+    pub async fn request_stream_offer(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), Error> {
         let context = self.binding.context(context)?;
         self.binding
             .hpb
             .as_ref()
             .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?
-            .request_offer(&context, peer)
+            .request_stream_offer(&context, peer, stream)
+            .await
+            .map_err(|e| self.binding.error(e))
+    }
+    pub async fn restart_subscription(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), Error> {
+        self.binding.context(context)?;
+        let route = self
+            .binding
+            .hpb
+            .as_ref()
+            .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?;
+        route
+            .reset_subscription(peer, stream)
+            .map_err(|e| self.binding.error(e))?;
+        self.selected
+            .retain(|p| &p.peer != peer || p.stream != stream);
+        self.request_stream_offer(context, peer, stream).await
+    }
+    pub async fn send_screen_offer(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+    ) -> Result<(), Error> {
+        let context = self.binding.context(context)?;
+        self.binding
+            .hpb
+            .as_ref()
+            .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?
+            .send_stream(
+                &context,
+                peer,
+                None,
+                Some(Signal::SendOffer),
+                StreamKind::Screen,
+            )
             .await
             .map_err(|e| self.binding.error(e))
     }
@@ -340,28 +429,41 @@ impl MeetingWriter {
     /// peer/SID has a separate finite exchange budget; a replaced SID retires the
     /// old entry instead of letting stale candidates attach to a newer peer.
     pub fn select(&mut self, peer: PeerSession, negotiation: Negotiation) -> Result<(), Error> {
+        self.select_stream(peer, negotiation, StreamKind::Camera)
+    }
+    pub fn select_stream(
+        &mut self,
+        peer: PeerSession,
+        negotiation: Negotiation,
+        stream: StreamKind,
+    ) -> Result<(), Error> {
         if self.binding.lifetime.cancellation.is_cancelled() {
             return Err(self.binding.error(ErrorKind::Cancelled));
         }
         if self.binding.hpb.is_none() && peer.0.as_str() == self.binding.session.as_str() {
             return Err(self.binding.error(ErrorKind::WrongScope));
         }
-        if let Some(existing) = self.selected.iter().find(|p| p.peer == peer) {
+        if let Some(existing) = self
+            .selected
+            .iter()
+            .find(|p| p.peer == peer && p.stream == stream)
+        {
             return if existing.negotiation == negotiation {
                 Ok(())
             } else {
                 Err(self.binding.error(ErrorKind::Conflict))
             };
         }
-        if self.selected.len() == if self.binding.hpb.is_some() { 17 } else { 16 } {
+        if self.selected.len() >= 20 {
             return Err(self.binding.error(ErrorKind::Busy));
         }
         if let Some(route) = &self.binding.hpb {
             route
-                .select(peer.clone(), negotiation.clone())
+                .select_stream(peer.clone(), negotiation.clone(), stream)
                 .map_err(|e| self.binding.error(e))?;
         }
         self.selected.push(PeerBudget {
+            stream,
             peer,
             negotiation,
             descriptions: 0,
@@ -370,9 +472,13 @@ impl MeetingWriter {
         Ok(())
     }
     pub fn remove(&mut self, peer: &PeerSession) {
-        self.selected.retain(|p| &p.peer != peer);
+        self.remove_stream(peer, StreamKind::Camera);
+    }
+    pub fn remove_stream(&mut self, peer: &PeerSession, stream: StreamKind) {
+        self.selected
+            .retain(|p| &p.peer != peer || p.stream != stream);
         if let Some(route) = &self.binding.hpb {
-            route.remove(peer);
+            route.remove_stream(peer, stream);
         }
     }
     pub async fn send(
@@ -382,11 +488,22 @@ impl MeetingWriter {
         negotiation: &Negotiation,
         signal: Signal,
     ) -> Result<AcceptedForProcessing, Error> {
+        self.send_stream(context, peer, negotiation, signal, StreamKind::Camera)
+            .await
+    }
+    pub async fn send_stream(
+        &mut self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        negotiation: &Negotiation,
+        signal: Signal,
+        stream: StreamKind,
+    ) -> Result<AcceptedForProcessing, Error> {
         let context = self.binding.context(context)?;
         let Some(budget) = self
             .selected
             .iter_mut()
-            .find(|p| &p.peer == peer && &p.negotiation == negotiation)
+            .find(|p| &p.peer == peer && &p.negotiation == negotiation && p.stream == stream)
         else {
             return Err(self.binding.error(ErrorKind::WrongScope));
         };
@@ -394,15 +511,22 @@ impl MeetingWriter {
             match &signal {
                 Signal::Description(_) if budget.descriptions < 8 => budget.descriptions += 1,
                 Signal::Candidate(_) if budget.candidates < 128 => budget.candidates += 1,
+                Signal::StopScreen if stream == StreamKind::Screen => {}
                 _ => return Err(self.binding.error(ErrorKind::TooLarge)),
             }
             route
-                .send(&context, peer, Some(negotiation), Some(signal))
+                .send_stream(&context, peer, Some(negotiation), Some(signal), stream)
                 .await
                 .map_err(|e| self.binding.error(e))?;
             return Ok(AcceptedForProcessing);
         }
         let (kind, payload) = match signal {
+            Signal::StopScreen if stream == StreamKind::Screen => {
+                ("unshareScreen", serde_json::Value::Null)
+            }
+            Signal::StopScreen | Signal::SendOffer => {
+                return Err(self.binding.error(ErrorKind::Unsupported));
+            }
             Signal::Description(sdp) => {
                 if budget.descriptions >= 8 {
                     return Err(self.binding.error(ErrorKind::TooLarge));
@@ -426,7 +550,16 @@ impl MeetingWriter {
                 )
             }
         };
-        let inner = json!({"to":peer.0.as_str(),"sid":negotiation.0,"roomType":"video","type":kind,"payload":payload});
+        let mut inner = json!({"to":peer.0.as_str(),"sid":negotiation.0,"roomType":stream.room_type(),"type":kind,"payload":payload});
+        if stream == StreamKind::Screen {
+            inner["broadcaster"] = json!(self.binding.session.as_str());
+        }
+        if kind == "unshareScreen" {
+            inner
+                .as_object_mut()
+                .ok_or_else(|| self.binding.error(ErrorKind::Malformed))?
+                .remove("payload");
+        }
         let messages = json!([{"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()}]).to_string();
         if messages.len() > 128 * 1024 {
             return Err(self.binding.error(ErrorKind::TooLarge));

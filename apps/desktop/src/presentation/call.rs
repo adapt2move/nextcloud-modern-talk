@@ -3,7 +3,9 @@ use super::{ButtonStyle, Desktop, LocalAction, Overlay};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, ImageSource, Window, div, img, prelude::*, px};
 use talk_core::ui::UserIntent;
-use talk_core::ui::presentation::{CallStage, MediaState, RequiredGate, UiIntent};
+use talk_core::ui::presentation::{
+    CallStage, CallStreamKind, MediaState, RequiredGate, ScreenShareState, UiIntent,
+};
 
 impl Desktop {
     pub fn set_call_images(
@@ -23,12 +25,18 @@ impl Desktop {
             let (old_scope, participant, at, _) = &self.call_images[index];
             let retain = admitted
                 && Some(*old_scope) == scope
-                && at.elapsed() < std::time::Duration::from_secs(2)
+                && (at.elapsed() < std::time::Duration::from_secs(2)
+                    || self.snapshot.call.as_ref().is_some_and(|c| {
+                        c.streams
+                            .as_slice()
+                            .iter()
+                            .any(|s| s.local_id == *participant && s.kind == CallStreamKind::Screen)
+                    }))
                 && self.snapshot.call.as_ref().is_some_and(|c| {
-                    c.participants
+                    c.streams
                         .as_slice()
                         .iter()
-                        .any(|p| p.local_id == *participant)
+                        .any(|s| s.local_id == *participant)
                 });
             if retain {
                 index += 1;
@@ -43,10 +51,10 @@ impl Desktop {
         if let Some(scope) = scope.filter(|_| admitted) {
             for (participant, image) in images.into_iter().take(16) {
                 if !self.snapshot.call.as_ref().is_some_and(|c| {
-                    c.participants
+                    c.streams
                         .as_slice()
                         .iter()
-                        .any(|p| p.local_id == participant)
+                        .any(|s| s.local_id == participant)
                 }) {
                     continue;
                 }
@@ -309,7 +317,7 @@ impl Desktop {
                     )),
             );
         }
-        if call.share == MediaState::Active {
+        if matches!(call.share, MediaState::Active | MediaState::Requested) {
             stage = stage.child(
                 div()
                     .p_4()
@@ -334,6 +342,43 @@ impl Desktop {
             // this grid would hide later rows outside its reported scroll extent.
             .flex_none()
             .min_h(px(if wide { 400. } else { 240. }));
+        for stream in call
+            .streams
+            .as_slice()
+            .iter()
+            .filter(|s| s.kind == CallStreamKind::Screen)
+        {
+            let image = self
+                .call_images
+                .iter()
+                .find(|(scope, local, _, _)| *scope == call.scope && *local == stream.local_id)
+                .map(|(_, _, _, image)| image);
+            let mut tile = div()
+                .min_h(px(240.))
+                .rounded(px(10.))
+                .bg(t.stage_panel)
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(div().p_3().child(format!(
+                    "{} · {}",
+                    stream.participant_name.as_str(),
+                    self.l("Bildschirmfreigabe")
+                )));
+            tile = if let Some(image) = image {
+                tile.child(
+                    div().flex_1().min_h_0().child(
+                        img(image.clone())
+                            .w_full()
+                            .h_full()
+                            .object_fit(gpui::ObjectFit::Contain),
+                    ),
+                )
+            } else {
+                tile.child(self.hint(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar.")))
+            };
+            tiles = tiles.child(tile);
+        }
         for participant in call.participants.as_slice() {
             let image = self
                 .call_images
@@ -481,17 +526,19 @@ impl Desktop {
             (
                 "screen-share",
                 "monitor-up",
-                if call.share == MediaState::Active {
+                if matches!(call.share, MediaState::Active | MediaState::Requested) {
                     "Freigabe beenden"
                 } else {
                     "Bildschirm teilen"
                 },
                 call.share,
-                LocalAction::Intent(if call.share == MediaState::Active {
-                    UiIntent::StopScreen(call.scope)
-                } else {
-                    UiIntent::ShareScreen(call.scope)
-                }),
+                LocalAction::Intent(
+                    if matches!(call.share, MediaState::Active | MediaState::Requested) {
+                        UiIntent::StopScreen(call.scope)
+                    } else {
+                        UiIntent::ShareScreen(call.scope)
+                    },
+                ),
             ),
         ] {
             controls = controls.child(
@@ -506,10 +553,14 @@ impl Desktop {
                             (symbol, label),
                             ButtonStyle::Stage,
                             Availability::when(
-                                matches!(
-                                    state,
-                                    MediaState::Off | MediaState::Active | MediaState::Requested
-                                ),
+                                (id == "screen-share"
+                                    && matches!(call.sharing, ScreenShareState::Failed(_)))
+                                    || matches!(
+                                        state,
+                                        MediaState::Off
+                                            | MediaState::Active
+                                            | MediaState::Requested
+                                    ),
                                 media_reason(state),
                             )
                             .labelled(),
