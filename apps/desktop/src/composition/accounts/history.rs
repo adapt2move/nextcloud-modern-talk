@@ -234,15 +234,22 @@ impl History {
                 // Discard grants; dispatch always obtains current server policy.
                 let mut prior = MessagePanel::new(self.context);
                 super::messaging::project_capabilities(&mut prior, capabilities);
-                let feature = talk_core::ui::messaging::MessageFeature::Threads;
-                let mut value = prior.availability(feature);
-                if value.allowed == Decision::Allowed {
-                    value.allowed = Decision::Unknown;
-                }
-                if value.implemented
-                    && value.server != talk_core::ui::presentation::FeatureSupport::Unknown
-                {
-                    let _ = panel.features.try_push((feature, value));
+                use talk_core::ui::messaging::MessageFeature;
+                for feature in [
+                    MessageFeature::Threads,
+                    MessageFeature::Reply,
+                    MessageFeature::Edit,
+                    MessageFeature::React,
+                ] {
+                    let mut value = prior.availability(feature);
+                    if value.allowed == Decision::Allowed {
+                        value.allowed = Decision::Unknown;
+                    }
+                    if value.implemented
+                        && value.server != talk_core::ui::presentation::FeatureSupport::Unknown
+                    {
+                        let _ = panel.features.try_push((feature, value));
+                    }
                 }
             }
         }

@@ -3298,7 +3298,13 @@ fn older_reads_cannot_replace_newer_composer_capabilities_and_expired_sources_st
         false
     ));
     cache.get(key).unwrap().project(&mut panel);
-    assert!(panel.features.as_slice().is_empty());
+    let reaction = panel.availability(talk_core::ui::messaging::MessageFeature::React);
+    assert_eq!(reaction.allowed, Decision::Unknown);
+    assert_eq!(
+        reaction.server,
+        talk_core::ui::presentation::FeatureSupport::Supported
+    );
+    assert!(!reaction.enabled());
     assert_eq!(panel.file_limit, 0);
     cache.remove(key);
     cache.open(key);
