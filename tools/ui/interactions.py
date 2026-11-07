@@ -133,7 +133,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine lokalen Treffer'])
+        expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         click('schreiben')
         type_text('DRAFTALPHA'); key('Return')
@@ -152,6 +152,16 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape closes settings and restores draft', ['DRAFTALPHA'], ['Einstellungen'])
         type_text('X')
         expect('modal returns focus to invoking composer', ['DRAFTALPHAX'])
+    elif scenario == 'search-navigation':
+        expect('switcher displays its initial matching conversation', ['Produktteam', 'Gruppengespräch'])
+        key('ctrl+a'); key('BackSpace')
+        expect('empty switcher shows recent rooms', ['Produktteam', 'Teamküche'])
+        key('Down'); key('Return')
+        expect('arrow and Enter open the selected conversation', ['Teamküche', 'Nachricht an Teamküche'], ['Mit Pfeiltasten auswählen'])
+        key('ctrl+k')
+        expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
+        key('Escape')
+        expect('Escape closes switcher', ['Nachricht an Teamküche'], ['Mit Pfeiltasten auswählen'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
