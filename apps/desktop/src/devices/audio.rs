@@ -1,5 +1,6 @@
 //! CPAL owns CoreAudio/WASAPI/ALSA/PulseAudio callbacks and native destruction.
-//! Samples are reduced in the input callback, never copied, retained or uploaded.
+//! Meter samples are reduced in the input callback. Explicit voice capture feeds
+//! a bounded in-memory recording, which is handed to the scoped upload owner.
 use super::{DeviceError, DeviceId, DeviceInfo, DeviceKind, Signal, safe_label};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};

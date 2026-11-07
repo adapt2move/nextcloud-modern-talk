@@ -201,6 +201,104 @@ fn stopping_preview_keeps_review_but_shutdown_retires_it() {
     assert!(runtime.voice_snapshot().is_none());
 }
 
+/// A synthetic PulseAudio monitor exercises the real callback and stream teardown,
+/// without claiming physical microphone or platform permission coverage.
+#[test]
+#[ignore = "requires owned OS loopback named NMT Synthetic DEVICE"]
+fn native_voice_records_and_disposes_synthetic_monitor() {
+    let runtime = DeviceRuntime::start().unwrap();
+    runtime
+        .submit(DeviceIntent::Enumerate {
+            request: RequestId(1),
+        })
+        .unwrap();
+    let snapshot = wait_for(&runtime, Duration::from_secs(8), |s| {
+        [DeviceKind::Microphone, DeviceKind::Speaker]
+            .into_iter()
+            .all(|kind| {
+                s.devices.as_slice().iter().any(|d| {
+                    d.kind == kind
+                        && d.label
+                            .as_str()
+                            .replace('_', " ")
+                            .contains("NMT Synthetic DEVICE")
+                })
+            })
+    });
+    let selected = |kind| {
+        snapshot
+            .devices
+            .as_slice()
+            .iter()
+            .find(|d| {
+                d.kind == kind
+                    && d.label
+                        .as_str()
+                        .replace('_', " ")
+                        .contains("NMT Synthetic DEVICE")
+            })
+            .unwrap()
+            .id
+            .clone()
+    };
+    runtime
+        .submit(DeviceIntent::ApplySelection {
+            request: RequestId(2),
+            revision: Revision(1),
+            values: DevicePreferences {
+                microphone: DeviceSelection::Specific(selected(DeviceKind::Microphone)),
+                speaker: DeviceSelection::Specific(selected(DeviceKind::Speaker)),
+                camera: DeviceSelection::SystemDefault,
+            },
+        })
+        .unwrap();
+    runtime
+        .submit(DeviceIntent::TestSpeaker {
+            request: RequestId(3),
+            session: PreviewSession(1),
+        })
+        .unwrap();
+    let context = test_voice(VoicePhase::Recording).context;
+    runtime.start_voice(context).unwrap();
+    let start = Instant::now();
+    loop {
+        let voice = runtime.voice_snapshot().unwrap();
+        if voice.phase == VoicePhase::Recording && voice.elapsed_ms >= 250 && voice.level > 0 {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(8),
+            "voice capture timed out: {voice:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runtime.stop_voice(context, false).unwrap();
+    let start = Instant::now();
+    loop {
+        let voice = runtime.voice_snapshot().unwrap();
+        if voice.phase == VoicePhase::Review {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "voice disposal timed out: {voice:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let bytes = runtime.voice_audio(context).unwrap().shared();
+    assert_eq!(&bytes[..4], b"RIFF");
+    assert_eq!(&bytes[8..12], b"WAVE");
+    assert!(bytes.len() > 44 && bytes[44..].iter().any(|byte| *byte != 0));
+    runtime.stop_voice(context, true).unwrap();
+    runtime
+        .submit(DeviceIntent::StopPreview {
+            session: PreviewSession(1),
+        })
+        .unwrap();
+    wait_for(&runtime, Duration::from_secs(3), |s| s.session.is_none());
+    shutdown(&runtime);
+}
+
 #[test]
 fn unavailable_start_stop_ack_and_obsolete_session_are_honest() {
     let runtime = DeviceRuntime::start().unwrap();
