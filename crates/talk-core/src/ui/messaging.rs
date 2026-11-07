@@ -288,6 +288,8 @@ pub struct MessagePanel {
     pub thread_details: Option<ThreadDetails>,
     /// Prior observation for the single admitted optimistic thread change.
     pub thread_change_prior: Option<(RequestId, ThreadDetails, Option<bool>)>,
+    /// Pending local subscription intent; this does not grant server authority.
+    pub thread_following_intent: Option<bool>,
     pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
     /// Foreground mutation state; targeted reads settle their own request slots.
@@ -345,6 +347,7 @@ impl MessagePanel {
             thread_activity: Page::empty(),
             thread_details: None,
             thread_change_prior: None,
+            thread_following_intent: None,
             thread_details_request: None,
             context,
             state: RemoteState::Idle,

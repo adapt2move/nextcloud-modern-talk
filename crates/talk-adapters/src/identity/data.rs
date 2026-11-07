@@ -227,6 +227,8 @@ pub enum OutboxKind {
     Schedule,
     CancelScheduled,
     MarkUnread,
+    RenameThread,
+    ThreadNotifications,
 }
 impl OutboxKind {
     fn code(self) -> i64 {
@@ -241,6 +243,8 @@ impl OutboxKind {
             Self::Schedule => 7,
             Self::CancelScheduled => 8,
             Self::MarkUnread => 9,
+            Self::RenameThread => 10,
+            Self::ThreadNotifications => 11,
         }
     }
     fn parse(code: i64) -> Result<Self> {
@@ -255,6 +259,8 @@ impl OutboxKind {
             7 => Self::Schedule,
             8 => Self::CancelScheduled,
             9 => Self::MarkUnread,
+            10 => Self::RenameThread,
+            11 => Self::ThreadNotifications,
             _ => return Err(DataError::Corrupt),
         })
     }

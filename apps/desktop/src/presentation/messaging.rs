@@ -1107,6 +1107,21 @@ impl Desktop {
                         && panel.availability(MessageFeature::Threads).allowed != Decision::Denied
                 })
     }
+    /// Previously observed thread details permit local staging, never a server
+    /// permission grant. The outbox revalidates after reconnecting.
+    pub(super) fn can_change_thread(&self, context: ConversationRef) -> bool {
+        use talk_core::ui::presentation::FeatureSupport;
+        self.message_feature_enabled(MessageFeature::Threads)
+            || self.snapshot.content == ContentState::Offline
+                && self.local_message_intents()
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    panel.context == context
+                        && panel.thread_details.is_some()
+                        && panel.availability(MessageFeature::Threads).server
+                            != FeatureSupport::Unsupported
+                        && panel.availability(MessageFeature::Threads).allowed != Decision::Denied
+                })
+    }
     /// Offline thread content is a read-only cached observation. A previously
     /// observed root may be opened while fresh server authority is unavailable.
     pub(super) fn can_open_thread(&self, context: ConversationRef, root: u128) -> bool {

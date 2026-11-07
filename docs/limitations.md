@@ -39,8 +39,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   threads may initially show only one replier.
   Sending thread replies can use the bounded outgoing queue when a prior
   capability observation permits it. Thread-page reads retry transient failures
-  up to four times before offering an explicit retry. Renaming and subscription
-  changes require a connection and are reconciled against the server response.
+  up to four times before offering an explicit retry. A thread observed during
+  the current session can have its title or subscription changed offline; the
+  bounded queue revalidates the room when reconnecting. Uncertain effects are
+  checked against the server and are never replayed blindly. Thread settings
+  themselves are not restored from disk as permission authority.
   The API creates a thread with a new root message; it does not expose an
   operation to convert an existing ordinary message into a thread. See the
   upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)

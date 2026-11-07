@@ -1474,6 +1474,7 @@ impl NativeDesktopPort for Port {
         model.snapshot.revision = model.snapshot.revision.saturating_add(1);
         let mut snapshot = model.snapshot.clone();
         model.project_room_unread(&mut snapshot);
+        model.project_thread_list(&mut snapshot);
         Some(snapshot)
     }
 }

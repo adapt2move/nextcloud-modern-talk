@@ -195,6 +195,7 @@ impl Outbox {
     ) {
         panel.queued_actions = 0;
         panel.unread_queued = false;
+        panel.thread_following_intent = None;
         panel.failed_drafts = Page::empty();
         for entry in self
             .entries
@@ -286,6 +287,99 @@ impl Accounts {
                 room
             },
         ));
+    }
+
+    /// Apply pending settings to the published account page, leaving its server
+    /// observation intact so a rejection can reveal it again.
+    pub(super) fn project_thread_list(&self, snapshot: &mut PresentationSnapshot) {
+        let Some(scope) = snapshot
+            .threads
+            .account
+            .filter(|scope| Some(*scope) == snapshot.active_account)
+        else {
+            return;
+        };
+        let live = |entry: &&Entry| {
+            entry.account == scope.account
+                && !matches!(
+                    entry.state,
+                    State::Failed | State::Removing | State::ParkedUncertain
+                )
+        };
+        let mut entries = Vec::new();
+        for row in snapshot.threads.entries.as_slice() {
+            let key = self.cache.stable_room(row.context).or_else(|| {
+                snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|room| room.context == row.context)
+                    .and_then(|room| room.navigation_key.clone())
+            });
+            let mut row = row.clone();
+            let mut followed = true;
+            if let Some(key) = key {
+                for entry in self
+                    .outbox
+                    .entries
+                    .iter()
+                    .filter(live)
+                    .filter(|entry| entry.record.room == key)
+                {
+                    match &entry.intent {
+                        Intent::RenameThread { root, title } if u128::from(*root) == row.root => {
+                            row.title = title.clone()
+                        }
+                        Intent::ThreadNotifications { root, level }
+                            if u128::from(*root) == row.root =>
+                        {
+                            followed = *level != 3
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            if followed {
+                entries.push(row);
+            }
+        }
+        // A just-followed thread may not have appeared in the observed page.
+        // Add it only from this open, scoped thread's bounded observation.
+        if snapshot.threads.offset == 0
+            && let Some(panel) = snapshot.message_panel.as_ref()
+            && Some(panel.context) == snapshot.selected
+            && panel.context.account == scope
+            && panel.thread_following_intent == Some(true)
+            && let Some(details) = panel.thread_details.as_ref()
+            && panel.thread_root == Some(details.root)
+            && !entries
+                .iter()
+                .any(|row| row.context == panel.context && row.root == details.root)
+            && entries.len() < 50
+        {
+            let root = panel.thread_root_message.as_ref().or_else(|| {
+                snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .find(|row| row.local_id == details.root)
+            });
+            entries.insert(
+                0,
+                talk_core::ui::presentation::ThreadView {
+                    context: panel.context,
+                    root: details.root,
+                    title: details.title.clone(),
+                    replies: root.map_or(0, |row| u32::from(row.reply_count)),
+                    last_message: panel
+                        .thread_messages
+                        .as_slice()
+                        .last()
+                        .map(|row| row.local_id),
+                },
+            );
+        }
+        snapshot.threads.entries = page(entries);
     }
 
     pub(super) fn outbox_available(&self, context: ConversationRef) -> bool {
@@ -450,6 +544,36 @@ impl Accounts {
                 return Err(SubmitError::StaleScope);
             }
             let intent = converted?;
+            if let Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } =
+                &intent
+            {
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| {
+                        panel.context == context && panel.thread_root == Some(u128::from(*root))
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                let details = panel
+                    .thread_details
+                    .as_ref()
+                    .filter(|details| details.root == u128::from(*root))
+                    .ok_or(SubmitError::StaleScope)?;
+                let availability = panel.availability(view::MessageFeature::Threads);
+                // A live thread observation proves this room exposed threads.
+                // Local admission can outlive that observation's permission
+                // TTL; the protocol owner revalidates before dispatch.
+                if availability.server == talk_core::ui::presentation::FeatureSupport::Unsupported
+                    || availability.allowed == Decision::Denied
+                    || matches!(&intent, Intent::RenameThread { .. })
+                        && details.rename == Decision::Denied
+                    || matches!(&intent, Intent::ThreadNotifications { .. })
+                        && details.notification_level.is_none()
+                {
+                    return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+                }
+            }
             let room = stable;
             // A repeated deliberate activation may replace an uncertain mark,
             // but must not create overlapping read-marker writes. Reapplying
@@ -559,6 +683,18 @@ impl Accounts {
             if !durable {
                 self.outbox_admitted(operation);
             }
+            if matches!(
+                action,
+                view::MessageAction::RenameThread { .. }
+                    | view::MessageAction::ThreadNotifications { .. }
+            ) && let Some(panel) = self
+                .snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+            {
+                panel.thread_details_request = None;
+            }
             self.project_history(context);
             self.touch();
             Ok(())
@@ -658,6 +794,16 @@ impl Accounts {
                 id(*message).map(|message| Intent::CancelScheduled { message })
             }
             A::MarkUnread => Ok(Intent::MarkUnread),
+            A::RenameThread { root, title } => id(*root).map(|root| Intent::RenameThread {
+                root,
+                title: title.clone(),
+            }),
+            A::ThreadNotifications { root, level } => {
+                id(*root).map(|root| Intent::ThreadNotifications {
+                    root,
+                    level: *level,
+                })
+            }
             A::Forward {
                 message,
                 destination,
@@ -1137,6 +1283,20 @@ impl Accounts {
         };
         let result = reply.as_ref().ok();
         let is_reconcile = self.outbox.entries[index].record.phase == OutboxPhase::Uncertain;
+        let confirmed_thread = match (
+            &self.outbox.entries[index].intent,
+            result,
+            self.outbox.entries[index].context,
+        ) {
+            (
+                intent @ (Intent::RenameThread { .. } | Intent::ThreadNotifications { .. }),
+                Some(wire::MessagingResult::Thread(thread)),
+                Some(context),
+            ) if reconciled(intent, &wire::MessagingResult::Thread(thread.clone())) => {
+                Some((context, intent.clone(), thread.as_ref().clone()))
+            }
+            _ => None,
+        };
         if !is_reconcile
             && matches!(self.outbox.entries[index].intent, Intent::MarkUnread)
             && matches!(result, Some(wire::MessagingResult::Changed))
@@ -1176,6 +1336,16 @@ impl Accounts {
                     self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(30);
                 }
             }
+            Some(result)
+                if matches!(
+                    self.outbox.entries[index].intent,
+                    Intent::RenameThread { .. } | Intent::ThreadNotifications { .. }
+                ) && !reconciled(&self.outbox.entries[index].intent, result) =>
+            {
+                self.outbox.entries[index].state = State::Uncertain;
+                self.outbox.entries[index].record.phase = OutboxPhase::Uncertain;
+                self.outbox.entries[index].retry = Instant::now() + Duration::from_secs(3);
+            }
             Some(_) => self.outbox.entries[index].state = State::Removing,
             None => match reply {
                 Err(Completion::Failed(
@@ -1211,6 +1381,11 @@ impl Accounts {
                 }
             },
         }
+        if self.outbox.entries[index].state == State::Removing
+            && let Some((context, intent, thread)) = confirmed_thread
+        {
+            self.confirm_thread_list(context, &intent, &thread);
+        }
         if matches!(
             self.outbox.entries[index].state,
             State::Uncertain | State::ParkedUncertain
@@ -1225,6 +1400,50 @@ impl Accounts {
             );
         }
         true
+    }
+
+    fn confirm_thread_list(
+        &mut self,
+        context: ConversationRef,
+        intent: &Intent,
+        thread: &wire::Thread,
+    ) {
+        use talk_core::ui::presentation::{FeatureSupport, ThreadView};
+        if self.snapshot.threads.account != Some(context.account)
+            || self.snapshot.threads.support != FeatureSupport::Supported
+        {
+            return;
+        }
+        let root = u128::from(thread.root.sequence);
+        let mut rows = self.snapshot.threads.entries.as_slice().to_vec();
+        let index = rows
+            .iter()
+            .position(|row| row.context == context && row.root == root);
+        if matches!(intent, Intent::ThreadNotifications { level: 3, .. }) {
+            if let Some(index) = index {
+                rows.remove(index);
+            }
+        } else {
+            let observed = ThreadView {
+                context,
+                root,
+                title: thread.title.clone(),
+                replies: thread.replies,
+                last_message: thread.last_message.map(|id| u128::from(id.sequence)),
+            };
+            if let Some(index) = index {
+                rows[index] = observed;
+            } else if matches!(intent, Intent::ThreadNotifications { .. })
+                && self.snapshot.threads.offset == 0
+            {
+                if rows.len() == 50 {
+                    rows.pop();
+                    self.snapshot.threads.has_next = true;
+                }
+                rows.insert(0, observed);
+            }
+        }
+        self.snapshot.threads.entries = page(rows);
     }
     pub(super) fn project_outbox(&mut self, context: ConversationRef) {
         let Some(key) = self.cache.stable_room(context).or_else(|| {
@@ -1355,6 +1574,7 @@ fn conflicts(earlier: &Entry, later: &Entry) -> bool {
         | Intent::Reaction { message, .. }
         | Intent::Pin { message, .. }
         | Intent::Reminder { message, .. } => Some(*message),
+        Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } => Some(*root),
         _ => None,
     };
     if let (Some(a), Some(b)) = (message(&earlier.intent), message(&later.intent)) {
@@ -1464,6 +1684,20 @@ fn command(
             W::CancelScheduled(u128::from(*message)),
         ),
         Intent::MarkUnread => (C::MarkUnread, W::Unread),
+        Intent::RenameThread { root, title } => (
+            C::RenameThread {
+                root: mid(*root),
+                title: title.clone(),
+            },
+            W::ThreadQueued(u128::from(*root)),
+        ),
+        Intent::ThreadNotifications { root, level } => (
+            C::ThreadNotifications {
+                root: mid(*root),
+                level: *level,
+            },
+            W::ThreadQueued(u128::from(*root)),
+        ),
         Intent::Forward {
             message,
             destination,
@@ -1497,6 +1731,9 @@ fn reconcile_command(
         // Repeating DELETE can move the read marker past messages that arrived
         // since the first attempt. An uncertain mutation needs user attention.
         Intent::MarkUnread => return None,
+        Intent::RenameThread { root, .. } | Intent::ThreadNotifications { root, .. } => {
+            (C::Thread(mid(*root)), W::ThreadQueued(u128::from(*root)))
+        }
         Intent::Send { .. } => (C::ReconcileSend, W::Send),
         Intent::Forward { .. } => (C::ReconcileSend, W::Send),
         Intent::Edit { message, .. }
@@ -1565,6 +1802,14 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
         ),
         Intent::Schedule { .. } => false,
         Intent::MarkUnread => false,
+        Intent::RenameThread { root, title } => {
+            matches!(result, wire::MessagingResult::Thread(thread)
+            if thread.root.sequence == *root && thread.title == *title)
+        }
+        Intent::ThreadNotifications { root, level } => {
+            matches!(result, wire::MessagingResult::Thread(thread)
+            if thread.root.sequence == *root && thread.notification_level == Some(*level))
+        }
     }
 }
 fn overlay(
@@ -1678,6 +1923,27 @@ fn overlay(
         );
     }
     match &entry.intent {
+        Intent::RenameThread { root, title } if panel.thread_root == Some(u128::from(*root)) => {
+            if let Some(details) = panel
+                .thread_details
+                .as_mut()
+                .filter(|details| details.root == u128::from(*root))
+            {
+                details.title = title.clone();
+            }
+        }
+        Intent::ThreadNotifications { root, level }
+            if panel.thread_root == Some(u128::from(*root)) =>
+        {
+            if let Some(details) = panel
+                .thread_details
+                .as_mut()
+                .filter(|details| details.root == u128::from(*root))
+            {
+                details.notification_level = Some(*level);
+                panel.thread_following_intent = Some(*level != 3);
+            }
+        }
         Intent::Send { body, options } => {
             let mut row = MessageView {
                 local_id: pending_id,

@@ -744,12 +744,9 @@ impl Desktop {
         let Some((context, root)) = self.thread_parent else {
             return div();
         };
-        let can_change = self
-            .snapshot
-            .message_panel
-            .as_ref()
-            .is_some_and(|panel| panel.context == context && !panel.state.pending())
-            && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Threads);
+        let can_change = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == context && (!panel.state.pending() || self.local_message_intents())
+        }) && self.can_change_thread(context);
         let mut body = div()
             .flex()
             .flex_col()
@@ -762,8 +759,14 @@ impl Desktop {
             .message_panel
             .as_ref()
             .filter(|panel| panel.context == context)
-            .and_then(|panel| panel.thread_change_prior.as_ref())
-            .and_then(|(_, _, following)| *following)
+            .and_then(|panel| {
+                panel.thread_following_intent.or_else(|| {
+                    panel
+                        .thread_change_prior
+                        .as_ref()
+                        .and_then(|(_, _, following)| *following)
+                })
+            })
             .or_else(|| {
                 thread_following(
                     &self.snapshot.threads,
@@ -820,7 +823,10 @@ impl Desktop {
                 ),
             );
         }
-        let can_rename = details.rename == talk_core::ui::Decision::Allowed;
+        let can_rename = details.rename == talk_core::ui::Decision::Allowed
+            || self.snapshot.content == ContentState::Offline
+                && self.local_message_intents()
+                && details.rename != talk_core::ui::Decision::Denied;
         if can_rename {
             body = if self.thread_renaming {
                 body.child(

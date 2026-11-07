@@ -12,6 +12,7 @@ pub(super) enum Work {
     ThreadRoot(u128),
     ThreadInfo(u128),
     ThreadChange(u128),
+    ThreadQueued(u128),
     History,
     Latest,
     Prefetch,
@@ -92,6 +93,7 @@ impl Work {
                 | Self::Metadata
                 | Self::Recovery
                 | Self::ThreadActivity
+                | Self::ThreadQueued(_)
         )
     }
 }
@@ -1009,6 +1011,7 @@ impl Accounts {
                 panel.thread_messages = rows;
                 panel.thread_details = None;
                 panel.thread_details_request = None;
+                panel.thread_following_intent = None;
                 panel.thread_root_state = RemoteState::Idle;
                 panel.thread_root_message = root_message;
             }
@@ -1222,12 +1225,14 @@ impl Accounts {
                 Ok(result)
             }
             Err(IdentityError::Request(ErrorKind::WrongScope | ErrorKind::Cancelled))
-                if work.foreground_result() =>
+                if work.foreground_result() || matches!(work, Work::ThreadQueued(_)) =>
             {
                 Err(Completion::Uncertain)
             }
             Err(error) => Err(completion_error(error)),
-            _ if work.foreground_result() => Err(Completion::Uncertain),
+            _ if work.foreground_result() || matches!(work, Work::ThreadQueued(_)) => {
+                Err(Completion::Uncertain)
+            }
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
         let mut result =
@@ -1276,11 +1281,15 @@ impl Accounts {
         {
             result = Err(Completion::Uncertain);
         }
-        if let Work::ThreadInfo(root) | Work::ThreadChange(root) = work
+        if let Work::ThreadInfo(root) | Work::ThreadChange(root) | Work::ThreadQueued(root) = work
             && result.is_ok()
             && !matches!(&result, Ok(wire::MessagingResult::Thread(thread)) if thread.root.conversation == context.conversation && u128::from(thread.root.sequence) == root)
         {
-            result = Err(Completion::Failed(UnavailableReason::PolicyStale));
+            result = Err(if matches!(work, Work::ThreadQueued(_)) {
+                Completion::Uncertain
+            } else {
+                Completion::Failed(UnavailableReason::PolicyStale)
+            });
         }
         if work == Work::Unread
             && result.is_ok()
@@ -1674,12 +1683,19 @@ impl Accounts {
                         }
                     }
                     wire::MessagingResult::Thread(thread) => {
-                        panel.thread_details = Some(view::ThreadDetails {
-                            root: u128::from(thread.root.sequence),
-                            title: thread.title,
-                            notification_level: thread.notification_level,
-                            rename: thread.rename,
-                        });
+                        // A direct fallback preserves its optimistic overlay
+                        // through projection; queued work already projected the
+                        // freshly observed baseline and later pending intents.
+                        if matches!(work, Work::ThreadChange(_))
+                            && panel.thread_change_prior.is_some()
+                        {
+                            panel.thread_details = Some(view::ThreadDetails {
+                                root: u128::from(thread.root.sequence),
+                                title: thread.title,
+                                notification_level: thread.notification_level,
+                                rename: thread.rename,
+                            });
+                        }
                     }
                     wire::MessagingResult::ReactionAuthors(_)
                     | wire::MessagingResult::Threads(_) => (),
@@ -1785,8 +1801,12 @@ impl Accounts {
             self.history
                 .remember_thread(context, root, rows, root_message);
         }
-        if matches!(work, Work::ThreadChange(_)) && completion == Completion::ServerAccepted {
-            let _ = self.refresh_threads(context.account);
+        if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_))
+            && completion == Completion::ServerAccepted
+        {
+            if self.refresh_threads(context.account).is_err() {
+                self.hint_thread_refresh(context.account, Instant::now());
+            }
         }
         if work == Work::History
             && completion != Completion::ServerAccepted

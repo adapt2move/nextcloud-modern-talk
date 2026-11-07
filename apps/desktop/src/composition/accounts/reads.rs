@@ -271,6 +271,7 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
                     panel.thread_root_state = RemoteState::Idle;
                     panel.thread_details = None;
                     panel.thread_details_request = None;
+                    panel.thread_following_intent = None;
                 }
                 panel.thread_root = Some(*root);
             }
@@ -374,6 +375,11 @@ impl Accounts {
                     panel.thread_messages = rows;
                     panel.thread_root_message = root_message;
                 }
+            }
+            if job.read.thread_root().is_some() {
+                // Reopening a retained thread restores its current-session
+                // metadata before any queued settings are projected over it.
+                self.project_history(context);
             }
             // Local acceptance always has a correlated loading/failure result.
             // No operation ticket is created until start_message admits it.

@@ -102,6 +102,279 @@ fn model() -> (Accounts, ConversationRef, NavigationRoomKey) {
     (model, context, room)
 }
 
+fn thread(context: ConversationRef, root: u64, title: &str, level: i8) -> Box<wire::Thread> {
+    Box::new(wire::Thread {
+        root: MessageId {
+            conversation: context.conversation,
+            sequence: root,
+        },
+        last_message: None,
+        last_reply: None,
+        title: text(title),
+        replies: 2,
+        unread: None,
+        notification_level: Some(level),
+        rename: Decision::Allowed,
+    })
+}
+
+#[test]
+fn queued_thread_changes_replay_over_observations_and_rollback_independently() {
+    let (mut model, context, room) = model();
+    model.snapshot.threads.account = Some(context.account);
+    model.snapshot.threads.entries = page([talk_core::ui::presentation::ThreadView {
+        context,
+        root: 7,
+        title: text("Original"),
+        replies: 2,
+        last_message: Some(9),
+    }]);
+    let op = OperationId::from_local(800);
+    model
+        .history
+        .admitted(context, op, messaging::Work::ThreadInfo(7), RequestId(1), 1);
+    assert!(model.history.complete(
+        context,
+        op,
+        messaging::Work::ThreadInfo(7),
+        RequestId(1),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context, 7, "Original", 0
+        ))),
+        false
+    ));
+    model.snapshot.message_panel.as_mut().unwrap().thread_root = Some(7);
+    let rename = Intent::RenameThread {
+        root: 7,
+        title: text("New title"),
+    };
+    let unfollow = Intent::ThreadNotifications { root: 7, level: 3 };
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(1, room.clone(), rename.clone(), OutboxPhase::Queued, 1),
+            stored(2, room, unfollow.clone(), OutboxPhase::Queued, 2),
+        ]),
+    );
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "New title"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(3)
+    );
+    assert_eq!(panel.thread_following_intent, Some(false));
+    assert!(conflicts(
+        &model.outbox.entries[0],
+        &model.outbox.entries[1]
+    ));
+    let mut list = model.snapshot.clone();
+    model.project_thread_list(&mut list);
+    assert!(list.threads.entries.as_slice().is_empty());
+    assert_eq!(
+        model.snapshot.threads.entries.as_slice()[0].title.as_str(),
+        "Original"
+    );
+
+    model.outbox_result(
+        OperationId::from_local(1),
+        &Err(Completion::Failed(UnavailableReason::PermissionDenied)),
+    );
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "Original"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(3)
+    );
+    assert_eq!(panel.thread_following_intent, Some(false));
+    assert!(panel.action_error.is_some());
+
+    model.outbox.entries[1].state = State::ParkedUncertain;
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().notification_level,
+        Some(0)
+    );
+    assert_eq!(panel.thread_following_intent, None);
+    let mut list = model.snapshot.clone();
+    model.project_thread_list(&mut list);
+    assert_eq!(
+        list.threads.entries.as_slice()[0].title.as_str(),
+        "Original"
+    );
+}
+
+#[test]
+fn uncertain_thread_mutations_reconcile_by_read_without_blind_replay() {
+    let (_, context, _) = model();
+    for intent in [
+        Intent::RenameThread {
+            root: 7,
+            title: text("New title"),
+        },
+        Intent::ThreadNotifications { root: 7, level: 3 },
+    ] {
+        assert!(matches!(reconcile_command(context, &intent),
+            Some((wire::MessagingCommand::Thread(id), messaging::Work::ThreadQueued(7))) if id.sequence == 7));
+        assert!(!reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 7, "Original", 0))
+        ));
+        assert!(!reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 8, "New title", 3))
+        ));
+        assert!(reconciled(
+            &intent,
+            &wire::MessagingResult::Thread(thread(context, 7, "New title", 3))
+        ));
+    }
+}
+
+#[test]
+fn malformed_thread_mutation_receipt_stays_uncertain() {
+    let (mut model, context, room) = model();
+    let operation = OperationId::from_local(1);
+    model.outbox.load(
+        context.account.account,
+        &page([stored(
+            1,
+            room,
+            Intent::RenameThread {
+                root: 7,
+                title: text("New title"),
+            },
+            OutboxPhase::Queued,
+            1,
+        )]),
+    );
+    model.outbox.entries[0].state = State::Running;
+    model.outbox.entries[0].record.phase = OutboxPhase::Dispatched;
+    model.history.admitted(
+        context,
+        operation,
+        messaging::Work::ThreadQueued(7),
+        RequestId(0),
+        1,
+    );
+    model.apply_message(
+        RequestId(0),
+        context,
+        operation,
+        messaging::Work::ThreadQueued(7),
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Thread(thread(context, 8, "New title", 0)),
+        })),
+    );
+    assert!(model.outbox.entries[0].state == State::Uncertain);
+    assert!(model.outbox.entries[0].record.phase == OutboxPhase::Uncertain);
+}
+
+#[test]
+fn confirmed_thread_changes_update_the_account_page_without_waiting_for_refresh() {
+    use talk_core::ui::presentation::{FeatureSupport, ThreadView};
+    let (mut model, context, room) = model();
+    model.snapshot.threads.account = Some(context.account);
+    model.snapshot.threads.support = FeatureSupport::Supported;
+    model.snapshot.threads.entries = page([ThreadView {
+        context,
+        root: 7,
+        title: text("Original"),
+        replies: 2,
+        last_message: Some(9),
+    }]);
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::RenameThread {
+                    root: 7,
+                    title: text("New title"),
+                },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room,
+                Intent::ThreadNotifications { root: 7, level: 3 },
+                OutboxPhase::Queued,
+                2,
+            ),
+        ]),
+    );
+    for entry in &mut model.outbox.entries {
+        entry.state = State::Running;
+        entry.record.phase = OutboxPhase::Dispatched;
+        entry.context = Some(context);
+    }
+    model.outbox_result(
+        OperationId::from_local(1),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context,
+            7,
+            "New title",
+            0,
+        ))),
+    );
+    assert!(model.outbox.entries[0].state == State::Removing);
+    assert_eq!(
+        model.snapshot.threads.entries.as_slice()[0].title.as_str(),
+        "New title"
+    );
+    model.outbox_result(
+        OperationId::from_local(2),
+        &Ok(wire::MessagingResult::Thread(thread(
+            context,
+            7,
+            "New title",
+            3,
+        ))),
+    );
+    assert!(model.outbox.entries[1].state == State::Removing);
+    assert!(model.snapshot.threads.entries.as_slice().is_empty());
+}
+
+#[test]
+fn thread_admission_rejects_wrong_root_and_known_denial() {
+    let (mut model, context, _) = model();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_details = Some(view::ThreadDetails {
+        root: 7,
+        title: text("Original"),
+        notification_level: Some(0),
+        rename: Decision::Denied,
+    });
+    let action = |root| view::MessageAction::RenameThread {
+        root,
+        title: text("New title"),
+    };
+    assert!(matches!(
+        model.queue_message_action(RequestId(1), context, &action(8)),
+        Some(Err(SubmitError::StaleScope))
+    ));
+    assert!(matches!(
+        model.queue_message_action(RequestId(2), context, &action(7)),
+        Some(Err(SubmitError::Unavailable(
+            UnavailableReason::PolicyStale
+        )))
+    ));
+    assert!(model.outbox.entries.is_empty());
+}
+
 #[test]
 fn new_thread_send_keeps_its_title_through_the_durable_intent() {
     let (model, context, room) = model();

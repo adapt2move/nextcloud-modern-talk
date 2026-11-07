@@ -53,6 +53,7 @@ pub const SCENARIOS: &[&str] = &[
     "thread-error",
     "thread-list",
     "thread-options",
+    "thread-offline",
     "thread-paged",
     "thread-compose",
     "private-reply",
@@ -299,6 +300,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     if scenario == Some("thread-options") {
         return snapshot(Some("thread"));
+    }
+    if scenario == Some("thread-offline") {
+        let mut state = snapshot(Some("thread"));
+        state.content = ContentState::Offline;
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.queue_available = true;
+            panel.features = Page::empty();
+            if let Some(details) = panel.thread_details.as_mut() {
+                details.rename = Decision::Unknown;
+            }
+        }
+        return state;
     }
     if matches!(
         scenario,
@@ -1358,7 +1371,8 @@ impl DevelopmentPort {
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
                 Some(
-                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-paged",
+                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-offline"
+                    | "thread-paged",
                 ) => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
@@ -1376,6 +1390,7 @@ impl DevelopmentPort {
                         | "thread-error"
                         | "thread-list"
                         | "thread-options"
+                        | "thread-offline"
                         | "thread-paged"
                         | "chat-send-pending"
                         | "unread-divider"
@@ -1884,6 +1899,7 @@ impl NativeDesktopPort for DevelopmentPort {
                 if Some(context) != self.snapshot.selected {
                     return Err(SubmitError::StaleScope);
                 }
+                let offline = self.snapshot.content == ContentState::Offline;
                 let panel = self
                     .snapshot
                     .message_panel
@@ -2020,7 +2036,14 @@ impl NativeDesktopPort for DevelopmentPort {
                             .filter(|details| details.root == root)
                         {
                             details.title = title;
-                            panel.result = Some((request, Completion::ServerAccepted));
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
                         }
                     }
                     MessageAction::ThreadNotifications { root, level }
@@ -2032,7 +2055,15 @@ impl NativeDesktopPort for DevelopmentPort {
                             .filter(|details| details.root == root)
                         {
                             details.notification_level = Some(level);
-                            panel.result = Some((request, Completion::ServerAccepted));
+                            panel.thread_following_intent = Some(level != 3);
+                            panel.result = Some((
+                                request,
+                                if offline {
+                                    Completion::Queued
+                                } else {
+                                    Completion::ServerAccepted
+                                },
+                            ));
                         }
                     }
                     MessageAction::Search(query) => {

@@ -222,6 +222,17 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Thread nicht mehr folgen', 'Alle Antworten', 'Nur Erwähnungen', 'Thread umbenennen'])
         click('umbenennen', xmin=800, ymin=100)
         expect('thread rename opens an editable title', ['Design review', 'Speichern'])
+    elif scenario == 'thread-offline':
+        expect('previously observed thread options are available offline',
+               ['Thread nicht mehr folgen', 'Thread umbenennen'])
+        click('umbenennen', xmin=800, ymin=100)
+        key('ctrl+a')
+        type_text('Release Notes')
+        click('Speichern', xmin=800, ymin=100)
+        expect('offline rename updates the thread heading immediately', ['Release Notes'])
+        click('folgen', xmin=800, ymin=100)
+        expect('offline unfollow updates the visible subscription action',
+               ['Thread folgen'], ['Thread nicht mehr folgen'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

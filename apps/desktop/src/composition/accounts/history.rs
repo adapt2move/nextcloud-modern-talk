@@ -42,6 +42,12 @@ struct ReactionSnapshot {
     reactions: Page<protocol::messaging::Reaction, 64>,
 }
 
+struct ThreadObservation {
+    details: talk_core::ui::messaging::ThreadDetails,
+    version: Version,
+    expires: Instant,
+}
+
 pub(super) struct History {
     context: ConversationRef,
     opened: bool,
@@ -75,6 +81,8 @@ pub(super) struct History {
     reaction_snapshots: Vec<ReactionSnapshot>,
     // Four recently opened threads per scoped room; no permission is cached.
     threads: Vec<(u128, Page<MessageView, 50>, Option<MessageView>)>,
+    // Current-runtime observations only; disk never restores rename authority.
+    thread_details: Vec<ThreadObservation>,
     thread_activity: Page<talk_core::ui::messaging::ThreadActivity, 50>,
     thread_activity_version: Version,
     thread_activity_requested: Option<Instant>,
@@ -110,6 +118,7 @@ impl History {
             metadata_probe: None,
             reaction_snapshots: Vec::new(),
             threads: Vec::new(),
+            thread_details: Vec::new(),
             thread_activity: Page::empty(),
             thread_activity_version: Version(0, false),
             thread_activity_requested: None,
@@ -126,6 +135,19 @@ impl History {
         panel.older = self.older;
         panel.latest = self.latest;
         panel.common_read = self.common_read;
+        if panel.thread_change_prior.is_none()
+            && let Some(observed) = panel.thread_root.and_then(|root| {
+                self.thread_details
+                    .iter()
+                    .find(|item| item.details.root == root)
+            })
+        {
+            let mut details = observed.details.clone();
+            if Instant::now() >= observed.expires && details.rename == Decision::Allowed {
+                details.rename = Decision::Unknown;
+            }
+            panel.thread_details = Some(details);
+        }
         // Presentation may reuse a recently observed limit/features snapshot;
         // every mutation still revalidates its room in the protocol owner.
         panel.features = Page::empty();
@@ -1016,6 +1038,39 @@ impl Cache {
                     }
                 }));
                 room.thread_activity_version = flight.version;
+            }
+        }
+        if let Work::ThreadInfo(root) | Work::ThreadChange(root) | Work::ThreadQueued(root) = work
+            && let Ok(MessagingResult::Thread(thread)) = result
+            && thread.root.conversation == context.conversation
+            && u128::from(thread.root.sequence) == root
+        {
+            let version = if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_)) {
+                mutation_version
+            } else {
+                flight.version
+            };
+            let old = room
+                .thread_details
+                .iter()
+                .position(|item| item.details.root == root);
+            if old.is_none_or(|index| room.thread_details[index].version <= version) {
+                if let Some(index) = old {
+                    room.thread_details.remove(index);
+                }
+                if room.thread_details.len() >= 4 {
+                    room.thread_details.remove(0);
+                }
+                room.thread_details.push(ThreadObservation {
+                    details: talk_core::ui::messaging::ThreadDetails {
+                        root,
+                        title: thread.title.clone(),
+                        notification_level: thread.notification_level,
+                        rename: thread.rename,
+                    },
+                    version,
+                    expires: flight.started + background::SOURCE_LIFETIME,
+                });
             }
         }
         if let Work::PinChange { message, pinned } = work

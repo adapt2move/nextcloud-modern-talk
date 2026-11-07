@@ -211,7 +211,10 @@ impl Desktop {
                 && !self.navigation_open
                 && !self.account_removal.confirming()
                 && !self.incoming_visible()
-                && matches!(self.overlay, None | Some(Overlay::CallChat))
+                && matches!(
+                    self.overlay,
+                    None | Some(Overlay::CallChat | Overlay::Thread)
+                )
                 && Instant::now() < toast.expires
         })?;
         Some(

@@ -4,6 +4,69 @@ use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
 #[test]
+fn thread_metadata_mutation_fences_old_reads_and_does_not_persist_authority() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let info = admit(&mut cache, key, 1, Work::ThreadInfo(7));
+    let change = admit(&mut cache, key, 2, Work::ThreadQueued(7));
+    let result = |title: &str| {
+        MessagingResult::Thread(Box::new(protocol::messaging::Thread {
+            root: MessageId {
+                conversation: key.conversation,
+                sequence: 7,
+            },
+            last_message: None,
+            last_reply: None,
+            title: text(title),
+            replies: 0,
+            unread: None,
+            notification_level: Some(0),
+            rename: Decision::Allowed,
+        }))
+    };
+    assert!(cache.complete(
+        key,
+        change,
+        Work::ThreadQueued(7),
+        RequestId(2),
+        &Ok(result("After")),
+        false
+    ));
+    assert!(cache.complete(
+        key,
+        info,
+        Work::ThreadInfo(7),
+        RequestId(1),
+        &Ok(result("Before")),
+        false
+    ));
+    let mut panel = MessagePanel::new(key);
+    panel.thread_root = Some(7);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().title.as_str(),
+        "After"
+    );
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().rename,
+        Decision::Allowed
+    );
+    cache.get_mut(key).unwrap().thread_details[0].expires = Instant::now() - Duration::from_secs(1);
+    cache.get(key).unwrap().project(&mut panel);
+    assert_eq!(
+        panel.thread_details.as_ref().unwrap().rename,
+        Decision::Unknown
+    );
+    cache.remove(key);
+    cache.open(key);
+    let mut fresh = MessagePanel::new(key);
+    fresh.thread_root = Some(7);
+    cache.get(key).unwrap().project(&mut fresh);
+    assert!(fresh.thread_details.is_none());
+}
+
+#[test]
 fn cached_thread_count_roundtrips_without_restoring_authority() {
     let key = context(1, 1, 1, 1);
     let mut detail = message(key, 7, "Thread root");

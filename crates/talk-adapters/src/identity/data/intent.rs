@@ -79,6 +79,15 @@ pub enum OutboxIntent {
         message: u64,
     },
     MarkUnread,
+    RenameThread {
+        root: u64,
+        #[serde(with = "codec::text")]
+        title: Text<256>,
+    },
+    ThreadNotifications {
+        root: u64,
+        level: i8,
+    },
 }
 impl OutboxIntent {
     pub fn kind(&self) -> OutboxKind {
@@ -93,6 +102,8 @@ impl OutboxIntent {
             Self::Schedule { .. } => OutboxKind::Schedule,
             Self::CancelScheduled { .. } => OutboxKind::CancelScheduled,
             Self::MarkUnread => OutboxKind::MarkUnread,
+            Self::RenameThread { .. } => OutboxKind::RenameThread,
+            Self::ThreadNotifications { .. } => OutboxKind::ThreadNotifications,
         }
     }
     fn valid(&self) -> bool {
@@ -111,6 +122,8 @@ impl OutboxIntent {
         };
         match self {
             Self::MarkUnread => true,
+            Self::RenameThread { root, title } => *root > 0 && !title.as_str().trim().is_empty(),
+            Self::ThreadNotifications { root, level } => *root > 0 && (0..=3).contains(level),
             Self::Send { body, options: o } => !body.as_str().trim().is_empty() && options(o),
             Self::Schedule {
                 body,
@@ -177,6 +190,39 @@ mod tests {
                 .unwrap();
         assert_eq!(record.kind, OutboxKind::MarkUnread);
         assert_eq!(record.intent(), Ok(OutboxIntent::MarkUnread));
+    }
+
+    #[test]
+    fn thread_changes_roundtrip_without_persisting_permission() {
+        let room = NavigationRoomKey::new(&format!("r1:{:032x}", 7)).unwrap();
+        for intent in [
+            OutboxIntent::RenameThread {
+                root: 42,
+                title: Text::new("Planning").unwrap(),
+            },
+            OutboxIntent::ThreadNotifications { root: 42, level: 3 },
+        ] {
+            let record =
+                OutboxRecord::from_intent(OperationId::from_local(5), room.clone(), &intent)
+                    .unwrap();
+            assert_eq!(record.intent(), Ok(intent));
+        }
+        for invalid in [
+            OutboxIntent::RenameThread {
+                root: 0,
+                title: Text::new("Planning").unwrap(),
+            },
+            OutboxIntent::RenameThread {
+                root: 42,
+                title: Text::new(" ").unwrap(),
+            },
+            OutboxIntent::ThreadNotifications { root: 42, level: 4 },
+        ] {
+            assert!(
+                OutboxRecord::from_intent(OperationId::from_local(5), room.clone(), &invalid,)
+                    .is_err()
+            );
+        }
     }
 
     #[test]
