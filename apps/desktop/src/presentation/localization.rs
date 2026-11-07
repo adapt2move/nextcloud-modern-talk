@@ -1,5 +1,6 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
+mod account_search;
 mod chat;
 mod connection;
 mod content;
@@ -17,6 +18,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         return key;
     }
     for catalog in [
+        account_search::MESSAGES,
         chat::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
@@ -79,6 +81,7 @@ mod tests {
     #[test]
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
         for catalog in [
+            account_search::MESSAGES,
             search_navigation::MESSAGES,
             resources::MESSAGES,
             recovery::MESSAGES,

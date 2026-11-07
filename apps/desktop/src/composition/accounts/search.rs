@@ -148,7 +148,9 @@ impl Accounts {
                 }
                 let has_room = hits.as_slice().len() < 100;
                 if let Some(query) = &mut self.account_search {
-                    query.cursor = result.cursor;
+                    query.cursor = result
+                        .cursor
+                        .filter(|next| query.cursor.as_ref() != Some(next));
                 }
                 if let Some(panel) = &mut self.snapshot.search_panel {
                     panel.more = has_room

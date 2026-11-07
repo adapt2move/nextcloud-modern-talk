@@ -523,6 +523,9 @@ impl Desktop {
                     }),
                 ),
             );
+        if self.search_kind == SearchKind::Messages {
+            return body.child(self.account_search_body(cx));
+        }
         if matches!(
             self.search_kind,
             SearchKind::All | SearchKind::Conversations | SearchKind::People

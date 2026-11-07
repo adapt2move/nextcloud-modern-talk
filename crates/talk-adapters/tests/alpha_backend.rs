@@ -515,6 +515,23 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let query = talk_core::protocol::search::Query {
+        term: text("Alpha edited"),
+        conversation: Some(id),
+        person: None,
+        since: Some(text("2020-01-01T00:00:00Z")),
+        until: Some(text("2099-12-31T23:59:59Z")),
+        cursor: None,
+    };
+    let ProtocolReply::SearchMessages(found) = client
+        .request(context(&runtime), ProtocolRequest::SearchMessages(query))
+        .await
+        .expect("account search")
+    else {
+        panic!("account search reply")
+    };
+    assert!(found.hits.as_slice().iter().any(|hit| hit.message == first));
+    println!("alpha-backend account message search and date/room filters: pass");
     m(
         &mut client,
         &runtime,

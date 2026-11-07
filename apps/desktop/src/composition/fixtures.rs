@@ -71,6 +71,7 @@ pub const SCENARIOS: &[&str] = &[
     "thread",
     "search",
     "search-navigation",
+    "account-search",
     "search-filter",
     "create34",
     "create35",
@@ -890,6 +891,46 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.older = Some(101);
             s.message_panel = Some(panel);
         }
+    }
+    if scenario == "account-search" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.search_panel = Some(talk_core::ui::search::Panel {
+            account: scope(),
+            request: RequestId(1),
+            term: text("Navigation"),
+            filters: talk_core::ui::search::Filters {
+                conversation: None,
+                person: None,
+                since: None,
+                until: None,
+            },
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            hits: page([
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 1,
+                    title: text("Mara Fischer"),
+                    excerpt: text("Die neue Navigation ist bereit für einen letzten Blick."),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(1),
+                    message: 2,
+                    title: text("Jonas Weber"),
+                    excerpt: text("Können wir die Navigation noch einmal prüfen?"),
+                },
+                talk_core::ui::search::Hit {
+                    context: context(2),
+                    message: 8,
+                    title: text("Alex Sommer"),
+                    excerpt: text("Die Navigation ist im Entwurf aktualisiert."),
+                },
+            ]),
+            loaded: true,
+            more: true,
+        });
     }
     s
 }
