@@ -970,7 +970,12 @@ impl Desktop {
         action_name: Option<&'static str>,
         cx: &Context<Self>,
     ) -> ReasonTip {
-        let label = self.l(availability.reason.or(availability.help).unwrap_or(""));
+        let label = match (availability.reason, availability.help) {
+            (Some(reason), Some(help)) if availability.enabled => {
+                format!("{} · {}", self.l(reason), self.l(help))
+            }
+            (reason, help) => self.l(reason.or(help).unwrap_or("")).to_owned(),
+        };
         ReasonTip {
             text_size: self.sp(12.),
             line_height: self.sp(16.),

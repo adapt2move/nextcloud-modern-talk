@@ -1035,7 +1035,8 @@ impl Desktop {
                     )
                     .min_h(px(28.))
                     .h(px(28.))
-                    .px_2(),
+                    .px_2()
+                    .text_color(self.theme.muted),
                 )
             });
         let can_send = Availability::when(
@@ -1090,7 +1091,7 @@ impl Desktop {
                     .min_h(px(96.))
                     .justify_center()
                     .p_3()
-                    .rounded(px(10.))
+                    .rounded(px(12.))
                     .border_1()
                     .border_color(self.theme.input_border)
                     .flex()
@@ -1215,7 +1216,11 @@ impl Desktop {
                     .h(px(3. + f32::from(level) / 1000. * 25.))
                     .rounded(px(2.))
                     .bg(if !review || played {
-                        self.theme.accent
+                        if self.theme.dark {
+                            gpui::rgb(0x6fa0e8).into()
+                        } else {
+                            self.theme.accent
+                        }
                     } else {
                         self.theme.muted
                     })
@@ -2643,18 +2648,21 @@ impl Desktop {
                 LocalAction::Content(Action::AddOption),
                 cx,
             )))
-            .child(self.dialog_row(
-                "Mehrere Antworten erlauben",
-                Some("Teilnehmende können mehr als eine Antwort wählen."),
-                self.switch(
-                    "poll-multiple",
+            .child(
+                self.dialog_row(
                     "Mehrere Antworten erlauben",
-                    Some(self.content_ui.multiple),
-                    Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
-                    LocalAction::Content(Action::Multiple),
-                    cx,
+                    None,
+                    self.switch(
+                        "poll-multiple",
+                        "Mehrere Antworten erlauben",
+                        Some(self.content_ui.multiple),
+                        Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet.")
+                            .help("Teilnehmende können mehr als eine Antwort wählen."),
+                        LocalAction::Content(Action::Multiple),
+                        cx,
+                    ),
                 ),
-            ))
+            )
             .when(self.content_ui.multiple, |d| {
                 d.child(
                     div()
@@ -2696,18 +2704,21 @@ impl Desktop {
                         )),
                 )
             })
-            .child(self.dialog_row(
-                "Anonym abstimmen",
-                Some("Ergebnisse erscheinen nach dem Ende; Stimmen bleiben anonym."),
-                self.switch(
-                    "poll-hidden",
+            .child(
+                self.dialog_row(
                     "Anonym abstimmen",
-                    Some(self.content_ui.hidden_results),
-                    Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
-                    LocalAction::Content(Action::HiddenResults),
-                    cx,
+                    None,
+                    self.switch(
+                        "poll-hidden",
+                        "Anonym abstimmen",
+                        Some(self.content_ui.hidden_results),
+                        Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet.")
+                            .help("Ergebnisse erscheinen nach dem Ende; Stimmen bleiben anonym."),
+                        LocalAction::Content(Action::HiddenResults),
+                        cx,
+                    ),
                 ),
-            ));
+            );
         if !available {
             body = body.child(self.hint(self.l(if !online {
                 "Die Verbindung ist derzeit nicht bereit."

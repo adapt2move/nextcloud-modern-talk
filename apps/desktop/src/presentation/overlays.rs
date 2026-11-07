@@ -93,6 +93,7 @@ impl Desktop {
             .child(
                 div()
                     .id("thread-resize-handle")
+                    .group("thread-resize")
                     .absolute()
                     .left_0()
                     .top_3()
@@ -103,7 +104,14 @@ impl Desktop {
                     .justify_center()
                     .hover(|handle| handle.bg(t.subtle))
                     .focus(|handle| handle.bg(t.subtle))
-                    .child(div().w(px(2.)).h(px(36.)).rounded_full().bg(t.border))
+                    .child(
+                        div()
+                            .w(px(2.))
+                            .h(px(36.))
+                            .rounded_full()
+                            .bg(gpui::transparent_black())
+                            .group_hover("thread-resize", |handle| handle.bg(t.border)),
+                    )
                     .when_some(resize_focus, |handle, focus| handle.track_focus(&focus))
                     .cursor(gpui::CursorStyle::ResizeLeftRight)
                     .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
@@ -168,13 +176,15 @@ impl Desktop {
                 .justify_start()
                 .p_0()
                 .min_h(px(24.))
-                .font_weight(FontWeight::BOLD)
+                .text_size(self.sp(16.))
+                .font_weight(FontWeight::SEMIBOLD)
                 .child(heading.to_owned())
                 .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
                 .into_any_element()
             } else {
                 div()
-                    .font_weight(FontWeight::BOLD)
+                    .text_size(self.sp(16.))
+                    .font_weight(FontWeight::SEMIBOLD)
                     .child(heading.to_owned())
                     .into_any_element()
             })
