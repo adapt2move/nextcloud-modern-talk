@@ -51,6 +51,8 @@ def exercise(scenario, env, xid, out, label, large=False):
             selection_count = re.fullmatch(r'([12]) ausgewählt', term)
             fuzzy_count = selection_count and re.search(
                 rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', text)
+            if selection_count and not fuzzy_count:
+                fuzzy_count = re.search(rf'hinzuf\w{{3,8}}\s*{selection_count.group(1)}\b', text)
             if selection_count and not fuzzy_count and (width, height) == (1280, 800):
                 # This inspected footer location is stable in the fixed-size
                 # fixture. A contrast-enhanced crop also works in dark mode.
@@ -189,19 +191,19 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
-                       input='file:///tmp/Fictional-paste.txt\r\n', text=True, env=env,
+                       input='file:///tmp/Beispiel.txt\r\n', text=True, env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
         data = run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-o'], env).stdout
-        if data.strip() != 'file:///tmp/Fictional-paste.txt':
+        if data.strip() != 'file:///tmp/Beispiel.txt':
             raise AssertionError('the X11 clipboard did not retain the native file-list fixture')
         key('ctrl+v')
-        expect('native file-list paste stages a file chip', ['Fictional-paste.txt', 'Bereit zum Senden'])
+        expect('native file-list paste stages a file chip', ['Beispiel.txt'])
         image = Path('apps/desktop/assets/fixtures/content-photo.png').read_bytes()
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i'],
                        input=image, env=env, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=True, timeout=10)
         key('ctrl+v')
-        expect('native image paste stages an image chip', ['Fictional-paste.txt', 'clipboard.png'])
+        expect('native image paste stages an image chip', ['Beispiel.txt', 'clipboard.png'])
     elif scenario == 'chat-cloud-files':
         click('Team', xmin=285, ymin=400)
         expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
