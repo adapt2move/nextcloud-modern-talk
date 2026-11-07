@@ -225,9 +225,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
         Some("files") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
-        Some("thread" | "thread-options" | "thread-offline" | "thread-paged") => {
-            Some(Overlay::Thread)
-        }
+        Some(
+            "thread" | "thread-options" | "thread-offline" | "thread-paged" | "thread-reference",
+        ) => Some(Overlay::Thread),
         Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),

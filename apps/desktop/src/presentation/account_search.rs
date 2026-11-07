@@ -64,6 +64,25 @@ impl AccountSearchUi {
     pub fn inputs(&self) -> [Entity<TextInput>; 3] {
         [self.person.clone(), self.since.clone(), self.until.clone()]
     }
+    pub fn reformat_dates(
+        &self,
+        old: talk_core::preferences::Locale,
+        new: talk_core::preferences::Locale,
+        cx: &mut Context<Desktop>,
+    ) {
+        if old == new {
+            return;
+        }
+        for input in [&self.since, &self.until] {
+            let value = input.read(cx).content.trim();
+            if let Ok(Some(day)) = date(value, old) {
+                let formatted = format_date(day.as_str(), new);
+                input.update(cx, |input, _| {
+                    input.set_value(&formatted);
+                });
+            }
+        }
+    }
     pub fn reset(&mut self, cx: &mut Context<Desktop>) {
         self.room = None;
         self.room_picker = false;
@@ -127,6 +146,16 @@ fn date(value: &str, locale: talk_core::preferences::Locale) -> Result<Option<Te
     Text::new(&format!("{year:04}-{month:02}-{day:02}"))
         .map(Some)
         .map_err(|_| ())
+}
+fn format_date(day: &str, locale: talk_core::preferences::Locale) -> String {
+    use talk_core::preferences::Locale;
+    // `day` is the canonical ASCII output of date(), never unvalidated input.
+    let (year, month, day) = (&day[..4], &day[5..7], &day[8..10]);
+    match locale {
+        Locale::German => format!("{day}.{month}.{year}"),
+        Locale::English => format!("{month}/{day}/{year}"),
+        Locale::Spanish => format!("{day}/{month}/{year}"),
+    }
 }
 fn highlight(text: &str, query: &str, color: gpui::Hsla) -> StyledText {
     let lower = text.to_lowercase();
@@ -854,7 +883,9 @@ mod tests {
             (English, "02/29/2024"),
             (Spanish, "29/02/2024"),
         ] {
-            assert_eq!(date(good, locale).unwrap().unwrap().as_str(), "2024-02-29");
+            let canonical = date(good, locale).unwrap().unwrap();
+            assert_eq!(canonical.as_str(), "2024-02-29");
+            assert_eq!(format_date(canonical.as_str(), locale), good);
             assert!(date("2023-02-29", locale).is_err());
             assert!(date("2024-13-01", locale).is_err());
             assert_eq!(date("", locale), Ok(None));

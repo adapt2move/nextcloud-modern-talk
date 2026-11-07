@@ -147,6 +147,7 @@ pub const SCENARIOS: &[&str] = &[
     "search-navigation",
     "account-search",
     "reference-preview",
+    "thread-reference",
     "search-filter",
     "sidebar-room-menu",
     "create34",
@@ -526,6 +527,28 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             joining: Some(context),
             uncertain: false,
         });
+        return state;
+    }
+    if scenario == Some("thread-reference") {
+        let mut state = snapshot(Some("thread"));
+        let context = state.selected.expect("fictional room");
+        if let Some(panel) = state.message_panel.as_mut() {
+            panel.thread_messages = page(panel.thread_messages.as_slice().iter().cloned().map(
+                |mut reply| {
+                    if reply.local_id == 40 {
+                        reply.body = text("Der Entwurf im Thread: https://example.test/studio");
+                    }
+                    reply
+                },
+            ));
+        }
+        state.reference_previews = page([talk_core::ui::reference::Preview {
+            context,
+            message: 40,
+            ordinal: 0,
+            title: text("Studiokonzept im Thread"),
+            description: Some(text("Ein fiktiver Link aus der Diskussion.")),
+        }]);
         return state;
     }
     if scenario == Some("reference-preview") {
