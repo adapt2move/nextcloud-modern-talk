@@ -229,7 +229,7 @@ impl Desktop {
                         // content can still scroll at larger text scales.
                         .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
                         .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
-                        .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(330.)))
+                        .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
