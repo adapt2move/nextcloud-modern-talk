@@ -1041,7 +1041,11 @@ impl Accounts {
                 .get(context)
                 .is_some_and(|h| h.loaded && h.latest.is_none());
         let before = self.history.get(context).map(|h| h.offline);
+        let thread_error = reply.as_ref().err().copied();
         self.apply_message(request, context, operation, work, reply);
+        if matches!(work, Work::Thread | Work::ThreadOlder(_)) {
+            self.settle_thread_read(context, request, work, thread_error, Instant::now());
+        }
         let after = self.history.get(context).map(|h| h.offline);
         if let Some(event) = event {
             // Empty successful polls and repeated offline failures are silent.

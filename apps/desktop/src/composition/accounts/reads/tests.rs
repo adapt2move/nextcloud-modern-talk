@@ -61,6 +61,108 @@ fn older_thread_read_uses_the_current_root_and_cursor() {
 }
 
 #[test]
+fn transient_thread_page_retry_preserves_the_page_and_retires_on_navigation() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let now = Instant::now();
+    let mut read = job(now);
+    read.read = Read::ThreadOlder {
+        root: 7,
+        before: 42,
+    };
+    let retained = model.snapshot.messages.as_slice()[0].clone();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([retained.clone()]);
+    panel.thread_state = RemoteState::Loading(read.request);
+    model.queued_read.thread_retry = Some(ThreadRetry {
+        job: read.clone(),
+        attempts: 0,
+        due: None,
+        expires: now + Duration::from_secs(120),
+        failure: UnavailableReason::Busy,
+    });
+    let operation = OperationId::from_local(1);
+    model
+        .history
+        .admitted(context, operation, read.read.work(), read.request, 1);
+    model.apply_message(
+        read.request,
+        context,
+        operation,
+        read.read.work(),
+        Err(IdentityError::Request(ErrorKind::ServerUnavailable)),
+    );
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_state,
+        RemoteState::Failed(
+            read.request,
+            UnavailableReason::Connection(ConnectionFailure::ServerUnavailable)
+        )
+    );
+    model.settle_thread_read(
+        context,
+        read.request,
+        read.read.work(),
+        Some(IdentityError::Request(ErrorKind::ServerUnavailable)),
+        now,
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_state, RemoteState::Loading(read.request));
+    assert_eq!(panel.thread_messages.as_slice(), &[retained]);
+    let retry = model.queued_read.thread_retry.as_ref().unwrap();
+    assert_eq!(retry.due, Some(now + Duration::from_secs(2)));
+    assert_eq!(retry.job.read, read.read, "older-page cursor must not move");
+    model.tick_queued_read(now + Duration::from_secs(1));
+    assert!(model.queued_read.thread_retry.is_some());
+    model.snapshot.selected = Some(crate::composition::fixtures::context(2));
+    model.tick_queued_read(now + Duration::from_secs(2));
+    assert!(model.queued_read.thread_retry.is_none());
+    assert!(model.pending.is_empty());
+}
+
+#[test]
+fn thread_retry_backoff_is_bounded_and_permission_failures_are_not_retried() {
+    let now = Instant::now();
+    let read = job(now);
+    let mut retry = ThreadRetry {
+        job: read.clone(),
+        attempts: 0,
+        due: None,
+        expires: now + Duration::from_secs(120),
+        failure: UnavailableReason::Busy,
+    };
+    for (attempt, delay) in [2, 4, 8, 16].into_iter().enumerate() {
+        retry.attempts = attempt as u8;
+        assert!(retry.schedule(UnavailableReason::Busy, now));
+        assert_eq!(retry.due, Some(now + Duration::from_secs(delay)));
+    }
+    retry.attempts = 4;
+    assert!(!retry.schedule(UnavailableReason::Busy, now));
+    retry.attempts = 0;
+    assert!(!retry.schedule(UnavailableReason::Busy, retry.expires));
+
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_state = RemoteState::Failed(read.request, UnavailableReason::PermissionDenied);
+    model.queued_read.thread_retry = Some(retry);
+    model.settle_thread_read(
+        context,
+        read.request,
+        Work::Thread,
+        Some(IdentityError::Request(ErrorKind::PermissionDenied)),
+        now,
+    );
+    assert!(model.queued_read.thread_retry.is_none());
+    assert_eq!(
+        model.snapshot.message_panel.as_ref().unwrap().thread_state,
+        RemoteState::Failed(read.request, UnavailableReason::PermissionDenied)
+    );
+}
+
+#[test]
 fn only_busy_nonadmission_retries_the_exact_request_and_target_without_extending_its_deadline() {
     let now = Instant::now();
     let mut pending = Some(job(now));
