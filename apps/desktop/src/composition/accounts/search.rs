@@ -4,7 +4,77 @@ use talk_core::ui::{
     conversation::RemoteState,
     search::{Action, Hit, Panel},
 };
+pub(super) struct Retry {
+    request: RequestId,
+    account: AccountScope,
+    append: bool,
+    attempts: u8,
+    due: Option<Instant>,
+    deadline: Instant,
+}
+fn transient(error: IdentityError) -> bool {
+    matches!(
+        error,
+        IdentityError::Request(
+            ErrorKind::Transport
+                | ErrorKind::Deadline
+                | ErrorKind::ServerUnavailable
+                | ErrorKind::RateLimited
+                | ErrorKind::Busy
+        )
+    )
+}
 impl Accounts {
+    pub(super) fn tick_account_search(&mut self) {
+        let now = Instant::now();
+        let Some(retry) = self.account_search_retry.as_ref() else {
+            return;
+        };
+        if retry.due.is_none_or(|due| now < due) {
+            return;
+        }
+        let (request, account, append, deadline) =
+            (retry.request, retry.account, retry.append, retry.deadline);
+        if self.snapshot.active_account != Some(account)
+            || self
+                .snapshot
+                .search_panel
+                .as_ref()
+                .is_none_or(|panel| panel.request != request || panel.account != account)
+        {
+            self.account_search_retry = None;
+            return;
+        }
+        let Some(query) = self.account_search.clone() else {
+            self.account_search_retry = None;
+            return;
+        };
+        match self.request(
+            account,
+            ProtocolRequest::SearchMessages(query),
+            Purpose::Search(request, account, append),
+        ) {
+            Ok(()) => {
+                if let Some(retry) = &mut self.account_search_retry {
+                    retry.due = None;
+                }
+            }
+            Err(SubmitError::Busy) if now < deadline => {
+                if let Some(retry) = &mut self.account_search_retry {
+                    retry.due = Some(now + Duration::from_secs(1));
+                }
+            }
+            Err(_) => {
+                self.account_search_retry = None;
+                if let Some(panel) = &mut self.snapshot.search_panel {
+                    panel.state = RemoteState::Failed(request, UnavailableReason::Busy);
+                    panel.more = append;
+                }
+                self.touch();
+            }
+        }
+    }
+
     pub(super) fn submit_account_search(
         &mut self,
         account: AccountScope,
@@ -27,6 +97,9 @@ impl Accounts {
                 if term.as_str().trim().is_empty() {
                     return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
                 }
+                if filters.from_self && filters.person.is_some() {
+                    return Err(SubmitError::StaleScope);
+                }
                 if filters.conversation.is_some_and(|c| {
                     c.account != account
                         || !self
@@ -46,6 +119,7 @@ impl Accounts {
                         scope: account,
                         local: p.local,
                     }),
+                    from_self: filters.from_self,
                     since: filters.since.clone(),
                     until: filters.until.clone(),
                     cursor: None,
@@ -91,6 +165,14 @@ impl Accounts {
             more: false,
         });
         self.account_search = Some(query);
+        self.account_search_retry = Some(Retry {
+            request,
+            account,
+            append,
+            attempts: 0,
+            due: None,
+            deadline: Instant::now() + Duration::from_secs(30),
+        });
         self.touch();
         Ok(())
     }
@@ -110,6 +192,19 @@ impl Accounts {
             return;
         };
         let old = panel.hits.clone();
+        if let Err(error) = result.as_ref()
+            && transient(*error)
+            && let Some(retry) = &mut self.account_search_retry
+            && retry.request == request
+            && retry.account == account
+            && retry.attempts < 2
+            && Instant::now() < retry.deadline
+        {
+            retry.attempts += 1;
+            retry.due = Some(Instant::now() + Duration::from_secs(1 << retry.attempts));
+            return;
+        }
+        self.account_search_retry = None;
         match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::SearchMessages(result))) => {
                 let mut hits = if append { old } else { Page::empty() };

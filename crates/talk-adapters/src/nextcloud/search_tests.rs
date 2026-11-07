@@ -17,6 +17,7 @@ fn query(room: Option<ConversationId>) -> Query {
         term: Text::new("synthetic").unwrap(),
         conversation: room,
         person: None,
+        from_self: false,
         since: None,
         until: None,
         cursor: None,

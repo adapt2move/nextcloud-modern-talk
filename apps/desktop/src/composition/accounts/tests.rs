@@ -749,6 +749,7 @@ pub(super) fn model() -> Accounts {
         room_invite: None,
         message_search: None,
         account_search: None,
+        account_search_retry: None,
         notices: notifications::Notices::default(),
         background: background::Background::default(),
         history: history::Cache::default(),

@@ -163,6 +163,7 @@ pub enum LocalAction {
     AccountSearchSubmit,
     AccountSearchMore,
     AccountSearchFindPerson,
+    AccountSearchSelf,
     AccountSearchPerson(talk_core::ui::conversation::AccountPersonRef),
     AccountSearchRooms,
     AccountSearchRoom(Option<ConversationRef>),
@@ -1201,6 +1202,7 @@ impl Desktop {
             LocalAction::AccountSearchSubmit => self.start_account_search(cx),
             LocalAction::AccountSearchMore => self.next_account_search(cx),
             LocalAction::AccountSearchFindPerson => self.find_account_search_person(cx),
+            LocalAction::AccountSearchSelf => self.account_search_toggle_self(cx),
             LocalAction::AccountSearchPerson(person) => {
                 self.select_account_search_person(person, cx)
             }

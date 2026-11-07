@@ -39,6 +39,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Find and select a person for the filter.",
         "Busca y selecciona una persona para el filtro.",
     ),
+    ("Von mir", "From me", "Enviados por mí"),
     ("Weitere Ergebnisse", "More results", "Más resultados"),
     (
         "Zeitraum: von / bis, jeweils JJJJ-MM-TT (UTC).",

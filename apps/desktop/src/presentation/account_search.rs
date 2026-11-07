@@ -16,6 +16,7 @@ pub(super) struct AccountSearchUi {
     room_picker: bool,
     person_query: Option<String>,
     selected_person: Option<(AccountPersonRef, String)>,
+    from_self: bool,
     selected: Option<(ConversationRef, u128)>,
     request: u64,
     pub jump: Option<(
@@ -36,6 +37,7 @@ impl AccountSearchUi {
             room_picker: false,
             person_query: None,
             selected_person: None,
+            from_self: false,
             selected: None,
             request: 0,
             jump: None,
@@ -50,6 +52,7 @@ impl AccountSearchUi {
         self.room_picker = false;
         self.person_query = None;
         self.selected_person = None;
+        self.from_self = false;
         self.selected = None;
         self.jump = None;
         self.invalid_date = false;
@@ -137,9 +140,23 @@ impl Desktop {
         if !current_person.is_empty() && person.is_none() {
             return Err(false);
         }
+        if let Some(id) = person
+            && !self.snapshot.create_panel.as_ref().is_some_and(|panel| {
+                Some(panel.account) == self.snapshot.active_account
+                    && self
+                        .room_ui
+                        .create_people_request
+                        .as_ref()
+                        .is_some_and(|request| request.ready(panel))
+                    && panel.people.as_slice().iter().any(|person| person.id == id)
+            })
+        {
+            return Err(false);
+        }
         Ok(Filters {
             conversation: self.account_search_ui.room,
             person,
+            from_self: self.account_search_ui.from_self,
             since,
             until,
         })
@@ -200,6 +217,7 @@ impl Desktop {
             return;
         }
         self.account_search_ui.selected_person = None;
+        self.account_search_ui.from_self = false;
         self.account_search_ui.person_query = Some(query.as_str().to_lowercase());
         self.submit_creation(talk_core::ui::conversation::CreateAction::FindPeople(query));
     }
@@ -229,7 +247,16 @@ impl Desktop {
             input.set_value(&name);
         });
         self.account_search_ui.selected_person = Some((id, name));
+        self.account_search_ui.from_self = false;
         self.account_search_ui.person_query = None;
+    }
+    pub(super) fn account_search_toggle_self(&mut self, cx: &mut Context<Self>) {
+        self.account_search_ui.from_self = !self.account_search_ui.from_self;
+        self.account_search_ui.selected_person = None;
+        self.account_search_ui.person_query = None;
+        self.account_search_ui
+            .person
+            .update(cx, |input, _| input.reset());
     }
     pub(super) fn account_search_room_picker(&mut self) {
         self.account_search_ui.room_picker = !self.account_search_ui.room_picker;
@@ -421,13 +448,39 @@ impl Desktop {
                         .child(self.account_search_ui.person.clone()),
                 )
                 .child(self.button(
-                    "account-search-person-find",
-                    "Person suchen",
-                    ButtonStyle::Secondary,
-                    self.active_account_connected(),
-                    LocalAction::AccountSearchFindPerson,
+                    "account-search-self",
+                    "Von mir",
+                    if self.account_search_ui.from_self {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Secondary
+                    },
+                    true,
+                    LocalAction::AccountSearchSelf,
                     cx,
-                )),
+                ))
+                .child(
+                    self.button(
+                        "account-search-person-find",
+                        "Person suchen",
+                        ButtonStyle::Secondary,
+                        self.active_account_connected()
+                            && !self
+                                .account_search_ui
+                                .person
+                                .read(cx)
+                                .content
+                                .trim()
+                                .is_empty()
+                            && self
+                                .snapshot
+                                .create_panel
+                                .as_ref()
+                                .is_none_or(|panel| !panel.state.pending()),
+                        LocalAction::AccountSearchFindPerson,
+                        cx,
+                    ),
+                ),
         );
         let person_query = self
             .account_search_ui
@@ -463,15 +516,14 @@ impl Desktop {
                 );
             }
         }
-        if self.account_search_ui.invalid_date {
+        if self.account_search_ui.invalid_date
+            || self.account_search_filters(cx).is_err_and(|date| date)
+        {
             body = body.child(self.hint(self.l("Bitte gib einen gültigen Zeitraum ein.")));
         }
-        if !person_query.is_empty()
-            && self
-                .account_search_ui
-                .selected_person
-                .as_ref()
-                .is_none_or(|(_, name)| name.to_lowercase() != person_query)
+        if self
+            .account_search_filters(cx)
+            .is_err_and(|is_date| !is_date)
         {
             body = body.child(self.hint(self.l("Suche und wähle eine Person für den Filter.")));
         }
@@ -481,6 +533,7 @@ impl Desktop {
             if !query.is_empty()
                 && self.account_search_filters(cx).is_ok_and(|filters| {
                     filters.person.is_none()
+                        && !filters.from_self
                         && filters.since.is_none()
                         && filters.until.is_none()
                         && filters
@@ -527,14 +580,23 @@ impl Desktop {
                 }
             }
         }
-        body = body.child(self.button(
-            "account-search-submit",
-            "Nachrichten suchen",
-            ButtonStyle::Primary,
-            self.active_account_connected() && !self.search.read(cx).content.trim().is_empty(),
-            LocalAction::AccountSearchSubmit,
-            cx,
-        ));
+        body = body.child(
+            self.button(
+                "account-search-submit",
+                "Nachrichten suchen",
+                ButtonStyle::Primary,
+                self.active_account_connected()
+                    && !self.search.read(cx).content.trim().is_empty()
+                    && self.account_search_filters(cx).is_ok()
+                    && self
+                        .snapshot
+                        .search_panel
+                        .as_ref()
+                        .is_none_or(|panel| !panel.state.pending()),
+                LocalAction::AccountSearchSubmit,
+                cx,
+            ),
+        );
         if let Some(panel) = self.snapshot.search_panel.as_ref().filter(|p| {
             Some(p.account) == self.snapshot.active_account
                 && p.term.as_str() == self.search.read(cx).content.trim()
@@ -567,7 +629,13 @@ impl Desktop {
                         .iter()
                         .find(|r| r.context == hit.context)
                     {
-                        body = body.child(self.title(room.title.as_str()));
+                        body = body.child(
+                            div()
+                                .pt_2()
+                                .text_size(self.sp(14.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(room.title.as_str().to_owned()),
+                        );
                     }
                     last = Some(hit.context);
                 }

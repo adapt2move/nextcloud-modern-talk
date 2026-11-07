@@ -20,9 +20,12 @@ impl NextcloudClient {
         else {
             return Err(self.error(ErrorKind::Unsupported));
         };
+        if query.from_self && query.person.is_some() {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
         if !provider.term
             || (query.conversation.is_some() && !provider.conversation)
-            || (query.person.is_some() && !provider.person)
+            || ((query.person.is_some() || query.from_self) && !provider.person)
             || (query.since.is_some() && !provider.since)
             || (query.until.is_some() && !provider.until)
         {
@@ -52,6 +55,11 @@ impl NextcloudClient {
                     .ok_or_else(|| self.error(ErrorKind::WrongScope))
             })
             .transpose()?;
+        let person = if query.from_self {
+            Some(self.transport.user().to_owned())
+        } else {
+            person
+        };
         let request = api::search::Query {
             term: query.term.as_str().into(),
             conversation: room,

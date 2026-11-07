@@ -8,6 +8,7 @@ use super::{
 pub struct Filters {
     pub conversation: Option<ConversationRef>,
     pub person: Option<AccountPersonRef>,
+    pub from_self: bool,
     pub since: Option<Text<32>>,
     pub until: Option<Text<32>>,
 }

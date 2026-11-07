@@ -145,6 +145,7 @@ pub struct Accounts {
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     account_search: Option<protocol::search::Query>,
+    account_search_retry: Option<search::Retry>,
     notices: notifications::Notices,
     background: background::Background,
     history: history::Cache,
@@ -192,6 +193,7 @@ impl Accounts {
             room_invite: None,
             message_search: None,
             account_search: None,
+            account_search_retry: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
@@ -324,6 +326,7 @@ impl Accounts {
         }
         self.snapshot.active_account = scope;
         self.account_search = None;
+        self.account_search_retry = None;
         self.snapshot.search_panel = None;
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
@@ -547,6 +550,7 @@ impl Accounts {
         self.tick_queued_read(Instant::now());
         self.tick_content();
         self.tick_file_work();
+        self.tick_account_search();
         self.tick_background();
         self.tick_calls();
         self.poll_messages();

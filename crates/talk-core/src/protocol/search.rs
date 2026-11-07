@@ -9,6 +9,7 @@ pub struct Query {
     pub term: Text<256>,
     pub conversation: Option<ConversationId>,
     pub person: Option<RecipientId>,
+    pub from_self: bool,
     pub since: Option<Text<32>>,
     pub until: Option<Text<32>>,
     pub cursor: Option<Text<1024>>,

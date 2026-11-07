@@ -904,6 +904,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             filters: talk_core::ui::search::Filters {
                 conversation: None,
                 person: None,
+                from_self: false,
                 since: None,
                 until: None,
             },

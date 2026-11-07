@@ -519,6 +519,7 @@ async fn released_server_messaging_and_room_controls() {
         term: text("Alpha edited"),
         conversation: Some(id),
         person: None,
+        from_self: false,
         since: Some(text("2020-01-01T00:00:00Z")),
         until: Some(text("2099-12-31T23:59:59Z")),
         cursor: None,
@@ -531,6 +532,26 @@ async fn released_server_messaging_and_room_controls() {
         panic!("account search reply")
     };
     assert!(found.hits.as_slice().iter().any(|hit| hit.message == first));
+    let own_query = talk_core::protocol::search::Query {
+        term: text("Alpha edited"),
+        conversation: None,
+        person: None,
+        from_self: true,
+        since: None,
+        until: None,
+        cursor: None,
+    };
+    let ProtocolReply::SearchMessages(own) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SearchMessages(own_query),
+        )
+        .await
+        .expect("self-filtered search")
+    else {
+        panic!("search")
+    };
+    assert!(own.hits.as_slice().iter().any(|hit| hit.message == first));
     let ProtocolReply::People(people) = client
         .request(
             context(&runtime),
@@ -548,6 +569,7 @@ async fn released_server_messaging_and_room_controls() {
         term: text("Alpha edited"),
         conversation: Some(id),
         person: Some(bob),
+        from_self: false,
         since: None,
         until: None,
         cursor: None,
