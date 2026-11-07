@@ -54,6 +54,7 @@ pub const SCENARIOS: &[&str] = &[
     "thread-list",
     "thread-paged",
     "thread-compose",
+    "private-reply",
     "sidebar-unread",
     "unread-divider",
     "unread-jump",
@@ -203,6 +204,13 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("private-reply") {
+        let mut state = snapshot(Some("chat-ux"));
+        let direct = context(3);
+        populate(&mut state, direct);
+        state.message_panel = Some(talk_core::ui::messaging::MessagePanel::new(direct));
+        return state;
+    }
     if scenario == Some("thread-paged") {
         let mut state = snapshot(Some("thread"));
         if let Some(panel) = state.message_panel.as_mut() {
@@ -223,6 +231,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 if Some(room.context) == state.selected {
                     room.unread = 3;
                     room.last_read_message = Some(marker);
+                    room.unread_direct_mention = Some(scenario == Some("unread-divider"));
                 }
                 room
             },

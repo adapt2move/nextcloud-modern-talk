@@ -211,6 +211,7 @@ pub struct InitialView {
     pub threads_fixture: bool,
     pub room_menu_fixture: bool,
     pub new_thread_fixture: bool,
+    pub private_reply_fixture: bool,
     pub scale: u16,
 }
 
@@ -372,6 +373,7 @@ impl Desktop {
             threads_fixture,
             room_menu_fixture,
             new_thread_fixture,
+            private_reply_fixture,
             scale,
         } = initial;
         let snapshot = port
@@ -660,6 +662,28 @@ impl Desktop {
             desktop.composer.update(cx, |input, _| {
                 input.set_value(body);
             });
+        }
+        if development
+            && private_reply_fixture
+            && let Some(context) = desktop.snapshot.selected
+            && let Ok(source) = talk_core::preferences::navigation::NavigationRoomKey::new(
+                "r1:00000000000000000000000000000001",
+            )
+        {
+            let target = talk_core::ui::messaging::PrivateReplyTarget {
+                source,
+                message: 12,
+                author: talk_core::ui::Text::new("Mara Fischer").expect("fixture author"),
+                body: talk_core::ui::Text::new("Können wir den Entwurf heute gemeinsam ansehen?")
+                    .expect("fixture quote"),
+            };
+            let _ = desktop.drafts.set_target(
+                context,
+                talk_core::ui::messaging::ComposeTarget {
+                    private_reply: Some(target),
+                    ..Default::default()
+                },
+            );
         }
         if development && initial_overlay == Some(Overlay::Search) {
             desktop.search.update(cx, |i, _| i.set_value("Navigation"));
