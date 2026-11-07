@@ -1076,3 +1076,46 @@ fn correlated_image_keeps_local_pixels_until_the_remote_preview_or_denial_arrive
     assert!(!model.asset_is_current(&job.target));
     assert!(!model.finish_content_image(&job, Some(128)));
 }
+
+#[test]
+fn dnd_suppresses_notifications_without_retiring_the_voice_attachment_owner() {
+    let (mut model, context) = model();
+    model.snapshot = crate::composition::fixtures::snapshot(Some("chat-voice"));
+    assert!(model.voice_allowed(context));
+    model.status_pending.push((
+        context.account,
+        talk_core::preferences::RequestId(41),
+        talk_core::preferences::account::StatusChoice::DoNotDisturb,
+    ));
+    assert!(model.suppress_account_notifications(context.account));
+    assert!(model.voice_allowed(context));
+    model
+        .send_voice_bytes(
+            RequestId(42),
+            context,
+            protocol::content::VoiceBytes::new(vec![1, 2, 3, 4]).unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((_, Step::Upload, Command::UploadVoice { .. }))
+    ));
+    assert_eq!(
+        model.stage_files(context, paths(&["other.txt"])),
+        Err(SubmitError::Busy)
+    );
+    result(
+        &mut model,
+        1,
+        Step::Upload,
+        Ok(Reply::Uploaded {
+            path: text("/draft/voice"),
+            bytes: 4,
+        }),
+    );
+    assert!(matches!(
+        model.attachment_owner.batch.as_ref().unwrap().next(),
+        Some((_, Step::Share, Command::ShareFile { voice_message: true, caption, options, .. }))
+            if caption.as_str().is_empty() && options == Default::default()
+    ));
+}

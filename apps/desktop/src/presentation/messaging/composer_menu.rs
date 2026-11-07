@@ -93,18 +93,20 @@ struct Item {
 
 impl Desktop {
     fn composer_menu_context_current(&self) -> bool {
-        self.snapshot.selected.is_some_and(|context| {
-            self.snapshot.active_account == Some(context.account)
-                && self
-                    .snapshot
-                    .conversations
-                    .as_slice()
-                    .iter()
-                    .any(|row| row.context == context)
-        }) && matches!(
-            self.snapshot.content,
-            ContentState::Ready | ContentState::Offline
-        )
+        self.composer_available()
+            && self.snapshot.selected.is_some_and(|context| {
+                self.snapshot.active_account == Some(context.account)
+                    && self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.context == context)
+            })
+            && matches!(
+                self.snapshot.content,
+                ContentState::Ready | ContentState::Offline
+            )
     }
 
     fn composer_menu_items(&self, target: Target) -> Vec<Item> {
