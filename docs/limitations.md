@@ -27,8 +27,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   unavailable before capture admission. A matching desktop portal backend and
   `gstreamer1.0-pipewire` are required; Xvfb alone supplies neither. The software
   compositor probe uses an explicitly patched portal backend for SHM-only
-  capture; unmodified compositor/picker and permission-revocation qualification
-  remains necessary.
+  capture. The headless Sway rerun did not deliver native source frames with
+  that older backend; fixed and maximum frame-rate constraints also failed
+  negotiation. Generated native 720p screen frames reaching the web client
+  establish media transport only. Linux desktop capture, the unmodified
+  compositor/picker and permission revocation remain unqualified.
 - macOS publication uses the bundled ScreenCaptureKit helper and the system
   content-sharing picker, with a three-buffer source queue, 1080p output and
   10 fps. It needs an Apple SDK build and native qualification, including picker
