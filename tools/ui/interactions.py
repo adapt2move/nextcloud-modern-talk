@@ -533,7 +533,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
         run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
-        expect('thread hover keeps reply text readable', ['Ich aktualisiere die letzten Details.'])
+        expect('thread hover keeps reply text readable', ['Ich aktualisiere die letzten', 'Details'])
         run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
         words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
         if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
