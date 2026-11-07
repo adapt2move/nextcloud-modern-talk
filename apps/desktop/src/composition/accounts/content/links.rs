@@ -58,9 +58,12 @@ fn location_destination(
     if !current {
         return Err(SubmitError::StaleScope);
     }
-    talk_core::ui::messaging::location::map_url(id.as_str())
-        .and_then(|url| Text::new(&url).ok())
-        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    let (lat, lon) = talk_core::ui::markup::location_coordinates(id.as_str())
+        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+    Text::new(&format!(
+        "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"
+    ))
+    .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unsupported))
 }
 
 fn accessible_message(

@@ -50,6 +50,8 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux-call",
     "chat-edit",
     "chat-message-tools",
+    "chat-reminder-time",
+    "lobby-settings",
     "thread-error",
     "chat-content",
     "chat-content-progress",
@@ -227,7 +229,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if scenario == Some("chat-message-tools") {
+    if matches!(scenario, Some("chat-message-tools" | "chat-reminder-time")) {
         let mut state = snapshot(Some("chat-ux"));
         let mut rows = state.messages.as_slice().to_vec();
         let mut location = message(
@@ -439,9 +441,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if scenario == Some("details-ready") {
+    if matches!(scenario, Some("details-ready" | "lobby-settings")) {
         let mut state = snapshot(Some("chat"));
         dialog::configure(&mut state);
+        if scenario == Some("lobby-settings")
+            && let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|p| p.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
+        }
         return state;
     }
     if matches!(

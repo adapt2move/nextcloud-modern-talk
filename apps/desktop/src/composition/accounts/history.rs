@@ -1000,7 +1000,7 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
                 .filter_map(|o| {
                     o.id.as_ref()
                         .filter(|id| {
-                            talk_core::ui::messaging::location::coordinates(id.as_str()).is_some()
+                            talk_core::ui::markup::location_coordinates(id.as_str()).is_some()
                         })
                         .map(|id| talk_adapters::identity::CachedLocation {
                             placeholder: o.placeholder.clone(),
@@ -1084,10 +1084,8 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                             .iter()
                             .filter(|o| {
                                 !message.deleted
-                                    && talk_core::ui::messaging::location::coordinates(
-                                        o.id.as_str(),
-                                    )
-                                    .is_some()
+                                    && talk_core::ui::markup::location_coordinates(o.id.as_str())
+                                        .is_some()
                             })
                             .map(|o| talk_core::ui::messaging::RichObject {
                                 placeholder: o.placeholder.clone(),

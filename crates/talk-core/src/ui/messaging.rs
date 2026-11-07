@@ -1,6 +1,4 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
-pub mod location;
-
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{Decision, Page, Text, UnavailableReason};

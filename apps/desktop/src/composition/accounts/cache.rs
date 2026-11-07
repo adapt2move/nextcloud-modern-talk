@@ -1082,6 +1082,7 @@ impl Accounts {
             server_default_permissions: None,
             effective_permissions: None,
             lobby: o.lobby,
+            lobby_timer: None,
             has_password: None,
             participant_count: room.participant_count,
             guest_access: o.guest_access,

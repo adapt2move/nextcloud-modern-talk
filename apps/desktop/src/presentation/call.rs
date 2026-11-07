@@ -283,8 +283,16 @@ impl Desktop {
                     .flex_none()
                     .p_4()
                     .rounded(px(10.))
-                    .bg(t.warning_bg)
-                    .text_color(t.warning)
+                    .bg(if gate == RequiredGate::Lobby {
+                        t.subtle
+                    } else {
+                        t.warning_bg
+                    })
+                    .text_color(if gate == RequiredGate::Lobby {
+                        t.text
+                    } else {
+                        t.warning
+                    })
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -292,21 +300,41 @@ impl Desktop {
                     .child(self.hint(self.l(
                         "Der Beitritt wird erst fortgesetzt, wenn diese Voraussetzung erfüllt ist.",
                     )))
-                    .child(self.button(
-                        "required-gate",
-                        if gate == RequiredGate::RecordingConsent {
-                            "Aufzeichnung zustimmen"
-                        } else {
-                            "Freigabe prüfen"
-                        },
-                        ButtonStyle::Secondary,
-                        gate == RequiredGate::RecordingConsent,
-                        LocalAction::Intent(UiIntent::ResolveRequiredGate {
-                            call: call.scope,
-                            gate,
-                        }),
-                        cx,
-                    )),
+                    .when(gate == RequiredGate::Lobby, |d| {
+                        let timer = self
+                            .snapshot
+                            .conversation_panel
+                            .as_ref()
+                            .filter(|p| {
+                                p.context.account == call.scope.account
+                                    && p.context.conversation == call.scope.conversation
+                            })
+                            .and_then(|p| p.details.as_ref())
+                            .and_then(|details| details.lobby_timer)
+                            .and_then(|at| self.settings_port.local_datetime(at));
+                        d.when_some(timer, |d, time| {
+                            d.child(
+                                self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])),
+                            )
+                        })
+                    })
+                    .when(gate != RequiredGate::Lobby, |d| {
+                        d.child(self.button(
+                            "required-gate",
+                            if gate == RequiredGate::RecordingConsent {
+                                "Aufzeichnung zustimmen"
+                            } else {
+                                "Freigabe prüfen"
+                            },
+                            ButtonStyle::Secondary,
+                            gate == RequiredGate::RecordingConsent,
+                            LocalAction::Intent(UiIntent::ResolveRequiredGate {
+                                call: call.scope,
+                                gate,
+                            }),
+                            cx,
+                        ))
+                    }),
             );
         }
         if call.share == MediaState::Active {

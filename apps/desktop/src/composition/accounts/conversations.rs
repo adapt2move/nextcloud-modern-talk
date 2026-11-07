@@ -1009,6 +1009,10 @@ fn command(
             enabled,
             timer: None,
         },
+        V::SetLobbyTimer(timer) => W::SetLobby {
+            enabled: true,
+            timer: Some(timer),
+        },
         V::Delete => W::Delete,
         V::ClearHistory => W::ClearHistory,
         V::Leave => W::Leave,
@@ -1068,6 +1072,7 @@ fn details_view(d: wire::ConversationDetails) -> view::RoomDetails {
         server_default_permissions: d.server_default_permissions,
         effective_permissions: d.effective_permissions,
         lobby: d.lobby,
+        lobby_timer: d.lobby_timer,
         has_password: d.has_password,
         participant_count: d.participant_count,
         guest_access: Some(d.conversation.kind == RoomKind::Public),

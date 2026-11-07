@@ -277,6 +277,11 @@ async fn released_server_messaging_and_room_controls() {
         assert_eq!(error.kind, talk_core::ports::ErrorKind::Unsupported);
         println!("alpha-backend preserve: server unsupported (correctly gated)");
     }
+    let lobby_timer = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 7200;
     settings(
         &mut client,
         &runtime,
@@ -285,10 +290,16 @@ async fn released_server_messaging_and_room_controls() {
         "lobby-enable",
         C::SetLobby {
             enabled: true,
-            timer: None,
+            timer: Some(lobby_timer),
         },
     )
     .await;
+    let CR::Details(details) =
+        settings(&mut client, &runtime, id, 140, "lobby-timer-read", C::Read).await
+    else {
+        panic!("lobby details")
+    };
+    assert_eq!(details.lobby_timer, Some(lobby_timer));
     settings(
         &mut client,
         &runtime,

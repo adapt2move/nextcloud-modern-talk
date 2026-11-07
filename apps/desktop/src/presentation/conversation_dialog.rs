@@ -72,6 +72,7 @@ pub(crate) enum Action {
     CancelConfirmation(ConversationRef, u64),
     Avatar,
     Password,
+    LobbyTime(talk_core::preferences::time::RepeatedTime),
     CopyGuestLink,
 }
 pub(super) struct RoomUi {
@@ -96,6 +97,8 @@ pub(super) struct RoomUi {
     pub csv: Entity<TextInput>,
     pub avatar: Entity<TextInput>,
     pub password: Entity<TextInput>,
+    pub lobby_time: Entity<TextInput>,
+    lobby_time_error: Option<talk_core::preferences::time::LocalTimeError>,
 }
 impl RoomUi {
     pub fn new(theme: super::theme::Theme, cx: &mut Context<Desktop>) -> Self {
@@ -113,6 +116,7 @@ impl RoomUi {
         });
         let avatar = cx.new(|cx| TextInput::new("Emoji", 64, theme, cx));
         let password = cx.new(|cx| TextInput::new("Neues Passwort", 512, theme, cx));
+        let lobby_time = cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx));
         Self {
             create_direct: true,
             create_account: None,
@@ -135,9 +139,11 @@ impl RoomUi {
             csv,
             avatar,
             password,
+            lobby_time,
+            lobby_time_error: None,
         }
     }
-    pub fn inputs(&self) -> [Entity<TextInput>; 6] {
+    pub fn inputs(&self) -> [Entity<TextInput>; 7] {
         [
             self.name.clone(),
             self.description.clone(),
@@ -145,6 +151,7 @@ impl RoomUi {
             self.csv.clone(),
             self.avatar.clone(),
             self.password.clone(),
+            self.lobby_time.clone(),
         ]
     }
 }
@@ -162,6 +169,14 @@ pub(super) fn unavailable(value: conversation::Availability) -> &'static str {
     }
 }
 impl Desktop {
+    pub(crate) fn fixture_lobby_settings(&mut self, cx: &mut Context<Self>) {
+        if !self.development {
+            return;
+        }
+        self.room_ui.context = self.snapshot.selected;
+        self.room_ui.tab = Tab::Meeting;
+        self.refresh_room_dialog(cx);
+    }
     pub(crate) fn room_members_applicable(&self) -> bool {
         matches!(
             self.selected().map(|row| row.kind),
@@ -185,6 +200,7 @@ impl Desktop {
             self.room_ui.loaded = false;
             self.room_ui.name_observation = None;
             self.room_ui.description_observation = None;
+            self.room_ui.lobby_time_error = None;
             self.room_ui.confirmation = None;
             for input in self.room_ui.inputs() {
                 input.update(cx, |i, _| i.reset());
@@ -217,6 +233,7 @@ impl Desktop {
             self.room_ui.loaded = false;
             self.room_ui.name_observation = None;
             self.room_ui.description_observation = None;
+            self.room_ui.lobby_time_error = None;
             self.room_ui.confirmation = None;
             self.room_ui.members.reset();
             self.room_ui.pending_member_focus = None;
@@ -473,6 +490,35 @@ impl Desktop {
                 if let Ok(password) = Text::new(self.room_ui.password.read(cx).content.as_str()) {
                     self.submit_room(ConversationAction::SetPassword(password));
                     self.room_ui.password.update(cx, |i, _| i.reset());
+                }
+            }
+            Action::LobbyTime(repeated) => {
+                if !self.room_available(RoomSetting::Lobby).is_enabled()
+                    || self.room_ui.lobby_time.read(cx).composing()
+                    || !self
+                        .room_panel()
+                        .and_then(|p| p.details.as_ref())
+                        .is_some_and(|d| d.lobby == Some(true))
+                {
+                    return;
+                }
+                let local = Text::new(self.room_ui.lobby_time.read(cx).content.as_str());
+                let result = local
+                    .map_err(|_| talk_core::preferences::time::LocalTimeError::Invalid)
+                    .and_then(|local| {
+                        self.settings_port.resolve_deadline(
+                            talk_core::preferences::time::DeadlineChoice::Custom {
+                                local,
+                                repeated,
+                            },
+                        )
+                    });
+                match result {
+                    Ok(moment) => {
+                        self.room_ui.lobby_time_error = None;
+                        self.submit_room(ConversationAction::SetLobbyTimer(moment.timestamp));
+                    }
+                    Err(error) => self.room_ui.lobby_time_error = Some(error),
                 }
             }
         }
@@ -1234,6 +1280,39 @@ impl Desktop {
                                 ConversationAction::SetLobby(d.lobby != Some(true)),
                                 cx,
                             ))
+                            .when(d.lobby == Some(true), |section| {
+                                let available = self.room_available(RoomSetting::Lobby);
+                                section
+                                    .when_some(d.lobby_timer.and_then(|at| self.settings_port.local_datetime(at)), |d, time| {
+                                        d.child(self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])))
+                                    })
+                                    .child(self.room_field(
+                                        "Beginn festlegen", &self.room_ui.lobby_time,
+                                        Some(self.button("room-set-lobby-time", "Zeit speichern", ButtonStyle::Secondary,
+                                            available, LocalAction::Room(Action::LobbyTime(talk_core::preferences::time::RepeatedTime::Ask)), cx)), cx,
+                                    ))
+                                    .child(self.hint(self.l("Datum und Uhrzeit: JJJJ-MM-TT HH:MM")))
+                                    .when_some(self.room_ui.lobby_time_error, |d, error| {
+                                        use talk_core::preferences::time::{LocalTimeError, RepeatedTime};
+                                        let label = match error {
+                                            LocalTimeError::Unavailable => "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
+                                            LocalTimeError::Invalid => "Bitte ein gültiges Datum mit Uhrzeit eingeben.",
+                                            LocalTimeError::Past => "Bitte einen Zeitpunkt in der Zukunft wählen.",
+                                            LocalTimeError::Skipped => "Diese Uhrzeit wird bei der Zeitumstellung übersprungen. Bitte eine andere wählen.",
+                                            LocalTimeError::Repeated => "Diese Uhrzeit kommt bei der Zeitumstellung zweimal vor. Welche möchtest du verwenden?",
+                                        };
+                                        d.child(self.hint(self.l(label)).text_color(t.danger))
+                                            .when(error == LocalTimeError::Repeated, |d| d.child(
+                                                div().flex().gap_2()
+                                                    .child(self.button("lobby-first-time", "Erste Uhrzeit verwenden", ButtonStyle::Secondary, available, LocalAction::Room(Action::LobbyTime(RepeatedTime::First)), cx))
+                                                    .child(self.button("lobby-second-time", "Zweite Uhrzeit verwenden", ButtonStyle::Secondary, available, LocalAction::Room(Action::LobbyTime(RepeatedTime::Second)), cx))
+                                            ))
+                                    })
+                                    .when(d.lobby_timer.is_some(), |d| d.child(self.button(
+                                        "room-clear-lobby-time", "Beginn entfernen", ButtonStyle::Quiet, available,
+                                        LocalAction::Room(Action::Command(ConversationAction::SetLobbyTimer(0))), cx,
+                                    )))
+                            })
                             .child(self.dialog_actions().child(self.button_with_leading_icon(
                                 "room-manage-roles",
                                 ("Mitglieder und Rollen", "users"),

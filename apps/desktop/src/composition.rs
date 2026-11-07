@@ -218,7 +218,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let development = options.scenario.is_some();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
-        Some("details") => Some(Overlay::RoomInfo),
+        Some("details" | "lobby-settings") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
         Some("thread") => Some(Overlay::Thread),
@@ -290,7 +290,16 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
-            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx))
+            cx.new(|cx| {
+                let mut view = Desktop::new(port, InitialView { probe, development, palette: saved.active.palette, appearance: saved.active.appearance, overlay, prejoin, onboarding: options.scenario.as_deref() == Some("ready"), scale: saved.active.scale.percent() }, bridge, window, cx);
+                match options.scenario.as_deref() {
+                    Some("chat-message-tools") => view.fixture_message_tools(false, window, cx),
+                    Some("chat-reminder-time") => view.fixture_message_tools(true, window, cx),
+                    Some("lobby-settings") => view.fixture_lobby_settings(cx),
+                    _ => (),
+                }
+                view
+            })
         });
     match window {
         Ok(window) => {

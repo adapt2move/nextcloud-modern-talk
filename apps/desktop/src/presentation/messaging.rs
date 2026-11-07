@@ -273,6 +273,21 @@ impl MessageUi {
     }
 }
 impl Desktop {
+    pub(crate) fn fixture_message_tools(
+        &mut self,
+        reminder: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.development {
+            return;
+        }
+        if reminder {
+            self.open_message_deadline(Some(1), window, cx);
+        } else {
+            self.message_ui.show_scheduled = true;
+        }
+    }
     /// Reuse the composition owner's finite refresh tick for one debounced
     /// mention query. No per-keystroke task or unbounded request queue.
     pub(super) fn refresh_composer_mentions(&mut self, cx: &Context<Self>) {

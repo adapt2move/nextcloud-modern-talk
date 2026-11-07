@@ -25,6 +25,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         server_default_permissions: Some(511),
         effective_permissions: Some(511),
         lobby: Some(false),
+        lobby_timer: None,
         has_password: Some(false),
         participant_count: Some(7),
         guest_access: Some(false),

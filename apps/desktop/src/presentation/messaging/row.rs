@@ -210,7 +210,7 @@ impl Desktop {
                 ))
             } else if object.kind.as_str() == "geo-location"
                 && let Some((id, (lat, lon))) = object.id.as_ref().and_then(|id| {
-                    talk_core::ui::messaging::location::coordinates(id.as_str())
+                    talk_core::ui::markup::location_coordinates(id.as_str())
                         .map(|point| (id, point))
                 })
             {
