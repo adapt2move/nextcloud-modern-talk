@@ -177,6 +177,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('Escape closes the call participants panel', absent=['Nicht im Anruf'])
         checks.append({'check': 'H toggles the hand in the call participants panel', 'result': 'pass'})
+    elif scenario == 'call-dock':
+        # The room row is visible in the fixed 1280x800 fictional dock fixture.
+        run(['xdotool', 'mousemove', '--window', xid, '150', '290'], env)
+        expect('Active room reveals its join action on hover', ['Beitreten'])
+        click('Beitreten', xmin=140, ymin=250)
+        expect('Join action expands the owned call', ['Teamküche', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):
         # The following points were inspected at this exact fixture size. The
         # fixture log reports only the local room identity, never media data.
