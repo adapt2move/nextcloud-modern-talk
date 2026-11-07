@@ -155,8 +155,16 @@ def exercise(scenario, env, xid, out, label, large=False):
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
         click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
-        click('Auswahl')
-        expect('selected cloud file returns to the composer', ['Projektübersicht.pdf', 'Bereit zum Senden'], ['NextCloud-Dateien'])
+        key('shift+Down')
+        expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
+        key('ctrl+space')
+        expect('control-space toggles the focused file', ['1 ausgewählt'])
+        key('ctrl+space')
+        key('Return')
+        expect('keyboard selection returns both cloud files to the composer',
+               ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
+    elif scenario == 'chat-cloud-files-offline':
+        expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

@@ -429,11 +429,29 @@ impl Accounts {
             pagination: cached.as_ref().and_then(|(_, pagination)| *pagination),
             search_available: self.content_owner.browser.search_unsupported != Some(account),
             favorites_available: self.content_owner.browser.favorites_unsupported != Some(account),
+            has_listing: cached.is_some(),
             loading: true,
             offline: false,
             error: None,
         });
         self.retire_cloud_previews();
+        if self.snapshot.content == ContentState::Offline {
+            if let Some(browser) = self.snapshot.content_panel.file_browser.as_mut() {
+                browser.loading = false;
+                browser.offline = true;
+            }
+            self.content_owner.browser.current = None;
+            self.content_owner.browser.retry = Some(Retry {
+                account,
+                request,
+                query,
+                attempts,
+                next: now,
+                expires: now + CACHE_LIFETIME,
+            });
+            self.touch();
+            return Ok(());
+        }
         let job = Job {
             request,
             account,
@@ -566,6 +584,7 @@ impl Accounts {
                 browser.generation = self.content_owner.browser.generation;
                 browser.entries = page(entries);
                 browser.pagination = pagination;
+                browser.has_listing = true;
                 browser.offline = false;
                 browser.error = None;
                 retire_previews = true;
@@ -629,6 +648,7 @@ impl Accounts {
                 } else {
                     if !transient {
                         browser.entries = Page::empty();
+                        browser.has_listing = false;
                         retire_previews = true;
                         self.content_owner
                             .browser
@@ -650,6 +670,18 @@ impl Accounts {
             .browser
             .cache
             .retain(|item| now.saturating_duration_since(item.saved) < CACHE_LIFETIME);
+        if self.snapshot.content == ContentState::Offline {
+            if self
+                .content_owner
+                .browser
+                .retry
+                .as_ref()
+                .is_some_and(|retry| now >= retry.expires)
+            {
+                self.content_owner.browser.retry = None;
+            }
+            return;
+        }
         if !self
             .content_owner
             .browser
@@ -763,5 +795,45 @@ mod tests {
             Some((Query::Folder(text("/old"), 0), 0))
         );
         assert!(owner.take_job(operation).is_none());
+    }
+
+    #[test]
+    fn offline_queries_show_only_scoped_cached_listings_and_bound_refresh() {
+        let mut model = crate::composition::accounts::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("chat-content"));
+        model.snapshot.content = ContentState::Offline;
+        let account = model.snapshot.active_account.unwrap();
+        let query = Query::Folder(text("/Plans"), 0);
+        model.content_owner.browser.cache.push(Cached {
+            account,
+            query: query.clone(),
+            entries: page([entry("plan.pdf", false, Some(42), None)]),
+            pagination: None,
+            saved: Instant::now(),
+        });
+        model
+            .start_cloud_query(RequestId(1), account, query.clone(), 0)
+            .unwrap();
+        let view = model.snapshot.content_panel.file_browser.as_ref().unwrap();
+        assert!(view.offline && view.has_listing && !view.loading);
+        assert_eq!(view.entries.as_slice()[0].name.as_str(), "plan.pdf");
+        assert!(model.content_owner.browser.jobs.is_empty());
+        assert_eq!(
+            model.content_owner.browser.retry.as_ref().unwrap().query,
+            query
+        );
+        model.retry_cloud_files();
+        assert!(model.content_owner.browser.retry.is_some());
+
+        model
+            .start_cloud_query(RequestId(2), account, Query::Folder(text("/unseen"), 0), 0)
+            .unwrap();
+        let view = model.snapshot.content_panel.file_browser.as_ref().unwrap();
+        assert!(view.offline && !view.has_listing && view.entries.as_slice().is_empty());
+        model.content_owner.browser.retry.as_mut().unwrap().expires = Instant::now();
+        model.retry_cloud_files();
+        assert!(model.content_owner.browser.retry.is_none());
+        model.content_owner.browser.retain_account(None);
+        assert!(model.content_owner.browser.cache.is_empty());
     }
 }

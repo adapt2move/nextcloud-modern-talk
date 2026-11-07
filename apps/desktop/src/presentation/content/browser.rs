@@ -198,11 +198,13 @@ impl Desktop {
         }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        if key == "space" && (modifiers.control || modifiers.platform) && !modifiers.alt {
-            if let Some(path) = self.content_ui.browser_cursor.clone() {
-                self.select_cloud_file(path, modifiers.shift, true, cx);
-                return true;
-            }
+        if key == "space"
+            && (modifiers.control || modifiers.platform)
+            && !modifiers.alt
+            && let Some(path) = self.content_ui.browser_cursor.clone()
+        {
+            self.select_cloud_file(path, modifiers.shift, true, cx);
+            return true;
         }
         if modifiers.control || modifiers.platform || modifiers.alt {
             return false;
@@ -564,7 +566,12 @@ impl Desktop {
             body = body.child(self.hint(self.l("Sortierung gilt für diese Seite.")));
         }
         if entries.is_empty() && !browser.loading && browser.error.is_none() {
-            body = body.child(self.hint(self.l("Dieser Ordner ist leer.")));
+            let label = if browser.offline && !browser.has_listing {
+                "Für diesen Bereich sind offline keine Dateien gespeichert."
+            } else {
+                "Dieser Ordner ist leer."
+            };
+            body = body.child(self.hint(self.l(label)));
         }
         let start = self
             .content_ui

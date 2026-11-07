@@ -52,6 +52,7 @@ pub const SCENARIOS: &[&str] = &[
     "thread-error",
     "chat-content",
     "chat-cloud-files",
+    "chat-cloud-files-offline",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
@@ -390,6 +391,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         Some(
             "chat-content"
                 | "chat-cloud-files"
+                | "chat-cloud-files-offline"
                 | "chat-attachments"
                 | "chat-upload"
                 | "chat-upload-uncertain"
@@ -400,8 +402,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
-        if scenario == Some("chat-cloud-files") {
+        if matches!(
+            scenario,
+            Some("chat-cloud-files" | "chat-cloud-files-offline")
+        ) {
             content::cloud_files(&mut state, "/");
+            if scenario == Some("chat-cloud-files-offline") {
+                state.content = ContentState::Offline;
+                if let Some(browser) = state.content_panel.file_browser.as_mut() {
+                    browser.offline = true;
+                }
+            }
         }
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
@@ -1178,6 +1189,7 @@ impl DevelopmentPort {
                 Some(
                     "chat-content"
                         | "chat-cloud-files"
+                        | "chat-cloud-files-offline"
                         | "chat-attachments"
                         | "chat-upload"
                         | "chat-upload-uncertain"

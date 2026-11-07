@@ -161,6 +161,8 @@ pub struct FileBrowserView {
     pub pagination: Option<(u64, u64)>,
     pub search_available: bool,
     pub favorites_available: bool,
+    /// Whether these entries came from a completed listing, including an empty one.
+    pub has_listing: bool,
     pub loading: bool,
     pub offline: bool,
     pub error: Option<UnavailableReason>,

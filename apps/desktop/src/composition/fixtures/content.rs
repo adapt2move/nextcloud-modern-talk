@@ -404,6 +404,7 @@ pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
         pagination: None,
         search_available: true,
         favorites_available: true,
+        has_listing: true,
         loading: false,
         offline: false,
         error: None,

@@ -742,13 +742,12 @@ impl Desktop {
                 } else {
                     "/".to_owned()
                 };
-                if let Ok(path) = Text::new(&path) {
-                    if self
+                if let Ok(path) = Text::new(&path)
+                    && self
                         .submit_content(ContentAction::ListFiles(path))
                         .is_some()
-                    {
-                        self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
-                    }
+                {
+                    self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
                 }
             }
             Action::ChooseFolder => {
@@ -905,15 +904,14 @@ impl Desktop {
                             return;
                         }
                     }
-                    if !paths.as_slice().is_empty() {
-                        if self
+                    if !paths.as_slice().is_empty()
+                        && self
                             .submit_content(ContentAction::StageCloudFiles { context, paths })
                             .is_some()
-                        {
-                            if self.close_content_overlay() && self.overlay.is_none() {
-                                self.composer.focus_handle(cx).focus(window);
-                            }
-                        }
+                        && self.close_content_overlay()
+                        && self.overlay.is_none()
+                    {
+                        self.composer.focus_handle(cx).focus(window);
                     }
                 }
             }
@@ -970,10 +968,12 @@ impl Desktop {
             }
             Action::Command(command) => {
                 let selected_file = matches!(&command, ContentAction::StageCloudFile { .. });
-                if self.submit_content(command).is_some() && selected_file {
-                    if self.close_content_overlay() && self.overlay.is_none() {
-                        self.composer.focus_handle(cx).focus(window);
-                    }
+                if self.submit_content(command).is_some()
+                    && selected_file
+                    && self.close_content_overlay()
+                    && self.overlay.is_none()
+                {
+                    self.composer.focus_handle(cx).focus(window);
                 }
             }
         }

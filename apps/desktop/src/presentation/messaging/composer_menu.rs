@@ -136,7 +136,12 @@ impl Desktop {
                 label: "Aus NextCloud teilen",
                 icon: "cloud",
                 availability: Availability::when(
-                    self.message_feature_enabled(MessageFeature::Files)
+                    (self.message_feature_enabled(MessageFeature::Files)
+                        || self.snapshot.content == ContentState::Offline
+                            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                                panel.context == target.context
+                                    && panel.availability(MessageFeature::Files).enabled()
+                            }))
                         && self.composer_available()
                         && self.snapshot.content_panel.file_browser_supported != Some(false),
                     if self.snapshot.content_panel.file_browser_supported == Some(false) {
