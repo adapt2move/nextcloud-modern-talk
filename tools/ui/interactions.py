@@ -244,7 +244,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('shift+Down')
         expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
-        expect('keyboard selection returns both cloud files to the composer',
+        expect_settled('keyboard selection returns both cloud files to the composer',
                ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
     elif scenario == 'chat-cloud-files-offline':
         expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
