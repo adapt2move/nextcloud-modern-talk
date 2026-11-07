@@ -19,6 +19,12 @@ impl NetworkRuntime {
             epoch.as_local(),
         )))
     }
+    pub fn connectivity_epoch(&self) -> u64 {
+        self.0.connectivity_epoch()
+    }
+    pub fn network_changed(&self) {
+        self.0.network_changed();
+    }
     pub fn now(&self) -> Moment {
         moment(self.0.now())
     }

@@ -482,6 +482,41 @@ async fn signaling_typing_is_room_scoped_and_respects_privacy() {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     assert!(restarted, "new typing should become visible after idle");
+    // The live HPB socket must resume after a network/suspend hint, rather than
+    // waiting for its heartbeat to time out or requiring another room join.
+    runtime.network_changed();
+    let resumed_at = Instant::now();
+    let mut resumed = false;
+    while resumed_at.elapsed() < Duration::from_secs(15) {
+        let _ = bob
+            .request(
+                context(bob_scope),
+                ProtocolRequest::TypingActivity {
+                    conversation: bob_room,
+                    active: true,
+                },
+            )
+            .await;
+        if let Ok(ProtocolReply::Typing(observation)) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            && observation.running
+            && observation
+                .people
+                .as_slice()
+                .iter()
+                .any(|p| p.name.as_str() == "lab_bob")
+        {
+            resumed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(resumed, "HPB typing must recover after a connectivity hint");
+
     bob.request(
         context(bob_scope),
         ProtocolRequest::TypingActivity {

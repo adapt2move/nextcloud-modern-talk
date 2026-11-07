@@ -277,6 +277,7 @@ async fn connected(
     let mut received = 0usize;
     let mut last_received = Instant::now();
     let mut last_ping = Instant::now();
+    let connectivity_epoch = shared.account.runtime.connectivity_epoch();
     let result: Result<End, ErrorKind> = async {
         loop {
             if !shared.live() { return Ok(End::Terminal(ErrorKind::Cancelled)); }
@@ -303,6 +304,7 @@ async fn connected(
             }
             tokio::select! {
                 biased;
+                _ = shared.account.runtime.connectivity_changed(connectivity_epoch) => return Ok(End::Reconnect(ErrorKind::Transport)),
                 _ = tick.tick() => {},
                 command = commands.recv() => {
                     let Some(command) = command else { return Ok(End::Terminal(ErrorKind::Cancelled)); };

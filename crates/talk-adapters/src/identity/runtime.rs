@@ -32,6 +32,16 @@ use talk_core::{
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use zeroize::Zeroizing;
 
+/// Account-worker lanes. One executing operation and at most seven admitted
+/// descriptors per account; a lane is ordering, never authorization.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub enum RequestPriority {
+    #[default]
+    User,
+    Visible,
+    Background,
+}
+
 #[derive(Clone)]
 pub struct RuntimeConfig {
     media: Option<Arc<crate::media::MediaService>>,
@@ -287,6 +297,8 @@ impl Drop for Observation {
     }
 }
 struct Job {
+    priority: RequestPriority,
+    admitted_at: std::time::Instant,
     command: RuntimeCommand,
     account: Arc<Mutex<Option<AccountId>>>,
     reply: oneshot::Sender<Result<RuntimeReply>>,
@@ -323,6 +335,8 @@ impl Pending {
 // cancel this observer only when both its attempt and account epoch match.
 // A provider writer already dispatched by that command has a separate owner.
 struct InFlight {
+    priority: RequestPriority,
+    preemptible: bool,
     epoch: u64,
     attempt: Option<LoginAttemptId>,
     cancel: Cancellation,
@@ -477,6 +491,7 @@ impl Control {
     }
 }
 struct Shared {
+    network: Mutex<Option<NetworkRuntime>>,
     summaries: Mutex<Page<AccountSummary, 8>>,
     controls: Mutex<Vec<Arc<Control>>>,
     failure: Mutex<Option<IdentityError>>,
@@ -496,6 +511,7 @@ impl IdentityRuntime {
         let (send, receive) = mpsc::channel(64);
         let (done_tx, done) = std::sync::mpsc::sync_channel(1);
         let shared = Arc::new(Shared {
+            network: Mutex::new(None),
             summaries: Mutex::new(Page::empty()),
             controls: Mutex::new(Vec::new()),
             failure: Mutex::new(None),
@@ -543,7 +559,31 @@ impl IdentityRuntime {
             .map(|s| s.clone())
             .unwrap_or_else(|_| Page::empty())
     }
+    /// A lifetime hint cannot restore credentials, replay a write or activate media.
+    pub fn network_revision(&self) -> u64 {
+        self.shared
+            .network
+            .lock()
+            .ok()
+            .and_then(|n| n.as_ref().map(NetworkRuntime::connectivity_epoch))
+            .unwrap_or(0)
+    }
+    pub fn network_changed(&self) {
+        if let Ok(network) = self.shared.network.lock()
+            && let Some(network) = network.as_ref()
+        {
+            network.network_changed();
+        }
+        self.shared.wake.notify_one();
+    }
     pub fn try_submit(&self, command: RuntimeCommand) -> Result<Observation> {
+        self.try_submit_priority(command, RequestPriority::User)
+    }
+    pub fn try_submit_priority(
+        &self,
+        command: RuntimeCommand,
+        priority: RequestPriority,
+    ) -> Result<Observation> {
         if self.shared.closing.load(Ordering::Acquire) {
             return Err(ErrorKind::Cancelled.into());
         }
@@ -566,6 +606,15 @@ impl IdentityRuntime {
                         c.close();
                         self.shared.wake.notify_one();
                     }
+                    if priority == RequestPriority::User
+                        && !matches!(command, RuntimeCommand::AccountData { .. })
+                        && let Ok(active) = c.inflight.lock()
+                        && let Some(active) = active.as_ref()
+                        && active.preemptible
+                        && active.priority != RequestPriority::User
+                    {
+                        active.cancel.cancel();
+                    }
                     epoch = c.epoch.load(Ordering::Acquire);
                     if matches!(command, RuntimeCommand::AccountData { .. }) {
                         c.data_slots.clone()
@@ -577,6 +626,18 @@ impl IdentityRuntime {
         } else {
             self.root_slots.clone()
         };
+        let reserve = if matches!(command, RuntimeCommand::AccountData { .. }) {
+            0
+        } else {
+            match priority {
+                RequestPriority::User => 0,
+                RequestPriority::Visible => 1,
+                RequestPriority::Background => 2,
+            }
+        };
+        if slots.available_permits() <= reserve {
+            return Err(ErrorKind::Busy.into());
+        }
         let permit = slots.try_acquire_owned().map_err(|_| ErrorKind::Busy)?;
         let slot = Arc::new(Slot { _permit: permit });
         let cancel = Cancellation::default();
@@ -594,6 +655,8 @@ impl IdentityRuntime {
         };
         self.send
             .try_send(Job {
+                priority,
+                admitted_at: std::time::Instant::now(),
                 account,
                 command,
                 reply,
@@ -827,6 +890,7 @@ async fn run(
     };
     let providers = Arc::new(providers);
     let network = NetworkRuntime::new(ClockEpoch::from_local(ledger::random()?));
+    *lock(&shared.network)? = Some(network.clone());
     let accounts = ledger.accounts()?;
     let ledger = Arc::new(Mutex::new(ledger));
     let capacity = Arc::new(Semaphore::new(2));
@@ -908,6 +972,9 @@ async fn run(
     for account in &accounts {
         workers.push((account.id, add(account.id, &mut tasks)?));
     }
+    let mut routes = super::network::fingerprint();
+    let mut route_tick = tokio::time::interval(Duration::from_secs(2));
+    route_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         while tasks.try_join_next().is_some() {}
         priority(&shared, &ledger)?;
@@ -915,6 +982,12 @@ async fn run(
             break;
         }
         tokio::select! {
+            _ = route_tick.tick() => {
+                if let Ok(next) = tokio::task::spawn_blocking(super::network::fingerprint).await && next!=routes {
+                    routes=next;
+                    network.network_changed();
+                }
+            },
             _=timezone_refresh.tick()=>crate::system_time::refresh_system_zone(),
             _=shared.wake.notified()=>{},
             _ = tasks.join_next(), if !tasks.is_empty() => {},
@@ -997,6 +1070,42 @@ async fn run(
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
     Ok(())
+}
+fn next_job(waiting: &[Job]) -> Option<usize> {
+    waiting
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, job)| job.priority)
+        .map(|(index, _)| index)
+}
+fn preemptible(command: &RuntimeCommand) -> bool {
+    use talk_core::protocol::{content::ContentCommand as C, messaging::MessagingCommand as M};
+    matches!(
+        command,
+        RuntimeCommand::Request {
+            request: ProtocolRequest::ListConversations
+                | ProtocolRequest::PollMessageNotifications
+                | ProtocolRequest::ResolveReference { .. }
+                | ProtocolRequest::PollTyping(_)
+                | ProtocolRequest::Content {
+                    command: C::Asset(_)
+                        | C::RevalidateAvatar(_)
+                        | C::RevalidateProfile
+                        | C::SelfProfile
+                        | C::Poll {
+                            command: talk_core::protocol::content::PollCommand::Read(_)
+                                | talk_core::protocol::content::PollCommand::Capabilities,
+                            ..
+                        },
+                    ..
+                }
+                | ProtocolRequest::Messaging {
+                    command: M::History { .. } | M::Poll { .. },
+                    ..
+                },
+            ..
+        }
+    )
 }
 fn priority(shared: &Shared, ledger: &Mutex<Ledger>) -> Result<()> {
     let controls = lock(&shared.controls)?.clone();
@@ -1081,6 +1190,7 @@ fn priority(shared: &Shared, ledger: &Mutex<Ledger>) -> Result<()> {
 }
 impl Worker {
     async fn run(mut self, mut receive: mpsc::Receiver<Job>) {
+        let mut waiting: Vec<Job> = Vec::with_capacity(7);
         loop {
             self.synchronize();
             if self.control.removed.load(Ordering::Acquire) {
@@ -1092,12 +1202,32 @@ impl Worker {
                     .filter(|p| !p.cancelled())
                     .map(|p| tokio::time::Instant::from_std(p.expires))
             });
-            let job = tokio::select! {
-                _ = self.control.changed.notified()=>continue,
-                _ = async {match expiry{Some(time)=>tokio::time::sleep_until(time).await,None=>std::future::pending().await}}=>{if let Ok(pending)=lock(&self.control.pending)&& let Some(p)=pending.as_ref(){p.cancel.cancel();}self.shared.wake.notify_one();continue;},
-                _ = async {match due{Some(time)=>tokio::time::sleep_until(time).await,None=>std::future::pending().await}}=>{self.health_probe().await;continue;},
-                next=receive.recv()=>{let Some(job)=next else{break;};job}
+            while waiting.len() < 7 {
+                match receive.try_recv() {
+                    Ok(job) => waiting.push(job),
+                    Err(_) => break,
+                }
+            }
+            let queued = next_job(&waiting);
+            let job = if let Some(index) = queued {
+                waiting.remove(index)
+            } else {
+                tokio::select! {
+                    _ = self.control.changed.notified()=>continue,
+                    _ = async {match expiry{Some(time)=>tokio::time::sleep_until(time).await,None=>std::future::pending().await}}=>{if let Ok(pending)=lock(&self.control.pending)&& let Some(p)=pending.as_ref(){p.cancel.cancel();}self.shared.wake.notify_one();continue;},
+                    _ = async {match due{Some(time)=>tokio::time::sleep_until(time).await,None=>std::future::pending().await}}=>{self.health_probe().await;continue;},
+                    next=receive.recv()=>{let Some(job)=next else{break;};job}
+                }
             };
+            let queue_limit = match job.priority {
+                RequestPriority::User => 30,
+                RequestPriority::Visible => 20,
+                RequestPriority::Background => 15,
+            };
+            if job.admitted_at.elapsed() >= Duration::from_secs(queue_limit) {
+                let _ = job.reply.send(Err(ErrorKind::Deadline.into()));
+                continue;
+            }
             self.synchronize();
             let attempt = match &job.command {
                 RuntimeCommand::Poll { attempt, .. }
@@ -1108,6 +1238,8 @@ impl Worker {
             };
             if let Ok(mut inflight) = lock(&self.control.inflight) {
                 *inflight = Some(InFlight {
+                    priority: job.priority,
+                    preemptible: preemptible(&job.command),
                     epoch: job.epoch,
                     attempt,
                     cancel: job.cancel.clone(),
@@ -1938,6 +2070,8 @@ impl Worker {
         let cancel = Cancellation::default();
         if let Ok(mut inflight) = lock(&self.control.inflight) {
             *inflight = Some(InFlight {
+                priority: RequestPriority::User,
+                preemptible: false,
                 epoch: self.epoch,
                 attempt: None,
                 cancel: cancel.clone(),
@@ -2698,6 +2832,7 @@ mod tests {
             controls: Mutex::new(vec![control.clone(), unrelated.clone()]),
             failure: Mutex::new(None),
             closing: AtomicBool::new(true),
+            network: Mutex::new(None),
             wake: Arc::new(Notify::new()),
         };
         if rejected {
@@ -2761,5 +2896,72 @@ mod tests {
     #[test]
     fn autonomous_rejection_closes_only_current_runtime_and_durably_suppresses() {
         closing_priority(false, true);
+    }
+    #[test]
+    fn user_lane_overtakes_disposable_reads_but_keeps_fifo_within_a_lane() {
+        let make = |priority| {
+            let (reply, _) = oneshot::channel();
+            Job {
+                priority,
+                admitted_at: std::time::Instant::now(),
+                account: Arc::new(Mutex::new(None)),
+                command: RuntimeCommand::Request {
+                    scope: AccountScope {
+                        account: AccountId::from_local(1),
+                        runtime: RuntimeGeneration::from_local(1),
+                    },
+                    request: ProtocolRequest::ListConversations,
+                },
+                reply,
+                cancel: Cancellation::default(),
+                epoch: 0,
+                owner: Arc::new(()),
+                _slot: Arc::new(Slot {
+                    _permit: Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),
+                }),
+            }
+        };
+        let mut waiting = vec![
+            make(RequestPriority::Background),
+            make(RequestPriority::Visible),
+            make(RequestPriority::User),
+            make(RequestPriority::User),
+        ];
+        assert_eq!(next_job(&waiting), Some(2));
+        waiting.remove(2);
+        assert_eq!(next_job(&waiting), Some(2));
+        waiting.remove(2);
+        assert_eq!(next_job(&waiting), Some(1));
+        waiting.remove(1);
+        assert_eq!(next_job(&waiting), Some(0));
+        waiting.clear();
+        assert_eq!(next_job(&waiting), None);
+    }
+    #[test]
+    fn preemption_never_treats_a_mutation_as_disposable_background_work() {
+        let scope = AccountScope {
+            account: AccountId::from_local(1),
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let room = ConversationId {
+            account: scope.account,
+            host: talk_core::ids::HostId::from_local(1),
+            local: 1,
+        };
+        assert!(preemptible(&RuntimeCommand::Request {
+            scope,
+            request: ProtocolRequest::ListConversations
+        }));
+        assert!(!preemptible(&RuntimeCommand::Request {
+            scope,
+            request: ProtocolRequest::SetFavorite {
+                conversation: room,
+                favorite: true
+            }
+        }));
+        assert!(!preemptible(&RuntimeCommand::AccountData {
+            account: scope.account,
+            command: super::super::data::DataCommand::Load
+        }));
     }
 }

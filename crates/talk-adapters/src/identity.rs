@@ -5,8 +5,11 @@ pub(crate) mod browser;
 mod connection;
 mod data;
 mod error;
+#[cfg(feature = "backend-test")]
+pub mod lab;
 mod ledger;
 mod login;
+mod network;
 mod private_fs;
 mod provider;
 mod runtime;
@@ -19,15 +22,15 @@ pub use data::{
     CACHE_DRAFT_LIMIT, CACHE_HISTORY_LIMIT, CACHE_LIFETIME, CACHE_PRESENCE_LIFETIME,
     CACHE_ROOM_LIMIT, CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT,
     CacheDraft, CacheHistory, CacheRoom, CacheRoomObservation, CacheThumbnail, CacheUserStatus,
-    CachedAttachment, CachedLocation, CachedMessage, CachedNotificationLevel, CachedPresence, CachedReaction,
-    CachedReply, CachedRoomKind, CachedThread, DataCommand, DataError, DataResult, DataSnapshot,
-    OUTBOX_LIMIT, OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase,
+    CachedAttachment, CachedLocation, CachedMessage, CachedNotificationLevel, CachedPresence,
+    CachedReaction, CachedReply, CachedRoomKind, CachedThread, DataCommand, DataError, DataResult,
+    DataSnapshot, OUTBOX_LIMIT, OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase,
     OutboxPrivateReply, OutboxRecord,
 };
 pub use error::{IdentityError, ProfileFailure};
 pub use runtime::{
-    AccountPhase, AccountSummary, IdentityRuntime, Observation, RecoverySelection, RuntimeCommand,
-    RuntimeConfig, RuntimeReply, StoredItemStatus, StoredState,
+    AccountPhase, AccountSummary, IdentityRuntime, Observation, RecoverySelection, RequestPriority,
+    RuntimeCommand, RuntimeConfig, RuntimeReply, StoredItemStatus, StoredState,
 };
 
 /// Safe presentation of the selected HTTPS destination before browser handoff.
