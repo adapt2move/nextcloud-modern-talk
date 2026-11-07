@@ -93,7 +93,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(['xdotool', 'key', '--clearmodifiers', value], env)
 
     def type_text(value):
-        run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
+        run(['xdotool', 'type', '--clearmodifiers', '--delay', '35', '--', value], env)
 
     def click(word, xmin=0, ymin=0, inspected_point=None):
         path, words, _ = observe()
