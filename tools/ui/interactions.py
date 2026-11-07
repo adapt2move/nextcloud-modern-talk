@@ -191,6 +191,46 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Right arrow did not move the selected calendar day')
         checks.append({'check': 'calendar arrow navigation moves selection', 'result': 'pass',
                        'image': after.name, 'sha256': sha(after)})
+    elif scenario == 'chat-reminder-menu':
+        expect('message menu combines reminder and unread actions',
+               ['Erinnerung bearbeiten', 'Gespräch als ungelesen markieren'])
+        click('bearbeiten', xmin=1000, ymin=200)
+        expect('message reminder opens the shared calendar', ['Später erinnern', 'Januar', 'Fiktiver Treffpunkt'])
+        key('Escape')
+        expect('calendar cancellation retains the message', ['Hier treffen wir uns.'], ['Später erinnern'])
+    elif scenario == 'chat-schedule-time':
+        expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Fiktive Nachricht für morgen.'])
+        key('Escape')
+        expect('cancelling send-later retains the draft', ['Fiktive Nachricht für morgen.'], ['Nachricht planen'])
+        type_text('X')
+        expect('send-later cancellation returns focus to the composer', ['Fiktive Nachricht für morgen.X'])
+    elif scenario == 'thread-message-tools':
+        expect('thread translation and account navigation coexist',
+               ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
+        click('anzeigen', xmin=950, ymin=300)
+        expect('thread translation can return to its original', ['That works for me.'], ['Das passt'])
+        click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
+        type_text('THREADTOOLS')
+        expect_settled('thread tools preserve an unsent reply', ['THREADTOOLS'])
+        run(['xdotool', 'mousemove', '--window', xid, '1100', '322'], env)
+        time.sleep(.4)
+        run(['xdotool', 'mousemove', '--window', xid, '1242', '295', 'click', '1'], env)
+        expect('thread message menu exposes reminder and cached translation', ['Später erinnern', 'Übersetzung anzeigen'])
+        click('erinnern', xmin=900)
+        expect('thread reminder uses the shared calendar inside the pane',
+               ['Design review', 'Später erinnern', 'Januar', 'THREADTOOLS'], footer_height=500)
+        run(['xdotool', 'mousemove', '--window', xid, '1150', '550',
+             'click', '--repeat', '12', '--delay', '70', '5'], env)
+        expect_settled('thread reminder presets and submit remain reachable by native scrolling',
+                       ['In 20 Minuten', 'THREADTOOLS'], footer_height=500)
+        click('Erinnern', xmin=890, ymin=600, inspected_point=(1280,800,932,632))
+        run(['xdotool', 'mousemove', '--window', xid, '1150', '550',
+             'click', '--repeat', '6', '--delay', '70', '5'], env)
+        expect_settled('unavailable fixture clock reports failure and retains the thread draft',
+                       ['Systemzeitzone', 'THREADTOOLS'], footer_height=500)
+        key('Escape')
+        type_text('X')
+        expect_settled('thread reminder cancellation restores its draft focus', ['THREADTOOLSX'], ['Später erinnern'])
     elif scenario == 'server':
         click('cloud.example.test')
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')
