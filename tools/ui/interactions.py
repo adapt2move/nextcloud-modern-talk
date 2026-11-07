@@ -791,4 +791,19 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Prejoin interaction requires the inspected 1280x800 layout')
         run(['xdotool', 'mousemove', '--window', xid, '1080', '500', 'click', '1'], env)
         expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
+    if not checks:
+        # Passive, denied and loading fixtures still receive native input.
+        # This only qualifies window input/paint; feature transitions above
+        # retain their stronger, scenario-specific assertions.
+        key('Tab')
+        path, _, _ = observe()
+        focused = run(['xdotool', 'getwindowfocus'], env).stdout.strip()
+        if focused != str(xid):
+            raise AssertionError(f'Tab moved native focus outside fixture window {xid}')
+        colors = int(run(['identify', '-format', '%k', str(path)], env).stdout)
+        if colors <= 16:
+            raise AssertionError('Native fixture became blank after Tab')
+        checks.append({'check': 'native Tab input retains the fixture window and painted surface',
+                       'result': 'pass', 'image': path.name, 'sha256': sha(path),
+                       'coverage': 'window input/paint only; no feature-specific transition'})
     return checks
