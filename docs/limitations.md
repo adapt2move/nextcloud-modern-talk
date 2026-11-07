@@ -33,6 +33,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   marker and latest known reply. Each displayed reply page holds at most 50
   messages. Replier avatars use available cached replies and the server's most
   recent activity summary; unopened threads may initially show only one replier.
+  Sending thread replies can use the bounded outgoing queue when a prior
+  capability observation permits it. Renaming and subscription changes require
+  a connection and are reconciled against the server response.
   The API creates a thread with a new root message; it does not expose an
   operation to convert an existing ordinary message into a thread. See the
   upstream [thread controller](https://github.com/nextcloud/spreed/blob/stable35/lib/Controller/ThreadController.php)

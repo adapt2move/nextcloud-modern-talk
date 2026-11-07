@@ -44,6 +44,7 @@ impl Timing {
 pub(super) enum Kind {
     Page,
     Panel,
+    ThreadPanel,
     Backdrop,
 }
 
@@ -122,6 +123,10 @@ impl Element for ActionReveal {
                     Kind::Panel => child
                         .relative()
                         .top(gpui::px(8. * (1. - eased)))
+                        .opacity(0.85 + 0.15 * eased),
+                    Kind::ThreadPanel => child
+                        .relative()
+                        .left(gpui::px(12. * (1. - eased)))
                         .opacity(0.85 + 0.15 * eased),
                     Kind::Backdrop => child.opacity(0.65 + 0.35 * eased),
                 }
