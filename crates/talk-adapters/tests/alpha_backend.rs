@@ -894,7 +894,7 @@ async fn released_server_messaging_and_room_controls() {
     .await;
     // The private lab triggers Talk's registered background job after the
     // client's baseline, so the next observation must deliver a new event.
-    std::fs::write(root.join("reminder.request"), b"run").expect("lab signal");
+    std::fs::write(root.join("reminder.request"), first.sequence.to_string()).expect("lab signal");
     tokio::time::timeout(std::time::Duration::from_secs(45), async {
         while !root.join("reminder.done").exists() {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

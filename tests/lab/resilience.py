@@ -73,7 +73,7 @@ class FaultRelay(Relay):
 
 
 class RecoveryLab(Lab):
-    def execute_reminders(self):
+    def execute_reminders(self, directory):
         # Run only Talk's registered reminder job in this disposable server.
         # The table contains no fixture credentials or message content.
         job_class = r"OCA\Talk\BackgroundJob\Reminder"
@@ -83,14 +83,28 @@ class RecoveryLab(Lab):
                 and parts[1].strip().isdigit() and parts[2].strip() == job_class]
         self.require("recovery.reminder-job", len(jobs) == 1)
         self.occ("background-job:execute", jobs[0], "--force-execute")
+        headers = {"X-Nextcloud-User-Status": None}
         notices = self.request("lab_alice", "GET", "/ocs/v2.php/apps/notifications/api/v2/notifications",
-                               name="recovery.reminder-notifications")
+                               name="recovery.reminder-notifications", response_headers=headers)
         reminders = [item for item in notices if item.get("app") == "spreed"
                      and item.get("object_type") == "reminder"]
+        message = int((directory / "reminder.request").read_text())
+        token = self.recovery_token
+        context = self.request("lab_alice", "GET",
+                               f"/ocs/v2.php/apps/spreed/api/v1/chat/{token}/{message}/context",
+                               query={"limit": 25}, name="recovery.reminder-context")
+        targets = [item for item in context if item.get("id") == message]
         self.current["reminder_probe"] = {
             "count": len(reminders),
             "object_has_message": any(len(item.get("object_id", "").split("/")) >= 2 for item in reminders),
+            "object_matches_target": any(item.get("object_id", "").split("/")[:2] == [token, str(message)] for item in reminders),
             "should_notify": [item.get("shouldNotify") for item in reminders],
+            "status_allows_notification": headers["X-Nextcloud-User-Status"] in ("online", "away", "offline", "invisible"),
+            "target_count": len(targets),
+            "target_token_matches": all(item.get("token") == token for item in targets),
+            "target_kind": [item.get("messageType") for item in targets],
+            "target_system_empty": [item.get("systemMessage") == "" for item in targets],
+            "target_expiration_set": [bool(item.get("expirationTimestamp")) for item in targets],
         }
         self.require("recovery.reminder-event-created", bool(reminders))
 
@@ -99,7 +113,7 @@ class RecoveryLab(Lab):
             while not (directory / "reminder.request").exists():
                 await asyncio.sleep(0.1)
         await asyncio.wait_for(wait_for_request(), 180)
-        await asyncio.to_thread(self.execute_reminders)
+        await asyncio.to_thread(self.execute_reminders, directory)
         (directory / "reminder.done").touch(mode=0o600)
 
     def smoke(self, key, pin):
@@ -109,6 +123,7 @@ class RecoveryLab(Lab):
         room = self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room",
                             body={"roomType": 2, "roomName": "Disposable recovery fixture"},
                             expected=(201,), name="recovery.create-room")
+        self.recovery_token = room["token"]
         self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"] + "/participants",
                      body={"newParticipant": "lab_bob", "source": "users"}, name="recovery.add-member")
         directory = self.runtime / f"{key}-recovery"
