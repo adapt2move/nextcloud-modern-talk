@@ -6,4 +6,5 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede mencionar a esta persona ahora mismo.",
     ),
     ("Erwähnen", "Mention", "Mencionar"),
+    ("Gast", "Guest", "Invitado"),
 ];
