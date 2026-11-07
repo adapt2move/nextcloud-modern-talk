@@ -819,11 +819,11 @@ async fn released_server_messaging_and_room_controls() {
     else {
         panic!("people")
     };
-    let bob = people.as_slice().first().expect("synthetic user").id;
+    let bob_person = people.as_slice().first().expect("synthetic user").id;
     let person_query = talk_core::protocol::search::Query {
         term: text("Alpha edited"),
         conversation: Some(id),
-        person: Some(bob),
+        person: Some(bob_person),
         from_self: false,
         since: None,
         until: None,

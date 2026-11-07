@@ -106,13 +106,11 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
         let message = match result {
             MessagingResult::Message(message) => {
                 assert!(message.own);
-                assert_eq!(
-                    message.message.own_operation,
-                    Some(OperationId::from_local(200 + index as u128))
-                );
+                assert_eq!(message.message.own_operation, Some(operation));
                 message.message.id
             }
             MessagingResult::Send(receipt) => {
+                assert_eq!(receipt.operation, operation);
                 let SendState::ServerAccepted(message) = receipt.state else {
                     panic!("server acceptance");
                 };
