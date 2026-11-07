@@ -561,7 +561,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment",
       "status": "partial",
       "api": "Request::Chat / chat::Command::ShareAttachment",
-      "scope": "Create-only attachment with reference, caption or voice-message metadata; other metadata remains unsupported. Talk 24/25 docs/chat.md release pins are recorded in tests/lab/pins.json."
+      "scope": "Create-only attachment with reference, caption, reply/thread/silent compose options and voice-message metadata; thread titles and replace-existing mode remain unsupported. Talk 24/25 docs/chat.md release pins are recorded in tests/lab/pins.json."
     },
     {
       "operation_id": "conversation_tag-get-tags",
