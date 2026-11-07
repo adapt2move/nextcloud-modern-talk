@@ -49,6 +49,54 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
         .request(context(), ProtocolRequest::ActivateConversation(room))
         .await
         .unwrap();
+    // Adapter completion diagnostics, not input-to-display timings. Compile
+    // before running this fixed matrix; retain deadline outcomes as samples.
+    let mut samples = Vec::new();
+    for mode in [
+        "healthy",
+        "latency-1500",
+        "latency-4000",
+        "slow-poll",
+        "intermittent",
+    ] {
+        std::fs::write(directory.join("fault.next"), mode).unwrap();
+        std::fs::rename(directory.join("fault.next"), directory.join("fault.mode")).unwrap();
+        for sample in 0..6 {
+            let start = std::time::Instant::now();
+            let reply = client
+                .request(
+                    context(),
+                    ProtocolRequest::Messaging {
+                        conversation: room,
+                        operation: OperationId::from_local(500 + sample),
+                        command: if mode == "slow-poll" {
+                            MessagingCommand::Poll {
+                                after: talk_core::protocol::MessageId {
+                                    conversation: room,
+                                    sequence: 1,
+                                },
+                                thread: None,
+                            }
+                        } else {
+                            MessagingCommand::History {
+                                before: None,
+                                thread: None,
+                            }
+                        },
+                    },
+                )
+                .await;
+            samples.push(serde_json::json!({"mode": mode, "sample": sample,
+                "elapsed_us": start.elapsed().as_micros() as u64,
+                "outcome": match reply { Ok(_) => "completed".to_owned(), Err(e) => format!("{:?}", e.kind) }}));
+        }
+    }
+    std::fs::remove_file(directory.join("fault.mode")).unwrap();
+    std::fs::write(
+        directory.join("latency.json"),
+        serde_json::to_vec_pretty(&samples).unwrap(),
+    )
+    .unwrap();
     let mut accepted = Vec::new();
     for (index, (mode, expected)) in [
         ("healthy", None),
