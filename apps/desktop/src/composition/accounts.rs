@@ -986,6 +986,14 @@ impl Accounts {
             } => {
                 self.open_message_link(context, message, source, ordinal)?;
             }
+            UiIntent::OpenLocation {
+                context,
+                message,
+                placeholder,
+                id,
+            } => {
+                self.open_location(context, message, placeholder, id)?;
+            }
             UiIntent::RemoveAccount {
                 request,
                 account,

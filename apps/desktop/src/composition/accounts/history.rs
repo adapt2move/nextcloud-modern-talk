@@ -990,6 +990,26 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
                     id: o.id.clone(),
                 }),
         ),
+        locations: page(
+            message
+                .metadata
+                .rich
+                .as_slice()
+                .iter()
+                .filter(|o| !message.metadata.deleted && o.kind.as_str() == "geo-location")
+                .filter_map(|o| {
+                    o.id.as_ref()
+                        .filter(|id| {
+                            talk_core::ui::messaging::location::coordinates(id.as_str()).is_some()
+                        })
+                        .map(|id| talk_adapters::identity::CachedLocation {
+                            placeholder: o.placeholder.clone(),
+                            name: o.name.clone(),
+                            id: id.clone(),
+                        })
+                })
+                .take(8),
+        ),
         id,
         author: text(message.author.as_str()),
         actor_key: message.metadata.author_key.clone(),
@@ -1056,7 +1076,29 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                         size: o.size,
                         id: o.id.clone(),
                         link: None,
-                    }),
+                    })
+                    .chain(
+                        message
+                            .locations
+                            .as_slice()
+                            .iter()
+                            .filter(|o| {
+                                !message.deleted
+                                    && talk_core::ui::messaging::location::coordinates(
+                                        o.id.as_str(),
+                                    )
+                                    .is_some()
+                            })
+                            .map(|o| talk_core::ui::messaging::RichObject {
+                                placeholder: o.placeholder.clone(),
+                                kind: text("geo-location"),
+                                name: o.name.clone(),
+                                mime_type: None,
+                                size: None,
+                                id: Some(o.id.clone()),
+                                link: None,
+                            }),
+                    ),
             ),
             author_key: message.actor_key.clone(),
             expires_at: message.expires_at,

@@ -122,6 +122,7 @@ fn message(id: u64) -> CachedMessage {
             own: true,
         }]),
         attachments: Page::empty(),
+        locations: Page::empty(),
     }
 }
 

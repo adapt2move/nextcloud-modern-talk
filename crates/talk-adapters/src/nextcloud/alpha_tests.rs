@@ -680,3 +680,54 @@ async fn inherited_permissions_survive_typed_api_and_adapter_projection() {
         assert_eq!(server.count(), 2);
     }
 }
+
+#[tokio::test]
+async fn scheduled_list_preserves_failed_and_rescheduled_deadlines() {
+    for major in [34, 35] {
+        let mut capabilities = caps(major);
+        capabilities["capabilities"]["spreed"]["features"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("scheduled-messages"));
+        let server = Server::start(vec![
+            Reply::data(capabilities),
+            Reply::data(room()),
+            Reply::data(json!([
+                {"id":"10", "message":"failed", "sendAt":0, "originalSendAt":200, "threadId":0, "silent":false},
+                {"id":"11", "message":"rescheduled", "sendAt":400, "originalSendAt":200, "threadId":0, "silent":false},
+                {"id":"12", "message":"pending", "sendAt":500, "threadId":0, "silent":false}
+            ])),
+        ]).await;
+        let runtime = runtime();
+        let mut client = client(&server.origin, runtime.clone());
+        let conversation = bind(&mut client);
+        let result = client
+            .request(
+                context(&runtime),
+                ProtocolRequest::Messaging {
+                    conversation,
+                    operation: OperationId::from_local(1),
+                    command: M::Scheduled,
+                },
+            )
+            .await
+            .unwrap();
+        let ProtocolReply::Messaging {
+            result: R::Scheduled(items),
+            ..
+        } = result
+        else {
+            panic!("expected schedules");
+        };
+        let items = items.as_slice();
+        assert_eq!(
+            (items[0].send_at, items[0].original_send_at),
+            (0, Some(200))
+        );
+        assert_eq!(
+            (items[1].send_at, items[1].original_send_at),
+            (400, Some(200))
+        );
+        assert_eq!((items[2].send_at, items[2].original_send_at), (500, None));
+    }
+}

@@ -624,14 +624,22 @@ impl Desktop {
                                         cx,
                                     )),
                             )
-                            .child(div().flex().items_center().gap_3().child(self.icon_button(
-                                "send",
-                                ("arrow-up", "Senden"),
-                                ButtonStyle::Primary,
-                                send_availability,
-                                LocalAction::Send,
-                                cx,
-                            ))),
+                            .child(
+                                div().flex().items_center().gap_1()
+                                    .when(self.message_feature_enabled(MessageFeature::Schedules), |d| {
+                                        d.child(self.icon_button(
+                                            "schedule-send", ("chevron-down", "Später senden"),
+                                            ButtonStyle::Quiet,
+                                            Availability::when(send_availability.is_enabled() && !attached && self.message_ui.editing.is_none(),
+                                                "Zum Planen eine Nachricht ohne Dateien verfassen."),
+                                            LocalAction::MessageIn(row.context, super::messaging::Action::Schedule), cx,
+                                        ))
+                                    })
+                                    .child(self.icon_button(
+                                        "send", ("arrow-up", "Senden"), ButtonStyle::Primary,
+                                        send_availability, LocalAction::Send, cx,
+                                    )),
+                            ),
                     ),
             )
             .children(

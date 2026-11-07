@@ -578,3 +578,27 @@ async fn image_lane_rejects_non_image_body_and_ambiguous_avatar_targets() {
     }
     assert_eq!(server.count(), 1);
 }
+
+#[test]
+fn location_parameters_must_agree_before_becoming_a_map_target() {
+    let object = |id: &str, latitude: &str, longitude: &str| {
+        json!({"place": {
+            "type":"geo-location", "id":id, "name":"Meeting place", "latitude":latitude, "longitude":longitude
+        }})
+    };
+    let good = object("geo:52.5,13.4", "52.5", "13.4");
+    assert_eq!(
+        chat::rich(Some(&good)).unwrap()[0].id.as_deref(),
+        Some("geo:52.5,13.4")
+    );
+    for invalid in [
+        object("geo:52.5,13.4", "52.6", "13.4"),
+        object("geo:91,13.4", "91", "13.4"),
+        object("geo:52.5,13.4&x=1", "52.5", "13.4"),
+        object("geo:NaN,13.4", "NaN", "13.4"),
+    ] {
+        let values = chat::rich(Some(&invalid)).unwrap();
+        assert!(values[0].id.is_none());
+        assert_eq!(values[0].name, "Meeting place");
+    }
+}

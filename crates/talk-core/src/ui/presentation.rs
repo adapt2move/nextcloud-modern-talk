@@ -562,6 +562,13 @@ pub enum UiIntent {
         source: Text<4096>,
         ordinal: u16,
     },
+    /// Open only a currently displayed, validated geo-location object.
+    OpenLocation {
+        context: ConversationRef,
+        message: u128,
+        placeholder: Text<128>,
+        id: Text<1024>,
+    },
     Content {
         request: RequestId,
         account: AccountScope,

@@ -180,8 +180,9 @@ impl Desktop {
                 .child(
                     div().flex().flex_wrap().gap_2().children(
                         [
-                            ("In 30 Minuten", DeadlineChoice::InThirtyMinutes),
+                            ("In 20 Minuten", DeadlineChoice::InTwentyMinutes),
                             ("In einer Stunde", DeadlineChoice::InOneHour),
+                            ("In 3 Stunden", DeadlineChoice::InThreeHours),
                             ("Morgen um 09:00", DeadlineChoice::TomorrowMorning),
                             (
                                 "Nächsten Montag um 09:00",
@@ -190,6 +191,7 @@ impl Desktop {
                         ]
                         .into_iter()
                         .enumerate()
+                        .filter(|(index, _)| reminder || *index >= 3)
                         .map(|(index, (label, choice))| {
                             self.button(
                                 ("message-time-preset", index),

@@ -2738,6 +2738,7 @@ fn reminder_changes_and_schedule_cancellation_preserve_other_confirmed_entries()
             id,
             body: text("Scheduled"),
             timestamp: 100,
+            failed_original_timestamp: None,
         }));
     let work = Work::CancelScheduled(7);
     let operation = admit(&mut model.history, key, 3, work);
@@ -3132,4 +3133,33 @@ fn scrolling_older_history_keeps_receipts_when_the_header_is_absent_but_respects
     );
     complete(&mut cache, key, 4, Work::Older, receipt(None));
     assert_eq!(cache.get(key).unwrap().common_read, Some(0));
+}
+
+#[test]
+fn location_cache_round_trip_drops_deleted_objects() {
+    let mut row = crate::composition::fixtures::snapshot(Some("chat-message-tools"))
+        .messages
+        .as_slice()
+        .iter()
+        .find(|row| row.local_id == 45)
+        .unwrap()
+        .clone();
+    let cached = cached_message(&row).unwrap();
+    assert_eq!(cached.locations.as_slice().len(), 1);
+    assert_eq!(
+        restored_message(&cached).metadata.rich.as_slice()[0]
+            .id
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "geo:52.5450511,13.3741463"
+    );
+    row.metadata.deleted = true;
+    assert!(
+        cached_message(&row)
+            .unwrap()
+            .locations
+            .as_slice()
+            .is_empty()
+    );
 }

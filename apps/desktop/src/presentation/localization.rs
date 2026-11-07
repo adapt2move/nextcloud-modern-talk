@@ -4,6 +4,7 @@ mod chat;
 mod connection;
 mod content;
 mod conversation;
+mod message_tools;
 mod onboarding;
 mod recovery;
 mod resources;
@@ -17,6 +18,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
     }
     for catalog in [
         chat::MESSAGES,
+        message_tools::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
         conversation::MESSAGES,
@@ -81,6 +83,7 @@ mod tests {
             recovery::MESSAGES,
             conversation::MESSAGES,
             chat::MESSAGES,
+            message_tools::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,
             updates::MESSAGES,

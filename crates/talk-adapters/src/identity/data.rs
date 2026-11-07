@@ -151,6 +151,16 @@ pub struct CachedAttachment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CachedLocation {
+    #[serde(with = "codec::text")]
+    pub placeholder: Text<128>,
+    #[serde(with = "codec::text")]
+    pub name: Text<1024>,
+    #[serde(with = "codec::text")]
+    pub id: Text<1024>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CachedMessage {
     pub id: u64,
     #[serde(with = "codec::text")]
@@ -178,6 +188,8 @@ pub struct CachedMessage {
     pub reactions: Page<CachedReaction, 64>,
     #[serde(default = "Page::empty", with = "codec::page")]
     pub attachments: Page<CachedAttachment, 8>,
+    #[serde(default = "Page::empty", with = "codec::page")]
+    pub locations: Page<CachedLocation, 8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -979,6 +991,7 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
             message.text = Text::new("").map_err(|_| DataError::InvalidInput)?;
             message.reactions = Page::empty();
             message.attachments = Page::empty();
+            message.locations = Page::empty();
         }
         if let Some(parent) = message.parent.as_mut()
             && (parent.unavailable || unavailable.contains(&parent.id))

@@ -1600,6 +1600,7 @@ fn overlay(
                 id: pending_id,
                 body: body.clone(),
                 timestamp: *timestamp,
+                failed_original_timestamp: None,
             });
         }
         Intent::CancelScheduled { message } => {

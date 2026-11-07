@@ -1585,6 +1585,7 @@ mod tests {
             room: stable(),
             messages: page([CachedMessage {
                 attachments: Page::empty(),
+                locations: Page::empty(),
                 id: 7,
                 author: text("Synthetic actor"),
                 actor_key: None,

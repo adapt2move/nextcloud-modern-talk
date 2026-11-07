@@ -1,4 +1,6 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
+pub mod location;
+
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{Decision, Page, Text, UnavailableReason};
@@ -137,6 +139,8 @@ pub struct Scheduled {
     pub id: u128,
     pub body: Text<4096>,
     pub timestamp: u64,
+    /// A zero send time means Talk has stopped trying to send this message.
+    pub failed_original_timestamp: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UploadedFile {

@@ -10,7 +10,8 @@ pub enum RepeatedTime {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeadlineChoice {
-    InThirtyMinutes,
+    InTwentyMinutes,
+    InThreeHours,
     InOneHour,
     TomorrowMorning,
     NextMondayMorning,

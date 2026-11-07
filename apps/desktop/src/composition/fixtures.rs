@@ -49,6 +49,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-ux",
     "chat-ux-call",
     "chat-edit",
+    "chat-message-tools",
     "thread-error",
     "chat-content",
     "chat-content-progress",
@@ -224,6 +225,65 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             }
             message
         }));
+        return state;
+    }
+    if scenario == Some("chat-message-tools") {
+        let mut state = snapshot(Some("chat-ux"));
+        let mut rows = state.messages.as_slice().to_vec();
+        let mut location = message(
+            45,
+            "Mara Fischer",
+            "MF",
+            "10:15",
+            "Hier treffen wir uns.",
+            false,
+        );
+        location.metadata.rich = page([talk_core::ui::messaging::RichObject {
+            id: Some(text("geo:52.5450511,13.3741463")),
+            mime_type: None,
+            size: None,
+            placeholder: text("location"),
+            kind: text("geo-location"),
+            name: text("Fiktiver Treffpunkt"),
+            link: None,
+        }]);
+        rows.push(location);
+        state.messages = page(rows);
+        if let Some(panel) = state.message_panel.as_mut() {
+            use talk_core::ui::{
+                conversation::Availability,
+                messaging::{MessageFeature, Reminder, Scheduled},
+                presentation::FeatureSupport,
+            };
+            for feature in [MessageFeature::Reminders, MessageFeature::Schedules] {
+                let _ = panel.features.try_push((
+                    feature,
+                    Availability {
+                        implemented: true,
+                        server: FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            panel.reminders = page([Reminder {
+                message: 1,
+                timestamp: 1_800_003_600,
+            }]);
+            panel.scheduled = page([
+                Scheduled {
+                    id: 41,
+                    body: text("Fiktive Nachricht für morgen"),
+                    timestamp: 1_800_090_000,
+                    failed_original_timestamp: None,
+                },
+                Scheduled {
+                    id: 42,
+                    body: text("Fiktive Nachricht erneut prüfen"),
+                    timestamp: 0,
+                    failed_original_timestamp: Some(1_800_003_600),
+                },
+            ]);
+        }
         return state;
     }
     if scenario == Some("chat-busy") {

@@ -1562,6 +1562,7 @@ impl NextcloudClient {
             id: mid(s.id),
             text: Text::new(&s.message).map_err(|_| self.error(ErrorKind::TooLarge))?,
             send_at: s.send_at,
+            original_send_at: s.original_send_at,
             options: ComposeOptions {
                 reply_to: s.options.reply_to.map(mid),
                 thread: s.options.thread.map(mid),

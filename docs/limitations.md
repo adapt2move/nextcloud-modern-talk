@@ -75,7 +75,15 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   correlation. An unresolved effect stays retained and is never blindly replayed.
   Scheduled creation has no operation correlation and may remain uncertain.
   The reminder backend uses server reminders; there is no standalone local OS
-  reminder fallback.
+  reminder fallback. Reminder badges use the currently loaded room list;
+  cross-room reminder navigation and real reminder event delivery remain incomplete.
+  Scheduled-message counts require an explicit list refresh, and scheduled
+  messages cannot yet be edited or rescheduled in the UI. Translation and chat
+  summaries are unavailable until provider-aware integration is implemented.
+- Validated location objects render from their geo identifiers and can open
+  OpenStreetMap deliberately; the client does not create locations or fetch map
+  tiles. Federated invitations, full breakout assignment/help/broadcast,
+  lobby admission, and room-image upload remain incomplete.
 
 ## Platforms
 

@@ -71,6 +71,7 @@ pub struct ScheduledMessage {
     pub id: MessageId,
     pub text: Text<131072>,
     pub send_at: u64,
+    pub original_send_at: Option<u64>,
     pub options: ComposeOptions,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

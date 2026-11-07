@@ -1241,6 +1241,8 @@ impl Accounts {
                                 id: u128::from(s.id.sequence),
                                 body: text(s.text.as_str()),
                                 timestamp: s.send_at,
+                                failed_original_timestamp:
+                                    (s.send_at == 0).then_some(s.original_send_at).flatten(),
                             }));
                     }
                     wire::MessagingResult::Schedule(schedule) => {
@@ -1256,6 +1258,9 @@ impl Accounts {
                                     id: u128::from(schedule.id.sequence),
                                     body: text(schedule.text.as_str()),
                                     timestamp: schedule.send_at,
+                                    failed_original_timestamp: (schedule.send_at == 0)
+                                        .then_some(schedule.original_send_at)
+                                        .flatten(),
                                 })),
                         );
                     }

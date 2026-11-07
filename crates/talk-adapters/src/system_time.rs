@@ -87,8 +87,11 @@ fn resolve_in(
     choice: DeadlineChoice,
 ) -> Result<DeadlineMoment, LocalTimeError> {
     let at = match choice {
-        DeadlineChoice::InThirtyMinutes => now
-            .checked_add(30.minutes())
+        DeadlineChoice::InTwentyMinutes => now
+            .checked_add(20.minutes())
+            .map_err(|_| LocalTimeError::Invalid)?,
+        DeadlineChoice::InThreeHours => now
+            .checked_add(3.hours())
             .map_err(|_| LocalTimeError::Invalid)?,
         DeadlineChoice::InOneHour => now
             .checked_add(1.hours())
@@ -236,6 +239,10 @@ mod tests {
         let tomorrow = resolve_in(&berlin, now, DeadlineChoice::TomorrowMorning).unwrap();
         assert_eq!(tomorrow.local.as_str(), "2026-03-29 09:00");
         assert_eq!(tomorrow.timestamp - now.as_second() as u64, 23 * 3600);
+        let twenty = resolve_in(&berlin, now, DeadlineChoice::InTwentyMinutes).unwrap();
+        assert_eq!(twenty.timestamp - now.as_second() as u64, 20 * 60);
+        let three = resolve_in(&berlin, now, DeadlineChoice::InThreeHours).unwrap();
+        assert_eq!(three.timestamp - now.as_second() as u64, 3 * 3600);
         let hour = resolve_in(&berlin, now, DeadlineChoice::InOneHour).unwrap();
         assert_eq!(hour.timestamp - now.as_second() as u64, 3600);
         let monday = resolve_in(&berlin, now, DeadlineChoice::NextMondayMorning).unwrap();

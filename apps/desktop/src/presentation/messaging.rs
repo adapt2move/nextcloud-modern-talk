@@ -49,8 +49,10 @@ pub(crate) enum Action {
     ToggleSearch,
     CloseSearch,
     Locate(u128),
+    OpenLocation(u128, Text<128>, Text<1024>),
     CyclePin { current: u128, forward: bool },
     Schedule,
+    ToggleScheduled,
     CancelTime,
     Remind(u128),
     SubmitTime,
@@ -81,6 +83,7 @@ pub(super) struct MessageUi {
     last_read: Option<(ConversationRef, u128)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
+    show_scheduled: bool,
     pub time_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
     pub search: Entity<TextInput>,
@@ -255,6 +258,7 @@ impl MessageUi {
             last_read: None,
             last_located: None,
             time_target: None,
+            show_scheduled: false,
             time_input: cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx)),
             time_error: None,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
@@ -462,6 +466,7 @@ impl Desktop {
                 self.message_ui.pending_edit = None;
             }
             self.message_ui.time_target = None;
+            self.message_ui.show_scheduled = false;
             self.message_ui.show_search = false;
             self.message_ui.search_return_focus = None;
             self.message_ui.search_pending_focus = false;
@@ -1054,6 +1059,9 @@ impl Desktop {
                 if matches!(command, MessageAction::Scheduled | MessageAction::Reminders) {
                     self.content_ui.menu = false;
                 }
+                if matches!(command, MessageAction::Scheduled) {
+                    self.message_ui.show_scheduled = true;
+                }
                 self.submit_message(command);
             }
             Action::Search => {
@@ -1083,8 +1091,22 @@ impl Desktop {
                     self.handle(LocalAction::Close, window, cx);
                 }
             }
+            Action::OpenLocation(message, placeholder, id) => {
+                self.submit(UiIntent::OpenLocation {
+                    context,
+                    message,
+                    placeholder,
+                    id,
+                });
+            }
             Action::Schedule => {
                 self.open_message_deadline(None, window, cx);
+            }
+            Action::ToggleScheduled => {
+                self.message_ui.show_scheduled = !self.message_ui.show_scheduled;
+                if self.message_ui.show_scheduled {
+                    self.submit_message(MessageAction::Scheduled);
+                }
             }
             Action::CancelTime => {
                 self.message_ui.time_target = None;
@@ -2060,18 +2082,46 @@ impl Desktop {
                     .into_any_element(),
                 );
             }
+            // Retained counts are immediate; expanding asks the owner to refresh.
+            if !panel.scheduled.as_slice().is_empty() {
+                rows.push(
+                    self.button(
+                        "scheduled-bar",
+                        self.lf(
+                            "Geplant ({n})",
+                            &[("n", &panel.scheduled.as_slice().len().to_string())],
+                        ),
+                        ButtonStyle::Quiet,
+                        self.message_available(MessageFeature::Schedules),
+                        LocalAction::MessageIn(context, Action::ToggleScheduled),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
             // Server lists requested from the + menu stay grouped in one card each.
             let scheduled: Vec<_> = panel
                 .scheduled
                 .as_slice()
                 .iter()
-                .take(if self.composer_active { 8 } else { 0 })
+                .take(if self.message_ui.show_scheduled { 8 } else { 0 })
                 .map(|scheduled| {
+                    let deadline = if scheduled.timestamp == 0 {
+                        scheduled.failed_original_timestamp
+                    } else {
+                        Some(scheduled.timestamp)
+                    };
+                    let label = deadline
+                        .and_then(|timestamp| self.settings_port.local_datetime(timestamp))
+                        .map(|time| format!("{} · {}", time.as_str(), scheduled.body.as_str()))
+                        .unwrap_or_else(|| scheduled.body.as_str().to_owned());
+                    let label = if scheduled.timestamp == 0 {
+                        format!("{} · {}", self.l("Senden fehlgeschlagen"), label)
+                    } else {
+                        label
+                    };
                     self.composer_list_row(
-                        self.settings_port
-                            .local_datetime(scheduled.timestamp)
-                            .map(|time| format!("{} · {}", time.as_str(), scheduled.body.as_str()))
-                            .unwrap_or_else(|| scheduled.body.as_str().to_owned()),
+                        label,
                         self.button(
                             ("schedule-cancel", scheduled.id as usize),
                             "Planung abbrechen",
