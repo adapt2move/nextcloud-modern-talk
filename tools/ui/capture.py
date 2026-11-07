@@ -38,6 +38,7 @@ def capture(args, before_runtime_cleanup=None):
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": 1, "kind": "compiled GPUI native X11 UI development evidence", "backend_connected": False,
         "media_engine_attached": False, "media_frames": False, "platform_qualified": False,
+        "preference_scope": "fresh private XDG configuration/data per scenario",
         "binary_sha256": sha(binary), "source_files": source_manifest(root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
@@ -69,6 +70,14 @@ def capture(args, before_runtime_cleanup=None):
                 label = f"{scenario}-{appearance}-{theme}"
                 command = [str(binary), "--ui-scenario", scenario, "--ui-appearance", appearance, "--ui-theme", theme, "--ui-font-metrics", "--ui-scale", str(args.scale)]
                 if args.scale != 100: label += f"-{args.scale}pct"
+                # UI actions use the real preference writer. A saved sidebar
+                # filter or setting from one case must not affect another case,
+                # another capture job, or this computer's ordinary profile.
+                profile = Path(runtime) / label
+                for variable, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data")]:
+                    path = profile / directory
+                    path.mkdir(mode=0o700, parents=True)
+                    env[variable] = str(path)
                 started = time.monotonic()
                 with open(out / f"{label}.log", "w") as app_log:
                     app = subprocess.Popen(command, env=env, stdout=app_log, stderr=app_log, start_new_session=True)
