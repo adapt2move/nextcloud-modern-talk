@@ -2569,7 +2569,10 @@ fn finish_startup_account_dialog(
 
 #[cfg(test)]
 mod interaction_tests {
-    use super::{Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog};
+    use super::{
+        Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog,
+        lobby_allows_overlay,
+    };
 
     #[test]
     fn automatic_account_prompt_waits_for_a_valid_activation_and_then_releases_the_modal() {
