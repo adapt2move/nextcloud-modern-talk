@@ -43,6 +43,18 @@ pub(super) struct Restart {
     entry: Entry,
     continuity: bool,
 }
+fn media_recovery_restart(snapshot: &Snapshot) -> Option<Restart> {
+    if snapshot.phase != Phase::Active {
+        return None;
+    }
+    let mut wishes = snapshot.wishes;
+    wishes.screen = false;
+    Some(Restart {
+        wishes,
+        entry: snapshot.entry,
+        continuity: true,
+    })
+}
 impl NextcloudClient {
     pub(super) async fn poll_incoming_calls(
         &mut self,
@@ -661,15 +673,7 @@ impl NextcloudClient {
                                 entry: Entry::PreparedConference,
                                 continuity: false,
                             }),
-                            Command::RecoverMedia(_) if snapshot.phase == Phase::Active => {
-                                let mut wishes = snapshot.wishes;
-                                wishes.screen = false;
-                                Some(Restart {
-                                    wishes,
-                                    entry: snapshot.entry,
-                                    continuity: true,
-                                })
-                            }
+                            Command::RecoverMedia(_) => media_recovery_restart(&snapshot),
                             _ => None,
                         };
                         if restart.is_none_or(|restart| !restart.continuity) {
@@ -822,5 +826,49 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         end_failed: false,
         counters: MediaCounters::default(),
         revision: 0,
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use talk_core::ids::{
+        AccountId, AccountScope, CallGeneration, ConversationId, HostId, RuntimeGeneration,
+    };
+    #[test]
+    fn explicit_media_rejoin_preserves_camera_and_mute_but_retires_screen() {
+        let account = AccountId::from_local(1);
+        let scope = CallScope {
+            account: AccountScope {
+                account,
+                runtime: RuntimeGeneration::from_local(2),
+            },
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(3),
+                local: 4,
+            },
+            call: CallGeneration::from_local(5),
+        };
+        let mut session = CallSession::new(scope, Entry::PreparedConference).unwrap();
+        session
+            .accept(
+                scope,
+                MediaWishes {
+                    microphone: false,
+                    camera: true,
+                    screen: true,
+                },
+            )
+            .unwrap();
+        let mut snapshot = pending_snapshot(&session);
+        assert!(media_recovery_restart(&snapshot).is_none());
+        snapshot.phase = Phase::Active;
+        let restart = media_recovery_restart(&snapshot).unwrap();
+        assert!(!restart.wishes.microphone && restart.wishes.camera && !restart.wishes.screen);
+        assert!(restart.continuity);
+        let recovered = CallSession::recover(scope, restart.entry, restart.wishes).unwrap();
+        assert!(!recovered.recording_consent());
+        assert_eq!(recovered.wishes(), restart.wishes);
     }
 }
