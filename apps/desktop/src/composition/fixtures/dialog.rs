@@ -25,8 +25,13 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         server_default_permissions: Some(511),
         effective_permissions: Some(511),
         lobby: Some(false),
+        lobby_timer: None,
         has_password: Some(false),
         participant_count: Some(7),
+        breakout_mode: None,
+        breakout_started: None,
+        breakout_child: false,
+        breakout_supported: true,
         guest_access: Some(false),
         leave: Decision::Allowed,
         controls: page(

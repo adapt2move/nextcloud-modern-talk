@@ -72,6 +72,10 @@ fn details(room: protocol::Conversation) -> wire::ConversationDetails {
         recording_consent: None,
         has_password: Some(true),
         participant_count: Some(4),
+        breakout_mode: None,
+        breakout_started: None,
+        breakout_child: false,
+        breakout_supported: false,
         controls: page(
             [wire::Setting::Metadata, wire::Setting::Members].map(|setting| {
                 (

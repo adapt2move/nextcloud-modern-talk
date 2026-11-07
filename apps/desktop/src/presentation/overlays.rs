@@ -230,6 +230,8 @@ impl Desktop {
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
             Overlay::PollDetails => ("Umfragedetails", 620.),
+            Overlay::Reminders => ("Erinnerungen", 560.),
+            Overlay::Federation => ("Föderierte Einladungen", 620.),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
@@ -381,6 +383,8 @@ impl Desktop {
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
             Overlay::PollDetails => self.poll_details_body(cx),
+            Overlay::Reminders => self.account_reminders_body(cx),
+            Overlay::Federation => self.federation_body(cx),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
         };

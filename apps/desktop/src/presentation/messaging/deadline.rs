@@ -3,6 +3,55 @@ use super::*;
 use talk_core::preferences::time::{DeadlineChoice, LocalTimeError, RepeatedTime};
 
 impl Desktop {
+    pub(super) fn open_scheduled_edit(
+        &mut self,
+        id: u128,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(context) = self.snapshot.selected else {
+            return;
+        };
+        let Some(item) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .and_then(|panel| {
+                panel
+                    .scheduled
+                    .as_slice()
+                    .iter()
+                    .find(|item| item.id == id && item.editable)
+            })
+            .cloned()
+        else {
+            return;
+        };
+        if !self.message_feature_enabled(MessageFeature::Schedules) {
+            return;
+        }
+        self.message_ui.scheduled_edit = Some((id, item.silent));
+        self.message_ui.scheduled_input.update(cx, |input, cx| {
+            input.set_context_value(item.body.as_str());
+            cx.notify();
+        });
+        self.open_message_deadline(None, window, cx);
+        if let Some(local) = (if item.timestamp == 0 {
+            item.failed_original_timestamp
+        } else {
+            Some(item.timestamp)
+        })
+        .and_then(|timestamp| self.settings_port.local_datetime(timestamp))
+        {
+            self.message_ui.picker =
+                talk_core::preferences::time::calendar::Calendar::parse(local.as_str());
+        }
+        self.message_ui
+            .scheduled_input
+            .focus_handle(cx)
+            .focus(window);
+    }
     pub(in crate::presentation) fn message_deadline_key(
         &mut self,
         event: &gpui::KeyDownEvent,
@@ -11,7 +60,7 @@ impl Desktop {
     ) -> bool {
         if self.message_ui.time_target.is_none()
             || self.overlay.is_some()
-            || self.message_ui.time_input.read(cx).composing()
+            || self.message_ui.scheduled_input.read(cx).composing()
         {
             return false;
         }
@@ -21,16 +70,6 @@ impl Desktop {
         }
         let action = match event.keystroke.key.as_str() {
             "escape" => Action::CancelTime,
-            "enter"
-                if !modifiers.shift
-                    && self
-                        .message_ui
-                        .time_input
-                        .focus_handle(cx)
-                        .is_focused(window) =>
-            {
-                Action::SubmitTime
-            }
             _ => return false,
         };
         self.message_action(action, window, cx);
@@ -67,11 +106,12 @@ impl Desktop {
                     .ok()
                     .map(|moment| moment.local)
             });
-        self.message_ui.time_input.update(cx, |input, cx| {
-            input.set_context_value(value.as_ref().map_or("", Text::as_str));
-            cx.notify();
+        self.message_ui.picker = value.as_ref().and_then(|value| {
+            talk_core::preferences::time::calendar::Calendar::parse(value.as_str())
         });
-        self.message_ui.time_input.focus_handle(cx).focus(window);
+        if self.message_ui.scheduled_edit.is_none() {
+            self.focus_date_picker(window, cx);
+        }
     }
 
     pub(super) fn submit_custom_deadline(
@@ -80,14 +120,13 @@ impl Desktop {
         window: &mut Window,
         cx: &Context<Self>,
     ) {
-        if self.message_ui.time_input.read(cx).composing() {
+        if self.message_ui.scheduled_input.read(cx).composing() {
             return;
         }
-        let local = Text::new(self.message_ui.time_input.read(cx).content.as_str());
-        if let Ok(local) = local {
+        if let Some(local) = self.message_ui.picker.and_then(|picker| picker.local()) {
             self.submit_message_deadline(DeadlineChoice::Custom { local, repeated }, window, cx);
         } else {
-            self.message_ui.time_error = Some(LocalTimeError::Invalid);
+            self.message_ui.time_error = Some(LocalTimeError::Unavailable);
         }
     }
 
@@ -116,7 +155,23 @@ impl Desktop {
                 message,
                 timestamp: Some(moment.timestamp),
             })
-        } else if !self.composer.read(cx).composing() {
+        } else if let Some((id, silent)) = self.message_ui.scheduled_edit {
+            self.message_ui
+                .scheduled_input
+                .read(cx)
+                .submitted_value()
+                .filter(|body| !body.trim().is_empty())
+                .and_then(|body| Text::new(body).ok())
+                .map(|body| MessageAction::EditScheduled {
+                    id,
+                    body,
+                    timestamp: moment.timestamp,
+                    silent,
+                })
+        } else if !self.composer.read(cx).composing()
+            && !self.has_staged_attachments()
+            && self.message_ui.editing.is_none()
+        {
             self.composer_submission(cx)
                 .filter(|body| !body.as_str().trim().is_empty())
                 .map(|body| MessageAction::Schedule {
@@ -131,6 +186,8 @@ impl Desktop {
             && self.submit_message(command).is_some()
         {
             self.message_ui.time_target = None;
+            self.message_ui.picker = None;
+            self.message_ui.scheduled_edit = None;
             self.restore_deadline_focus(window, cx);
         }
     }
@@ -147,11 +204,38 @@ impl Desktop {
         let target = self.message_ui.time_target?;
         let context = self.snapshot.selected?;
         let reminder = target.is_some();
+        let editing = !reminder && self.message_ui.scheduled_edit.is_some();
         let available = self.message_available(if reminder {
             MessageFeature::Reminders
         } else {
             MessageFeature::Schedules
         });
+        let available = if editing
+            && available.is_enabled()
+            && self
+                .message_ui
+                .scheduled_input
+                .read(cx)
+                .submitted_value()
+                .is_none_or(|body| body.trim().is_empty())
+        {
+            Availability::when(false, "Gib eine Nachricht ein.")
+        } else if !reminder
+            && !editing
+            && available.is_enabled()
+            && (self.has_staged_attachments()
+                || self.message_ui.editing.is_some()
+                || self.message_ui.composer_load_failed == Some(context)
+                || self
+                    .composer
+                    .read(cx)
+                    .submitted_value()
+                    .is_none_or(|body| body.trim().is_empty()))
+        {
+            Availability::when(false, "Zum Planen eine Nachricht ohne Dateien verfassen.")
+        } else {
+            available
+        };
         Some(
             self.composer_card()
                 .p_3()
@@ -164,6 +248,8 @@ impl Desktop {
                         .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(
                             if reminder {
                                 "Später erinnern"
+                            } else if editing {
+                                "Geplante Nachricht bearbeiten"
                             } else {
                                 "Nachricht planen"
                             },
@@ -177,11 +263,21 @@ impl Desktop {
                             cx,
                         )),
                 )
+                .when(editing, |d| {
+                    d.child(
+                        self.input_surface(&self.message_ui.scheduled_input, cx)
+                            .w_full()
+                            .child(self.message_ui.scheduled_input.clone()),
+                    )
+                })
                 .child(
-                    div().flex().flex_wrap().gap_2().children(
+                    div().flex().flex_wrap().items_start().gap_4()
+                    .child(self.date_picker(context, cx))
+                    .child(div().flex_1().min_w(px(230.)).flex().flex_col().items_start().gap_1().children(
                         [
-                            ("In 30 Minuten", DeadlineChoice::InThirtyMinutes),
+                            ("In 20 Minuten", DeadlineChoice::InTwentyMinutes),
                             ("In einer Stunde", DeadlineChoice::InOneHour),
+                            ("In 3 Stunden", DeadlineChoice::InThreeHours),
                             ("Morgen um 09:00", DeadlineChoice::TomorrowMorning),
                             (
                                 "Nächsten Montag um 09:00",
@@ -190,39 +286,32 @@ impl Desktop {
                         ]
                         .into_iter()
                         .enumerate()
+                        .filter(|(index, _)| reminder || *index >= 3)
                         .map(|(index, (label, choice))| {
                             self.button(
                                 ("message-time-preset", index),
                                 label,
-                                ButtonStyle::Secondary,
+                                ButtonStyle::Quiet,
                                 available,
                                 LocalAction::MessageIn(context, Action::ChooseTime(choice)),
                                 cx,
                             )
                         }),
-                    ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            self.input_surface(&self.message_ui.time_input, cx)
-                                .flex_1()
-                                .min_w_0()
-                                .child(self.message_ui.time_input.clone()),
-                        )
-                        .child(self.button(
+                    ).child(div().pt_2().child(self.button(
                             "submit-message-time",
-                            if reminder { "Erinnern" } else { "Planen" },
+                            if reminder {
+                                "Erinnern"
+                            } else if editing {
+                                "Änderungen speichern"
+                            } else {
+                                "Planen"
+                            },
                             ButtonStyle::Primary,
-                            available,
+                            if self.message_ui.picker.is_some() { available } else { Availability::when(false, "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.") },
                             LocalAction::MessageIn(context, Action::SubmitTime),
                             cx,
-                        )),
+                        )))),
                 )
-                .child(self.hint(self.l("Datum und Uhrzeit: JJJJ-MM-TT HH:MM")))
                 .when_some(self.message_ui.time_error, |d, error| {
                     d.child(
                         self.hint(self.l(error_label(error)))

@@ -11,6 +11,7 @@ mod conversation_dialog;
 mod creation;
 mod device_settings;
 mod discovery;
+mod federation;
 mod feedback;
 mod focus;
 pub mod input;
@@ -28,6 +29,7 @@ mod permissions;
 pub mod preferences;
 pub(super) mod probes;
 mod references;
+mod reminders;
 mod selectable;
 mod settings;
 mod settings_pages;
@@ -76,6 +78,8 @@ pub enum Overlay {
     ContentPreview,
     CreatePoll,
     PollDetails,
+    Reminders,
+    Federation,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
@@ -145,6 +149,7 @@ pub enum LocalAction {
     BeginThreadRename,
     SaveThreadRename,
     ThreadNotification(i8),
+    OpenReminder(ConversationRef, u128),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
@@ -618,11 +623,11 @@ impl Desktop {
             .chain([discovery_search.clone()])
             .chain([
                 message_ui.search.clone(),
-                message_ui.time_input.clone(),
                 own_status_message_input.clone(),
                 own_status_icon_input.clone(),
                 thread_composer.clone(),
                 thread_title.clone(),
+                message_ui.scheduled_input.clone(),
             ])
             .chain(content_ui.inputs().cloned())
         {
@@ -1208,6 +1213,17 @@ impl Desktop {
         self.observe_reference_previews(&next);
         self.snapshot = next;
         self.retain_thread_edit();
+        if self.waiting_in_lobby() {
+            self.call_chat_open = false;
+            if self
+                .overlay
+                .is_some_and(|overlay| !lobby_allows_overlay(overlay))
+            {
+                self.overlay = None;
+                self.return_focus = None;
+                self.pending_modal_focus = false;
+            }
+        }
         let limit = self.composer_message_limit();
         self.composer
             .update(cx, |input, _| input.configure_message_limit(limit));
@@ -1383,6 +1399,33 @@ impl Desktop {
             }
         }
     }
+    pub(crate) fn activate_notification(
+        &mut self,
+        activation: talk_core::preferences::notifications::NotificationActivation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let talk_core::preferences::notifications::NotificationActivation::OpenMessage {
+            scope,
+            conversation,
+            message,
+        } = activation
+        else {
+            return;
+        };
+        let context = ConversationRef {
+            account: scope,
+            conversation,
+        };
+        if self.save_draft(cx) && self.submit_notification_message(context, u128::from(message)) {
+            self.overlay = None;
+            self.return_focus = None;
+            self.navigation_open = false;
+            self.destination = SidebarDestination::Conversations;
+            self.root_focus.focus(window);
+        }
+        cx.notify();
+    }
     // Deferred GPUI elements render after the surrounding surface has finished.
     // Restore their captured interaction policy for every nested control.
     fn in_surface<R>(&mut self, inert: bool, render: impl FnOnce(&Self) -> R) -> R {
@@ -1409,6 +1452,7 @@ impl Desktop {
                 .message_ui
                 .composer_load_failed
                 .is_none_or(|context| Some(context) != self.snapshot.selected)
+            && !self.waiting_in_lobby()
             && composer_allowed(
                 self.overlay,
                 self.prejoin.is_some(),
@@ -1644,6 +1688,9 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                if self.waiting_in_lobby() && !lobby_allows_overlay(overlay) {
+                    return;
+                }
                 self.own_status_open = false;
                 self.own_status_editing = false;
                 if overlay == Overlay::RecordingConsent {
@@ -1698,6 +1745,16 @@ impl Desktop {
                     self.return_focus = window.focused(cx);
                 }
                 self.overlay = Some(overlay);
+                if overlay == Overlay::Reminders
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshAccountReminders(scope));
+                }
+                if overlay == Overlay::Federation
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshFederationInvitations(scope));
+                }
                 if overlay == Overlay::Settings
                     && self.settings_tab == preferences::SettingsTab::Notifications
                 {
@@ -2078,6 +2135,9 @@ impl Desktop {
                 }
             }
             LocalAction::ToggleCallChat => {
+                if self.waiting_in_lobby() {
+                    return;
+                }
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
@@ -2227,6 +2287,18 @@ impl Desktop {
                     } else if !self.submit(UiIntent::OpenConversation(context)) {
                         self.pending_thread_open = None;
                     }
+                }
+            }
+            LocalAction::OpenReminder(context, message) => {
+                if self.save_thread_draft(cx)
+                    && self.save_draft(cx)
+                    && self.submit_open_reminder(context, message)
+                {
+                    self.overlay = None;
+                    self.return_focus = None;
+                    self.navigation_open = false;
+                    self.destination = SidebarDestination::Conversations;
+                    self.root_focus.focus(window);
                 }
             }
             LocalAction::Destination(destination) => self.destination = destination,
@@ -3084,8 +3156,8 @@ impl Desktop {
             &self.own_status_message_input,
             &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
             &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3105,7 +3177,7 @@ impl Desktop {
             &self.group_name,
             &self.upload_folder,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.message_ui.scheduled_input,
             &self.discovery_search,
         ]
         .into_iter()
@@ -3128,7 +3200,7 @@ impl Desktop {
             &self.own_status_message_input,
             &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())
@@ -3198,6 +3270,7 @@ impl Render for Desktop {
             && self.thread_composer_focus.contains_focused(window, cx);
         self.prepare_typing(window, cx);
         self.prepare_message_motion(window);
+        self.prepare_message_tool_fixture(window, cx);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
@@ -3342,7 +3415,7 @@ impl Render for Desktop {
                     });
             });
         }
-        for input in [&self.message_ui.search, &self.message_ui.time_input] {
+        for input in [&self.message_ui.search, &self.message_ui.scheduled_input] {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
@@ -3362,7 +3435,7 @@ impl Render for Desktop {
             (&self.room_ui.avatar, "Emoji"),
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
-            (&self.message_ui.time_input, "JJJJ-MM-TT HH:MM"),
+            (&self.message_ui.scheduled_input, "Nachricht bearbeiten"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -3486,8 +3559,8 @@ impl Render for Desktop {
             &self.own_status_message_input,
             &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.time_input,
             &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3842,6 +3915,9 @@ fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool, voi
         && !incoming
         && matches!(overlay, None | Some(Overlay::CallChat | Overlay::Thread))
 }
+fn lobby_allows_overlay(overlay: Overlay) -> bool {
+    matches!(overlay, Overlay::Settings | Overlay::Accounts)
+}
 fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
 }
@@ -3870,7 +3946,10 @@ fn finish_startup_account_dialog(
 
 #[cfg(test)]
 mod interaction_tests {
-    use super::{Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog};
+    use super::{
+        Overlay, composer_allowed, docked_call_chat, finish_startup_account_dialog,
+        lobby_allows_overlay,
+    };
 
     #[test]
     fn automatic_account_prompt_waits_for_a_valid_activation_and_then_releases_the_modal() {
@@ -3959,5 +4038,19 @@ mod interaction_tests {
             false
         ));
         assert!(!composer_allowed(None, true, false, false));
+    }
+    #[test]
+    fn waiting_lobby_keeps_conversation_overlays_closed() {
+        for overlay in [
+            Overlay::CallChat,
+            Overlay::CallParticipants,
+            Overlay::Thread,
+            Overlay::Files,
+            Overlay::RoomInfo,
+        ] {
+            assert!(!lobby_allows_overlay(overlay));
+        }
+        assert!(lobby_allows_overlay(Overlay::Settings));
+        assert!(lobby_allows_overlay(Overlay::Accounts));
     }
 }

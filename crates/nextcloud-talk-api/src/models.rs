@@ -117,6 +117,8 @@ pub struct Room {
     pub unread_mention: Option<bool>,
     /// Zero represents Talk's explicit first-message unread sentinel (-2).
     pub last_read: Option<u64>,
+    /// Summary accepts zero for Talk's negative "first unread" sentinels.
+    pub summary_offset: Option<u64>,
     pub common_read: Option<u64>,
     pub last_activity: Option<u64>,
     pub has_call: Option<bool>,
@@ -143,6 +145,8 @@ pub struct Room {
     pub recording_status: Option<u64>,
     pub last_pinned: Option<u64>,
     pub hidden_pinned: Option<u64>,
+    pub breakout_mode: Option<u64>,
+    pub breakout_status: Option<u64>,
 }
 impl Room {
     pub(crate) fn decode(v: &Value) -> Result<Self, ErrorKind> {
@@ -186,6 +190,13 @@ impl Room {
             } else {
                 integer(v.get("lastReadMessage"))
             },
+            summary_offset: integer(v.get("lastReadMessage")).or_else(|| {
+                match v.get("lastReadMessage") {
+                    Some(Value::Number(n)) if matches!(n.as_i64(), Some(-2 | -1)) => Some(0),
+                    Some(Value::String(s)) if matches!(s.as_str(), "-2" | "-1") => Some(0),
+                    _ => None,
+                }
+            }),
             common_read: integer(v.get("lastCommonReadMessage")),
             last_activity: integer(v.get("lastActivity")),
             has_call: v.get("hasCall").and_then(Value::as_bool),
@@ -214,6 +225,8 @@ impl Room {
             recording_status: integer(v.get("callRecording")),
             last_pinned: integer(v.get("lastPinnedId")),
             hidden_pinned: integer(v.get("hiddenPinnedId")),
+            breakout_mode: integer(v.get("breakoutRoomMode")),
+            breakout_status: integer(v.get("breakoutRoomStatus")),
         };
         RoomToken::parse(&result.token)?;
         Ok(result)
@@ -444,6 +457,10 @@ pub struct Capabilities {
     pub features: Vec<String>,
     pub read_privacy: Option<u64>,
     pub typing_privacy: Option<u64>,
+    pub translation_providers: Option<bool>,
+    pub summary_threshold: Option<u64>,
+    pub federation_enabled: Option<bool>,
+    pub federation_incoming: Option<bool>,
     pub attachment_folder: Option<String>,
     pub attachments_allowed: Option<bool>,
     pub conversation_subfolders: Option<bool>,
@@ -492,6 +509,10 @@ impl Capabilities {
             features,
             read_privacy: integer(s["config"]["chat"].get("read-privacy")),
             typing_privacy: integer(s["config"]["chat"].get("typing-privacy")),
+            translation_providers: s["config"]["chat"]["has-translation-providers"].as_bool(),
+            summary_threshold: integer(s["config"]["chat"].get("summary-threshold")),
+            federation_enabled: s["config"]["federation"]["enabled"].as_bool(),
+            federation_incoming: s["config"]["federation"]["incoming-enabled"].as_bool(),
             attachment_folder: string(s["config"]["attachments"].get("folder"), 16384)?,
             attachments_allowed: s["config"]["attachments"]["allowed"].as_bool(),
             conversation_subfolders: s["config"]["attachments"]["conversation-subfolders"]
@@ -669,6 +690,12 @@ mod message_tests {
             assert_eq!(decoded.last_read, expected);
             assert_eq!(decoded.common_read, expected);
         }
+        room["lastReadMessage"] = json!(-2);
+        let decoded = Room::decode(&room).unwrap();
+        assert_eq!(decoded.last_read, None);
+        assert_eq!(decoded.summary_offset, Some(0));
+        room["lastReadMessage"] = json!(-9);
+        assert_eq!(Room::decode(&room).unwrap().summary_offset, None);
     }
 
     #[test]

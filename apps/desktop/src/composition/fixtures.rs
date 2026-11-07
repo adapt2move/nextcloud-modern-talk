@@ -103,6 +103,26 @@ pub const SCENARIOS: &[&str] = &[
     "status-message",
     "chat-ux-call",
     "chat-edit",
+    "chat-message-tools",
+    "chat-reminder-time",
+    "chat-reminder-menu",
+    "account-reminders",
+    "account-reminders-partial",
+    "federation-invitations",
+    "federation-pending",
+    "chat-schedule-time",
+    "chat-schedule-edit",
+    "chat-translation",
+    "chat-summary-offer",
+    "chat-summary-pending",
+    "chat-summary-result",
+    "lobby-settings",
+    "room-avatar",
+    "breakout-configure",
+    "breakout-create",
+    "breakout-free",
+    "breakout-assigned",
+    "breakout-help",
     "thread-error",
     "thread-list",
     "thread-options",
@@ -584,6 +604,153 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     if matches!(
         scenario,
+        Some("federation-invitations" | "federation-pending")
+    ) {
+        use talk_core::ui::presentation::{
+            FeatureSupport, FederationInvitationView, FederationInvitationsView,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(scope) = state.active_account {
+            state.federation_invitations = Some(FederationInvitationsView {
+                scope,
+                support: FeatureSupport::Supported,
+                pending: scenario == Some("federation-pending"),
+                failed: false,
+                invitations: page([
+                    FederationInvitationView {
+                        id: 101,
+                        room: text("Community planning"),
+                        inviter: text("Alex Morgan"),
+                    },
+                    FederationInvitationView {
+                        id: 102,
+                        room: text("Design exchange"),
+                        inviter: text("Sam Rivera"),
+                    },
+                ]),
+            });
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("chat-summary-offer" | "chat-summary-pending" | "chat-summary-result")
+    ) {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Summary},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                MessageFeature::Summary,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.summary = Some(match scenario {
+                Some("chat-summary-pending") => Summary::Pending {
+                    parts: Page::empty(),
+                },
+                Some("chat-summary-result") => Summary::Ready {
+                    parts: page([text(
+                        "The team agreed to share the draft on Friday. Mara will collect feedback before the next meeting.",
+                    )]),
+                    partial: false,
+                },
+                _ => Summary::Offer {
+                    from: 12,
+                    unread: 120,
+                },
+            });
+        }
+        return state;
+    }
+    if scenario == Some("chat-translation") {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Translation},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(message) = state
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| {
+                !message.metadata.system
+                    && !message.metadata.deleted
+                    && matches!(
+                        message.delivery,
+                        DeliveryState::Received | DeliveryState::ServerAccepted
+                    )
+                    && !message.body.as_str().trim().is_empty()
+                    && message.metadata.rich.as_slice().is_empty()
+            })
+            .cloned()
+            && let Some(panel) = state.message_panel.as_mut()
+        {
+            let _ = panel.features.try_push((
+                MessageFeature::Translation,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.translation_targets = Some(page([text("de"), text("en"), text("es")]));
+            panel.translations = page(["de", "en", "es"].map(|language| Translation {
+                message: message.local_id,
+                source: message.body.clone(),
+                language: text(language),
+                text: text("Fictional translated message for the team."),
+            }));
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("account-reminders" | "account-reminders-partial")
+    ) {
+        use talk_core::ui::presentation::{
+            AccountReminderView, AccountRemindersView, FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        let reminders = state
+            .conversations
+            .as_slice()
+            .iter()
+            .take(3)
+            .enumerate()
+            .map(|(index, room)| AccountReminderView {
+                context: room.context,
+                message: 45 + index as u128,
+                preview: Some(text(match index {
+                    0 => "Die neue Navigation ist bereit für einen letzten Blick.",
+                    1 => "Den Entwurf besprechen wir morgen.",
+                    _ => "Ich schicke dir die Notizen später.",
+                })),
+                timestamp: if index == 0 {
+                    1_800_003_600
+                } else {
+                    1_800_090_000
+                },
+            })
+            .collect::<Vec<_>>();
+        state.account_reminders = Some(AccountRemindersView {
+            scope: scope(),
+            support: FeatureSupport::Supported,
+            state: ContentState::Ready,
+            complete: scenario != Some("account-reminders-partial"),
+            reminders: page(reminders),
+        });
+        return state;
+    }
+    if matches!(
+        scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
     ) {
         let mut state = snapshot(Some("chat-send-pending"));
@@ -610,6 +777,82 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             }
             message
         }));
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some(
+            "chat-message-tools"
+                | "chat-reminder-time"
+                | "chat-reminder-menu"
+                | "chat-schedule-time"
+                | "chat-schedule-edit"
+        )
+    ) {
+        let mut state = snapshot(Some("chat-ux"));
+        let mut rows = state.messages.as_slice().to_vec();
+        let mut location = message(
+            45,
+            "Mara Fischer",
+            "MF",
+            "10:15",
+            "Hier treffen wir uns.",
+            false,
+        );
+        location.metadata.rich = page([talk_core::ui::messaging::RichObject {
+            id: Some(text("geo:52.5450511,13.3741463")),
+            mime_type: None,
+            size: None,
+            placeholder: text("location"),
+            kind: text("geo-location"),
+            name: text("Fiktiver Treffpunkt"),
+            link: None,
+        }]);
+        rows.push(location);
+        state.messages = page(rows);
+        if let Some(panel) = state.message_panel.as_mut() {
+            use talk_core::ui::{
+                conversation::Availability,
+                messaging::{MessageFeature, Reminder, Scheduled},
+                presentation::FeatureSupport,
+            };
+            for feature in [
+                MessageFeature::Reminders,
+                MessageFeature::UpcomingReminders,
+                MessageFeature::Schedules,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    Availability {
+                        implemented: true,
+                        server: FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            panel.reminders = page([Reminder {
+                message: 45,
+                timestamp: 1_800_003_600,
+            }]);
+            panel.scheduled = page([
+                Scheduled {
+                    id: 41,
+                    body: text("Fiktive Nachricht für morgen"),
+                    timestamp: 1_800_090_000,
+                    failed_original_timestamp: None,
+                    editable: true,
+                    silent: false,
+                },
+                Scheduled {
+                    id: 42,
+                    body: text("Fiktive Nachricht erneut prüfen"),
+                    timestamp: 0,
+                    failed_original_timestamp: Some(1_800_003_600),
+                    editable: true,
+                    silent: false,
+                },
+            ]);
+        }
         return state;
     }
     if scenario == Some("chat-busy") {
@@ -854,9 +1097,108 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }));
         return state;
     }
-    if scenario == Some("details-ready") {
+    if matches!(
+        scenario,
+        Some(
+            "details-ready"
+                | "room-avatar"
+                | "lobby-settings"
+                | "breakout-configure"
+                | "breakout-create"
+                | "breakout-free"
+                | "breakout-assigned"
+                | "breakout-help"
+        )
+    ) {
         let mut state = snapshot(Some("chat"));
         dialog::configure(&mut state);
+        if scenario == Some("lobby-settings")
+            && let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|p| p.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
+        }
+        if matches!(
+            scenario,
+            Some(
+                "breakout-configure"
+                    | "breakout-create"
+                    | "breakout-free"
+                    | "breakout-assigned"
+                    | "breakout-help"
+            )
+        ) && let Some(panel) = state.conversation_panel.as_mut()
+        {
+            use talk_core::ui::conversation::{
+                BreakoutMode, BreakoutRoom, DirectorySource, Member, MemberRole, PersonRef,
+                RoomSetting,
+            };
+            let context = panel.context;
+            if let Some(details) = panel.details.as_mut() {
+                details.breakout_mode = if scenario == Some("breakout-create") {
+                    None
+                } else {
+                    Some(if scenario == Some("breakout-free") {
+                        BreakoutMode::Free
+                    } else {
+                        BreakoutMode::Manual
+                    })
+                };
+                details.breakout_started = Some(true);
+                details.breakout_child = scenario == Some("breakout-help");
+                if !matches!(scenario, Some("breakout-configure" | "breakout-create")) {
+                    details.controls = page(details.controls.as_slice().iter().copied().map(
+                        |(key, mut availability)| {
+                            if key == RoomSetting::Breakouts {
+                                availability.allowed = Decision::Denied;
+                            }
+                            (key, availability)
+                        },
+                    ));
+                }
+            }
+            panel.members = page([("Mara Fischer", 11), ("Jonas Weber", 12)].map(
+                |(name, local)| Member {
+                    id: PersonRef { context, local },
+                    name: text(name),
+                    role: MemberRole::Member,
+                    source: DirectorySource::User,
+                    permissions: Some(255),
+                    self_user: false,
+                },
+            ));
+            panel.members_loaded = true;
+            panel.breakout_rooms = page([
+                BreakoutRoom {
+                    context: super::fixtures::context(101),
+                    name: text("Gruppe 1"),
+                    assigned: true,
+                },
+                BreakoutRoom {
+                    context: super::fixtures::context(102),
+                    name: text("Gruppe 2"),
+                    assigned: false,
+                },
+            ]);
+            if scenario == Some("breakout-assigned") {
+                panel.breakout_rooms = page(
+                    panel
+                        .breakout_rooms
+                        .as_slice()
+                        .iter()
+                        .filter(|room| room.assigned)
+                        .cloned(),
+                );
+            }
+            panel.breakout_loaded = true;
+            if scenario == Some("breakout-create") {
+                panel.breakout_rooms = Page::empty();
+                panel.breakout_loaded = false;
+            }
+        }
         return state;
     }
     if matches!(
@@ -1025,6 +1367,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         tags: Page::empty(),
         tag_state: ContentState::Unconfigured,
         organization_result: None,
+        account_reminders: None,
+        federation_invitations: None,
         selected: None,
         content: ContentState::Unconfigured,
         messages: Page::empty(),
@@ -1536,6 +1880,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 dimensions: Some((1280, 720)),
                 flowing: false,
             });
+        }
+    }
+    if scenario == "gate-lobby" {
+        dialog::configure(&mut s);
+        if let Some(details) = s
+            .conversation_panel
+            .as_mut()
+            .and_then(|panel| panel.details.as_mut())
+        {
+            details.lobby = Some(true);
+            details.lobby_timer = Some(1_800_003_600);
         }
     }
     if scenario == "call-error-unknown" {

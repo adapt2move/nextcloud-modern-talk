@@ -857,6 +857,30 @@ mod tests {
         );
     }
     #[test]
+    fn waiting_lobby_can_advance_after_fresh_open_policy_but_never_after_end() {
+        let mut call = accepted(Entry::PreparedConference);
+        let mut closed = inputs();
+        if let Observed::Known { value, .. } = &mut closed.room {
+            value.lobby_closed = true;
+        }
+        assert_eq!(
+            call.advance(&closed, exists(), support(), devices(), now(100)),
+            Err(Gate::Lobby)
+        );
+        assert_eq!(call.phase(), Phase::Waiting(Gate::Lobby));
+        assert!(
+            call.advance(&inputs(), exists(), support(), devices(), now(200))
+                .is_ok()
+        );
+        assert_eq!(call.phase(), Phase::Connecting);
+        call.end(scope()).unwrap();
+        assert_eq!(
+            call.advance(&inputs(), exists(), support(), devices(), now(300)),
+            Err(Gate::CallEnded)
+        );
+    }
+
+    #[test]
     fn continuity_preserves_requested_media_and_end_is_irreversible() {
         let mut c = accepted(Entry::OutgoingDirect);
         c.advance(&inputs(), exists(), support(), devices(), now(100))

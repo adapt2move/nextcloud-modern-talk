@@ -6,6 +6,7 @@ pub(super) mod content;
 mod conversations;
 mod creation;
 mod discover;
+mod federation;
 pub(super) mod files;
 mod history;
 mod messaging;
@@ -14,11 +15,14 @@ mod outbox;
 mod preview;
 mod reads;
 mod references;
+mod reminders;
 mod removal;
 mod search;
 mod startup;
+mod summary;
 mod thread_change;
 mod threads;
+mod translation;
 mod typing;
 mod update;
 use crate::diagnostics::{
@@ -72,9 +76,19 @@ enum Purpose {
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
+    AccountReminders(AccountScope, u64),
+    FederationInvitations(AccountScope, u64),
+    FederationChange(AccountScope, OperationId, u128),
     LiveEvents(AccountScope),
     Typing(ConversationRef, typing::Work),
     Call(talk_core::ids::CallScope),
+    BreakoutLeave(
+        talk_core::ids::CallScope,
+        RequestId,
+        ConversationRef,
+        ConversationRef,
+        bool,
+    ),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
     Login(RequestId, LoginWork),
@@ -130,6 +144,8 @@ pub struct Accounts {
     content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
+    breakout_leave: Option<calls::BreakoutLeave>,
+    breakout_observation: Option<(ConversationRef, Page<protocol::Conversation, 20>)>,
     call_poll_at: Instant,
     call_events: calls::CallEvents,
     call_actions: std::sync::Arc<calls::CallActions>,
@@ -171,17 +187,25 @@ pub struct Accounts {
     reference_owner: references::Owner,
     reference_generation: u64,
     notices: notifications::Notices,
+    reminders: reminders::Reminders,
+    federation: federation::Federation,
     background: background::Background,
     typing: typing::Typing,
     history: history::Cache,
     cache: cache::Cache,
     picker: Option<files::Picker>,
     picker_open: bool,
+    avatar_picker: Option<(RequestId, ConversationRef)>,
+    avatar_dialog: Option<(RequestId, ConversationRef)>,
     csv_file_owner: files::CsvOwner,
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
     thread_refresh_due: Option<(AccountScope, u32, Instant)>,
+    scheduled_poll: Option<(ConversationRef, Instant)>,
+    translation: translation::Translations,
+    translation_poll: Option<(ConversationRef, Instant)>,
+    summary: summary::Summaries,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -194,6 +218,8 @@ impl Accounts {
             ),
             media,
             call_ui: None,
+            breakout_leave: None,
+            breakout_observation: None,
             call_poll_at: Instant::now(),
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -229,22 +255,38 @@ impl Accounts {
             reference_owner: references::Owner::default(),
             reference_generation: 0,
             notices: notifications::Notices::default(),
+            reminders: reminders::Reminders::default(),
+            federation: federation::Federation::default(),
             background: background::Background::default(),
             typing: typing::Typing::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
             picker: None,
             picker_open: false,
+            avatar_picker: None,
+            avatar_dialog: None,
             csv_file_owner: files::CsvOwner::default(),
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
             thread_refresh_due: None,
+            scheduled_poll: None,
+            translation: translation::Translations::default(),
+            summary: summary::Summaries::default(),
+            translation_poll: None,
         }))
     }
     pub fn shutdown(&mut self) {
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.kind, files::Kind::Avatar))
+        {
+            self.picker = None;
+        }
         self.stop_video();
         self.queued_send = None;
         self.queued_read.clear();
@@ -344,6 +386,9 @@ impl Accounts {
         self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        self.breakout_leave = None;
+        self.breakout_observation = None;
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -397,6 +442,8 @@ impl Accounts {
         self.snapshot.tag_state = ContentState::Unconfigured;
         self.load_tags = None;
         self.clear_content();
+        self.project_account_reminders();
+        self.project_federation();
         self.load_rooms = scope;
         self.touch();
     }
@@ -611,6 +658,12 @@ impl Accounts {
         self.tick_background();
         self.tick_typing();
         self.tick_thread_refresh(Instant::now());
+        self.tick_account_reminders();
+        self.tick_notification_navigation();
+        self.tick_federation();
+        self.tick_translations();
+        self.tick_summary();
+        self.tick_breakout_leave();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -743,8 +796,12 @@ impl Accounts {
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::Typing(context, work) => self.complete_typing(context, work, result),
+            Purpose::BreakoutLeave(scope, request, context, target, assigned) => self.complete_breakout_leave(scope, request, context, target, assigned, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
+            Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),
+            Purpose::FederationInvitations(scope, version) => self.complete_federation(scope, version, result),
+            Purpose::FederationChange(scope, operation, invitation) => self.complete_federation_change(scope, operation, invitation, result),
             Purpose::LiveEvents(scope) => {
                 if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
                     return;
@@ -1170,6 +1227,14 @@ impl Accounts {
             } => {
                 self.open_message_link(context, message, source, ordinal)?;
             }
+            UiIntent::OpenLocation {
+                context,
+                message,
+                placeholder,
+                id,
+            } => {
+                self.open_location(context, message, placeholder, id)?;
+            }
             UiIntent::RemoveAccount {
                 request,
                 account,
@@ -1474,12 +1539,50 @@ impl Accounts {
                 self.failures.retain(|(a, _)| *a != account);
             }
             UiIntent::SelectAccount(scope) => {
+                self.reminders.cancel_navigation();
                 if !self.cache.is_local(scope) {
                     self.current(scope)?;
                 }
                 self.select(Some(scope));
             }
-            UiIntent::OpenConversation(context) => self.open(context)?,
+            UiIntent::OpenConversation(context) => {
+                self.reminders.cancel_navigation();
+                self.open(context)?;
+            }
+            UiIntent::RefreshAccountReminders(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_account_reminders(scope);
+            }
+            UiIntent::RefreshFederationInvitations(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_federation(scope);
+            }
+            UiIntent::ChangeFederationInvitation {
+                scope,
+                invitation,
+                accept,
+            } => {
+                self.change_federation(scope, invitation, accept)?;
+            }
+            UiIntent::OpenReminder {
+                request,
+                context,
+                message,
+            } => {
+                self.reminders.cancel_navigation();
+                self.open_reminder(request, context, message)?;
+            }
+            UiIntent::OpenNotificationMessage {
+                request,
+                context,
+                message,
+            } => {
+                self.open_notification_message(request, context, message)?;
+            }
             UiIntent::Refresh(context) => {
                 self.current(context.account)?;
                 let already_selected = self.snapshot.selected == Some(context);

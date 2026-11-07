@@ -69,6 +69,9 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
             | MessagingCommand::Threads
             | MessagingCommand::Thread(_)
             | MessagingCommand::SharedFiles { .. }
+            | MessagingCommand::TranslationLanguages
+            | MessagingCommand::Translate { .. }
+            | MessagingCommand::SummaryStatus { .. }
     )
 }
 fn feature(c: &MessagingCommand) -> MessagingFeature {
@@ -91,7 +94,8 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Mentions(_) => F::Mentions,
         C::Search { .. } => F::Search,
         C::Pin { .. } | C::Unpin(_) | C::HidePin(_) | C::Pins => F::Pins,
-        C::Reminder { .. } | C::ReadReminder(_) | C::Reminders => F::Reminders,
+        C::Reminder { .. } | C::ReadReminder(_) => F::Reminders,
+        C::Reminders => F::UpcomingReminders,
         C::Scheduled | C::Schedule { .. } | C::EditScheduled { .. } | C::CancelScheduled(_) => {
             F::Schedule
         }
@@ -106,8 +110,8 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         | C::UploadFile { .. }
         | C::UploadImage { .. }
         | C::DownloadFile { .. } => F::Files,
-        C::Translate { .. } => F::Translation,
-        C::Summarize { .. } => F::Summary,
+        C::TranslationLanguages | C::Translate { .. } => F::Translation,
+        C::Summarize { .. } | C::SummaryStatus { .. } | C::SummaryContinue { .. } => F::Summary,
         C::Capabilities => F::Read,
     }
 }
@@ -124,6 +128,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::Search => "unified-search",
         F::Pins => "pinned-messages",
         F::Reminders => "remind-me-later",
+        F::UpcomingReminders => "upcoming-reminders",
         F::Schedule => "scheduled-messages",
         F::Threads => "threads",
         F::Forward => "chat-reference-id",
@@ -134,7 +139,7 @@ fn support(f: MessagingFeature) -> &'static str {
         F::MarkUnread => "chat-unread",
         F::UnreadFrom => "chat-read-last",
         F::Translation => "translation",
-        F::Summary => "chat-summary",
+        F::Summary => "chat-summary-api",
     }
 }
 fn availability(
@@ -179,8 +184,14 @@ fn availability(
         room.actions.read_messages
     };
     ActionAvailability {
-        implemented: !matches!(f, F::Translation | F::Summary),
-        server: if f == F::Voice
+        implemented: !caps.federation_verified || matches!(f, F::Read | F::Send | F::Reply),
+        server: if f == F::Translation {
+            match (caps.supported(), caps.translation_providers) {
+                (true, Some(true)) => FeatureSupport::Supported,
+                (true, Some(false)) => FeatureSupport::Unsupported,
+                _ => FeatureSupport::Unknown,
+            }
+        } else if f == F::Voice
             && caps.feature("voice-message-sharing") == FeatureSupport::Supported
             && (!caps.has("rich-object-sharing")
                 || !caps.has("chat-reference-id")
@@ -348,7 +359,11 @@ impl NextcloudClient {
         progress.published();
         Ok(length)
     }
-    fn message_scope(&self, id: MessageId, conversation: ConversationId) -> Result<u64, PortError> {
+    pub(super) fn message_scope(
+        &self,
+        id: MessageId,
+        conversation: ConversationId,
+    ) -> Result<u64, PortError> {
         if id.conversation != conversation || id.sequence == 0 {
             return Err(self.error(ErrorKind::WrongScope));
         }
@@ -375,6 +390,7 @@ impl NextcloudClient {
             F::Search,
             F::Pins,
             F::Reminders,
+            F::UpcomingReminders,
             F::Schedule,
             F::Threads,
             F::Forward,
@@ -408,6 +424,31 @@ impl NextcloudClient {
             media_caption: caps.has("media-caption"),
             read_receipts: caps.read_receipts,
             typing_status: caps.typing_status,
+            summary_offer: if matches!(
+                availability(F::Summary, room, data, caps),
+                ActionAvailability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed
+                }
+            ) {
+                caps.summary_threshold
+                    .filter(|threshold| *threshold > 0)
+                    .and_then(|threshold| {
+                        let unread =
+                            u32::try_from(wire::integer(data.get("unreadMessages"))?).ok()?;
+                        let sequence = wire::integer(data.get("summaryOffset"))?;
+                        (unread >= threshold).then_some(SummaryOffer {
+                            from: MessageId {
+                                conversation: room.id,
+                                sequence,
+                            },
+                            unread,
+                        })
+                    })
+            } else {
+                None
+            },
         })
     }
     fn message_action(
@@ -923,6 +964,26 @@ impl NextcloudClient {
         use MessagingCommand as C;
         use MessagingResult as R;
         let data = self.room_data(c, id).await?;
+        let effective_caps;
+        let caps = if wire::is_federated(&data) {
+            effective_caps = self
+                .federation_capabilities_for_room(c, id, caps, is_mutation(&command))
+                .await?;
+            if !matches!(
+                command,
+                C::Capabilities
+                    | C::History { .. }
+                    | C::Poll { .. }
+                    | C::Context(_)
+                    | C::ReconcileSend
+                    | C::Send { .. }
+            ) {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            &effective_caps
+        } else {
+            caps
+        };
         let room = wire::room(&data, id, caps).map_err(|k| self.error(k))?;
         if command == C::Capabilities {
             return Ok(R::Capabilities(
@@ -930,6 +991,79 @@ impl NextcloudClient {
             ));
         }
         self.message_action(feature(&command), &room, &data, caps)?;
+        if matches!(
+            command,
+            C::Summarize { .. } | C::SummaryStatus { .. } | C::SummaryContinue { .. }
+        ) {
+            return self.summary(c, id, operation, command).await;
+        }
+        if command == C::TranslationLanguages {
+            let api::Reply::TranslationLanguages(languages) = self
+                .transport
+                .api_request(c, api::Request::TranslationLanguages)
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            let mut targets = Page::empty();
+            if languages.detection {
+                for target in languages.targets {
+                    targets
+                        .try_push(Text::new(&target).map_err(|_| self.error(ErrorKind::TooLarge))?)
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+            }
+            return Ok(R::TranslationLanguages(targets));
+        }
+        if let C::Translate {
+            message,
+            language,
+            source,
+        } = &command
+        {
+            self.message_scope(*message, id)?;
+            let original = self.target(c, *message).await?;
+            if original.kind.as_deref() != Some("comment")
+                || !original.rich.is_empty()
+                || original.message.as_deref() != Some(source.as_str())
+            {
+                return Err(self.error(ErrorKind::Conflict));
+            }
+            let api::Reply::TranslationLanguages(languages) = self
+                .transport
+                .api_request(c, api::Request::TranslationLanguages)
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            if !languages.detection
+                || !languages
+                    .targets
+                    .iter()
+                    .any(|target| target.eq_ignore_ascii_case(language.as_str()))
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            let api::Reply::Translated(translated) = self
+                .transport
+                .api_request(
+                    c,
+                    api::Request::Translate {
+                        text: source.as_str().to_owned(),
+                        to_language: language.as_str().to_owned(),
+                    },
+                )
+                .await?
+            else {
+                return Err(self.error(ErrorKind::Malformed));
+            };
+            return Ok(R::Translation {
+                message: *message,
+                source: source.clone(),
+                language: language.clone(),
+                text: Text::new(&translated).map_err(|_| self.error(ErrorKind::TooLarge))?,
+            });
+        }
         if command == C::ReconcileSend {
             return self
                 .reconcile_durable_send(c, id, operation, &room, caps)
@@ -1921,7 +2055,36 @@ impl NextcloudClient {
                 Ok(R::Scheduled(out))
             }
             api::Reply::Chat(WireResponse::Schedule(v)) => {
-                Ok(R::Schedule(Box::new(self.scheduled(v, id)?)))
+                let scheduled = self.scheduled(v, id)?;
+                let matches_request = match &command {
+                    C::Schedule {
+                        text,
+                        send_at,
+                        options,
+                    } => {
+                        scheduled.text == *text
+                            && scheduled.send_at == *send_at
+                            && scheduled.options.reply_to == options.reply_to
+                            && scheduled.options.thread == options.thread
+                            && scheduled.options.silent == options.silent
+                    }
+                    C::EditScheduled {
+                        id,
+                        text,
+                        send_at,
+                        silent,
+                    } => {
+                        scheduled.id == *id
+                            && scheduled.text == *text
+                            && scheduled.send_at == *send_at
+                            && scheduled.options.silent == *silent
+                    }
+                    _ => false,
+                };
+                if !matches_request {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+                Ok(R::Schedule(Box::new(scheduled)))
             }
             api::Reply::Chat(WireResponse::Threads(values)) => {
                 let mut out = Page::empty();
@@ -1993,6 +2156,7 @@ impl NextcloudClient {
             id: mid(s.id),
             text: Text::new(&s.message).map_err(|_| self.error(ErrorKind::TooLarge))?,
             send_at: s.send_at,
+            original_send_at: s.original_send_at,
             options: ComposeOptions {
                 reply_to: s.options.reply_to.map(mid),
                 private_reply: None,

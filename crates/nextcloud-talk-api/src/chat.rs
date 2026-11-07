@@ -32,6 +32,9 @@ pub enum Command {
         after: Option<u64>,
     },
     Context(u64),
+    Summarize {
+        from: u64,
+    },
     Send {
         message: String,
         reference: String,
@@ -215,11 +218,21 @@ pub(crate) fn rich(v: Option<&Value>) -> Result<Vec<RichObject>, ErrorKind> {
     map.iter()
         .map(|(key, v)| {
             bounded(key, 128)?;
+            let kind = string(v.get("type"), 128)?.unwrap_or_else(|| "unknown".into());
+            let id =
+                string(v.get("id"), 1024)?.or_else(|| integer(v.get("id")).map(|n| n.to_string()));
+            // NextCloud's geo-location definition requires the geo URI and both
+            // coordinate fields to describe the same point. Invalid objects remain
+            // readable as generic attachments; they never become map destinations.
+            let id = if kind == "geo-location" {
+                id.filter(|id| valid_location(id, v))
+            } else {
+                id
+            };
             Ok(RichObject {
                 placeholder: key.clone(),
-                kind: string(v.get("type"), 128)?.unwrap_or_else(|| "unknown".into()),
-                id: string(v.get("id"), 1024)?
-                    .or_else(|| integer(v.get("id")).map(|n| n.to_string())),
+                kind,
+                id,
                 name: string(v.get("name"), 1024)?.unwrap_or_else(|| "[unknown object]".into()),
                 link: string(v.get("link"), 2048)?,
                 path: string(v.get("path"), 16384)?,
@@ -229,6 +242,40 @@ pub(crate) fn rich(v: Option<&Value>) -> Result<Vec<RichObject>, ErrorKind> {
         })
         .collect()
 }
+fn valid_location(id: &str, value: &Value) -> bool {
+    fn coordinate(value: &str, limit: f64) -> Option<f64> {
+        if value.is_empty()
+            || value.len() > 32
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'.'))
+        {
+            return None;
+        }
+        let value = value.parse::<f64>().ok()?;
+        (value.is_finite() && value.abs() <= limit).then_some(value)
+    }
+    let Some((latitude, longitude)) = id.strip_prefix("geo:").and_then(|s| s.split_once(','))
+    else {
+        return false;
+    };
+    let (Some(lat), Some(lon), Some(field_lat), Some(field_lon)) = (
+        coordinate(latitude, 90.),
+        coordinate(longitude, 180.),
+        value
+            .get("latitude")
+            .and_then(Value::as_str)
+            .and_then(|s| coordinate(s, 90.)),
+        value
+            .get("longitude")
+            .and_then(Value::as_str)
+            .and_then(|s| coordinate(s, 180.)),
+    ) else {
+        return false;
+    };
+    lat == field_lat && lon == field_lon
+}
+
 #[derive(Clone, Debug)]
 pub struct Mention {
     pub id: String,
@@ -255,6 +302,8 @@ pub struct ScheduledMessage {
     pub id: u64,
     pub message: String,
     pub send_at: u64,
+    /// Original deadline retained by Talk after a delivery failure.
+    pub original_send_at: Option<u64>,
     pub options: ComposeOptions,
 }
 #[derive(Clone, Debug)]
@@ -302,10 +351,16 @@ pub enum Response {
     Reminders(Vec<Reminder>),
     Scheduled(Vec<ScheduledMessage>),
     Schedule(ScheduledMessage),
+    Summary(Option<SummaryTask>),
     Threads(Vec<Thread>),
     Thread(Thread),
     AttachmentFolder(AttachmentFolder),
     AttachmentShared(Vec<(String, String)>),
+}
+#[derive(Clone, Debug)]
+pub struct SummaryTask {
+    pub task_id: u64,
+    pub next_offset: Option<u64>,
 }
 #[derive(Clone, Copy)]
 pub(crate) enum ResponseKind {
@@ -316,6 +371,7 @@ pub(crate) enum ResponseKind {
     Reminders,
     Scheduled,
     Schedule,
+    Summary,
     Threads,
     Thread,
     AttachmentFolder,
@@ -359,6 +415,7 @@ fn schedule(v: &Value) -> Result<ScheduledMessage, ErrorKind> {
         id: number(v, "id")?,
         message: required(v, "message", 131072)?,
         send_at: number(v, "sendAt")?,
+        original_send_at: integer(v.get("originalSendAt")).filter(|n| *n > 0),
         options: ComposeOptions {
             reply_to: integer(v.get("parent").and_then(|p| p.get("id"))).filter(|n| *n > 0),
             reply_to_token: None,
@@ -516,6 +573,16 @@ pub(crate) fn decode(kind: ResponseKind, v: &Value) -> Result<crate::Reply, Erro
         K::Reminders => R::Reminders(array(v, 100, reminder)?),
         K::Scheduled => R::Scheduled(array(v, 100, schedule)?),
         K::Schedule => R::Schedule(schedule(v)?),
+        K::Summary => R::Summary(if v.is_null() {
+            None
+        } else {
+            let task_id = number(v, "taskId")?;
+            positive(task_id)?;
+            Some(SummaryTask {
+                task_id,
+                next_offset: integer(v.get("nextOffset")).filter(|id| *id > 0),
+            })
+        }),
         K::Threads => R::Threads(array(v, 50, thread)?),
         K::Thread => R::Thread(thread(v)?),
         K::AttachmentFolder => R::AttachmentFolder(AttachmentFolder {
@@ -601,6 +668,13 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     let mut f = Vec::new();
     let mut kind = Kind::Ack;
     match c {
+        C::Summarize { from } => {
+            // Talk 24/25 clamps the first-unread marker to zero before querying.
+            route.push_str("/summarize");
+            method = Method::POST;
+            f.push(("fromMessageId", from.to_string()));
+            kind = Kind::Chat(K::Summary);
+        }
         C::History { .. } | C::Poll { .. } | C::UnreadAfter { .. } => {
             let future = matches!(c, C::Poll { .. } | C::UnreadAfter { .. });
             let cursor = match c {

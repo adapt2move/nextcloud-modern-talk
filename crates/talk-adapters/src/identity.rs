@@ -19,10 +19,10 @@ pub use data::{
     CACHE_HISTORY_LIMIT, CACHE_LIFETIME, CACHE_PRESENCE_LIFETIME, CACHE_ROOM_LIMIT,
     CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory,
     CacheRoom, CacheRoomObservation, CacheThumbnail, CacheUserStatus, CachedAttachment,
-    CachedMessage, CachedNotificationLevel, CachedPresence, CachedReaction, CachedReply,
-    CachedRoomKind, CachedThread, DataCommand, DataError, DataResult, DataSnapshot, OUTBOX_LIMIT,
-    OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase, OutboxPrivateReply,
-    OutboxRecord,
+    CachedLocation, CachedMessage, CachedNotificationLevel, CachedPresence, CachedReaction,
+    CachedReply, CachedRoomKind, CachedThread, DataCommand, DataError, DataResult, DataSnapshot,
+    OUTBOX_LIMIT, OutboxEntry, OutboxIntent, OutboxKind, OutboxOptions, OutboxPhase,
+    OutboxPrivateReply, OutboxRecord,
 };
 pub use error::{IdentityError, ProfileFailure};
 pub use runtime::{

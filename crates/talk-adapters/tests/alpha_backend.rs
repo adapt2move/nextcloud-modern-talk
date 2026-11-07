@@ -10,10 +10,11 @@ use talk_core::lifecycle::Cancellation;
 use talk_core::policy::{Decision, Moment};
 use talk_core::ports::{NextcloudPort, OperationContext, ProtocolReply, ProtocolRequest};
 use talk_core::protocol::conversation::{
-    ConversationCommand as C, ConversationResult as CR, NotificationLevel, RecipientSource, Setting,
+    BreakoutAssignment, BreakoutMode, ConversationCommand as C, ConversationResult as CR,
+    NotificationLevel, RecipientSource, Setting,
 };
 use talk_core::protocol::messaging::{
-    ComposeOptions, MessagingCommand as M, MessagingResult as MR,
+    ComposeOptions, MessagingCommand as M, MessagingFeature, MessagingResult as MR,
 };
 use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, RoomKind, SendState};
 fn scope() -> AccountScope {
@@ -123,7 +124,13 @@ async fn settings(
 ) -> CR {
     match c
         .request(
-            context(r),
+            context_for(
+                r,
+                AccountScope {
+                    account: id.account,
+                    runtime: RuntimeGeneration::from_local(1),
+                },
+            ),
             ProtocolRequest::ConversationSettings {
                 conversation: id,
                 operation: OperationId::from_local(n),
@@ -288,12 +295,260 @@ async fn released_server_messaging_and_room_controls() {
             .any(|room| room.id == listed_id)
     );
     println!("alpha-backend listable room search and join: pass");
+    let MR::Capabilities(message_caps) = m(
+        &mut client,
+        &runtime,
+        id,
+        999,
+        "provider-capabilities",
+        M::Capabilities,
+    )
+    .await
+    else {
+        panic!("messaging capabilities")
+    };
+    for feature in [MessagingFeature::Translation, MessagingFeature::Summary] {
+        let availability = message_caps
+            .actions
+            .as_slice()
+            .iter()
+            .find(|(key, _)| *key == feature)
+            .unwrap()
+            .1;
+        assert_ne!(
+            availability.server,
+            FeatureSupport::Supported,
+            "the lab has no translation or summary provider"
+        );
+    }
+    assert!(message_caps.summary_offer.is_none());
+    println!("alpha-backend provider-absent-gates: pass");
+    let ProtocolReply::FederationInvitations(invitations) = client
+        .request(context(&runtime), ProtocolRequest::FederationInvitations)
+        .await
+        .unwrap()
+    else {
+        panic!("federation invitations")
+    };
+    assert!(invitations.items.as_slice().is_empty());
+    println!(
+        "alpha-backend federation-empty: pass (supported={})",
+        invitations.supported
+    );
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {
         panic!("details")
     };
     assert_eq!(details.conversation.role, Role::Owner);
+    if details.breakout_supported
+        && details
+            .controls
+            .as_slice()
+            .iter()
+            .any(|(setting, availability)| {
+                *setting == Setting::Breakouts
+                    && availability.server == FeatureSupport::Supported
+                    && availability.allowed == talk_core::policy::Decision::Allowed
+            })
+    {
+        let CR::Members(members) = settings(
+            &mut client,
+            &runtime,
+            id,
+            1001,
+            "breakout-members",
+            C::Members,
+        )
+        .await
+        else {
+            panic!("breakout members")
+        };
+        let participant = members
+            .as_slice()
+            .iter()
+            .find(|member| !member.is_self && member.role == Role::Member)
+            .expect("synthetic member");
+        let mut assignments = talk_core::bounded::Page::empty();
+        assignments
+            .try_push(BreakoutAssignment {
+                member: participant.id,
+                room: 0,
+            })
+            .unwrap();
+        let configured = settings(
+            &mut client,
+            &runtime,
+            id,
+            1002,
+            "breakout-configure",
+            C::ConfigureBreakouts {
+                amount: 2,
+                mode: BreakoutMode::Manual,
+                assignments: assignments.clone(),
+            },
+        )
+        .await;
+        assert!(matches!(configured, CR::BreakoutRooms(_)));
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1003,
+            "breakout-assign",
+            C::AssignBreakouts(assignments),
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1004,
+            "breakout-start",
+            C::StartBreakouts,
+        )
+        .await;
+        let bob_scope = AccountScope {
+            account: AccountId::from_local(701),
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let mut bob = test_support::from_private_fixture(
+            &root.join("bob.json"),
+            bob_scope,
+            HostId::from_local(701),
+            runtime.clone(),
+        )
+        .expect("private synthetic participant fixture");
+        bob.request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::InspectAccount,
+        )
+        .await
+        .unwrap();
+        let bob_parent = bob.fixture_conversation().unwrap();
+        let CR::BreakoutRooms(assigned) = settings(
+            &mut bob,
+            &runtime,
+            bob_parent,
+            2001,
+            "breakout-assigned-room",
+            C::BreakoutRooms,
+        )
+        .await
+        else {
+            panic!("assigned room")
+        };
+        assert_eq!(assigned.as_slice().len(), 1);
+        let child = &assigned.as_slice()[0];
+        assert_eq!(
+            child.actions.read_messages,
+            talk_core::policy::Decision::Allowed
+        );
+        settings(
+            &mut bob,
+            &runtime,
+            child.id,
+            2002,
+            "breakout-request-help",
+            C::RequestBreakoutAssistance,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1005,
+            "breakout-broadcast",
+            C::BroadcastBreakouts(text("Synthetic breakout notice")),
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1006,
+            "breakout-stop",
+            C::StopBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1007,
+            "breakout-remove",
+            C::RemoveBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1008,
+            "breakout-configure-free",
+            C::ConfigureBreakouts {
+                amount: 2,
+                mode: BreakoutMode::Free,
+                assignments: talk_core::bounded::Page::empty(),
+            },
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1009,
+            "breakout-start-free",
+            C::StartBreakouts,
+        )
+        .await;
+        let CR::BreakoutRooms(choices) = settings(
+            &mut bob,
+            &runtime,
+            bob_parent,
+            2003,
+            "breakout-free-choices",
+            C::BreakoutRooms,
+        )
+        .await
+        else {
+            panic!("free choices")
+        };
+        assert_eq!(choices.as_slice().len(), 2);
+        let chosen = choices.as_slice()[0].id;
+        assert!(matches!(
+            settings(
+                &mut bob,
+                &runtime,
+                bob_parent,
+                2004,
+                "breakout-switch",
+                C::SwitchBreakout(chosen)
+            )
+            .await,
+            CR::BreakoutSwitched(_)
+        ));
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1010,
+            "breakout-stop-free",
+            C::StopBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1011,
+            "breakout-remove-free",
+            C::RemoveBreakouts,
+        )
+        .await;
+    } else {
+        println!("alpha-backend breakouts: server unsupported (correctly gated)");
+    }
     settings(
         &mut client,
         &runtime,
@@ -405,6 +660,23 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let avatar_file = tempfile::tempdir().unwrap();
+    let avatar_path = avatar_file.path().join("synthetic-wide.png");
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([80, 140, 210, 255]))
+        .save(&avatar_path)
+        .unwrap();
+    let uploaded = settings(
+        &mut client,
+        &runtime,
+        id,
+        1000,
+        "image-avatar",
+        C::SetImageAvatar {
+            local_path: text(avatar_path.to_str().unwrap()),
+        },
+    )
+    .await;
+    assert!(matches!(uploaded, CR::Details(_)));
     settings(
         &mut client,
         &runtime,
@@ -456,6 +728,11 @@ async fn released_server_messaging_and_room_controls() {
         assert_eq!(error.kind, talk_core::ports::ErrorKind::Unsupported);
         println!("alpha-backend preserve: server unsupported (correctly gated)");
     }
+    let lobby_timer = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 7200;
     settings(
         &mut client,
         &runtime,
@@ -464,10 +741,16 @@ async fn released_server_messaging_and_room_controls() {
         "lobby-enable",
         C::SetLobby {
             enabled: true,
-            timer: None,
+            timer: Some(lobby_timer),
         },
     )
     .await;
+    let CR::Details(details) =
+        settings(&mut client, &runtime, id, 140, "lobby-timer-read", C::Read).await
+    else {
+        panic!("lobby details")
+    };
+    assert_eq!(details.lobby_timer, Some(lobby_timer));
     settings(
         &mut client,
         &runtime,
@@ -899,6 +1182,22 @@ async fn released_server_messaging_and_room_controls() {
         M::ReadReminder(first),
     )
     .await;
+    let MR::Reminder(Some(edited_reminder)) = m(
+        &mut client,
+        &runtime,
+        id,
+        1160,
+        "reminder-edit",
+        M::Reminder {
+            message: first,
+            timestamp: Some(now + 5400),
+        },
+    )
+    .await
+    else {
+        panic!("updated reminder")
+    };
+    assert_eq!(edited_reminder.timestamp, now + 5400);
     m(
         &mut client,
         &runtime,
@@ -908,6 +1207,15 @@ async fn released_server_messaging_and_room_controls() {
         M::Reminders,
     )
     .await;
+    let reminders = client
+        .request(context(&runtime), ProtocolRequest::UpcomingReminders)
+        .await
+        .unwrap();
+    assert!(
+        matches!(reminders, ProtocolReply::UpcomingReminders(ref value)
+        if value.supported && value.reminders.as_slice().iter().any(|reminder| reminder.message == first))
+    );
+    println!("alpha-backend account-reminders: pass");
     m(
         &mut client,
         &runtime,
@@ -920,6 +1228,63 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let baseline = client
+        .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
+        .await
+        .expect("notification baseline");
+    assert!(
+        matches!(baseline, ProtocolReply::MessageNotifications(ref value)
+        if value.source == talk_core::protocol::NotificationSourceState::Available)
+    );
+    m(
+        &mut client,
+        &runtime,
+        id,
+        1180,
+        "reminder-due",
+        M::Reminder {
+            message: first,
+            timestamp: Some(now.saturating_sub(5)),
+        },
+    )
+    .await;
+    // The private lab triggers Talk's registered background job after the
+    // client's baseline, so the next observation must deliver a new event.
+    std::fs::write(root.join("reminder.request"), first.sequence.to_string()).expect("lab signal");
+    tokio::time::timeout(std::time::Duration::from_secs(45), async {
+        while !root.join("reminder.done").exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("lab reminder job");
+    let mut delivered = false;
+    for _ in 0..8 {
+        let ProtocolReply::MessageNotifications(observed) = client
+            .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
+            .await
+            .expect("notification observation")
+        else {
+            panic!("notification observation")
+        };
+        println!(
+            "alpha-backend reminder-poll: source={:?} changed={} notices={}",
+            observed.source,
+            observed.changed,
+            observed.notices.as_slice().len()
+        );
+        delivered = observed.notices.as_slice().iter().any(|notice| {
+            notice.reminder && notice.conversation == id && notice.message == first.sequence
+        });
+        if delivered || !observed.changed {
+            break;
+        }
+    }
+    assert!(
+        delivered,
+        "the new reminder must resolve to its original message"
+    );
+    println!("alpha-backend reminder-notification-target: pass");
     let MR::Schedule(schedule) = m(
         &mut client,
         &runtime,

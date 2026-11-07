@@ -103,6 +103,12 @@ pub(super) struct History {
     pins_state: RemoteState,
     pins_loaded: bool,
     pins_read_at: Option<Instant>,
+    schedules: Page<talk_core::ui::messaging::Scheduled, 100>,
+    schedules_version: Version,
+    translation_targets: Option<(Instant, Page<Text<64>, 64>)>,
+    translations: Page<talk_core::ui::messaging::Translation, 50>,
+    pub(super) summary: Option<talk_core::ui::messaging::Summary>,
+    summary_dismissed: bool,
 }
 impl History {
     fn new(context: ConversationRef) -> Self {
@@ -138,6 +144,12 @@ impl History {
             pins_state: RemoteState::Idle,
             pins_loaded: false,
             pins_read_at: None,
+            schedules: Page::empty(),
+            schedules_version: Version(0, false),
+            translation_targets: None,
+            translations: Page::empty(),
+            summary: None,
+            summary_dismissed: false,
         }
     }
     pub(super) fn project(&self, panel: &mut MessagePanel) {
@@ -207,6 +219,31 @@ impl History {
                 last_time: last.map(|message| message.time_label.clone()),
                 expires: last.and_then(|message| message.metadata.expires_at),
             });
+        }
+        panel.scheduled = self.schedules.clone();
+        panel.summary = self.summary.clone();
+        panel.translation_targets = self
+            .translation_targets
+            .as_ref()
+            .filter(|(expires, _)| Instant::now() < *expires)
+            .map(|(_, targets)| targets.clone());
+        panel.translations = page(
+            self.translations
+                .as_slice()
+                .iter()
+                .filter(|translation| {
+                    self.messages.as_slice().iter().any(|message| {
+                        message.local_id == translation.message
+                            && !message.metadata.deleted
+                            && message.body == translation.source
+                    })
+                })
+                .cloned(),
+        );
+        if let Some((expires, _, capabilities)) = &self.capabilities
+            && Instant::now() < *expires
+        {
+            super::messaging::project_capabilities(panel, capabilities);
         }
         panel.thread_activity = page(activities.into_iter().map(|mut activity| {
             if activity.expires.is_some_and(|at| at > 0 && at <= now) {
@@ -855,6 +892,24 @@ impl Cache {
     pub(super) fn get(&self, context: ConversationRef) -> Option<&History> {
         self.rooms.iter().find(|r| r.context == context)
     }
+    pub(super) fn dismiss_summary(&mut self, context: ConversationRef) {
+        if let Some(room) = self.get_mut(context) {
+            room.summary = None;
+            room.summary_dismissed = true;
+        }
+    }
+    pub(super) fn set_summary(
+        &mut self,
+        context: ConversationRef,
+        value: talk_core::ui::messaging::Summary,
+    ) -> bool {
+        if let Some(room) = self.get_mut(context) {
+            room.summary = Some(value);
+            true
+        } else {
+            false
+        }
+    }
     /// Durable projections contain confirmed content only, never live policy,
     /// transport identifiers, attachments or unresolved optimistic messages.
     pub(super) fn durable(
@@ -1218,6 +1273,82 @@ impl Cache {
             // Busy admission leaves this eligible for the next bounded owner tick.
             room.pins_read_at = None;
         }
+        match result {
+            Ok(MessagingResult::Scheduled(values))
+                if matches!(work, Work::Scheduled | Work::ScheduledPoll)
+                    && flight.version >= room.schedules_version =>
+            {
+                room.schedules = page(
+                    values
+                        .as_slice()
+                        .iter()
+                        .map(super::messaging::scheduled_view),
+                );
+                room.schedules_version = flight.version;
+            }
+            Ok(MessagingResult::TranslationLanguages(targets))
+                if work == Work::TranslationOptions =>
+            {
+                room.translation_targets =
+                    Some((Instant::now() + Duration::from_secs(600), targets.clone()));
+            }
+            Ok(MessagingResult::Translation {
+                message,
+                source,
+                language,
+                text,
+            }) if matches!(work, Work::Translate(id) if id == u128::from(message.sequence)) => {
+                let id = u128::from(message.sequence);
+                if room
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.local_id == id && !row.metadata.deleted && row.body == *source)
+                {
+                    room.translations = page(
+                        room.translations
+                            .as_slice()
+                            .iter()
+                            .filter(|known| known.message != id || known.language != *language)
+                            .take(49)
+                            .cloned()
+                            .chain(std::iter::once(talk_core::ui::messaging::Translation {
+                                message: id,
+                                source: source.clone(),
+                                language: language.clone(),
+                                text: text.clone(),
+                            })),
+                    );
+                }
+            }
+            Ok(MessagingResult::Schedule(value)) => {
+                let value = super::messaging::scheduled_view(value);
+                let id = value.id;
+                room.schedules = page(
+                    room.schedules
+                        .as_slice()
+                        .iter()
+                        .filter(|known| known.id != id)
+                        .take(99)
+                        .cloned()
+                        .chain(std::iter::once(value)),
+                );
+                room.schedules_version = mutation_version;
+            }
+            Ok(MessagingResult::Changed) if matches!(work, Work::CancelScheduled(_)) => {
+                if let Work::CancelScheduled(id) = work {
+                    room.schedules = page(
+                        room.schedules
+                            .as_slice()
+                            .iter()
+                            .filter(|known| known.id != id)
+                            .cloned(),
+                    );
+                    room.schedules_version = mutation_version;
+                }
+            }
+            _ => {}
+        }
         let capabilities = match result {
             Ok(MessagingResult::Messages { capabilities, .. }) => capabilities.as_ref(),
             Ok(MessagingResult::Capabilities(capabilities)) => Some(capabilities),
@@ -1229,6 +1360,16 @@ impl Cache {
                 .as_ref()
                 .is_none_or(|(_, version, _)| *version <= flight.version)
         {
+            if !room.summary_dismissed
+                && room.summary.is_none()
+                && let Some(offer) = &capabilities.summary_offer
+                && offer.from.conversation == context.conversation
+            {
+                room.summary = Some(talk_core::ui::messaging::Summary::Offer {
+                    from: u128::from(offer.from.sequence),
+                    unread: offer.unread,
+                });
+            }
             room.capabilities = Some((
                 flight.started + background::SOURCE_LIFETIME,
                 flight.version,
@@ -1471,6 +1612,26 @@ fn cached_message(message: &MessageView) -> Option<CachedMessage> {
                     id: o.id.clone(),
                 }),
         ),
+        locations: page(
+            message
+                .metadata
+                .rich
+                .as_slice()
+                .iter()
+                .filter(|o| !message.metadata.deleted && o.kind.as_str() == "geo-location")
+                .filter_map(|o| {
+                    o.id.as_ref()
+                        .filter(|id| {
+                            talk_core::ui::markup::location_coordinates(id.as_str()).is_some()
+                        })
+                        .map(|id| talk_adapters::identity::CachedLocation {
+                            placeholder: o.placeholder.clone(),
+                            name: o.name.clone(),
+                            id: id.clone(),
+                        })
+                })
+                .take(8),
+        ),
         id,
         author: text(message.author.as_str()),
         actor_key: message.metadata.author_key.clone(),
@@ -1540,7 +1701,27 @@ fn restored_message(message: &CachedMessage) -> MessageView {
                         size: o.size,
                         id: o.id.clone(),
                         link: None,
-                    }),
+                    })
+                    .chain(
+                        message
+                            .locations
+                            .as_slice()
+                            .iter()
+                            .filter(|o| {
+                                !message.deleted
+                                    && talk_core::ui::markup::location_coordinates(o.id.as_str())
+                                        .is_some()
+                            })
+                            .map(|o| talk_core::ui::messaging::RichObject {
+                                placeholder: o.placeholder.clone(),
+                                kind: text("geo-location"),
+                                name: o.name.clone(),
+                                mime_type: None,
+                                size: None,
+                                id: Some(o.id.clone()),
+                                link: None,
+                            }),
+                    ),
             ),
             author_key: message.actor_key.clone(),
             expires_at: message.expires_at,

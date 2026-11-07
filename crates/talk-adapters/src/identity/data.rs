@@ -174,6 +174,16 @@ pub struct CachedAttachment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CachedLocation {
+    #[serde(with = "codec::text")]
+    pub placeholder: Text<128>,
+    #[serde(with = "codec::text")]
+    pub name: Text<1024>,
+    #[serde(with = "codec::text")]
+    pub id: Text<1024>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CachedMessage {
     pub id: u64,
     #[serde(with = "codec::text")]
@@ -205,6 +215,8 @@ pub struct CachedMessage {
     pub reactions: Page<CachedReaction, 64>,
     #[serde(default = "Page::empty", with = "codec::page")]
     pub attachments: Page<CachedAttachment, 8>,
+    #[serde(default = "Page::empty", with = "codec::page")]
+    pub locations: Page<CachedLocation, 8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -248,6 +260,7 @@ pub enum OutboxKind {
     MarkUnread,
     RenameThread,
     ThreadNotifications,
+    EditScheduled,
 }
 impl OutboxKind {
     fn code(self) -> i64 {
@@ -264,6 +277,7 @@ impl OutboxKind {
             Self::MarkUnread => 9,
             Self::RenameThread => 10,
             Self::ThreadNotifications => 11,
+            Self::EditScheduled => 12,
         }
     }
     fn parse(code: i64) -> Result<Self> {
@@ -280,6 +294,7 @@ impl OutboxKind {
             9 => Self::MarkUnread,
             10 => Self::RenameThread,
             11 => Self::ThreadNotifications,
+            12 => Self::EditScheduled,
             _ => return Err(DataError::Corrupt),
         })
     }
@@ -771,7 +786,10 @@ impl Store {
             || record.phase != OutboxPhase::Queued
             || !matches!(
                 record.kind,
-                OutboxKind::Send | OutboxKind::Edit | OutboxKind::Schedule
+                OutboxKind::Send
+                    | OutboxKind::Edit
+                    | OutboxKind::Schedule
+                    | OutboxKind::EditScheduled
             )
         {
             return Err(DataError::InvalidInput);
@@ -1068,6 +1086,7 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
             message.text = Text::new("").map_err(|_| DataError::InvalidInput)?;
             message.reactions = Page::empty();
             message.attachments = Page::empty();
+            message.locations = Page::empty();
         }
         if let Some(parent) = message.parent.as_mut()
             && (parent.unavailable || !parent.external && unavailable.contains(&parent.id))

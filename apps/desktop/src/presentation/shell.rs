@@ -872,6 +872,15 @@ impl Desktop {
                                             ))
                                         },
                                     )
+                                    .when(!thread && !self.drafts.target(row.context).new_thread && self.drafts.target(row.context).private_reply.is_none() && self.message_feature_enabled(MessageFeature::Schedules), |d| {
+                                        d.child(self.icon_button(
+                                            "schedule-send", ("chevron-down", "Später senden"),
+                                            ButtonStyle::Quiet,
+                                            Availability::when(send_availability.is_enabled() && !attached && self.message_ui.editing.is_none(),
+                                                "Zum Planen eine Nachricht ohne Dateien verfassen."),
+                                            LocalAction::MessageIn(row.context, super::messaging::Action::Schedule), cx,
+                                        ))
+                                    })
                                     .child(self.icon_button(
                                         send_id,
                                         ("arrow-up", "Senden"),

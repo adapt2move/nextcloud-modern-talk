@@ -217,6 +217,10 @@ fn readonly_details(mut details: view::RoomDetails) -> view::RoomDetails {
     details.default_permissions = None;
     details.server_default_permissions = None;
     details.effective_permissions = None;
+    details.breakout_mode = None;
+    details.breakout_started = None;
+    details.breakout_child = false;
+    details.breakout_supported = false;
     details.has_password = None;
     details
 }
@@ -234,6 +238,7 @@ pub(super) enum Work {
     Bots,
     BotChange { bot: view::PersonRef, enabled: bool },
     Notification(NotificationChange),
+    BreakoutSwitch,
 }
 #[derive(Clone, Copy)]
 pub(super) enum NotificationChange {
@@ -258,6 +263,7 @@ impl Work {
                 enabled: *enabled,
             },
             view::ConversationAction::Read => Self::Read,
+            view::ConversationAction::SwitchBreakout(_) => Self::BreakoutSwitch,
             action if action.reads() => Self::OtherRead,
             _ => Self::Write,
         }
@@ -490,6 +496,9 @@ impl Accounts {
         automatic: bool,
     ) -> Result<(), SubmitError> {
         match action {
+            view::ConversationAction::PickAvatar => {
+                return self.queue_picker(request, context, super::files::Kind::Avatar);
+            }
             view::ConversationAction::PickCsv { edit_generation } => {
                 return self.queue_csv_picker(request, context, edit_generation);
             }
@@ -501,6 +510,29 @@ impl Accounts {
         }
         if self.cache.is_presentation(context) {
             return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+        }
+        if let view::ConversationAction::OpenAssignedBreakout(target) = action {
+            if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                !matches!(
+                    call.stage,
+                    talk_core::ui::presentation::CallStage::Ended
+                        | talk_core::ui::presentation::CallStage::Failed
+                )
+            }) {
+                return self.leave_for_breakout(request, context, target, call.scope, true);
+            }
+            return self.open_assigned_breakout(context, target);
+        }
+        if let view::ConversationAction::SwitchBreakout(target) = action
+            && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                !matches!(
+                    call.stage,
+                    talk_core::ui::presentation::CallStage::Ended
+                        | talk_core::ui::presentation::CallStage::Failed
+                )
+            })
+        {
+            return self.leave_for_breakout(request, context, target, call.scope, false);
         }
         let mut work = Work::for_action(&action);
         if let Some(details) = self
@@ -607,6 +639,103 @@ impl Accounts {
         self.touch();
         Ok(())
     }
+    pub(super) fn start_avatar_upload(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        path: std::path::PathBuf,
+    ) -> Result<(), SubmitError> {
+        if self.cache.is_presentation(context)
+            || self
+                .pending
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Room(_, c, _, _) if c == context))
+            || self.snapshot.conversation_panel.as_ref().is_none_or(|p| {
+                p.context != context
+                    || p.details_stale
+                    || !p
+                        .details
+                        .as_ref()
+                        .is_some_and(|d| d.availability(view::RoomSetting::Avatar).enabled())
+                    || matches!(p.state, view::RemoteState::Uncertain(_))
+            })
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+        }
+        let local_path = path
+            .to_str()
+            .and_then(|p| Text::new(p).ok())
+            .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+        let operation = self.operation(context)?;
+        self.request(
+            context.account,
+            ProtocolRequest::ConversationSettings {
+                conversation: context.conversation,
+                operation,
+                command: wire::ConversationCommand::SetImageAvatar { local_path },
+            },
+            Purpose::Room(request, context, operation, Work::Write),
+        )?;
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.metadata.admitted(context, operation, false);
+        }
+        if let Some(panel) = self.snapshot.conversation_panel.as_mut() {
+            begin_room(panel, request, Work::Write);
+        }
+        self.touch();
+        Ok(())
+    }
+    fn open_assigned_breakout(
+        &mut self,
+        context: ConversationRef,
+        target: ConversationRef,
+    ) -> Result<(), SubmitError> {
+        self.current(context.account)?;
+        if self.snapshot.selected != Some(context) || target.account != context.account {
+            return Err(SubmitError::StaleScope);
+        }
+        let allowed = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .is_some_and(|panel| {
+                panel.context == context
+                    && !panel.details_stale
+                    && panel.breakout_loaded
+                    && panel.details.as_ref().is_some_and(|details| {
+                        details.breakout_supported
+                            && details.breakout_started == Some(true)
+                            && matches!(
+                                details.breakout_mode,
+                                Some(view::BreakoutMode::Automatic | view::BreakoutMode::Manual)
+                            )
+                    })
+                    && panel
+                        .breakout_rooms
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == target && room.assigned)
+            });
+        let room = self
+            .breakout_observation
+            .as_ref()
+            .filter(|(parent, _)| *parent == context)
+            .and_then(|(_, rooms)| {
+                rooms.as_slice().iter().find(|room| {
+                    room.id == target.conversation
+                        && room.actions.read_messages == Decision::Allowed
+                        && !room.unknown_restrictions
+                        && !room.classified
+                })
+            })
+            .cloned();
+        if !allowed {
+            return Err(SubmitError::StaleScope);
+        }
+        let room = room.ok_or(SubmitError::StaleScope)?;
+        self.open_breakout_room(context, room);
+        Ok(())
+    }
     pub(super) fn complete_room(
         &mut self,
         request: RequestId,
@@ -705,10 +834,19 @@ impl Accounts {
         let mut invalidate_cache = false;
         let mut observed_members = None;
         let mut observed_details = None;
+        let mut observed_breakouts = None;
+        let mut clear_breakouts = false;
+        let mut switched = None;
         let completion = match result {
             Ok(result) => {
                 match result {
                     wire::ConversationResult::Details(details) => {
+                        clear_breakouts =
+                            details.breakout_mode.is_none() && !details.breakout_child;
+                        if clear_breakouts {
+                            panel.breakout_rooms = Page::empty();
+                            panel.breakout_loaded = false;
+                        }
                         if !details.controls.as_slice().iter().any(|(setting, value)| {
                             *setting == wire::Setting::Members
                                 && value.implemented
@@ -917,7 +1055,21 @@ impl Accounts {
                         reload = true;
                         panel.bans_loaded = false;
                     }
-                    wire::ConversationResult::BreakoutRooms(_) => (),
+                    wire::ConversationResult::BreakoutRooms(rooms) => {
+                        panel.breakout_rooms =
+                            page(rooms.as_slice().iter().map(|room| view::BreakoutRoom {
+                                context: ConversationRef {
+                                    account: context.account,
+                                    conversation: room.id,
+                                },
+                                name: room.name.clone(),
+                                assigned: room.actions.read_messages == Decision::Allowed,
+                            }));
+                        observed_breakouts = Some(rooms);
+                        panel.breakout_loaded = true;
+                        reload = !read;
+                    }
+                    wire::ConversationResult::BreakoutSwitched(room) => switched = Some(*room),
                     wire::ConversationResult::GuestLink(link) => panel.guest_link = Some(link),
                 }
                 Completion::ServerAccepted
@@ -1023,6 +1175,11 @@ impl Accounts {
                 self.remember_cached_room_details(context, &details);
             }
         }
+        if let Some(rooms) = observed_breakouts {
+            self.breakout_observation = Some((context, rooms));
+        } else if clear_breakouts {
+            self.breakout_observation = None;
+        }
         if let Some(members) = observed_members.as_ref() {
             self.observe_member_avatar_identities(context, members);
         }
@@ -1051,6 +1208,57 @@ impl Accounts {
             let _ =
                 self.room_action_inner(request, context, view::ConversationAction::Members, true);
         }
+        if let Some(room) = switched {
+            self.open_breakout_room(context, room);
+        }
+        self.touch();
+    }
+    fn open_breakout_room(&mut self, context: ConversationRef, room: protocol::Conversation) {
+        self.observe_created_room(context.account, room.clone());
+        let target = ConversationRef {
+            account: context.account,
+            conversation: room.id,
+        };
+        let row = conversation(&room, context.account);
+        self.snapshot.conversations = page(
+            std::iter::once(row.clone()).chain(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .filter(|existing| existing.context != target)
+                    .take(99)
+                    .cloned(),
+            ),
+        );
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.rooms = page(
+                std::iter::once(row).chain(
+                    account
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .filter(|existing| existing.context != target)
+                        .take(99)
+                        .cloned(),
+                ),
+            );
+        }
+        if self.snapshot.call.as_ref().is_none_or(|call| {
+            matches!(
+                call.stage,
+                talk_core::ui::presentation::CallStage::Ended
+                    | talk_core::ui::presentation::CallStage::Failed
+            )
+        }) {
+            // The user explicitly chose the new room after the call owner
+            // confirmed it had ended. Retire its terminal screen so the
+            // navigation is actually visible.
+            self.snapshot.call = None;
+            self.call_ui = None;
+            let _ = self.open(target);
+        }
+        self.load_rooms = Some(context.account);
         self.touch();
     }
     fn project_notification_change(
@@ -1214,7 +1422,12 @@ fn command(
     use view::ConversationAction as V;
     use wire::ConversationCommand as W;
     Ok(match action {
-        V::PickCsv { .. } | V::CancelCsvPick { .. } => return Err(SubmitError::StaleScope),
+        V::PickAvatar
+        | V::OpenAssignedBreakout(_)
+        | V::PickCsv { .. }
+        | V::CancelCsvPick { .. } => {
+            return Err(SubmitError::StaleScope);
+        }
         V::Read => W::Read,
         V::SetName(v) => W::SetName(v),
         V::SetDescription(v) => W::SetDescription(v),
@@ -1241,6 +1454,10 @@ fn command(
         V::SetLobby(enabled) => W::SetLobby {
             enabled,
             timer: None,
+        },
+        V::SetLobbyTimer(timer) => W::SetLobby {
+            enabled: true,
+            timer: Some(timer),
         },
         V::Delete => W::Delete,
         V::ClearHistory => W::ClearHistory,
@@ -1270,8 +1487,53 @@ fn command(
         V::Bans => W::Bans,
         V::Unban(id) => W::Unban(integration(context, id)?),
         V::PreviewCsv(csv) => W::PreviewEmailCsv(csv),
-        V::ConfigureBreakouts { amount, automatic } => W::ConfigureBreakouts { amount, automatic },
+        V::ConfigureBreakouts {
+            amount,
+            mode,
+            assignments,
+        } => W::ConfigureBreakouts {
+            amount,
+            mode: breakout_mode(mode),
+            assignments: breakout_assignments(context, assignments)?,
+        },
+        V::BreakoutRooms => W::BreakoutRooms,
+        V::AssignBreakouts(assignments) => {
+            W::AssignBreakouts(breakout_assignments(context, assignments)?)
+        }
+        V::StartBreakouts => W::StartBreakouts,
+        V::StopBreakouts => W::StopBreakouts,
+        V::RemoveBreakouts => W::RemoveBreakouts,
+        V::BroadcastBreakouts(message) => W::BroadcastBreakouts(message),
+        V::SwitchBreakout(target) => {
+            if target.account != context.account || !target.is_consistent() {
+                return Err(SubmitError::StaleScope);
+            }
+            W::SwitchBreakout(target.conversation)
+        }
+        V::RequestBreakoutAssistance => W::RequestBreakoutAssistance,
     })
+}
+fn breakout_mode(mode: view::BreakoutMode) -> wire::BreakoutMode {
+    match mode {
+        view::BreakoutMode::Automatic => wire::BreakoutMode::Automatic,
+        view::BreakoutMode::Manual => wire::BreakoutMode::Manual,
+        view::BreakoutMode::Free => wire::BreakoutMode::Free,
+    }
+}
+fn breakout_assignments(
+    context: ConversationRef,
+    items: Page<view::BreakoutAssignment, 100>,
+) -> Result<Page<wire::BreakoutAssignment, 100>, SubmitError> {
+    let mut result = Page::empty();
+    for item in items.as_slice() {
+        result
+            .try_push(wire::BreakoutAssignment {
+                member: member(context, item.member)?,
+                room: item.room,
+            })
+            .map_err(|_| SubmitError::Busy)?;
+    }
+    Ok(result)
 }
 pub(super) fn availability(a: wire::ActionAvailability) -> view::Availability {
     view::Availability {
@@ -1301,8 +1563,17 @@ fn details_view(d: wire::ConversationDetails) -> view::RoomDetails {
         server_default_permissions: d.server_default_permissions,
         effective_permissions: d.effective_permissions,
         lobby: d.lobby,
+        lobby_timer: d.lobby_timer,
         has_password: d.has_password,
         participant_count: d.participant_count,
+        breakout_mode: d.breakout_mode.map(|mode| match mode {
+            wire::BreakoutMode::Automatic => view::BreakoutMode::Automatic,
+            wire::BreakoutMode::Manual => view::BreakoutMode::Manual,
+            wire::BreakoutMode::Free => view::BreakoutMode::Free,
+        }),
+        breakout_started: d.breakout_started,
+        breakout_child: d.breakout_child,
+        breakout_supported: d.breakout_supported,
         guest_access: Some(d.conversation.kind == RoomKind::Public),
         leave: d.conversation.actions.leave_conversation,
         controls: page(

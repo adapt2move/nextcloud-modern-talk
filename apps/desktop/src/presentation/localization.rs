@@ -1,14 +1,21 @@
 //! Own interface copy only. User, room and message content never enters this catalog.
 //! Source keys are stable German author strings; translations remain centralized.
 mod account_search;
+mod avatar;
+mod breakouts;
 mod call;
 mod chat;
 mod connection;
 mod content;
 mod conversation;
 mod creation;
+mod date_picker;
 mod discovery;
+mod federation;
 mod files;
+mod message_summary;
+mod message_tools;
+mod message_translation;
 mod onboarding;
 mod own_status;
 mod people;
@@ -35,10 +42,17 @@ pub fn text(locale: Locale, key: &str) -> &str {
         call::MESSAGES,
         account_search::MESSAGES,
         chat::MESSAGES,
+        avatar::MESSAGES,
+        breakouts::MESSAGES,
+        message_tools::MESSAGES,
+        message_translation::MESSAGES,
+        message_summary::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
         files::MESSAGES,
         polls::MESSAGES,
+        date_picker::MESSAGES,
+        federation::MESSAGES,
         conversation::MESSAGES,
         creation::MESSAGES,
         discovery::MESSAGES,
@@ -122,10 +136,17 @@ mod tests {
             discovery::MESSAGES,
             reference::MESSAGES,
             chat::MESSAGES,
+            avatar::MESSAGES,
+            breakouts::MESSAGES,
+            message_tools::MESSAGES,
+            message_translation::MESSAGES,
+            message_summary::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,
             files::MESSAGES,
             polls::MESSAGES,
+            date_picker::MESSAGES,
+            federation::MESSAGES,
             updates::MESSAGES,
             onboarding::MESSAGES,
             own_status::MESSAGES,

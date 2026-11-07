@@ -694,6 +694,21 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
     }) {
         return false;
     }
+    if snapshot
+        .federation_invitations
+        .as_ref()
+        .is_some_and(|view| Some(view.scope) != snapshot.active_account)
+    {
+        return false;
+    }
+    if snapshot.account_reminders.as_ref().is_some_and(|view| {
+        Some(view.scope) != snapshot.active_account
+            || view.reminders.as_slice().iter().any(|reminder| {
+                reminder.context.account != view.scope || !reminder.context.is_consistent()
+            })
+    }) {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -952,6 +967,8 @@ pub(super) mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
+            federation_invitations: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),

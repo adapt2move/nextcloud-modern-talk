@@ -62,7 +62,9 @@ pub enum NotificationKind {
     MessageReminder {
         scope: AccountScope,
         conversation: ConversationId,
+        /// Server notification identity; repeated reminders may target one message.
         id: NotificationId,
+        message: u64,
     },
     IncomingCall {
         call: CallScope,
@@ -125,15 +127,21 @@ impl NotificationKind {
                 scope,
                 conversation,
                 ..
-            }
-            | Self::MessageReminder {
-                scope,
-                conversation,
-                ..
             } => Some(NotificationActivation::OpenConversation {
                 scope,
                 conversation,
             }),
+            Self::MessageReminder {
+                scope,
+                conversation,
+                message,
+                ..
+            } if message > 0 => Some(NotificationActivation::OpenMessage {
+                scope,
+                conversation,
+                message,
+            }),
+            Self::MessageReminder { .. } => None,
             Self::ConferenceParticipantJoined { call, .. } => {
                 Some(NotificationActivation::OpenConferencePrejoin(call))
             }
@@ -150,6 +158,11 @@ pub enum NotificationActivation {
     OpenConversation {
         scope: AccountScope,
         conversation: ConversationId,
+    },
+    OpenMessage {
+        scope: AccountScope,
+        conversation: ConversationId,
+        message: u64,
     },
     OpenConferencePrejoin(CallScope),
     AcceptDirectCall(CallScope),

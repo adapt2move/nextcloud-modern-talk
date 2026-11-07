@@ -183,6 +183,8 @@ mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
+            federation_invitations: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),

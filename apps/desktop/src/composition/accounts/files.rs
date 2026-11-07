@@ -10,6 +10,7 @@ use talk_core::ui::{content::DownloadView, messaging::MessageFeature};
 #[derive(Clone)]
 pub(crate) enum Kind {
     Upload,
+    Avatar,
     Csv {
         edit_generation: u64,
     },
@@ -55,6 +56,17 @@ fn csv_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> b
                     !details.classified
                         && details.availability(RoomSetting::CsvImport).enabled()
                         && details.availability(RoomSetting::Invite).enabled()
+                })
+        })
+}
+fn avatar_available(snapshot: &PresentationSnapshot, context: ConversationRef) -> bool {
+    snapshot.active_account == Some(context.account)
+        && snapshot.selected == Some(context)
+        && snapshot.conversation_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && !panel.details_stale
+                && panel.details.as_ref().is_some_and(|details| {
+                    !details.classified && details.availability(RoomSetting::Avatar).enabled()
                 })
         })
 }
@@ -265,7 +277,9 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
-        let permitted = if matches!(kind, Kind::Csv { .. }) {
+        let permitted = if matches!(kind, Kind::Avatar) {
+            avatar_available(&self.snapshot, context)
+        } else if matches!(kind, Kind::Csv { .. }) {
             csv_available(&self.snapshot, context)
         } else {
             self.snapshot.message_panel.as_ref().is_some_and(|p| {
@@ -287,6 +301,9 @@ impl Accounts {
                 panel.csv_file = None;
             }
         }
+        if matches!(kind, Kind::Avatar) {
+            self.avatar_picker = Some((request, context));
+        }
         self.picker = Some(Picker {
             request,
             context,
@@ -302,6 +319,9 @@ impl Accounts {
                 context: p.context,
                 edit_generation: *edit_generation,
             });
+        }
+        if matches!(p.kind, Kind::Avatar) {
+            self.avatar_dialog = Some((p.request, p.context));
         }
         self.picker_open = true;
         Some(p)
@@ -320,6 +340,49 @@ impl Accounts {
             self.csv_file_owner.dialog = None;
             self.picker_open = false;
             self.finish_csv_selection(picker, edit_generation, result);
+            return;
+        }
+        if matches!(picker.kind, Kind::Avatar) {
+            if self.avatar_dialog != Some((picker.request, picker.context)) {
+                return;
+            }
+            self.avatar_dialog = None;
+            self.picker_open = false;
+            if self.avatar_picker != Some((picker.request, picker.context)) {
+                return;
+            }
+            self.avatar_picker = None;
+            if self.current(picker.context.account).is_err()
+                || !avatar_available(&self.snapshot, picker.context)
+            {
+                return;
+            }
+            let result = result
+                .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unconfigured))
+                .and_then(|path| match path {
+                    None => Ok(()),
+                    Some(path) => self.start_avatar_upload(picker.request, picker.context, path),
+                });
+            if let Err(error) = result {
+                let reason = match error {
+                    SubmitError::Unavailable(reason) => reason,
+                    _ => UnavailableReason::Busy,
+                };
+                if let Some(panel) = self
+                    .snapshot
+                    .conversation_panel
+                    .as_mut()
+                    .filter(|p| p.context == picker.context)
+                {
+                    panel.state =
+                        talk_core::ui::conversation::RemoteState::Failed(picker.request, reason);
+                    panel.result = Some(talk_core::ui::conversation::RoomResult {
+                        request: picker.request,
+                        completion: Completion::Failed(reason),
+                    });
+                }
+                self.touch();
+            }
             return;
         }
         self.picker_open = false;
@@ -382,7 +445,7 @@ impl Accounts {
             );
         }
         let command = match &picker.kind {
-            Kind::Csv { .. } => return Err(SubmitError::StaleScope),
+            Kind::Csv { .. } | Kind::Avatar => return Err(SubmitError::StaleScope),
             Kind::CloudDownload { .. } => return Err(SubmitError::StaleScope),
             Kind::Upload => {
                 let name = path
@@ -560,6 +623,42 @@ mod tests {
         }
         model.snapshot.active_account = None;
         assert!(!csv_available(&model.snapshot, selection.context));
+    }
+    #[test]
+    fn avatar_picker_rechecks_policy_and_old_callbacks_cannot_release_a_new_dialog() {
+        let (mut model, selection) = csv_model();
+        assert!(avatar_available(&model.snapshot, selection.context));
+        let old = Picker {
+            request: RequestId(91),
+            context: selection.context,
+            kind: Kind::Avatar,
+        };
+        model.avatar_picker = Some((old.request, old.context));
+        model.picker = Some(old.clone());
+        let dialog = model.take_picker().unwrap();
+        model.clear_content();
+        assert!(model.avatar_picker.is_none());
+        assert!(model.picker_open);
+        model.finish_picker(dialog.clone(), Ok(Some(PathBuf::from("stale.png"))));
+        assert!(!model.picker_open);
+        assert!(model.snapshot.conversation_panel.is_none());
+        model.picker_open = true;
+        model.avatar_dialog = Some((RequestId(92), selection.context));
+        model.avatar_picker = model.avatar_dialog;
+        model.finish_picker(dialog, Err(()));
+        assert!(model.picker_open);
+        assert_eq!(
+            model.avatar_picker,
+            Some((RequestId(92), selection.context))
+        );
+        model.snapshot = super::super::super::fixtures::snapshot(Some("details-ready"));
+        model
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .unwrap()
+            .details_stale = true;
+        assert!(!avatar_available(&model.snapshot, selection.context));
     }
     #[test]
     fn cancellation_acknowledges_only_exact_result_and_preserves_other_ticket() {

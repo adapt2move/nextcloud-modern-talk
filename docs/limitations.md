@@ -257,8 +257,32 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   checks have finite windows, including the latest 200 messages for send/forward
   correlation. An unresolved effect stays retained and is never blindly replayed.
   Scheduled creation has no operation correlation and may remain uncertain.
-  The reminder backend uses server reminders; there is no standalone local OS
-  reminder fallback.
+  Reminders are server-owned; there is no standalone local OS reminder fallback.
+  The account-wide list and translated text are bounded session caches and do not
+  survive a restart. Talk 24/25 returns at most ten upcoming reminders without
+  pagination; a full result is marked potentially incomplete. A reminder for a
+  room absent from the bounded room list is omitted with the same indication. Notifications without
+  a structured message identifier are suppressed. Notification activation is
+  available on Linux notification daemons with action support and via the macOS
+  helper; native delivery and click-through still need platform qualification.
+  Translation requires a provider with source-language detection and a target
+  matching the interface locale; task-only translation providers are not used.
+  Summary generation requires a configured server assistant and the server's
+  unread threshold; provider availability varies.
+- Validated location objects render from their geo identifiers and can open
+  OpenStreetMap deliberately; the client does not create locations or fetch map
+  tiles. Incoming federation invitations and text chat use the server proxy;
+  federated calls, files and other room tools are unavailable, and multi-server
+  interoperability needs qualification. Breakout switching closes an active call
+  before moving; joining the target call uses the normal call flow. Clearing help
+  requests and restoring existing assignment selections are not implemented.
+  Breakout v1 assigns logged-in users; changing the room count or mode requires
+  removing the existing breakout rooms first.
+  Waiting calls recheck policy, but automatic lobby admission needs real-server
+  qualification. The lobby start time is shown only when room details were loaded.
+  Room-avatar uploads accept regular images up to 8 MiB and 16 million pixels,
+  crop to a centered square and send a bounded PNG. Avatar and federation
+  invitation changes require a connection; they are not queued across restarts.
 
 ## Platforms
 

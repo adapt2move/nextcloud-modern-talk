@@ -115,6 +115,14 @@ pub enum ProtocolRequest {
     SubscribedThreads {
         offset: u32,
     },
+    /// Bounded account-wide reminder observation, without a selected conversation.
+    UpcomingReminders,
+    FederationInvitations,
+    ChangeFederationInvitation {
+        operation: OperationId,
+        invitation: u128,
+        accept: bool,
+    },
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
     WatchTyping(ConversationId),
@@ -238,6 +246,12 @@ pub enum ProtocolReply {
         threads: crate::bounded::Page<crate::protocol::messaging::Thread, 50>,
         /// Based on the server page before unbound rooms are excluded.
         has_next: bool,
+    },
+    UpcomingReminders(crate::protocol::messaging::AccountReminders),
+    FederationInvitations(crate::protocol::federation::Invitations),
+    FederationInvitationChanged {
+        operation: OperationId,
+        invitation: u128,
     },
     LiveEvents(crate::protocol::AccountLiveEvents),
     Typing(crate::protocol::TypingObservation),

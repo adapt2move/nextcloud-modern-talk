@@ -212,7 +212,7 @@ impl Desktop {
                 Choice::Reminders,
                 "Erinnerungen",
                 "bell",
-                MessageFeature::Reminders,
+                MessageFeature::UpcomingReminders,
             ),
         ]
     }
@@ -372,6 +372,7 @@ impl Desktop {
                 || self.update_restart_pending
                 || self.projection_blocked
                 || self.prejoin.is_some()
+                || self.waiting_in_lobby()
                 || self.incoming_visible()
                 || self.onboarding_open
                 || self.account_removal.confirming()

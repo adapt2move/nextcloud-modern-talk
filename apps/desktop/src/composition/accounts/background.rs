@@ -450,6 +450,9 @@ impl Purpose {
             | Self::DiscoverProbe(s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
+            | Self::AccountReminders(s, _)
+            | Self::FederationInvitations(s, _)
+            | Self::FederationChange(s, _, _)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
             | Self::Threads(s, _)
@@ -725,6 +728,10 @@ impl Accounts {
         self.background.sync(&scopes, Instant::now());
         self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
+        self.reminders.retain_accounts(&scopes);
+        self.federation.retain_accounts(&scopes);
+        self.translation.retain_accounts(&scopes);
+        self.summary.retain_accounts(&scopes);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if pending

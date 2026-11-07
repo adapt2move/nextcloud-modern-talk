@@ -683,6 +683,9 @@ pub struct PresentationSnapshot {
     pub tags: Page<TagView, 102>,
     pub tag_state: ContentState,
     pub organization_result: Option<OrganizationResult>,
+    /// Upcoming reminders belong to the active account, independently of selection.
+    pub account_reminders: Option<AccountRemindersView>,
+    pub federation_invitations: Option<FederationInvitationsView>,
     /// History/files/participants below belong to exactly this runtime+host context.
     pub selected: Option<ConversationRef>,
     pub content: ContentState,
@@ -738,6 +741,40 @@ pub struct ConversationListState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountReminderView {
+    pub context: ConversationRef,
+    pub message: u128,
+    pub timestamp: u64,
+    /// Available only when the bounded room history already contains the message.
+    pub preview: Option<Text<160>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountRemindersView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub state: ContentState,
+    /// False if the server limit was reached or a reminder's room is unavailable.
+    pub complete: bool,
+    pub reminders: Page<AccountReminderView, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationView {
+    pub id: u128,
+    pub room: Text<256>,
+    pub inviter: Text<256>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationsView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub invitations: Page<FederationInvitationView, 100>,
+    pub pending: bool,
+    pub failed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
     RefreshThreads(AccountScope),
     PageThreads {
@@ -771,6 +808,13 @@ pub enum UiIntent {
         message: u128,
         source: Text<4096>,
         ordinal: u16,
+    },
+    /// Open only a currently displayed, validated geo-location object.
+    OpenLocation {
+        context: ConversationRef,
+        message: u128,
+        placeholder: Text<128>,
+        id: Text<1024>,
     },
     Content {
         request: RequestId,
@@ -853,6 +897,25 @@ pub enum UiIntent {
     },
     SelectAccount(AccountScope),
     OpenConversation(ConversationRef),
+    RefreshAccountReminders(AccountScope),
+    RefreshFederationInvitations(AccountScope),
+    ChangeFederationInvitation {
+        scope: AccountScope,
+        invitation: u128,
+        accept: bool,
+    },
+    OpenReminder {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
+    /// Native activation is only navigation; the account owner revalidates the
+    /// runtime and room before loading this message context.
+    OpenNotificationMessage {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
     SetArchived {
         request: RequestId,
         context: ConversationRef,

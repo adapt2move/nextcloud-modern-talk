@@ -803,7 +803,14 @@ fn project(reply: api::Reply) -> Result<Response, ErrorKind> {
         | R::Conversation(_)
         | R::SearchProvider(_)
         | R::Reference(_)
-        | R::CreationPresets(_) => return Err(ErrorKind::Malformed),
+        | R::CreationPresets(_)
+        | R::TranslationLanguages(_)
+        | R::Translated(_)
+        | R::FederationInvitations(_)
+        | R::FederatedRoomCapabilities(_)
+        | R::TaskProcessing(_) => {
+            return Err(ErrorKind::Malformed);
+        }
         R::Account(v) => v.project(),
         R::Capabilities(v) => v.project(),
         R::Room(v) => v.project(),

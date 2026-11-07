@@ -23,12 +23,19 @@ pub(super) enum Work {
     Forward(ConversationRef),
     Reminder(u128),
     CancelScheduled(u128),
+    EditScheduled(u128),
     Reaction(u128),
     ReactionAuthors,
     Files,
     Search,
     Reminders,
     Scheduled,
+    ScheduledPoll,
+    TranslationOptions,
+    Translate(u128),
+    SummaryStart,
+    SummaryStatus,
+    SummaryContinue,
     Pins,
     PinChange { message: u128, pinned: bool },
     Share,
@@ -49,6 +56,7 @@ impl Work {
                 | Self::Forward(_)
                 | Self::Reminder(_)
                 | Self::CancelScheduled(_)
+                | Self::EditScheduled(_)
                 | Self::Reaction(_)
                 | Self::PinChange { .. }
                 | Self::Share
@@ -94,6 +102,11 @@ impl Work {
                 | Self::Recovery
                 | Self::ThreadActivity
                 | Self::ThreadQueued(_)
+                | Self::ScheduledPoll
+                | Self::TranslationOptions
+                | Self::SummaryStart
+                | Self::SummaryStatus
+                | Self::SummaryContinue
         )
     }
 }
@@ -419,6 +432,7 @@ impl Accounts {
         if self.pending.iter().any(|p| {
             matches!(p.purpose, Purpose::Message(_, c, _, w)
                 if c == context && (w == work || w.backward() && work.backward()
+                    || matches!(w, Work::Scheduled | Work::ScheduledPoll) && matches!(work, Work::Scheduled | Work::ScheduledPoll)
                     || matches!((w, work), (Work::Reaction(_), Work::Reaction(_)))
                     || work == Work::Poll && w == Work::History
                         && !self.history.get(context).is_some_and(|h| h.loaded)))
@@ -563,6 +577,26 @@ impl Accounts {
         if self.snapshot.content == ContentState::Denied {
             return;
         }
+        let now = Instant::now();
+        if self
+            .scheduled_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(view::MessageFeature::Schedules)
+                        .enabled()
+            })
+        {
+            self.scheduled_poll = Some((context, now + Duration::from_secs(30)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Scheduled,
+                Work::ScheduledPoll,
+            );
+        }
         if self.history.get(context).is_some_and(|h| h.needs_pins()) {
             let _ = self.start_message(
                 RequestId(0),
@@ -586,6 +620,26 @@ impl Accounts {
                 context,
                 wire::MessagingCommand::Threads,
                 Work::ThreadActivity,
+            );
+        }
+        if self
+            .translation_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel.translation_targets.is_none()
+                    && panel
+                        .availability(view::MessageFeature::Translation)
+                        .enabled()
+            })
+        {
+            self.translation_poll = Some((context, now + Duration::from_secs(60)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::TranslationLanguages,
+                Work::TranslationOptions,
             );
         }
         let Ok((command, work)) = self.live_message_request(context) else {
@@ -618,11 +672,37 @@ impl Accounts {
         context: ConversationRef,
         action: view::MessageAction,
     ) -> Result<(), SubmitError> {
+        if matches!(action, view::MessageAction::Summarize) {
+            return self.begin_summary(request, context);
+        }
+        if matches!(action, view::MessageAction::DismissSummary) {
+            return self.dismiss_summary(context);
+        }
+        if let view::MessageAction::Translate {
+            message,
+            source,
+            language,
+        } = &action
+        {
+            return self.begin_translation(
+                request,
+                context,
+                *message,
+                source.clone(),
+                language.clone(),
+            );
+        }
         if let Some(result) = self.deliberate_read(request, context, &action) {
             return result;
         }
         if let Some(result) = self.queue_message_action(request, context, &action) {
+            if result.is_ok() && matches!(action, view::MessageAction::Reminder { .. }) {
+                self.reminder_changed(context.account);
+            }
             return result;
+        }
+        if matches!(action, view::MessageAction::EditScheduled { .. }) {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
         }
         let view::MessageAction::Send { body, target } = &action else {
             return self.dispatch_message_action(request, context, action);
@@ -773,6 +853,8 @@ impl Accounts {
             V::Forward { destination, .. } => Work::Forward(*destination),
             V::Reminder { message, .. } => Work::Reminder(*message),
             V::CancelScheduled(id) => Work::CancelScheduled(*id),
+            V::EditScheduled { id, .. } => Work::EditScheduled(*id),
+            V::Translate { message, .. } => Work::Translate(*message),
             _ => Work::Action,
         };
         if work == Work::Send
@@ -817,6 +899,7 @@ impl Accounts {
             _ => None,
         };
         let command = match action {
+            V::Summarize | V::DismissSummary => return Err(SubmitError::StaleScope),
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
             V::PickUpload
             | V::Download { .. }
@@ -971,7 +1054,27 @@ impl Accounts {
                 },
             },
             V::Scheduled => W::Scheduled,
+            V::EditScheduled {
+                id,
+                body,
+                timestamp,
+                silent,
+            } => W::EditScheduled {
+                id: message_id(context, id)?,
+                text: text(body.as_str()),
+                send_at: timestamp,
+                silent,
+            },
             V::CancelScheduled(id) => W::CancelScheduled(message_id(context, id)?),
+            V::Translate {
+                message,
+                source,
+                language,
+            } => W::Translate {
+                message: message_id(context, message)?,
+                source,
+                language,
+            },
             V::Forward {
                 message,
                 destination,
@@ -1061,6 +1164,16 @@ impl Accounts {
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
+        let reply = if let Work::Translate(message) = work {
+            self.translation_reply(request, context, operation, message, reply)
+        } else if matches!(
+            work,
+            Work::SummaryStart | Work::SummaryStatus | Work::SummaryContinue
+        ) {
+            self.summary_reply(request, context, operation, work, reply)
+        } else {
+            reply
+        };
         let event = diagnostic_result(diagnostic_request, context, operation, work, &reply);
         if self.current(context.account).is_err() {
             self.outbox.lost_scope(operation);
@@ -1289,6 +1402,9 @@ impl Accounts {
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
                 | (Work::ThreadActivity, Ok(wire::MessagingResult::Threads(_)))
+                | (Work::ScheduledPoll, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::TranslationOptions, Ok(wire::MessagingResult::TranslationLanguages(_)))
+                | (Work::Translate(_), Ok(wire::MessagingResult::Translation { .. }))
                 | (
                     Work::Files | Work::Pins | Work::Metadata,
                     Ok(wire::MessagingResult::Messages { .. }),
@@ -1298,6 +1414,9 @@ impl Accounts {
                     | Work::Reminders
                     | Work::Scheduled
                     | Work::ThreadActivity
+                    | Work::ScheduledPoll
+                    | Work::TranslationOptions
+                    | Work::Translate(_)
                     | Work::Files
                     | Work::Pins
                     | Work::Metadata,
@@ -1331,6 +1450,12 @@ impl Accounts {
         {
             result = Err(Completion::Uncertain);
         }
+        if let Work::EditScheduled(target) = work
+            && !matches!(&result, Ok(wire::MessagingResult::Schedule(value)) if u128::from(value.id.sequence) == target)
+            && result.is_ok()
+        {
+            result = Err(Completion::Uncertain);
+        }
         if matches!(work, Work::PinChange { .. })
             && !matches!(
                 &result,
@@ -1347,6 +1472,9 @@ impl Accounts {
         }
         self.history
             .reconcile_reactions(context, operation, work, &mut result);
+        if let Work::Reminder(message) = work {
+            self.observe_reminder_result(context, message, &result);
+        }
         let queued = self.outbox_result(operation, &result);
         if !self.history.complete(
             context,
@@ -1364,6 +1492,23 @@ impl Accounts {
         if access_lost {
             self.invalidate_history(context, ContentState::Denied);
             return;
+        }
+        // A selected federated room can establish its first remote capability
+        // observation while the account list still has only an unknown policy.
+        if self.snapshot.selected == Some(context)
+            && self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|room| room.context == context && room.send == Decision::Unknown)
+            && matches!(&result, Ok(wire::MessagingResult::Messages { capabilities: Some(capabilities), .. })
+                if capabilities.actions.as_slice().iter().any(|(feature, availability)|
+                    *feature == wire::MessagingFeature::Send && availability.implemented
+                    && availability.server == protocol::FeatureSupport::Supported
+                    && availability.allowed == Decision::Allowed))
+        {
+            self.invalidate_account(context.account, protocol::AccountChange::Conversations);
         }
         // A switched-away room still receives its admitted canonical updates.
         // Mutation receipts also settle without changing another room's panels.
@@ -1624,30 +1769,14 @@ impl Accounts {
                                 })),
                         );
                     }
-                    wire::MessagingResult::Scheduled(schedules) => {
-                        panel.scheduled =
-                            page(schedules.as_slice().iter().map(|s| view::Scheduled {
-                                id: u128::from(s.id.sequence),
-                                body: text(s.text.as_str()),
-                                timestamp: s.send_at,
-                            }));
-                    }
-                    wire::MessagingResult::Schedule(schedule) => {
-                        panel.scheduled = page(
-                            panel
-                                .scheduled
-                                .as_slice()
-                                .iter()
-                                .filter(|s| s.id != u128::from(schedule.id.sequence))
-                                .take(99)
-                                .cloned()
-                                .chain(std::iter::once(view::Scheduled {
-                                    id: u128::from(schedule.id.sequence),
-                                    body: text(schedule.text.as_str()),
-                                    timestamp: schedule.send_at,
-                                })),
-                        );
-                    }
+                    wire::MessagingResult::Scheduled(_)
+                    | wire::MessagingResult::Schedule(_)
+                    | wire::MessagingResult::TranslationLanguages(_)
+                    | wire::MessagingResult::Translation { .. }
+                    | wire::MessagingResult::SummaryStarted { .. }
+                    | wire::MessagingResult::SummaryPending
+                    | wire::MessagingResult::SummaryPart { .. }
+                    | wire::MessagingResult::SummaryEmpty => (),
                     wire::MessagingResult::Uploaded { path, bytes } => {
                         let name = panel.upload_name.take().unwrap_or_else(|| text("File"));
                         panel.uploaded = Some(view::UploadedFile {
@@ -2067,6 +2196,19 @@ fn diagnostic_result(
     Some(event)
 }
 
+pub(super) fn scheduled_view(schedule: &wire::ScheduledMessage) -> view::Scheduled {
+    view::Scheduled {
+        id: u128::from(schedule.id.sequence),
+        body: text(schedule.text.as_str()),
+        timestamp: schedule.send_at,
+        failed_original_timestamp: (schedule.send_at == 0)
+            .then_some(schedule.original_send_at)
+            .flatten(),
+        editable: schedule.text.as_str().len() <= 4096,
+        silent: schedule.options.silent,
+    }
+}
+
 fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> bool {
     let message = |m: &wire::MessageDetails| {
         m.message.id.conversation == context.conversation
@@ -2113,6 +2255,9 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
                         && last.sequence >= thread.root.sequence
                 })
         }),
+        wire::MessagingResult::Translation { message, .. } => {
+            message.conversation == context.conversation
+        }
         wire::MessagingResult::Search { hits, .. } => hits
             .as_slice()
             .iter()
@@ -2498,6 +2643,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Search => V::Search,
         W::Pins => V::Pins,
         W::Reminders => V::Reminders,
+        W::UpcomingReminders => V::UpcomingReminders,
         W::Schedule => V::Schedules,
         W::Forward => V::Forward,
         W::Files => V::Files,
@@ -2506,6 +2652,8 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::ReadReceipts => V::ReadReceipts,
         W::MarkUnread => V::MarkUnread,
         W::UnreadFrom => V::UnreadFrom,
+        W::Translation => V::Translation,
+        W::Summary => V::Summary,
         _ => return None,
     })
 }

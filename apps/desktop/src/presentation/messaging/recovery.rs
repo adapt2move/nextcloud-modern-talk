@@ -101,7 +101,7 @@ impl Desktop {
                                 !row.metadata.deleted && row.metadata.edit != Decision::Denied
                             })
                 }
-                FailedDraftKind::Schedule(_) => {
+                FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => {
                     self.message_feature_enabled(MessageFeature::Schedules)
                 }
             }
@@ -175,12 +175,11 @@ impl Desktop {
                     self.message_ui.editing = Some(message);
                 }
                 if let FailedDraftKind::Schedule(timestamp) = draft.kind {
+                    self.message_ui.scheduled_edit = None;
                     self.open_message_deadline(None, window, cx);
                     if let Some(local) = self.settings_port.local_datetime(timestamp) {
-                        self.message_ui.time_input.update(cx, |input, cx| {
-                            input.set_context_value(local.as_str());
-                            cx.notify();
-                        });
+                        self.message_ui.picker =
+                            talk_core::preferences::time::calendar::Calendar::parse(local.as_str());
                     }
                 } else {
                     self.composer.focus_handle(cx).focus(window);
@@ -209,7 +208,7 @@ impl Desktop {
                 .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(match draft.kind {
                     FailedDraftKind::Send => "Senden fehlgeschlagen",
                     FailedDraftKind::Edit(_) => "Änderung fehlgeschlagen",
-                    FailedDraftKind::Schedule(_) => "Planung fehlgeschlagen",
+                    FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => "Planung fehlgeschlagen",
                 })))
                 .when(drafts.len() > 1, |row| row
                     .child(self.icon_button(scoped_id("failed-previous", context, 0, 0), ("arrow-left", "Vorheriger Entwurf"), ButtonStyle::Quiet,

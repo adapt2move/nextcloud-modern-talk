@@ -94,9 +94,12 @@ impl Services {
         self.notification_sequence.set(next);
         Ok(RequestId(next))
     }
-    pub fn poll_notifications(&self, background: bool) {
+    pub fn poll_notifications(
+        &self,
+        background: bool,
+    ) -> Option<talk_core::preferences::notifications::NotificationActivation> {
         let (Some(accounts), Ok(runtime)) = (&self.accounts, &self.notifications) else {
-            return;
+            return None;
         };
         runtime.update_visibility(background);
         let mut accounts = accounts.borrow_mut();
@@ -169,6 +172,7 @@ impl Services {
                 accounts.settle_message_notification(kind);
             }
         }
+        runtime.take_message_activation()
     }
     pub(super) fn shutdown_requested(&self) -> bool {
         self.shutdown_deadline.get().is_some()
@@ -485,6 +489,18 @@ impl ComputerSettingsPort for Bridge {
         talk_adapters::system_time::search_date_boundary(local, end)
     }
     fn local_datetime(&self, timestamp: u64) -> Option<talk_core::ui::Text<32>> {
+        if self.services.accounts.is_none() {
+            // Disconnected fictional scenarios have no identity worker to
+            // observe a system zone; use fixed authored dates for those fixtures.
+            let label = match timestamp {
+                1_800_003_600 => Some("2027-01-15 09:00"),
+                1_800_090_000 => Some("2027-01-16 09:00"),
+                _ => None,
+            };
+            if let Some(label) = label {
+                return talk_core::ui::Text::new(label).ok();
+            }
+        }
         talk_adapters::system_time::local_datetime(timestamp)
     }
     fn same_local_day(&self, first: u64, second: u64) -> bool {

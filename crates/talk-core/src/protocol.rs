@@ -5,6 +5,7 @@ use crate::bounded::{Page, Text};
 use crate::ids::{AccountScope, CallScope, ConversationId, OperationId};
 use crate::policy::Decision;
 use crate::preferences::navigation::NavigationRoomKey;
+pub mod federation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeatureSupport {
@@ -202,6 +203,8 @@ pub struct OpenConversations {
 pub struct MessageNotice {
     pub conversation: ConversationId,
     pub message: u64,
+    pub notification_id: u64,
+    pub reminder: bool,
     pub title: Text<128>,
     pub body: Text<512>,
     pub redacted: bool,

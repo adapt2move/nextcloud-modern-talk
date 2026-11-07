@@ -45,6 +45,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     let banner: Bool
     let sound: NotificationSound
     let call: Bool
+    let reminder: Bool
     let accept: Bool
     let decline: Bool
     let language: String
@@ -58,7 +59,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
               let title = decodeHex(arguments[3], maximum: 128),
               let body = decodeHex(arguments[4], maximum: 512),
               let sound = NotificationSound(rawValue: arguments[6]),
-              [5, 7, 8, 9].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              [5, 8, 9].allSatisfy({ arguments[$0] == "0" || arguments[$0] == "1" }),
+              ["0", "1", "2"].contains(arguments[7]),
               arguments[10] == "0", // Reserved: delivery never requests permission.
               ["en", "de", "es"].contains(arguments[11]) else { return nil }
         identifier = arguments[2]
@@ -67,6 +69,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         banner = arguments[5] == "1"
         self.sound = sound
         call = arguments[7] == "1"
+        reminder = arguments[7] == "2"
         accept = call && arguments[8] == "1"
         decline = call && arguments[9] == "1"
         language = arguments[11]
@@ -90,7 +93,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             _ = try? FileHandle.standardInput.read(upToCount: 16)
             DispatchQueue.main.async { self?.finish(withdraw: true) }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (call ? 40 : 8)) { [weak self] in self?.finish(withdraw: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + ((call || reminder) ? 40 : 8)) { [weak self] in self?.finish(withdraw: true) }
         center.getNotificationSettings { [weak self] settings in
             guard let self = self else { return }
             self.submit(settings)
@@ -140,7 +143,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                     if error != nil { emit("failed"); self.finish(withdraw: true); return }
                     self.submitted = true
                     emit("submitted\t\(canBanner ? 1 : 0)\t\(canSound ? 1 : 0)")
-                    if !self.call { self.finish(withdraw: false) }
+                    if !self.call && !self.reminder { self.finish(withdraw: false) }
                 }
             }
         }
@@ -159,8 +162,11 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         DispatchQueue.main.async {
             defer { completionHandler() }
-            guard self.live, self.submitted, self.call, response.notification.request.identifier == self.identifier,
+            guard self.live, self.submitted, (self.call || self.reminder), response.notification.request.identifier == self.identifier,
                   response.notification.request.content.userInfo["nmt_id"] as? String == self.identifier else { return }
+            if self.reminder && response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                emit("open"); self.finish(withdraw: true); return
+            }
             // Clicking the banner itself never accepts a call. Only these explicit actions
             // reach Rust, where the current admitted dispatcher must revalidate again.
             if response.actionIdentifier == "accept" && self.accept { emit("accept") }

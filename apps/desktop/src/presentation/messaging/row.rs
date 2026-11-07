@@ -152,6 +152,14 @@ impl Desktop {
                     .iter()
                     .any(|pin| pin.local_id == m.local_id)
         });
+        let reminded = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == context
+                && panel
+                    .reminders
+                    .as_slice()
+                    .iter()
+                    .any(|reminder| reminder.message == m.local_id)
+        });
         let metadata = |text: &str| {
             self.hint(text)
                 .text_size(self.sp(13.))
@@ -251,6 +259,19 @@ impl Desktop {
                     ),
             );
         }
+        if reminded && !m.metadata.deleted {
+            content = content.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(self.scaled_icon("clock", 12., t.muted))
+                    .child(self.hint(self.l("Erinnerung"))),
+            );
+        }
+        if let Some(translation) = self.translation_row(context, m, cx) {
+            content = content.child(translation);
+        }
         if let Some(upload) = upload {
             content = content.child(self.pending_upload_card(context, upload, cx));
         }
@@ -285,6 +306,65 @@ impl Desktop {
                 } else {
                     content.child(self.attachment_card(reference, object, cx))
                 }
+            } else if object.kind.as_str() == "geo-location"
+                && let Some((id, (lat, lon))) = object.id.as_ref().and_then(|id| {
+                    talk_core::ui::markup::location_coordinates(id.as_str())
+                        .map(|point| (id, point))
+                })
+            {
+                content.child(
+                    div()
+                        .p_3()
+                        .rounded_lg()
+                        .bg(t.subtle)
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(self.scaled_icon("pin", 18., t.muted))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(object.name.as_str().to_owned())
+                                .child(self.hint(&format!("{lat}, {lon}"))),
+                        )
+                        .child(
+                            self.button(
+                                gpui::ElementId::Name(
+                                    format!(
+                                        "{}:{}:{}",
+                                        scoped_id("location-map", context, m.local_id, 0),
+                                        object.placeholder.as_str(),
+                                        self.message_ui.thread_load.as_ref().map_or_else(
+                                            || "timeline".to_owned(),
+                                            |thread| format!("thread:{:032x}", thread.root),
+                                        )
+                                    )
+                                    .into(),
+                                ),
+                                "In Karte öffnen",
+                                ButtonStyle::Secondary,
+                                Availability::when(
+                                    self.snapshot.content == ContentState::Ready
+                                        && self.selected().is_some_and(|room| {
+                                            room.draft_clipboard == talk_core::ui::Decision::Allowed
+                                        }),
+                                    "Dieser Link kann gerade nicht geöffnet werden.",
+                                ),
+                                LocalAction::MessageIn(
+                                    context,
+                                    Action::OpenLocation(
+                                        m.local_id,
+                                        object.placeholder.clone(),
+                                        id.clone(),
+                                    ),
+                                ),
+                                cx,
+                            ),
+                        ),
+                )
             } else if matches!(object.kind.as_str(), "poll" | "talk-poll")
                 && let Some(id) = object.id.as_ref().and_then(|id| id.as_str().parse().ok())
             {

@@ -299,6 +299,77 @@ impl Desktop {
                 SidebarDestination::Archive,
                 cx,
             ))
+            .when(
+                self.snapshot
+                    .account_reminders
+                    .as_ref()
+                    .is_some_and(|view| {
+                        Some(view.scope) == self.snapshot.active_account
+                            && view.support == FeatureSupport::Supported
+                    }),
+                |sidebar| {
+                    sidebar.child(
+                        self.button_with_leading_icon(
+                            "nav-reminders",
+                            ("Erinnerungen", "clock"),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Open(Overlay::Reminders),
+                            cx,
+                        )
+                        .w_full()
+                        .justify_start(),
+                    )
+                },
+            )
+            .when_some(
+                self.snapshot
+                    .federation_invitations
+                    .as_ref()
+                    .filter(|view| {
+                        Some(view.scope) == self.snapshot.active_account
+                            && view.support == FeatureSupport::Supported
+                            && !view.invitations.as_slice().is_empty()
+                    }),
+                |sidebar, view| {
+                    sidebar.child(
+                        self.button_with_leading_icon(
+                            "nav-federation",
+                            ("Einladungen", "users"),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Open(Overlay::Federation),
+                            cx,
+                        )
+                        .w_full()
+                        .justify_start()
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .flex_none()
+                                .min_w(px(18.))
+                                .h(px(18.))
+                                .px_1()
+                                .rounded_full()
+                                .bg(t.accent)
+                                .text_color(t.on_accent)
+                                .font_family("Google Sans Code")
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(px(11.))
+                                .line_height(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_center()
+                                .child(if view.invitations.as_slice().len() > 99 {
+                                    "99+".to_owned()
+                                } else {
+                                    view.invitations.as_slice().len().to_string()
+                                }),
+                        ),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex_none()

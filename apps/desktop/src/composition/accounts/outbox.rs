@@ -76,6 +76,45 @@ pub(super) struct Outbox {
     next_error: u64,
 }
 impl Outbox {
+    /// Apply pending reminder intents over an account observation, using only
+    /// room keys already bound in the current conversation list.
+    pub(super) fn project_reminders(
+        &self,
+        scope: AccountScope,
+        rooms: &[ConversationView],
+        reminders: &mut Vec<talk_core::ui::presentation::AccountReminderView>,
+    ) {
+        for entry in self.entries.iter().filter(|entry| {
+            entry.account == scope.account
+                && !matches!(
+                    entry.state,
+                    State::Failed | State::Removing | State::ParkedUncertain
+                )
+        }) {
+            let Intent::Reminder { message, timestamp } = &entry.intent else {
+                continue;
+            };
+            let Some(room) = rooms.iter().find(|room| {
+                room.context.account == scope
+                    && room.navigation_key.as_ref() == Some(&entry.record.room)
+            }) else {
+                continue;
+            };
+            reminders.retain(|item| {
+                item.context != room.context || item.message != u128::from(*message)
+            });
+            if let Some(timestamp) = timestamp
+                && reminders.len() < 100
+            {
+                reminders.push(talk_core::ui::presentation::AccountReminderView {
+                    context: room.context,
+                    message: u128::from(*message),
+                    timestamp: *timestamp,
+                    preview: None,
+                });
+            }
+        }
+    }
     fn next_index(&self, account: AccountId, now: Instant) -> Option<usize> {
         if self.entries.iter().any(|entry| {
             entry.account == account && matches!(entry.state, State::Running | State::Marking)
@@ -790,6 +829,33 @@ impl Accounts {
                     })
                 }
             }
+            A::EditScheduled {
+                id: scheduled,
+                body,
+                timestamp,
+                silent,
+            } => {
+                let valid = self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context)
+                    .is_some_and(|panel| {
+                        panel.scheduled.as_slice().iter().any(|item| {
+                            item.id == *scheduled && item.editable && item.silent == *silent
+                        })
+                    });
+                if !valid {
+                    Err(SubmitError::StaleScope)
+                } else {
+                    id(*scheduled).map(|id| Intent::EditScheduled {
+                        id,
+                        body: body.clone(),
+                        timestamp: *timestamp,
+                        silent: *silent,
+                    })
+                }
+            }
             A::CancelScheduled(message) => {
                 id(*message).map(|message| Intent::CancelScheduled { message })
             }
@@ -1477,7 +1543,10 @@ impl Accounts {
 fn retain_failure(intent: &Intent) -> bool {
     matches!(
         intent,
-        Intent::Send { .. } | Intent::Edit { .. } | Intent::Schedule { .. }
+        Intent::Send { .. }
+            | Intent::Edit { .. }
+            | Intent::Schedule { .. }
+            | Intent::EditScheduled { .. }
     )
 }
 fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
@@ -1513,6 +1582,11 @@ fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
             body.clone(),
             target(options),
             view::FailedDraftKind::Schedule(*timestamp),
+        ),
+        Intent::EditScheduled { id, body, .. } => (
+            body.clone(),
+            Default::default(),
+            view::FailedDraftKind::EditScheduled(u128::from(*id)),
         ),
         _ => return None,
     };
@@ -1582,7 +1656,10 @@ fn conflicts(earlier: &Entry, later: &Entry) -> bool {
     }
     match (&earlier.intent, &later.intent) {
         (Intent::Schedule { timestamp: a, .. }, Intent::Schedule { timestamp: b, .. }) => a == b,
-        (Intent::CancelScheduled { message: a }, Intent::CancelScheduled { message: b }) => a == b,
+        (Intent::CancelScheduled { message: a }, Intent::CancelScheduled { message: b })
+        | (Intent::CancelScheduled { message: a }, Intent::EditScheduled { id: b, .. })
+        | (Intent::EditScheduled { id: a, .. }, Intent::CancelScheduled { message: b })
+        | (Intent::EditScheduled { id: a, .. }, Intent::EditScheduled { id: b, .. }) => a == b,
         _ => false,
     }
 }
@@ -1698,6 +1775,20 @@ fn command(
             },
             W::ThreadQueued(u128::from(*root)),
         ),
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => (
+            C::EditScheduled {
+                id: mid(*id),
+                text: text(body.as_str()),
+                send_at: *timestamp,
+                silent: *silent,
+            },
+            W::EditScheduled(u128::from(*id)),
+        ),
         Intent::Forward {
             message,
             destination,
@@ -1744,7 +1835,9 @@ fn reconcile_command(
             C::ReadReminder(mid(*message)),
             W::Reminder(u128::from(*message)),
         ),
-        Intent::Schedule { .. } | Intent::CancelScheduled { .. } => (C::Scheduled, W::Action),
+        Intent::Schedule { .. } | Intent::CancelScheduled { .. } | Intent::EditScheduled { .. } => {
+            (C::Scheduled, W::ScheduledPoll)
+        }
     })
 }
 fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
@@ -1791,6 +1884,14 @@ fn reconciled(intent: &Intent, result: &wire::MessagingResult) -> bool {
         }
         Intent::CancelScheduled { message } => {
             matches!(result,wire::MessagingResult::Scheduled(values)if !values.as_slice().iter().any(|v|v.id.sequence==*message))
+        }
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => {
+            matches!(result, wire::MessagingResult::Scheduled(values) if values.as_slice().iter().any(|value| value.id.sequence == *id && value.text.as_str() == body.as_str() && value.send_at == *timestamp && value.options.silent == *silent))
         }
         Intent::Forward { .. } => matches!(
             result,
@@ -2069,7 +2170,9 @@ fn overlay(
             }
         }
         Intent::Schedule {
-            body, timestamp, ..
+            body,
+            timestamp,
+            options,
         } => {
             panel.scheduled = page(
                 panel
@@ -2083,7 +2186,26 @@ fn overlay(
                 id: pending_id,
                 body: body.clone(),
                 timestamp: *timestamp,
+                failed_original_timestamp: None,
+                editable: false,
+                silent: options.silent,
             });
+        }
+        Intent::EditScheduled {
+            id,
+            body,
+            timestamp,
+            silent,
+        } => {
+            panel.scheduled = page(panel.scheduled.as_slice().iter().cloned().map(|mut item| {
+                if item.id == u128::from(*id) {
+                    item.body = body.clone();
+                    item.timestamp = *timestamp;
+                    item.failed_original_timestamp = None;
+                    item.silent = *silent;
+                }
+                item
+            }));
         }
         Intent::CancelScheduled { message } => {
             panel.scheduled = page(
