@@ -65,6 +65,16 @@ fresh screen frames before the explicit stop. REST success alone never stands
 in for a resumed signaling read; the recorded phase must become active again.
 Do not run two browser drivers concurrently on the same endpoints.
 
+When extending a driver into a sustained native-UI journey, keep X11 commands,
+OCR and other blocking work off the asyncio thread that owns its forwards
+(for example, use `asyncio.to_thread`). A busy observer on that thread also
+stalls the client's network and can manufacture a recovery failure. Record
+event-loop lag with the media counters. `LoopbackForward` closes connections
+after 180 seconds, even with traffic, so a longer run through it exercises
+repeated transport recovery. Browser instrumentation also admits only eight
+peer connections per page lifetime; use fresh contexts between independent
+calls and report a diagnostic-bound failure separately from a client failure.
+
 `trace_signaling.py` accepts the same arguments and observes bounded HPB message
 metadata while forwarding unchanged bytes. It records hashed routing identities,
 message kinds and error codes, plus HTTP call/room mutation methods and relative

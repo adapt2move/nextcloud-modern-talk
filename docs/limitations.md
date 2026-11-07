@@ -219,7 +219,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   that share. These pending attachment intents are not durable across restart.
   Local raster previews use the same bounded decoder and stay out of disk caches.
   File-list and image paste and incoming file drops need native qualification on
-  each platform; file-list paste has been exercised on Linux X11. Caption and
+  each platform; file-list paste and incoming file drops with captions have
+  been exercised on Linux X11. Image paste still needs separate qualification. Caption and
   reply/thread/silent metadata require the corresponding server capabilities.
   Native outgoing file drags use AppKit file promises on macOS and still need
   Finder qualification; Linux and Windows use the Download action.
