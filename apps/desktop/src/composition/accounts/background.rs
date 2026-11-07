@@ -868,14 +868,12 @@ impl Accounts {
                         .metadata
                         .participant_index_ticket(row.context)
                         .is_some()
-                    {
-                        if let Some(observed) = cache
+                        && let Some(observed) = cache
                             .member_counts
                             .iter()
                             .find(|m| m.context == row.context)
-                        {
-                            row.participant_names = observed.names.clone();
-                        }
+                    {
+                        row.participant_names = observed.names.clone();
                     }
                     row
                 }));

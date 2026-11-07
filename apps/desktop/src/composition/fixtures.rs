@@ -833,6 +833,17 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             1
         }),
     );
+    if scenario == "search-filter" {
+        s.conversations = page(s.conversations.as_slice().iter().cloned().map(|mut row| {
+            if row.context == context(2) {
+                row.unread_mention = None;
+            }
+            if row.context == context(1) {
+                row.unread = 1;
+            }
+            row
+        }));
+    }
     match scenario {
         "offline" => s.content = ContentState::Offline,
         "offline-empty" => {

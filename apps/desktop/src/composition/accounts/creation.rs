@@ -372,6 +372,7 @@ fn finish_creation(
     {
         panel.people = Page::empty();
         panel.people_loaded = false;
+        panel.invites = Page::empty();
     }
     panel.state = match completion {
         Completion::Queued | Completion::ServerAccepted => RemoteState::Idle,
@@ -455,6 +456,7 @@ mod tests {
             "A directory read does not resolve an uncertain creation"
         );
         begin_creation(&mut panel, RequestId(3), Work::People);
+        panel.invites = page(panel.people.as_slice().iter().cloned());
         finish_creation(
             &mut panel,
             RequestId(3),
@@ -468,5 +470,6 @@ mod tests {
             "Known access loss retires retained directory identities"
         );
         assert!(!panel.people_loaded);
+        assert!(panel.invites.as_slice().is_empty());
     }
 }

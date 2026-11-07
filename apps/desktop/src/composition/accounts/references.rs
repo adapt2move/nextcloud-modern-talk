@@ -153,15 +153,13 @@ impl Accounts {
             .pending
             .as_ref()
             .is_some_and(|pending| !current.contains(&pending.binding))
+            && let Some(pending) = self.reference_owner.pending.take()
+            && let Ok(connection) = &mut self.connection
         {
-            if let Some(pending) = self.reference_owner.pending.take()
-                && let Ok(connection) = &mut self.connection
-            {
-                for request in &self.pending {
-                    if matches!(request.purpose, Purpose::Reference(_, _, _, generation) if generation == pending.generation)
-                    {
-                        let _ = connection.cancel_request(request.id);
-                    }
+            for request in &self.pending {
+                if matches!(request.purpose, Purpose::Reference(_, _, _, generation) if generation == pending.generation)
+                {
+                    let _ = connection.cancel_request(request.id);
                 }
             }
         }

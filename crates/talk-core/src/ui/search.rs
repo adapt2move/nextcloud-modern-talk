@@ -31,6 +31,10 @@ pub struct Panel {
     pub more: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "The fixed, bounded filters remain inline in the UI intent"
+)]
 pub enum Action {
     Search { term: Text<256>, filters: Filters },
     More,
