@@ -89,6 +89,11 @@ def capture(args, before_runtime_cleanup=None):
                         run(["xdotool", "windowfocus", "--sync", xid], env)
                         run(["xdotool", "windowmove", "--sync", xid, "0", "0"], env)
                         run(["xdotool", "windowsize", "--sync", xid, str(args.width), str(args.height)], env)
+                        if args.call_fullscreen:
+                            # The call fixture's header action owns fullscreen. Use
+                            # the native control, then capture the resulting window.
+                            run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
+                            time.sleep(.5)
                         run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
                         screenshot = out / f"{label}.png"
                         # A visible X11 window can precede its first Vulkan frame,
@@ -147,5 +152,6 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--scale", type=int, choices=[100,125,150,200], default=100)
+    parser.add_argument("--call-fullscreen", action="store_true", help="Activate the call header fullscreen control before capture")
     parser.add_argument("--interactions", action="store_true", help="Run native keyboard/mouse checks; requires tesseract-ocr")
     capture(parser.parse_args())
