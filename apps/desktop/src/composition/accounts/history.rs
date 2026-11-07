@@ -32,6 +32,7 @@ struct Flight {
     version: Version,
     started: Instant,
     poll_after: Option<u128>,
+    older_before: Option<u128>,
     tail_repair: bool,
 }
 
@@ -58,6 +59,8 @@ pub(super) struct History {
     // At most 99 adjacent pairs in the retained 100-row page. Unlike mutation
     // versions, these preserve observed pagination continuity across polls.
     read_edges: Vec<(u128, u128)>,
+    // Proof from an exhausted live older page. Never restored from disk.
+    first_message: Option<u128>,
     // One proven hidden continuation beyond an older retained window. This
     // stores IDs only, never another message page, and is not restored from disk.
     read_tail: Option<(u128, u128)>,
@@ -101,6 +104,7 @@ impl History {
             connectivity_version: Version(0, false),
             versions: Vec::new(),
             read_edges: Vec::new(),
+            first_message: None,
             read_tail: None,
             tail_probe: None,
             metadata_probe: None,
@@ -267,6 +271,15 @@ impl History {
         self.read_edges
             .iter()
             .find_map(|(previous, next)| (*next == id && *previous > 0).then_some(*previous))
+            .or_else(|| {
+                (self.first_message == Some(id)
+                    && self
+                        .messages
+                        .as_slice()
+                        .first()
+                        .is_some_and(|row| row.local_id == id))
+                .then_some(0)
+            })
     }
 
     /// Invisible pin activity carries no additional user content. A deliberate
@@ -567,6 +580,18 @@ impl Cache {
     }
     /// Record the actual dispatched cursor, including a bounded hidden-tail
     /// repair. The flight must not infer it from a newer canonical event cursor.
+    pub(super) fn older_admitted(
+        &mut self,
+        context: ConversationRef,
+        operation: OperationId,
+        before: u128,
+    ) {
+        if let Some(flight) = self.flights.iter_mut().find(|flight| {
+            flight.context == context && flight.operation == operation && flight.work == Work::Older
+        }) {
+            flight.older_before = Some(before);
+        }
+    }
     pub(super) fn poll_admitted(
         &mut self,
         context: ConversationRef,
@@ -577,13 +602,17 @@ impl Cache {
             .get(context)
             .is_some_and(|room| room.latest.is_some_and(|latest| after < latest));
         let Some(flight) = self.flights.iter_mut().find(|flight| {
-            flight.context == context && flight.operation == operation && flight.work == Work::Poll
+            flight.context == context
+                && flight.operation == operation
+                && matches!(flight.work, Work::Poll | Work::UnreadContext(_))
         }) else {
             return;
         };
         flight.poll_after = Some(after);
-        flight.tail_repair = repair;
-        if let Some(room) = self.get_mut(context)
+        let is_poll = flight.work == Work::Poll;
+        flight.tail_repair = is_poll && repair;
+        if is_poll
+            && let Some(room) = self.get_mut(context)
             && room.latest.is_some_and(|latest| after < latest)
         {
             room.tail_probe = Some((after, Instant::now()));
@@ -856,6 +885,7 @@ impl Cache {
             version: Version(serial, false),
             started,
             poll_after,
+            older_before: None,
             tail_repair: false,
         });
         if work == Work::Metadata
@@ -1039,6 +1069,7 @@ impl Cache {
                 | Work::Older
                 | Work::Poll
                 | Work::Context(_)
+                | Work::UnreadContext(_)
                 | Work::Recovery
         );
         // Retained content and reachability are independent. Only a newer
@@ -1077,6 +1108,15 @@ impl Cache {
                 ..
             }) if timeline => {
                 let was_loaded = room.loaded;
+                if work == Work::Older
+                    && messages.as_slice().is_empty()
+                    && cursor.is_none()
+                    && flight.older_before.is_some()
+                    && room.messages.as_slice().first().map(|row| row.local_id)
+                        == flight.older_before
+                {
+                    room.first_message = flight.older_before;
+                }
                 let incoming: Vec<_> = messages
                     .as_slice()
                     .iter()
@@ -1107,7 +1147,7 @@ impl Cache {
                     flight.tail_repair
                         || hidden_poll
                         || work == Work::Older
-                        || matches!(work, Work::Context(id)
+                        || matches!(work, Work::Context(id) | Work::UnreadContext(id)
                         if room.messages.as_slice().first().is_some_and(|m| id < m.local_id)),
                 );
                 if !matches!(work, Work::Recovery | Work::Context(_)) {
@@ -1118,7 +1158,7 @@ impl Cache {
                     || matches!(work, Work::Latest | Work::Prefetch) && room.latest.is_none()
                 {
                     room.older = cursor.map(|id| u128::from(id.sequence));
-                } else if matches!(work, Work::Context(_)) {
+                } else if matches!(work, Work::Context(_) | Work::UnreadContext(_)) {
                     room.older = room.messages.as_slice().first().map(|m| m.local_id);
                 }
                 // The forward cursor is an event cursor, not necessarily a
@@ -1195,7 +1235,7 @@ impl Cache {
             }
             Err(completion)
                 if timeline
-                    && !matches!(work, Work::Context(_))
+                    && !matches!(work, Work::Context(_) | Work::UnreadContext(_))
                     && (work == Work::Older || flight.version >= room.connectivity_version)
                     && (!work.background()
                         || (room.state_owner.background() || room.state == RemoteState::Idle)

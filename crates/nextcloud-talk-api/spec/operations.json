@@ -284,8 +284,8 @@
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
       "status": "partial",
-      "api": "Request::Chat / chat::Command::History / Poll",
-      "scope": "Bounded history/context and finite future polling with safe read/privacy defaults. No destructive chat long-poll owner."
+      "api": "Request::Chat / chat::Command::History / Poll / UnreadAfter",
+      "scope": "Bounded history/context and finite future reads with safe read/privacy defaults. UnreadAfter uses a nonnegative lastKnownMessageId (zero means start), lookIntoFuture=1 and timeout=0. No destructive chat long-poll owner. Source: spreed stable34 and stable35 lib/Controller/ChatController.php receiveMessages."
     },
     {
       "operation_id": "chat-clear-history",
@@ -412,8 +412,8 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/read",
       "status": "implemented",
-      "api": "Request::MarkRead",
-      "scope": "Bounded protocol operation; application policy, permission and UI integration remain separate obligations."
+      "api": "Request::MarkRead / Request::MarkUnreadFromStart",
+      "scope": "Read marker and explicit first-message unread sentinel (-2); application proves history boundaries and checks capability separately. Source: spreed stable34 and stable35 lib/Controller/ChatController.php setReadMarker and lib/Chat/ChatManager.php UNREAD_FIRST_MESSAGE."
     },
     {
       "operation_id": "chat-mark-unread",

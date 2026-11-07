@@ -36,6 +36,7 @@ pub(super) enum Work {
     UnreadFrom(u128),
     Typing,
     Context(u128),
+    UnreadContext(u128),
     Recovery,
 }
 impl Work {
@@ -59,7 +60,7 @@ impl Work {
         Some(match self {
             Self::History => DiagnosticOperation::History,
             Self::Older => DiagnosticOperation::Older,
-            Self::Context(_) => DiagnosticOperation::Context,
+            Self::Context(_) | Self::UnreadContext(_) => DiagnosticOperation::Context,
             Self::Thread => DiagnosticOperation::Thread,
             Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata => {
                 DiagnosticOperation::Poll
@@ -77,6 +78,7 @@ impl Work {
                 | Self::Prefetch
                 | Self::Older
                 | Self::Context(_)
+                | Self::UnreadContext(_)
                 | Self::Recovery
         )
     }
@@ -444,6 +446,16 @@ impl Accounts {
         }
         let poll_after = match &command {
             wire::MessagingCommand::Poll { after, .. } => Some(u128::from(after.sequence)),
+            wire::MessagingCommand::UnreadAfter(after) => {
+                Some(after.map_or(0, |id| u128::from(id.sequence)))
+            }
+            _ => None,
+        };
+        let older_before = match &command {
+            wire::MessagingCommand::History {
+                before: Some(before),
+                thread: None,
+            } if work == Work::Older => Some(u128::from(before.sequence)),
             _ => None,
         };
         self.request(
@@ -460,6 +472,9 @@ impl Accounts {
         if let Some(after) = poll_after {
             self.history.poll_admitted(context, operation, after);
         }
+        if let Some(before) = older_before {
+            self.history.older_admitted(context, operation, before);
+        }
         if queued.is_none()
             && let Some(panel) = self
                 .snapshot
@@ -475,7 +490,7 @@ impl Accounts {
                 Work::History | Work::Older => panel.history = RemoteState::Loading(request),
                 Work::Thread => panel.thread_state = RemoteState::Loading(request),
                 Work::ThreadRoot(_) => panel.thread_root_state = RemoteState::Loading(request),
-                Work::Context(target) => {
+                Work::Context(target) | Work::UnreadContext(target) => {
                     panel.context_load = Some(view::ContextLoad {
                         target,
                         state: RemoteState::Loading(request),
@@ -709,6 +724,7 @@ impl Accounts {
             V::React { message, .. } => Work::Reaction(*message),
             V::ReactionAuthors { .. } => Work::ReactionAuthors,
             V::Context(id) => Work::Context(*id),
+            V::LocateUnreadAfter(marker) => Work::UnreadContext(*marker),
             V::Forward { destination, .. } => Work::Forward(*destination),
             V::Reminder { message, .. } => Work::Reminder(*message),
             V::CancelScheduled(id) => Work::CancelScheduled(*id),
@@ -810,6 +826,11 @@ impl Accounts {
                 thread: None,
             },
             V::Context(id) => W::Context(message_id(context, id)?),
+            V::LocateUnreadAfter(marker) => W::UnreadAfter(
+                (marker > 0)
+                    .then(|| message_id(context, marker))
+                    .transpose()?,
+            ),
             V::Send { body, target } => W::Send {
                 text: text(body.as_str()),
                 options: options(context, target, body.as_str())?,
@@ -838,7 +859,11 @@ impl Accounts {
                 let Work::UnreadFrom(previous) = work else {
                     return Err(SubmitError::StaleScope);
                 };
-                W::MarkUnreadFrom(message_id(context, previous)?)
+                if previous == 0 {
+                    W::MarkUnreadFromStart
+                } else {
+                    W::MarkUnreadFrom(message_id(context, previous)?)
+                }
             }
             V::Typing(v) => W::Typing(v),
             V::Mentions(v) => W::Mentions(v),
@@ -1065,7 +1090,7 @@ impl Accounts {
                             && panel.thread_state == RemoteState::Loading(request)
                     })
             }
-            Work::Context(target) => {
+            Work::Context(target) | Work::UnreadContext(target) => {
                 self.snapshot.selected == Some(context)
                     && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                         panel.context == context
@@ -1155,13 +1180,16 @@ impl Accounts {
             _ if work.foreground_result() => Err(Completion::Uncertain),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
-        let mut result = if matches!(work, Work::Thread | Work::ThreadRoot(_) | Work::Context(_))
-            && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
-        {
-            Err(Completion::Failed(UnavailableReason::PolicyStale))
-        } else {
-            result
-        };
+        let mut result =
+            if matches!(
+                work,
+                Work::Thread | Work::ThreadRoot(_) | Work::Context(_) | Work::UnreadContext(_)
+            ) && !matches!(&result, Ok(wire::MessagingResult::Messages { .. }) | Err(_))
+            {
+                Err(Completion::Failed(UnavailableReason::PolicyStale))
+            } else {
+                result
+            };
         if result.is_ok()
             && !match (work, &result) {
                 (Work::Search, Ok(wire::MessagingResult::Search { .. }))
@@ -1262,6 +1290,7 @@ impl Accounts {
                         | Work::Poll
                         | Work::Metadata
                         | Work::Context(_)
+                        | Work::UnreadContext(_)
                 ) =>
             {
                 messages
@@ -1296,7 +1325,21 @@ impl Accounts {
                         project_capabilities(panel, &capabilities);
                     }
                     wire::MessagingResult::Messages { messages, .. } => {
-                        if let Work::Context(id) = work {
+                        if let Work::UnreadContext(marker) = work {
+                            if let Some(first) = messages
+                                .as_slice()
+                                .iter()
+                                .map(message_view)
+                                .filter(|message| {
+                                    message.local_id > marker && !message.metadata.pin_notice
+                                })
+                                .min_by_key(|message| message.local_id)
+                            {
+                                panel.located = Some((request, first.local_id));
+                            } else {
+                                completion = Completion::Failed(UnavailableReason::PolicyUnknown);
+                            }
+                        } else if let Work::Context(id) = work {
                             if messages
                                 .as_slice()
                                 .iter()
@@ -1601,7 +1644,7 @@ impl Accounts {
         if matches!(work, Work::ThreadRoot(_)) {
             panel.thread_root_state = state;
         }
-        if matches!(work, Work::Context(_))
+        if matches!(work, Work::Context(_) | Work::UnreadContext(_))
             && let Some(load) = panel.context_load.as_mut()
         {
             load.state = state;

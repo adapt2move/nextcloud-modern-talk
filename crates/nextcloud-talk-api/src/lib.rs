@@ -95,6 +95,10 @@ pub enum Request {
         room: RoomToken,
         message: u64,
     },
+    /// Talk's explicit first-message unread sentinel, not a message ID.
+    MarkUnreadFromStart {
+        room: RoomToken,
+    },
     CreateGroup {
         name: String,
     },
@@ -862,6 +866,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
                 Kind::Ack,
             )
         }
+        Request::MarkUnreadFromStart { room: t } => (
+            Method::POST,
+            room("v1/chat", t, "/read"),
+            vec![],
+            vec![("lastReadMessage", "-2".into())],
+            Kind::Ack,
+        ),
         Request::CreateGroup { name } => {
             bounded(name, 256)?;
             if name.trim().is_empty() {

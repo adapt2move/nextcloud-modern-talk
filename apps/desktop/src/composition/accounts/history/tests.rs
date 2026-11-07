@@ -1381,7 +1381,7 @@ fn admit_target(
             panel.thread_root = Some(7);
             panel.thread_state = RemoteState::Loading(RequestId(serial));
         }
-        Work::Context(target) => {
+        Work::Context(target) | Work::UnreadContext(target) => {
             panel.context_load = Some(talk_core::ui::messaging::ContextLoad {
                 target,
                 state: RemoteState::Loading(RequestId(serial)),
@@ -1391,6 +1391,92 @@ fn admit_target(
         _ => panic!("targeted read required"),
     }
     operation
+}
+
+#[test]
+fn locating_unread_uses_first_visible_scoped_row_without_rewinding_live_cursor() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 80, "Newer window")], Some(80)),
+    );
+    model.project_history(key);
+    let operation = admit_target(&mut model, key, 2, Work::UnreadContext(10));
+    model.history.poll_admitted(key, operation, 10);
+    model.apply_message(
+        RequestId(2),
+        key,
+        operation,
+        Work::UnreadContext(10),
+        reply(
+            key,
+            operation,
+            messages(
+                key,
+                [
+                    message(key, 15, "Second unread"),
+                    message(key, 11, "First unread"),
+                ],
+                Some(15),
+            ),
+        ),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.located, Some((RequestId(2), 11)));
+    assert_eq!(
+        panel.context_load.as_ref().unwrap().state,
+        RemoteState::Idle
+    );
+    let history = model.history.get(key).unwrap();
+    assert_eq!(history.latest, Some(80));
+    assert_eq!(history.predecessor(11), None);
+}
+
+#[test]
+fn first_unread_requires_a_live_exhausted_page_for_the_same_oldest_row() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(
+            key,
+            [message(key, 7, "First"), message(key, 8, "Next")],
+            Some(7),
+        ),
+    );
+    assert_eq!(cache.get(key).unwrap().predecessor(7), None);
+    let stale = admit(&mut cache, key, 2, Work::Older);
+    cache.older_admitted(key, stale, 8);
+    assert!(cache.complete(
+        key,
+        stale,
+        Work::Older,
+        RequestId(2),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().predecessor(7), None);
+    let current = admit(&mut cache, key, 3, Work::Older);
+    cache.older_admitted(key, current, 7);
+    assert!(cache.complete(
+        key,
+        current,
+        Work::Older,
+        RequestId(3),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().predecessor(7), Some(0));
+    assert_eq!(cache.get(key).unwrap().predecessor(8), Some(7));
 }
 
 fn reply(

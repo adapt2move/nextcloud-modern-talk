@@ -27,6 +27,10 @@ pub enum Command {
         after: u64,
         thread: Option<u64>,
     },
+    /// Finite, read-only forward page for locating the first unread message.
+    UnreadAfter {
+        after: Option<u64>,
+    },
     Context(u64),
     Send {
         message: String,
@@ -565,11 +569,16 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     let mut f = Vec::new();
     let mut kind = Kind::Ack;
     match c {
-        C::History { thread, .. } | C::Poll { thread, .. } => {
-            let future = matches!(c, C::Poll { .. });
+        C::History { .. } | C::Poll { .. } | C::UnreadAfter { .. } => {
+            let future = matches!(c, C::Poll { .. } | C::UnreadAfter { .. });
             let cursor = match c {
                 C::Poll { after, .. } => Some(*after),
                 C::History { before, .. } => *before,
+                C::UnreadAfter { after } => Some(after.unwrap_or(0)),
+                _ => None,
+            };
+            let thread = match c {
+                C::History { thread, .. } | C::Poll { thread, .. } => *thread,
                 _ => None,
             };
             q.extend([
@@ -584,11 +593,13 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
                 ("timeout", "0".into()),
             ]);
             if let Some(id) = cursor {
-                positive(id)?;
+                if !matches!(c, C::UnreadAfter { .. }) {
+                    positive(id)?;
+                }
                 q.push(("lastKnownMessageId", id.to_string()))
             }
             if let Some(id) = thread {
-                positive(*id)?;
+                positive(id)?;
                 q.push(("threadId", id.to_string()))
             }
             kind = Kind::History;
@@ -911,6 +922,22 @@ pub(crate) fn validate(room: &RoomToken, response: &Response) -> Result<(), Erro
 mod thread_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn unread_location_is_a_finite_forward_read_without_read_side_effects() {
+        let room = RoomToken::parse("room1234").unwrap();
+        for after in [None, Some(42)] {
+            let (method, _, query, _, _, mutation) =
+                plan(&room, &Command::UnreadAfter { after }).unwrap();
+            assert_eq!(method, Method::GET);
+            assert!(!mutation);
+            assert!(query.contains(&("lookIntoFuture", "1".into())));
+            assert!(query.contains(&("lastKnownMessageId", after.unwrap_or(0).to_string())));
+            assert!(query.contains(&("setReadMarker", "0".into())));
+            assert!(query.contains(&("markNotificationsAsRead", "0".into())));
+            assert!(query.contains(&("timeout", "0".into())));
+        }
+    }
 
     #[test]
     fn rejects_zero_thread_id_before_exposing_it_to_callers() {

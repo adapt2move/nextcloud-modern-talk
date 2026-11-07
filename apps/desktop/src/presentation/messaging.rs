@@ -56,6 +56,7 @@ pub(crate) enum Action {
     ToggleSearch,
     CloseSearch,
     Locate(u128),
+    JumpUnread,
     CyclePin { current: u128, forward: bool },
     Schedule,
     CancelTime,
@@ -98,6 +99,7 @@ pub(super) struct MessageUi {
     unread_prior: Option<(RequestId, Option<(ConversationRef, u128)>)>,
     unread_marker: Option<(ConversationRef, u128)>,
     first_unread: Option<(ConversationRef, u128)>,
+    unread_jump: Option<(ConversationRef, RequestId)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
     pub time_input: Entity<TextInput>,
@@ -288,6 +290,7 @@ impl MessageUi {
             unread_prior: None,
             unread_marker: None,
             first_unread: None,
+            unread_jump: None,
             last_located: None,
             time_target: None,
             time_input: cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx)),
@@ -727,6 +730,7 @@ impl Desktop {
                     .and_then(|row| row.last_read_message.map(|marker| (context, marker)))
             });
             self.message_ui.first_unread = None;
+            self.message_ui.unread_jump = None;
             self.message_ui.list.reset(rows.len());
             self.message_ui.observed = rows.to_vec();
             self.message_ui.menu.clear();
@@ -846,6 +850,10 @@ impl Desktop {
             && rows.iter().any(|m| m.local_id == id)
         {
             if let Some(context) = self.snapshot.selected {
+                if self.message_ui.unread_jump == Some((context, request)) {
+                    self.message_ui.first_unread = Some((context, id));
+                    self.message_ui.unread_jump = None;
+                }
                 self.locate_message_smooth(context, id);
             }
             self.message_ui.last_located = Some(request);
@@ -980,6 +988,17 @@ impl Desktop {
         self.snapshot.selected
     }
     fn observe_visible_message(&mut self, context: ConversationRef) {
+        if self.message_ui.unread_jump.is_some_and(|(room, request)| {
+            room == context
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    panel.context == context
+                        && panel.context_load.as_ref().is_some_and(|load| {
+                            load.state == talk_core::ui::conversation::RemoteState::Loading(request)
+                        })
+                })
+        }) {
+            return;
+        }
         if self
             .snapshot
             .message_panel
@@ -1477,7 +1496,15 @@ impl Desktop {
                     .and_then(|panel| panel.context_load.as_ref())
                     .is_some_and(|load| current_context_retry(load, request, target))
                 {
-                    self.submit_message(MessageAction::Context(target));
+                    if self.message_ui.unread_jump == Some((context, request)) {
+                        if let Some(next) =
+                            self.submit_message(MessageAction::LocateUnreadAfter(target))
+                        {
+                            self.message_ui.unread_jump = Some((context, next));
+                        }
+                    } else {
+                        self.submit_message(MessageAction::Context(target));
+                    }
                 }
             }
             Action::Reply(id) => {
@@ -1579,6 +1606,7 @@ impl Desktop {
             Action::CloseSearch => self.close_conversation_search(window, cx),
             Action::CyclePin { current, forward } => self.cycle_pin(context, current, forward),
             Action::Locate(id) => {
+                self.message_ui.unread_jump = None;
                 if self.locate_message_smooth(context, id) {
                     if self.overlay == Some(Overlay::Files) {
                         self.handle(LocalAction::Close, window, cx);
@@ -1590,6 +1618,27 @@ impl Desktop {
                     && self.overlay == Some(Overlay::Files)
                 {
                     self.handle(LocalAction::Close, window, cx);
+                }
+            }
+            Action::JumpUnread => {
+                if let Some((_, first)) = self
+                    .message_ui
+                    .first_unread
+                    .filter(|(room, _)| *room == context)
+                    && self.locate_message_smooth(context, first)
+                {
+                    cx.notify();
+                    return;
+                }
+                if let Some((_, marker)) = self
+                    .message_ui
+                    .unread_marker
+                    .filter(|(room, _)| *room == context)
+                    && self.snapshot.content == ContentState::Ready
+                    && let Some(request) =
+                        self.submit_message(MessageAction::LocateUnreadAfter(marker))
+                {
+                    self.message_ui.unread_jump = Some((context, request));
                 }
             }
             Action::Schedule => {
@@ -2016,8 +2065,13 @@ impl Desktop {
             .message_ui
             .first_unread
             .filter(|(room, _)| Some(*room) == context);
+        let unread_marker = self
+            .message_ui
+            .unread_marker
+            .filter(|(room, _)| Some(*room) == context);
         let show_unread_jump = unread_target.is_some()
-            && self.message_ui.geometry.borrow().unread_visible == Some(false);
+            && self.message_ui.geometry.borrow().unread_visible == Some(false)
+            || unread_target.is_none() && unread_marker.is_some();
         self.message_ui.geometry.borrow_mut().painted.clear();
         let inert = self.background_inert;
         div()
@@ -2211,14 +2265,25 @@ impl Desktop {
                 .size_full(),
             )
             .when(show_unread_jump, |area| {
-                let Some((context, message)) = unread_target else { return area };
+                let Some(context) = context else { return area };
+                let loading = self.message_ui.unread_jump.is_some_and(|(room, request)| {
+                    room == context && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                        panel.context_load.as_ref().is_some_and(|load| {
+                            load.state == talk_core::ui::conversation::RemoteState::Loading(request)
+                        })
+                    })
+                });
                 area.child(
                     div().absolute().right_4().bottom_4().child(self.button(
                         "jump-unread",
                         "Zu ungelesenen springen",
                         ButtonStyle::Secondary,
-                        true,
-                        LocalAction::MessageIn(context, Action::Locate(message)),
+                        if loading {
+                            Availability::pending()
+                        } else {
+                            Availability::when(unread_target.is_some() || self.snapshot.content == ContentState::Ready, "Die Verbindung ist derzeit nicht bereit.")
+                        },
+                        LocalAction::MessageIn(context, Action::JumpUnread),
                         cx,
                     )),
                 )

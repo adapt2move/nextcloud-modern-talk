@@ -30,6 +30,7 @@ pub(super) fn is_mutation(c: &MessagingCommand) -> bool {
         MessagingCommand::Capabilities
             | MessagingCommand::History { .. }
             | MessagingCommand::Poll { .. }
+            | MessagingCommand::UnreadAfter(_)
             | MessagingCommand::Context(_)
             | MessagingCommand::ReconcileSend
             | MessagingCommand::ReactionAuthors { .. }
@@ -48,13 +49,17 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
     use MessagingCommand as C;
     use MessagingFeature as F;
     match c {
-        C::History { .. } | C::Poll { .. } | C::Context(_) | C::ReconcileSend => F::Read,
+        C::History { .. }
+        | C::Poll { .. }
+        | C::UnreadAfter(_)
+        | C::Context(_)
+        | C::ReconcileSend => F::Read,
         C::Send { .. } => F::Send,
         C::Edit { .. } => F::Edit,
         C::Delete(_) => F::Delete,
         C::React { .. } | C::ReactionAuthors { .. } => F::React,
         C::MarkUnread => F::MarkUnread,
-        C::MarkUnreadFrom(_) => F::UnreadFrom,
+        C::MarkUnreadFrom(_) | C::MarkUnreadFromStart => F::UnreadFrom,
         C::MarkRead(_) => F::ReadReceipts,
         C::Typing(_) => F::Typing,
         C::Mentions(_) => F::Mentions,
@@ -1083,6 +1088,17 @@ impl NextcloudClient {
             }
             return Ok(R::Changed);
         }
+        if matches!(command, C::MarkUnreadFromStart) {
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            self.transport
+                .api_request(c, api::Request::MarkUnreadFromStart { room: token })
+                .await?;
+            if let Some(binding) = self.rooms.iter_mut().find(|binding| binding.id == id) {
+                binding.read_through = Some(0);
+            }
+            return Ok(R::Changed);
+        }
         if let C::MarkRead(message) = command {
             self.message_scope(message, id)?;
             let observed = wire::integer(data.get("lastReadMessage"));
@@ -1128,6 +1144,11 @@ impl NextcloudClient {
             C::Poll { after, thread } => WireCommand::Poll {
                 after: self.message_scope(*after, id)?,
                 thread: thread.map(|m| self.message_scope(m, id)).transpose()?,
+            },
+            C::UnreadAfter(after) => WireCommand::UnreadAfter {
+                after: after
+                    .map(|message| self.message_scope(message, id))
+                    .transpose()?,
             },
             C::Context(m) => WireCommand::Context(self.message_scope(*m, id)?),
             C::Edit { message, text } => {
@@ -1335,6 +1356,64 @@ impl NextcloudClient {
             }
             r => r?,
         };
+        if let C::UnreadAfter(after) = &command {
+            // Edits, reactions and pin notices can occupy a whole forward page
+            // without producing a visible new row. Follow their server cursor,
+            // with the same deadline and a strict limit on additional reads.
+            let marker = after.map_or(0, |message| message.sequence);
+            let mut cursor = marker;
+            for _ in 0..3 {
+                let api::Reply::History {
+                    messages,
+                    last_given,
+                    ..
+                } = &response
+                else {
+                    break;
+                };
+                let visible = messages.iter().any(|event| {
+                    let hidden = matches!(
+                        event.system.as_deref(),
+                        Some(
+                            "reaction_deleted"
+                                | "message_edited"
+                                | "message_deleted"
+                                | "reaction"
+                                | "reaction_revoked"
+                        )
+                    );
+                    let Some(row) = event.update.as_deref().or((!hidden).then_some(event)) else {
+                        return false;
+                    };
+                    row.id > marker
+                        && !row.expires.is_some_and(|expires| expires <= now_unix())
+                        && !matches!(
+                            row.system.as_deref(),
+                            Some("message_pinned" | "message_unpinned")
+                        )
+                });
+                let Some(next) = last_given.filter(|next| *next > cursor) else {
+                    break;
+                };
+                if visible {
+                    break;
+                }
+                cursor = next;
+                response = self
+                    .transport
+                    .api_request(
+                        c,
+                        api::Request::Chat {
+                            room: api::models::RoomToken::parse(self.check_room(id)?)
+                                .map_err(|kind| self.error(transport::kind(kind)))?,
+                            command: WireCommand::UnreadAfter {
+                                after: Some(cursor),
+                            },
+                        },
+                    )
+                    .await?;
+            }
+        }
         if let C::Reminder { message, timestamp } = &command {
             // POST/DELETE acknowledge the write without returning a reminder.
             // Read the created value once under the same deadline; never turn

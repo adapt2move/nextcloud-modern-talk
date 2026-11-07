@@ -10,6 +10,17 @@ use tokio::{
 };
 
 #[test]
+fn marking_the_first_message_unread_uses_talks_explicit_sentinel() {
+    let room = RoomToken::parse("room1234").unwrap();
+    let (method, route, _, form, _, mutation) =
+        plan(&Request::MarkUnreadFromStart { room }).unwrap();
+    assert_eq!(method, Method::POST);
+    assert!(route.ends_with("/chat/room1234/read"));
+    assert_eq!(form, vec![("lastReadMessage", "-2".into())]);
+    assert!(mutation);
+}
+
+#[test]
 fn subscribed_threads_are_account_scoped_and_paged() {
     let (method, route, query, _, _, mutation) =
         plan(&Request::SubscribedThreads { offset: 50 }).unwrap();

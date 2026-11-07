@@ -446,6 +446,8 @@ pub enum MessageAction {
     MarkRead(u128),
     MarkUnread,
     MarkUnreadFrom(u128),
+    /// Locate the first visible message after the read marker; zero means start.
+    LocateUnreadAfter(u128),
     Typing(bool),
     Mentions(Text<256>),
     Search(Text<256>),

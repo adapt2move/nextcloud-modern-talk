@@ -26,6 +26,21 @@ fn occupied(model: &mut Accounts, work: Work) {
 }
 
 #[test]
+fn unread_location_preserves_the_room_scope_and_start_sentinel() {
+    let room = crate::composition::fixtures::context(1);
+    assert!(matches!(
+        Read::UnreadAfter(0).command(room),
+        Ok(wire::MessagingCommand::UnreadAfter(None))
+    ));
+    let Ok(wire::MessagingCommand::UnreadAfter(Some(marker))) = Read::UnreadAfter(42).command(room)
+    else {
+        panic!("scoped unread cursor")
+    };
+    assert_eq!(marker.conversation, room.conversation);
+    assert_eq!(marker.sequence, 42);
+}
+
+#[test]
 fn only_busy_nonadmission_retries_the_exact_request_and_target_without_extending_its_deadline() {
     let now = Instant::now();
     let mut pending = Some(job(now));

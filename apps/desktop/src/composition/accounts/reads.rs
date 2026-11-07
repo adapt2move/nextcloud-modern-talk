@@ -14,6 +14,7 @@ use talk_core::{
 enum Read {
     Thread(u128),
     Context(u128),
+    UnreadAfter(u128),
     Older(u128),
     Refresh,
     Pins,
@@ -35,6 +36,7 @@ impl Read {
         Some(Ok(match action {
             A::Thread(root) => Self::Thread(*root),
             A::Context(target) => Self::Context(*target),
+            A::LocateUnreadAfter(marker) => Self::UnreadAfter(*marker),
             A::Older => Self::Older(
                 match model
                     .snapshot
@@ -74,6 +76,7 @@ impl Read {
         match self {
             Self::Thread(_) => Work::Thread,
             Self::Context(id) => Work::Context(*id),
+            Self::UnreadAfter(marker) => Work::UnreadContext(*marker),
             Self::Older(_) => Work::Older,
             Self::Refresh => Work::History,
             Self::Pins => Work::Pins,
@@ -105,6 +108,9 @@ impl Read {
                 thread: Some(id(*root)?),
             },
             Self::Context(target) => wire::MessagingCommand::Context(id(*target)?),
+            Self::UnreadAfter(marker) => {
+                wire::MessagingCommand::UnreadAfter((*marker > 0).then(|| id(*marker)).transpose()?)
+            }
             Self::Older(before) => wire::MessagingCommand::History {
                 before: Some(id(*before)?),
                 thread: None,
@@ -199,7 +205,7 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
                 panel.thread_state = state;
             }
         }
-        Read::Context(target) => {
+        Read::Context(target) | Read::UnreadAfter(target) => {
             if initial {
                 panel.context_load = Some(view::ContextLoad {
                     target: *target,

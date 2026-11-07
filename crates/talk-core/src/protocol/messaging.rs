@@ -148,6 +148,8 @@ pub enum MessagingCommand {
         after: MessageId,
         thread: Option<MessageId>,
     },
+    /// First bounded forward page after the room read marker; None means start.
+    UnreadAfter(Option<MessageId>),
     Context(MessageId),
     /// Read-only recovery of one durable send correlation after restart. Absence
     /// in the bounded search is uncertain and never authorizes a second POST.
@@ -173,6 +175,8 @@ pub enum MessagingCommand {
     MarkUnread,
     /// Explicitly rewind to the observed predecessor of the selected message.
     MarkUnreadFrom(MessageId),
+    /// Mark from the beginning when a live exhausted history proves the first row.
+    MarkUnreadFromStart,
     MarkRead(MessageId),
     Typing(bool),
     Mentions(Text<256>),

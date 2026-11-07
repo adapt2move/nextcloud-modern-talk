@@ -61,6 +61,25 @@ fn canonical_accepted_id(result: MR, operation: OperationId) -> MessageId {
     assert!(id.sequence > 0);
     id
 }
+async fn read_marker(
+    client: &mut NextcloudClient,
+    runtime: &NetworkRuntime,
+    id: ConversationId,
+) -> Option<u64> {
+    let ProtocolReply::Conversations(list) = client
+        .request(context(runtime), ProtocolRequest::ListConversations)
+        .await
+        .expect("conversation list")
+    else {
+        panic!("conversation list")
+    };
+    list.rooms
+        .as_slice()
+        .iter()
+        .find(|room| room.id == id)
+        .expect("test room")
+        .last_read_message
+}
 async fn m(
     c: &mut NextcloudClient,
     r: &NetworkRuntime,
@@ -450,6 +469,44 @@ async fn released_server_messaging_and_room_controls() {
     .await;
     let second = canonical_accepted_id(sent, OperationId::from_local(102));
     assert_eq!(second.conversation, id);
+    let marker_before = read_marker(&mut client, &runtime, id).await;
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        135,
+        "unread-from-start",
+        M::UnreadAfter(None),
+    )
+    .await
+    else {
+        panic!("unread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == first)
+    );
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        136,
+        "unread-after-marker",
+        M::UnreadAfter(Some(first)),
+    )
+    .await
+    else {
+        panic!("unread page")
+    };
+    assert!(
+        messages
+            .as_slice()
+            .iter()
+            .any(|message| message.message.id == second)
+    );
+    assert_eq!(read_marker(&mut client, &runtime, id).await, marker_before);
     m(
         &mut client,
         &runtime,
@@ -836,6 +893,16 @@ async fn released_server_messaging_and_room_controls() {
         M::MarkUnreadFrom(first),
     )
     .await;
+    m(
+        &mut client,
+        &runtime,
+        id,
+        137,
+        "mark-unread-from-start",
+        M::MarkUnreadFromStart,
+    )
+    .await;
+    assert_eq!(read_marker(&mut client, &runtime, id).await, Some(0));
     m(&mut client, &runtime, id, 130, "mark-unread", M::MarkUnread).await;
     let MR::Message(deleted) = m(&mut client, &runtime, id, 131, "delete", M::Delete(second)).await
     else {
