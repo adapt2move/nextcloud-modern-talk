@@ -185,10 +185,6 @@ impl Desktop {
         };
         let content = if overlay == Overlay::CallChat {
             div().flex_1().min_h_0().child(body).into_any_element()
-        } else if matches!(overlay, Overlay::ConfirmRecording | Overlay::ConfirmEndCall) {
-            // These compact confirmations have no independently scrolling
-            // content. Let their natural height include the action-row padding.
-            div().flex_none().p_6().child(body).into_any_element()
         } else {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
@@ -214,6 +210,10 @@ impl Desktop {
                         .max_h_full()
                         .min_h_0()
                         .when(side, |d| d.h_full())
+                        // Reserve space for wrapped titles and action rows;
+                        // content can still scroll at larger text scales.
+                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
+                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
