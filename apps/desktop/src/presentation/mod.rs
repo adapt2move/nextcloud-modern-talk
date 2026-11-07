@@ -2191,6 +2191,9 @@ impl Desktop {
                 if self.overlay == Some(Overlay::Thread) && !self.save_thread_draft(cx) {
                     return;
                 }
+                if self.overlay == Some(Overlay::Thread) {
+                    self.retire_thread_deadline();
+                }
                 self.thread_options_open = false;
                 self.thread_renaming = false;
                 self.startup_account_dialog = false;

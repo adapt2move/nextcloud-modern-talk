@@ -707,7 +707,18 @@ impl Desktop {
                         });
                     }
                     Choice::Remind => {
-                        self.message_action(Action::Remind(target.message), window, cx);
+                        self.message_action(
+                            Action::Remind {
+                                message: target.message,
+                                thread: thread_menu
+                                    .then_some(self.thread_parent)
+                                    .flatten()
+                                    .filter(|(context, _)| *context == target.context)
+                                    .map(|(_, root)| root),
+                            },
+                            window,
+                            cx,
+                        );
                     }
                     Choice::RemoveReminder => {
                         self.submit_message(MessageAction::Reminder {

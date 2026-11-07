@@ -563,6 +563,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             for feature in [
                 talk_core::ui::messaging::MessageFeature::Reminders,
                 talk_core::ui::messaging::MessageFeature::Translation,
+                talk_core::ui::messaging::MessageFeature::Schedules,
             ] {
                 let _ = panel.features.try_push((
                     feature,

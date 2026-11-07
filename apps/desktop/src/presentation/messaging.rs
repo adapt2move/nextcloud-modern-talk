@@ -69,7 +69,7 @@ pub(crate) enum Action {
     EditScheduled(u128),
     ToggleScheduled,
     CancelTime,
-    Remind(u128),
+    Remind { message: u128, thread: Option<u128> },
     SubmitTime,
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
     ChooseTime(talk_core::preferences::time::DeadlineChoice),
@@ -511,14 +511,14 @@ impl Desktop {
             return;
         }
         match surface {
-            "chat-reminder-time" => self.open_message_deadline(Some(45), window, cx),
+            "chat-reminder-time" => self.open_message_deadline(Some(45), None, window, cx),
             "chat-reminder-menu" => self.message_ui.fixture_menu_pending = true,
             "chat-schedule-time" => {
                 self.composer.update(cx, |input, cx| {
                     input.set_context_value("Fiktive Nachricht für morgen.");
                     cx.notify();
                 });
-                self.open_message_deadline(None, window, cx);
+                self.open_message_deadline(None, None, window, cx);
                 if self.message_ui.picker.is_none() {
                     self.message_ui.picker =
                         talk_core::preferences::time::calendar::Calendar::parse("2027-01-16 09:00");
@@ -1830,7 +1830,7 @@ impl Desktop {
             }
             Action::Schedule => {
                 self.message_ui.scheduled_edit = None;
-                self.open_message_deadline(None, window, cx);
+                self.open_message_deadline(None, None, window, cx);
             }
             Action::EditScheduled(id) => {
                 self.open_scheduled_edit(id, window, cx);
@@ -1842,16 +1842,17 @@ impl Desktop {
                 }
             }
             Action::CancelTime => {
+                let thread = self.message_ui.time_thread;
                 self.message_ui.time_target = None;
                 self.message_ui.time_thread = None;
                 self.message_ui.picker = None;
                 self.message_ui.scheduled_edit = None;
                 self.message_ui.time_error = None;
-                self.restore_deadline_focus(window, cx);
+                self.restore_deadline_focus(thread, window, cx);
             }
-            Action::Remind(id) => {
+            Action::Remind { message, thread } => {
                 self.message_ui.scheduled_edit = None;
-                self.open_message_deadline(Some(id), window, cx);
+                self.open_message_deadline(Some(message), thread, window, cx);
             }
             Action::SubmitTime => {
                 self.submit_custom_deadline(

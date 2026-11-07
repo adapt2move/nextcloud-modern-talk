@@ -231,6 +231,15 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         type_text('X')
         expect_settled('thread reminder cancellation restores its draft focus', ['THREADTOOLSX'], ['Später erinnern'])
+        click('Nachricht', xmin=280, ymin=650, inspected_point=(1280,800,400,700))
+        type_text('MAINCALENDAR')
+        expect_settled('main and thread composers retain independent drafts', ['MAINCALENDAR', 'THREADTOOLSX'])
+        click('send-later', inspected_point=(1280,800,768,742))
+        expect('main send-later stays beside the open thread', ['Nachricht planen', 'Design review', 'THREADTOOLSX'])
+        key('Escape')
+        type_text('X')
+        expect_settled('main calendar cancellation preserves the thread and restores main focus',
+                       ['MAINCALENDARX', 'Design review', 'THREADTOOLSX'], ['Nachricht planen'])
     elif scenario == 'server':
         click('cloud.example.test')
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')

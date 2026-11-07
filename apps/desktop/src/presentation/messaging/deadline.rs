@@ -3,6 +3,15 @@ use super::*;
 use talk_core::preferences::time::{DeadlineChoice, LocalTimeError, RepeatedTime};
 
 impl Desktop {
+    pub(in crate::presentation) fn retire_thread_deadline(&mut self) {
+        if self.message_ui.time_thread.is_some() {
+            self.message_ui.time_target = None;
+            self.message_ui.time_thread = None;
+            self.message_ui.picker = None;
+            self.message_ui.time_error = None;
+        }
+    }
+
     pub(super) fn open_scheduled_edit(
         &mut self,
         id: u128,
@@ -36,7 +45,7 @@ impl Desktop {
             input.set_context_value(item.body.as_str());
             cx.notify();
         });
-        self.open_message_deadline(None, window, cx);
+        self.open_message_deadline(None, None, window, cx);
         if let Some(local) = (if item.timestamp == 0 {
             item.failed_original_timestamp
         } else {
@@ -59,10 +68,11 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.message_ui.time_target.is_none()
-            || (self.overlay.is_some()
-                && !(self.overlay == Some(Overlay::Thread)
-                    && self.message_ui.time_thread.is_some()
-                    && self.message_ui.time_thread == self.thread_parent.map(|(_, root)| root)))
+            || !matches!(self.overlay, None | Some(Overlay::Thread))
+            || self.message_ui.time_thread.is_some_and(|root| {
+                self.overlay != Some(Overlay::Thread)
+                    || self.thread_parent != self.snapshot.selected.map(|context| (context, root))
+            })
             || self.message_ui.scheduled_input.read(cx).composing()
         {
             return false;
@@ -82,20 +92,21 @@ impl Desktop {
     pub(super) fn open_message_deadline(
         &mut self,
         target: Option<u128>,
+        thread: Option<u128>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if thread.is_some_and(|root| {
+            target.is_none()
+                || self.overlay != Some(Overlay::Thread)
+                || self.thread_parent != self.snapshot.selected.map(|context| (context, root))
+        }) {
+            return;
+        }
         self.content_ui.menu = false;
         self.message_ui.menu.clear();
         self.message_ui.time_target = Some(target);
-        self.message_ui.time_thread = target.and_then(|_| {
-            self.thread_parent
-                .filter(|(context, _)| {
-                    Some(*context) == self.snapshot.selected
-                        && self.overlay == Some(Overlay::Thread)
-                })
-                .map(|(_, root)| root)
-        });
+        self.message_ui.time_thread = thread;
         self.message_ui.time_error = None;
         let value = target
             .and_then(|message| {
@@ -205,16 +216,25 @@ impl Desktop {
         if let Some(command) = command
             && self.submit_message(command).is_some()
         {
+            let thread = self.message_ui.time_thread;
             self.message_ui.time_target = None;
             self.message_ui.time_thread = None;
             self.message_ui.picker = None;
             self.message_ui.scheduled_edit = None;
-            self.restore_deadline_focus(window, cx);
+            self.restore_deadline_focus(thread, window, cx);
         }
     }
 
-    pub(super) fn restore_deadline_focus(&self, window: &mut Window, cx: &Context<Self>) {
-        if self.overlay == Some(Overlay::Thread) && self.thread_parent.is_some() {
+    pub(super) fn restore_deadline_focus(
+        &self,
+        thread: Option<u128>,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) {
+        if thread.is_some_and(|root| {
+            self.overlay == Some(Overlay::Thread)
+                && self.thread_parent == self.snapshot.selected.map(|context| (context, root))
+        }) {
             self.thread_composer.focus_handle(cx).focus(window);
         } else if self.composer_available() {
             self.composer.focus_handle(cx).focus(window);
@@ -230,9 +250,12 @@ impl Desktop {
     ) -> Option<gpui::AnyElement> {
         let target = self.message_ui.time_target?;
         let context = self.snapshot.selected?;
-        let in_thread = self.overlay == Some(Overlay::Thread)
-            && self.message_ui.time_thread.is_some()
-            && self.message_ui.time_thread == self.thread_parent.map(|(_, root)| root);
+        if self.message_ui.time_thread.is_some_and(|root| {
+            self.overlay != Some(Overlay::Thread) || self.thread_parent != Some((context, root))
+        }) {
+            return None;
+        }
+        let in_thread = self.message_ui.time_thread.is_some();
         if thread != in_thread {
             return None;
         }

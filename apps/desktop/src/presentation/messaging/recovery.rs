@@ -176,7 +176,7 @@ impl Desktop {
                 }
                 if let FailedDraftKind::Schedule(timestamp) = draft.kind {
                     self.message_ui.scheduled_edit = None;
-                    self.open_message_deadline(None, window, cx);
+                    self.open_message_deadline(None, None, window, cx);
                     if let Some(local) = self.settings_port.local_datetime(timestamp) {
                         self.message_ui.picker =
                             talk_core::preferences::time::calendar::Calendar::parse(local.as_str());
