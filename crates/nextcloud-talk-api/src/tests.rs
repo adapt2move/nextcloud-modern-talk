@@ -13,8 +13,16 @@ use tokio::{
 async fn reference_thumbnails_cannot_fetch_a_third_party_or_unreviewed_server_route() {
     let server = Server::start(vec![]).await;
     let (mut owner, clock) = client(&server);
-    for url in ["https://third-party.invalid/core/references/preview/123", "http://127.0.0.1:1/cloud/unreviewed/secret"] {
-        assert!(owner.reference_thumbnail(&context(&clock), url).await.is_err());
+    for url in [
+        "https://third-party.invalid/core/references/preview/123",
+        "http://127.0.0.1:1/cloud/unreviewed/secret",
+    ] {
+        assert!(
+            owner
+                .reference_thumbnail(&context(&clock), url)
+                .await
+                .is_err()
+        );
     }
     assert_eq!(server.count(), 0);
 }

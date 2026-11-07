@@ -171,10 +171,18 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
     elif scenario == 'discover':
         expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
-        click('discovery-search-input', inspected_point=(1280, 800, 500, 320))
+        click('discovery-search-input', inspected_point=(1280, 800, 340, 320))
         time.sleep(.25)
         type_text('Design')
-        expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
+        # Lavapipe can present the previous frame after the input event. The
+        # assertion still requires the native result, with a finite render wait.
+        for attempt in range(3):
+            try:
+                expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
+                break
+            except AssertionError:
+                if attempt == 2: raise
+                time.sleep(.75)
         key('Escape')
         expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
     elif scenario == 'reference-preview':

@@ -3,6 +3,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Beitreten", "Join", "Unirse"),
     ("Beitritt läuft …", "Joining …", "Uniéndose…"),
     (
+        "Das Gespräch konnte nicht geöffnet werden. Bitte versuche es erneut.",
+        "Could not open the conversation. Please try again.",
+        "No se pudo abrir la conversación. Vuelve a intentarlo.",
+    ),
+    (
         "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar.",
         "Open conversations are unavailable on this server.",
         "Las conversaciones abiertas no están disponibles en este servidor.",

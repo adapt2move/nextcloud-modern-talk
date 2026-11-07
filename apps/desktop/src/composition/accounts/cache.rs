@@ -574,7 +574,12 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
         },
         unread: room.unread,
         unread_mention: room.unread_mention,
-        notification_muted: None,
+        notification_muted: room
+            .observation
+            .as_ref()
+            .filter(|observation| fresh_metadata(observation.observed_at, history::now_unix()))
+            .and_then(|observation| observation.notifications)
+            .map(|level| level == CachedNotificationLevel::Never),
         last_activity: None,
         favorite: room.favorite,
         tags: None,

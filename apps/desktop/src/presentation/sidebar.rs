@@ -912,29 +912,36 @@ impl Desktop {
             });
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.
-        let menu_open = self.sidebar_room_menu == Some(context);
+        let joining = self
+            .snapshot
+            .discover_panel
+            .as_ref()
+            .is_some_and(|panel| panel.joining == Some(context) && panel.state.pending());
+        let menu_open = !joining && self.sidebar_room_menu == Some(context);
         div()
             .flex_none()
             .when(namespace == "room", |d| d.pl(px(4.)))
             .group("sidebar-room")
             .relative()
             .child(control)
-            .child(
-                div().absolute().right_1().top_0().child(
-                    self.icon_button(
-                        scoped_id("sidebar-room-actions", context, 0, 0),
-                        ("more", "Gesprächsaktionen"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::ToggleSidebarRoomMenu(context),
-                        cx,
-                    )
-                    .bg(if selected { t.selected } else { t.sidebar })
-                    .opacity(if menu_open { 1. } else { 0. })
-                    .group_hover("sidebar-room", |s| s.opacity(1.))
-                    .focus(|s| s.opacity(1.)),
-                ),
-            )
+            .when(!joining, |d| {
+                d.child(
+                    div().absolute().right_1().top_0().child(
+                        self.icon_button(
+                            scoped_id("sidebar-room-actions", context, 0, 0),
+                            ("more", "Gesprächsaktionen"),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::ToggleSidebarRoomMenu(context),
+                            cx,
+                        )
+                        .bg(if selected { t.selected } else { t.sidebar })
+                        .opacity(if menu_open { 1. } else { 0. })
+                        .group_hover("sidebar-room", |s| s.opacity(1.))
+                        .focus(|s| s.opacity(1.)),
+                    ),
+                )
+            })
             .when(menu_open, |d| {
                 d.child(
                     self.context_menu_surface()

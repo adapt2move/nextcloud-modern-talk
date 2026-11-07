@@ -454,6 +454,13 @@ impl Accounts {
     }
     pub(super) fn operation(&self, context: ConversationRef) -> Result<OperationId, SubmitError> {
         self.current(context.account)?;
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyUnknown));
+        }
         if self.snapshot.selected != Some(context) {
             return Err(SubmitError::StaleScope);
         }

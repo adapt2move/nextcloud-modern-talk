@@ -660,6 +660,11 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
                 .as_slice()
                 .iter()
                 .any(|person| person.id.account != panel.account)
+            || panel
+                .invites
+                .as_slice()
+                .iter()
+                .any(|person| person.id.account != panel.account)
             || panel.result.is_some_and(|result| {
                 result.conversation.is_some_and(|context| {
                     context.account != panel.account || !context.is_consistent()

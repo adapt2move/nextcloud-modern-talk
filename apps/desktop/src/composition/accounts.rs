@@ -155,6 +155,7 @@ pub struct Accounts {
     discover_probe: Option<discover::Probe>,
     discover_probe_generation: u64,
     discovery_retry: Option<discover::Retry>,
+    discovery_join: Option<discover::OptimisticJoin>,
     reference_owner: references::Owner,
     reference_generation: u64,
     notices: notifications::Notices,
@@ -208,6 +209,7 @@ impl Accounts {
             discover_probe: None,
             discover_probe_generation: 0,
             discovery_retry: None,
+            discovery_join: None,
             reference_owner: references::Owner::default(),
             reference_generation: 0,
             notices: notifications::Notices::default(),
@@ -349,8 +351,10 @@ impl Accounts {
         self.snapshot.search_panel = None;
         self.snapshot.discover_panel = scope.map(discover::empty_panel);
         self.discovery_retry = None;
+        self.discovery_join = None;
         self.discover_probe_generation = self.discover_probe_generation.saturating_add(1);
-        self.discover_probe = scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
+        self.discover_probe =
+            scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -976,6 +980,19 @@ impl Accounts {
         });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            if self.snapshot.selected != Some(context) {
+                self.clear_content();
+                self.snapshot.selected = Some(context);
+                self.snapshot.content = ContentState::Loading;
+                self.touch();
+            }
+            return Ok(());
+        }
         if self.cache.is_presentation(context) {
             self.select_conversation(context)?;
             return Ok(());
@@ -1017,7 +1034,11 @@ impl Accounts {
             return result;
         }
         match intent {
-            UiIntent::Discover { account, request, action } => self.submit_discovery(account, request, action)?,
+            UiIntent::Discover {
+                account,
+                request,
+                action,
+            } => self.submit_discovery(account, request, action)?,
             UiIntent::AccountSearch {
                 account,
                 request,

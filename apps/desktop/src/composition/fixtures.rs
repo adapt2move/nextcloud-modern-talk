@@ -4,9 +4,9 @@ mod dialog;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
     AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
-    ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
-    NativeDesktopPort, NativeStoreState, ParticipantView, Presence, PresentationSnapshot,
-    RequestId, RequiredGate, StorageStatus, SubmissionResult, UiIntent,
+    ConversationView, DeliveryState, FeatureSupport, FileView, LoginFailure, LoginPhase, LoginView,
+    MediaState, NativeDesktopPort, NativeStoreState, ParticipantView, Presence,
+    PresentationSnapshot, RequestId, RequiredGate, StorageStatus, SubmissionResult, UiIntent,
 };
 use talk_core::ui::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
@@ -78,6 +78,7 @@ pub const SCENARIOS: &[&str] = &[
     "create34",
     "create35",
     "discover",
+    "discover-joining",
     "uncertain",
     "pending",
     "incoming",
@@ -203,6 +204,58 @@ fn message(
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     if scenario == Some("sidebar-room-menu") {
         return snapshot(Some("details-ready"));
+    }
+    if scenario == Some("discover-joining") {
+        let mut state = snapshot(Some("chat"));
+        let context = context(7);
+        let mut room = state.conversations.as_slice()[0].clone();
+        room.context = context;
+        room.navigation_key = None;
+        room.title = text("Designrunde");
+        room.kind = ConversationKind::Unknown;
+        room.send = Decision::Unknown;
+        room.attach = Decision::Unknown;
+        room.call = Decision::Unknown;
+        room.call_scope = None;
+        room.draft_clipboard = Decision::Unknown;
+        room.favorite = None;
+        room.archive = Decision::Unknown;
+        room.participants = None;
+        room.unread = 0;
+        room.unread_mention = None;
+        room.notification_muted = None;
+        room.organization.category = talk_core::ui::presentation::ConversationCategory::Unknown;
+        room.organization.favorites = FeatureSupport::Unknown;
+        room.organization.favorite_change = Decision::Unknown;
+        room.organization.classified = None;
+        state.conversations =
+            page(std::iter::once(room).chain(state.conversations.as_slice().iter().cloned()));
+        state.selected = Some(context);
+        state.content = ContentState::Loading;
+        state.messages = Page::empty();
+        state.files = Page::empty();
+        state.participants = Page::empty();
+        state.conversation_panel = None;
+        state.message_panel = None;
+        state.content_panel = Default::default();
+        state.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: context.account,
+            request: RequestId(1),
+            query: text(""),
+            support: FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Saving(RequestId(1)),
+            rooms: page([talk_core::ui::discover::Room {
+                context,
+                name: text("Designrunde"),
+                description: None,
+                participants: None,
+                join: Decision::Allowed,
+            }]),
+            loaded: true,
+            joining: Some(context),
+            uncertain: false,
+        });
+        return state;
     }
     if scenario == Some("reference-preview") {
         let mut state = snapshot(Some("chat"));

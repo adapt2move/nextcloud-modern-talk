@@ -1,6 +1,6 @@
 //! Open-room browsing stays responsive while the account owner queries the server.
-use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability};
-use gpui::{Context, Div, FontWeight, div, prelude::*};
+use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
+use gpui::{Context, Div, FontWeight, Window, div, prelude::*};
 use talk_core::ui::{
     Decision, Text,
     conversation::RemoteState,
@@ -35,31 +35,46 @@ impl Desktop {
             let _ = self.discovery_intent(Action::List(query));
         }
     }
-    pub(super) fn join_discovery(&mut self, context: ConversationRef) {
-        if self.active_account_connected() && self.discovery_intent(Action::Join(context)) {
+    pub(super) fn join_discovery(
+        &mut self,
+        context: ConversationRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_account_connected()
+            && self.save_draft(cx)
+            && self.discovery_intent(Action::Join(context))
+        {
             self.discovery_join = Some(context);
+            self.overlay = None;
+            self.root_focus.focus(window);
         }
     }
     pub(super) fn refresh_discovery(&mut self) {
         let Some(context) = self.discovery_join else {
             return;
         };
-        if self.overlay == Some(Overlay::Discover)
-            && self.snapshot.discover_panel.as_ref().is_some_and(|p| {
-                !p.uncertain
-                    && p.state == RemoteState::Idle
-                    && p.joining == Some(context)
-                    && self.snapshot.selected == Some(context)
-            })
-        {
-            self.overlay = None;
+        if self.snapshot.discover_panel.as_ref().is_some_and(|p| {
+            !p.uncertain && p.state == RemoteState::Idle && p.joining == Some(context)
+        }) {
             self.discovery_join = None;
-        } else if self.snapshot.discover_panel.as_ref().is_some_and(|p| {
-            matches!(
-                p.state,
+        } else if let Some(panel) = self
+            .snapshot
+            .discover_panel
+            .as_ref()
+            .filter(|p| p.account == context.account && p.joining == Some(context))
+            && matches!(
+                panel.state,
                 RemoteState::Failed(..) | RemoteState::Uncertain(..)
             )
-        }) {
+        {
+            self.feedback = Some(if panel.uncertain {
+                super::feedback::Feedback::warning("Der Beitritt wird überprüft.")
+            } else {
+                super::feedback::Feedback::error(
+                    "Das Gespräch konnte nicht geöffnet werden. Bitte versuche es erneut.",
+                )
+            });
             self.discovery_join = None;
         }
     }

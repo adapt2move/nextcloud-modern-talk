@@ -754,6 +754,7 @@ pub(super) fn model() -> Accounts {
         discover_probe: None,
         discover_probe_generation: 0,
         discovery_retry: None,
+        discovery_join: None,
         reference_owner: references::Owner::default(),
         reference_generation: 0,
         notices: notifications::Notices::default(),

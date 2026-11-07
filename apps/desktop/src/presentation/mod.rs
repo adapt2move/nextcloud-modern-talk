@@ -1313,7 +1313,7 @@ impl Desktop {
                 }
             }
             LocalAction::DiscoverSearch => self.search_discovery(cx),
-            LocalAction::DiscoverJoin(context) => self.join_discovery(context),
+            LocalAction::DiscoverJoin(context) => self.join_discovery(context, window, cx),
             LocalAction::ToggleReference(context, message, ordinal) => {
                 self.toggle_reference(context, message, ordinal)
             }

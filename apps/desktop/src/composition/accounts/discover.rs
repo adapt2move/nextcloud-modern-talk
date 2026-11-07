@@ -55,7 +55,155 @@ pub(super) fn empty_panel(account: AccountScope) -> Panel {
     }
 }
 
+/// Display-only transition. The pending row has no policy or membership authority.
+pub(super) struct OptimisticJoin {
+    pub context: ConversationRef,
+    request: RequestId,
+    previous: Option<ConversationRef>,
+    row: ConversationView,
+}
+
+fn pending_row(room: &Room) -> ConversationView {
+    ConversationView {
+        context: room.context,
+        navigation_key: None,
+        title: room.name.clone(),
+        initials: initials(room.name.as_str()),
+        subtitle: text(""),
+        updated_label: text(""),
+        kind: ConversationKind::Unknown,
+        unread: 0,
+        unread_mention: None,
+        notification_muted: None,
+        last_activity: None,
+        favorite: None,
+        organization: ConversationOrganization {
+            category: ConversationCategory::Unknown,
+            classified: None,
+            favorites: FeatureSupport::Unknown,
+            favorite_change: Decision::Unknown,
+            tags: FeatureSupport::Unknown,
+            tag_change: Decision::Unknown,
+        },
+        tags: None,
+        archived: Some(false),
+        archive: Decision::Unknown,
+        presence: Presence::Unknown,
+        participants: room.participants.and_then(|n| u16::try_from(n).ok()),
+        participant_names: Page::empty(),
+        send: Decision::Unknown,
+        attach: Decision::Unknown,
+        draft_clipboard: Decision::Unknown,
+        call: Decision::Unknown,
+        call_scope: None,
+    }
+}
+
+fn with_pending_row(
+    rows: &Page<ConversationView, 100>,
+    join: &OptimisticJoin,
+) -> Page<ConversationView, 100> {
+    let previous = join
+        .previous
+        .filter(|id| *id != join.context)
+        .and_then(|id| rows.as_slice().iter().find(|row| row.context == id))
+        .cloned();
+    let remaining = 99usize.saturating_sub(usize::from(previous.is_some()));
+    page(
+        std::iter::once(join.row.clone()).chain(previous).chain(
+            rows.as_slice()
+                .iter()
+                .filter(|row| row.context != join.context && Some(row.context) != join.previous)
+                .take(remaining)
+                .cloned(),
+        ),
+    )
+}
+
 impl Accounts {
+    fn begin_optimistic_join(&mut self, request: RequestId, room: &Room) {
+        let join = OptimisticJoin {
+            context: room.context,
+            request,
+            previous: self.snapshot.selected,
+            row: pending_row(room),
+        };
+        self.clear_content();
+        self.snapshot.conversations = with_pending_row(&self.snapshot.conversations, &join);
+        self.retain_visible_search_hits();
+        self.snapshot.selected = Some(room.context);
+        self.snapshot.content = ContentState::Loading;
+        self.discovery_join = Some(join);
+    }
+    pub(super) fn restore_optimistic_join(&mut self, scope: AccountScope) {
+        if let Some(join) = self
+            .discovery_join
+            .as_ref()
+            .filter(|join| join.context.account == scope)
+        {
+            self.snapshot.conversations = with_pending_row(&self.snapshot.conversations, join);
+            self.retain_visible_search_hits();
+        }
+    }
+    fn retain_visible_search_hits(&mut self) {
+        if let Some(panel) = &mut self.snapshot.search_panel {
+            panel.hits = page(
+                panel
+                    .hits
+                    .as_slice()
+                    .iter()
+                    .filter(|hit| {
+                        self.snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .any(|row| row.context == hit.context)
+                    })
+                    .cloned(),
+            );
+        }
+    }
+    fn take_optimistic_join(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+    ) -> Option<OptimisticJoin> {
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.request == request && join.context == context)
+        {
+            self.discovery_join.take()
+        } else {
+            None
+        }
+    }
+    fn rollback_optimistic_join(&mut self, join: OptimisticJoin) {
+        self.snapshot.conversations = page(
+            self.snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .filter(|row| row.context != join.context)
+                .cloned(),
+        );
+        if self.snapshot.selected == Some(join.context) {
+            self.clear_content();
+            if let Some(previous) = join.previous.filter(|previous| {
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.context == *previous)
+            }) {
+                if self.open(previous).is_err() {
+                    let _ = self.select_conversation(previous);
+                }
+            } else {
+                self.snapshot.content = ContentState::Ready;
+            }
+        }
+    }
     pub(super) fn tick_discovery_retry(&mut self) {
         let now = Instant::now();
         let Some(retry) = self.discovery_retry.as_ref() else {
@@ -231,6 +379,19 @@ impl Accounts {
                 )
             }
         };
+        let transition = joining.and_then(|context| {
+            self.snapshot
+                .discover_panel
+                .as_ref()
+                .and_then(|panel| {
+                    panel
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .find(|room| room.context == context)
+                })
+                .cloned()
+        });
         self.request(
             account,
             command,
@@ -260,6 +421,9 @@ impl Accounts {
         } else {
             RemoteState::Loading(request)
         };
+        if let Some(room) = transition {
+            self.begin_optimistic_join(request, &room);
+        }
         self.touch();
         Ok(())
     }
@@ -353,6 +517,7 @@ impl Accounts {
         if panel.uncertain {
             self.load_rooms = Some(account);
         }
+        let transition = joining.and_then(|context| self.take_optimistic_join(request, context));
         if let Some(room) = joined {
             let row = conversation(&room, account);
             let context = row.context;
@@ -369,7 +534,13 @@ impl Accounts {
             );
             self.observe_created_room(account, room);
             self.load_rooms = Some(account);
-            let _ = self.open(context);
+            if transition.is_some() && self.snapshot.selected == Some(context) {
+                self.snapshot.selected = None;
+                let _ = self.open(context);
+            }
+        } else if let Some(transition) = transition {
+            self.rollback_optimistic_join(transition);
+            self.load_rooms = Some(account);
         }
         self.touch();
     }
@@ -378,6 +549,139 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn optimistic_join_has_no_authority_and_does_not_override_later_navigation() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+        let old = model.snapshot.selected.unwrap();
+        let room = Room {
+            context: crate::composition::fixtures::context(7),
+            name: text("Synthetic room"),
+            description: None,
+            participants: None,
+            join: Decision::Allowed,
+        };
+        model.begin_optimistic_join(RequestId(1), &room);
+        assert_eq!(model.snapshot.selected, Some(room.context));
+        assert_eq!(model.snapshot.content, ContentState::Loading);
+        let row = model
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|r| r.context == room.context)
+            .unwrap();
+        assert_eq!(
+            (row.send, row.attach, row.call),
+            (Decision::Unknown, Decision::Unknown, Decision::Unknown)
+        );
+        assert!(row.call_scope.is_none());
+        model.snapshot.conversations = page(
+            model
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .filter(|r| r.context != room.context)
+                .cloned(),
+        );
+        model.restore_optimistic_join(old.account);
+        assert!(
+            model
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|r| r.context == room.context)
+        );
+        model.snapshot.selected = Some(old);
+        let join = model
+            .take_optimistic_join(RequestId(1), room.context)
+            .unwrap();
+        model.rollback_optimistic_join(join);
+        assert_eq!(
+            model.snapshot.selected,
+            Some(old),
+            "a later navigation remains selected"
+        );
+        assert!(
+            !model
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|r| r.context == room.context)
+        );
+    }
+
+    #[test]
+    fn failed_optimistic_join_restores_the_originating_room() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+        let old = model.snapshot.selected.unwrap();
+        let room = Room {
+            context: crate::composition::fixtures::context(7),
+            name: text("Synthetic room"),
+            description: None,
+            participants: None,
+            join: Decision::Allowed,
+        };
+        model.begin_optimistic_join(RequestId(2), &room);
+        assert!(
+            model
+                .take_optimistic_join(RequestId(1), room.context)
+                .is_none()
+        );
+        let join = model
+            .take_optimistic_join(RequestId(2), room.context)
+            .unwrap();
+        model.rollback_optimistic_join(join);
+        assert_eq!(model.snapshot.selected, Some(old));
+    }
+
+    #[test]
+    fn optimistic_join_keeps_the_selected_room_and_bounds_related_search_hits() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("account-search"));
+        let template = model.snapshot.conversations.as_slice()[0].clone();
+        model.snapshot.conversations = page((1..=100).map(|id| {
+            let mut row = template.clone();
+            row.context = crate::composition::fixtures::context(id);
+            row
+        }));
+        model.snapshot.selected = Some(crate::composition::fixtures::context(100));
+        let panel = model.snapshot.search_panel.as_mut().unwrap();
+        let mut hit = panel.hits.as_slice()[0].clone();
+        hit.context = crate::composition::fixtures::context(99);
+        panel.hits = page([hit]);
+        let room = Room {
+            context: crate::composition::fixtures::context(101),
+            name: text("Synthetic room"),
+            description: None,
+            participants: None,
+            join: Decision::Allowed,
+        };
+        model.begin_optimistic_join(RequestId(3), &room);
+        assert_eq!(model.snapshot.conversations.as_slice().len(), 100);
+        assert!(
+            model
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .any(|r| r.context == crate::composition::fixtures::context(100))
+        );
+        assert!(
+            model
+                .snapshot
+                .search_panel
+                .as_ref()
+                .unwrap()
+                .hits
+                .as_slice()
+                .is_empty()
+        );
+    }
     #[test]
     fn old_capability_probe_cannot_reenable_a_reselected_account() {
         let mut model = super::super::tests::model();

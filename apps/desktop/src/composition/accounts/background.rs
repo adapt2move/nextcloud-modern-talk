@@ -993,6 +993,7 @@ impl Accounts {
                     }
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
+                    self.restore_optimistic_join(scope);
                     self.restore_pending_notifications(scope);
                     self.restore_cache_selection();
                     if list

@@ -104,6 +104,19 @@ fn restart_observations_restore_readonly_and_activity_does_not_renew_detail_age(
 }
 
 #[test]
+fn cached_muted_bell_uses_only_fresh_notification_observations() {
+    let mut room = metadata();
+    let now = history::now_unix();
+    let mut value = observation(now);
+    value.notifications = Some(CachedNotificationLevel::Never);
+    room.observation = Some(value);
+    let context = crate::composition::fixtures::context(1);
+    assert_eq!(row(&room, context).notification_muted, Some(true));
+    room.observation.as_mut().unwrap().observed_at = now.saturating_add(86_400);
+    assert_eq!(row(&room, context).notification_muted, None);
+}
+
+#[test]
 fn detail_retirement_fences_late_disk_reads_and_obsolete_scope_cleanup() {
     let mut model = super::super::super::tests::model();
     let scope = crate::composition::fixtures::context(1).account;
