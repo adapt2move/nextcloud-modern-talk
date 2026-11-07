@@ -65,7 +65,7 @@ def _seed(lab, rooms):
         parent=lab.request('lab_bob','POST',chat,body={'message':f'Synthetic thread root {index}','threadTitle':f'Synthetic thread {index}'},expected=(201,),name='perf.thread-root')
         lab.request('lab_alice','POST',chat,body={'message':f'Synthetic thread reply {index}','threadId':parent['id']},expected=(201,),name='perf.thread-reply')
     # Validate the real corpus, rather than claiming success from enqueue counts.
-    ids=set();counts={'images':0,'voice':0,'polls':0,'threads':0};before=0
+    ids=set();thread_roots=set();counts={'images':0,'voice':0,'polls':0};before=0
     for _ in range(20):
         page=lab.request('lab_alice','GET',chat,query={'lookIntoFuture':0,'limit':100,'lastKnownMessageId':before},name='perf.validate-history')
         if not page: break
@@ -75,7 +75,10 @@ def _seed(lab, rooms):
             ids.add(number)
             if message.get('messageType')=='voice-message': counts['voice']+=1
             thread = message.get('threadId')
-            if isinstance(thread, int) and thread > 0 or message.get('threadTitle'): counts['threads']+=1
+            # Talk assigns threadId=self even to ordinary messages. Count
+            # distinct real threads, including roots with a title/replies.
+            if isinstance(thread, int) and thread > 0 and (thread != number or message.get('threadTitle') or message.get('threadReplies')):
+                thread_roots.add(thread)
             # PHP emits [] for an empty map. Nonempty parameter collections
             # must still be objects; do not discard malformed rich content.
             parameters = message.get('messageParameters') or {}
@@ -86,6 +89,7 @@ def _seed(lab, rooms):
                 if value.get('type')=='file' and value.get('mimetype','').startswith('image/'):counts['images']+=1
         before=min(int(item['id']) for item in page)
         if len(page)<100: break
+    counts['threads']=len(thread_roots)
     listing=lab.request('lab_alice','GET','/ocs/v2.php/apps/spreed/api/v4/room',name='perf.validate-rooms')
     if len(listing)!=200 or len(ids)<1000 or not all(counts.values()):
         raise RuntimeError(f'Synthetic workload validation failed: {len(listing)} rooms, {len(ids)} messages, {counts}')
