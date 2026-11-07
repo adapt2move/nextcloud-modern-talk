@@ -501,6 +501,37 @@ impl Desktop {
             cx.notify();
             return true;
         }
+        if self.people_card.target.is_some()
+            && event.keystroke.key == "tab"
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.alt
+        {
+            // The anchored card is deferred beside a virtualized row. Its
+            // native traversal order must not escape into the chat composer.
+            // Only controls rendered in the current frame participate.
+            let handles: Vec<_> = [
+                "person-compose",
+                "person-direct",
+                "person-call",
+                "person-mention",
+            ]
+            .into_iter()
+            .filter_map(|id| self.control_focus.current(&id.into()))
+            .collect();
+            let current = handles.iter().position(|handle| handle.is_focused(window));
+            if !handles.is_empty() {
+                let next = if event.keystroke.modifiers.shift {
+                    current.map_or(handles.len() - 1, |index| {
+                        (index + handles.len() - 1) % handles.len()
+                    })
+                } else {
+                    current.map_or(0, |index| (index + 1) % handles.len())
+                };
+                handles[next].focus(window);
+            }
+            return true;
+        }
         false
     }
     pub(super) fn prepare_person_card(&mut self, window: &Window) {
