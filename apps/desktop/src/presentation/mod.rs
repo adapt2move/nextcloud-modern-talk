@@ -1048,6 +1048,9 @@ impl Desktop {
             cx.notify();
         }
         self.refresh_preferences(cx);
+        if self.theme.reduced_transparency != self.settings_port.reduced_transparency() {
+            cx.notify();
+        }
         self.refresh_onboarding(cx);
         if let Some(result) = self.pending_ack
             && self
@@ -3557,6 +3560,7 @@ impl Render for Desktop {
         self.navigation.hints.begin();
         self.navigation.prepare_history(self.snapshot.selected);
         self.theme = Theme::resolve(self.palette, self.appearance, cx.window_appearance());
+        self.theme.reduced_transparency = self.settings_port.reduced_transparency();
         let t = self.theme;
         for input in self.content_ui.inputs() {
             input.update(cx, |i, _| {
@@ -4030,12 +4034,12 @@ impl Render for Desktop {
                     .child(body)
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
-                    .when_some(incoming_card, |d, card| d.child(card))
                     .when_some(action_toast, |d, toast| d.child(toast))
                     .when_some(message_menu, |d, menu| d.child(menu))
                     .when_some(composer_menu, |d, menu| d.child(menu))
                     .when_some(pin_motion_overlay, |d, motion| d.child(motion)),
             )
+            .when_some(incoming_card, |d, card| d.child(card))
             .children(self.window_resize_edges(window));
         if let Some(scope) = self.pending_prejoin_return.take()
             && self.overlay.is_none()

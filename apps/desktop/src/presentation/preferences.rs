@@ -139,6 +139,10 @@ pub trait ComputerSettingsPort {
     fn reduced_motion(&self) -> bool {
         true
     }
+    /// Unknown support uses opaque, flat materials.
+    fn reduced_transparency(&self) -> bool {
+        true
+    }
     /// Non-macOS native picker support, observed by the platform owner.
     /// Linux's supported system picker copies the chosen emoji; the user pastes
     /// explicitly. Neither this port nor the view automatically reads clipboard.

@@ -8,17 +8,19 @@
 | --- | --- | --- | --- |
 | `text.primary` | `#26354B` | `#252E2E` | Main text and headings |
 | `text.secondary` | `#596B85` | `#566358` | Readable secondary text on light surfaces |
-| `surface.content` | `#FFFFFF` | `#FFFFFF` | Conversation and form content |
+| `surface.content` | `#FFFEFB` | `#FFFEFB` | Conversation and form content |
 | `surface.subtle` | `#F6F8FC` | `#F6F7F4` | Grouping and inset areas |
 | `action.primary` | `#356FC1` | `#354F41` | Primary button, selection indicator; white button text |
 | `selection.surface` | `#EAF1FB` | `#EDF2E9` | Selected content with a distinct outline/label |
-| `chrome.start` | `#E3EDFB` | `#E9E7BF` | Schematic window/sidebar tint |
-| `chrome.end` | `#CBDCED` | `#C6D6DF` | Schematic gradient end |
+| `chrome.start` | `#EDE9E2` | `#EDECE0` | Window/sidebar paper tone |
+| `chrome.end` | `#E4E1DA` | `#E4E8DC` | Gradient end when transparency effects are allowed |
 | `border.decorative` | `#E6ECF4` | `#E9ECE8` | Nonessential separators only |
 | `stage.background` | `#1C293B` | `#202725` | Call stage |
 | `stage.text` | `#EAF0F8` | `#E9EEEA` | Text on the dark stage |
 
-Gradients are visual exploration. Native title bars and increased-contrast appearances follow the platform. Do not depend on a decorative separator to identify an input or a selected control.
+The blue dark canvas is `#14171C` and its content surface is `#1C222B`; the sage dark palette keeps its green undertone. The shared content surface uses a subtle vertical wash to `#FBF9F4` in light blue and `#1B2029` in dark blue when effects are allowed. The content card has a 16 pt radius, a fine edge, and two soft shadows; menus use 12 pt and dialogs 16 pt. Controls use 8 pt, chips 6 pt, and avatars use a radius of 28% of their size. Input fields remain flat and clean. The scrim is warm dark in light mode and neutral dark in dark mode.
+
+Reduce Transparency is observed by the existing settings worker on macOS and Windows. Linux and unknown observations fall back to flat opaque fills. Native title bars and increased-contrast appearances follow the platform. Do not depend on a decorative separator to identify an input or a selected control. Text and functional state colors must still meet the measured contrast targets on their actual surfaces.
 
 | Semantic role | Foreground / light background | Required accompanying cue |
 | --- | --- | --- |
@@ -44,7 +46,7 @@ These roles are shared across palettes. Gray indicates unavailable/unknown state
 | Icon box | 20 × 20 pt; consistent optical centering and stroke weight |
 | Standard control | 36 pt high; at least 32 × 32 pt interactive hit area |
 | Primary form action | 44–46 pt high; label and icon centered on the same control axis |
-| Common radii | 8 pt controls, 12 pt content panels; native window corners are system-owned |
+| Common radii | 6 pt chips, 8 pt controls, 12 pt menus and cards, 16 pt dialogs and content card; native window corners are system-owned |
 | Baseline alignment | Align sender and time on one baseline; body starts at the same x-coordinate; keep avatars in a fixed column |
 | Screenshot reference | 1280 × 900 canvas; 1120 × 760 schematic window; 44 px title bar; 278 px sidebar |
 | Call reference | 1096 × 704 inner sheet; 274 px chat panel; 64 px header; 90 px control area |

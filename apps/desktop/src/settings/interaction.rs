@@ -20,12 +20,14 @@ pub(super) enum Picker {
 #[derive(Clone, Copy)]
 pub(super) struct Profile {
     pub reduced_motion: bool,
+    pub reduced_transparency: bool,
     pub picker: Picker,
 }
 impl Default for Profile {
     fn default() -> Self {
         Self {
             reduced_motion: true,
+            reduced_transparency: true,
             picker: Picker::Unavailable,
         }
     }
@@ -98,6 +100,9 @@ pub(super) fn observe(cancelled: impl Fn() -> bool) -> Profile {
                 .accessibilityDisplayShouldReduceMotion();
         Profile {
             reduced_motion: reduced,
+            reduced_transparency: cancelled()
+                || objc2_app_kit::NSWorkspace::sharedWorkspace()
+                    .accessibilityDisplayShouldReduceTransparency(),
             // GPUI opens the character palette in the actual app process.
             picker: Picker::Unavailable,
         }
@@ -110,6 +115,12 @@ pub(super) fn observe(cancelled: impl Fn() -> bool) -> Profile {
             .and_then(|settings| settings.AnimationsEnabled().ok());
         Profile {
             reduced_motion: enabled.map(|value| !value).unwrap_or(true),
+            reduced_transparency: (!cancelled())
+                .then(windows::UI::ViewManagement::UISettings::new)
+                .and_then(Result::ok)
+                .and_then(|settings| settings.AdvancedEffectsEnabled().ok())
+                .map(|value| !value)
+                .unwrap_or(true),
             picker: Picker::Windows,
         }
     }
@@ -170,6 +181,8 @@ pub(super) fn observe(cancelled: impl Fn() -> bool) -> Profile {
         };
         Profile {
             reduced_motion,
+            // No common Linux desktop setting reliably describes transparency.
+            reduced_transparency: true,
             picker,
         }
     }
@@ -245,6 +258,7 @@ mod tests {
         assert_eq!(parse_bool("false\n"), Some(false));
         assert_eq!(parse_bool("true\n"), Some(true));
         assert!(Profile::default().reduced_motion);
+        assert!(Profile::default().reduced_transparency);
     }
 
     #[test]

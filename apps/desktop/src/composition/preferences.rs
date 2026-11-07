@@ -586,6 +586,9 @@ impl ComputerSettingsPort for Bridge {
     fn reduced_motion(&self) -> bool {
         self.services.preferences.reduced_motion()
     }
+    fn reduced_transparency(&self) -> bool {
+        self.services.preferences.reduced_transparency()
+    }
     fn emoji_picker_available(&self) -> bool {
         self.services.preferences.emoji_picker_available()
     }

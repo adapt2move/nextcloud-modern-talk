@@ -4,6 +4,7 @@ pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     pub dark: bool,
+    pub reduced_transparency: bool,
     pub disabled_fg: Hsla,
     pub hover: Hsla,
     pub row_hover: Hsla,
@@ -72,10 +73,33 @@ impl Theme {
     }
 
     pub fn chrome(self) -> gpui::Background {
+        if self.reduced_transparency {
+            return self.canvas.into();
+        }
         gpui::linear_gradient(
             155.,
             gpui::linear_color_stop(self.canvas, 0.),
             gpui::linear_color_stop(self.chrome_end, 1.),
+        )
+    }
+
+    /// A restrained wash on the content layer. Inputs remain flat.
+    pub fn content_material(self) -> gpui::Background {
+        if self.reduced_transparency {
+            return self.surface.into();
+        }
+        let end = if self.dark {
+            Hsla {
+                l: (self.surface.l - 0.015).max(0.),
+                ..self.surface
+            }
+        } else {
+            color(0xfbf9f4)
+        };
+        gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(self.surface, 0.),
+            gpui::linear_color_stop(end, 1.),
         )
     }
 
@@ -116,19 +140,19 @@ impl Theme {
         let sage = palette == Palette::Sage;
         let values = match (dark, sage) {
             (false, false) => [
-                0xeef4fd, 0xeef4fd, 0xffffff, 0xf6f8fc, 0x26354b, 0x596b85, 0x356fc1, 0xffffff,
+                0xede9e2, 0xede9e2, 0xfffefb, 0xf6f8fc, 0x26354b, 0x596b85, 0x356fc1, 0xffffff,
                 0xcbdbf3, 0x315e98, 0xe0e7f0, 0x70819c, 0x9e3e32, 0xfff0ec, 0x795300, 0xfff4d6,
-                0x286343, 0x1c293b, 0x2c3d55, 0xeaf0f8, 0xc0ccdd, 0xd7e5f5, 0x356fc1, 0x4a5b73,
+                0x286343, 0x1c293b, 0x2c3d55, 0xeaf0f8, 0xc0ccdd, 0xe4e1da, 0x356fc1, 0x4a5b73,
             ],
             (false, true) => [
-                0xe9e7bf, 0xe9e7bf, 0xffffff, 0xf6f7f4, 0x252e2e, 0x566358, 0x354f41, 0xffffff,
+                0xedece0, 0xedece0, 0xfffefb, 0xf6f7f4, 0x252e2e, 0x566358, 0x354f41, 0xffffff,
                 0xd3d5b0, 0x354f41, 0xe0e5dd, 0x66776a, 0x9e3e32, 0xfff0ec, 0x795300, 0xfff4d6,
-                0x286343, 0x202725, 0x303d35, 0xe9eeea, 0xc5d2c9, 0xc6d6df, 0x354f41, 0x4c584e,
+                0x286343, 0x202725, 0x303d35, 0xe9eeea, 0xc5d2c9, 0xe4e8dc, 0x354f41, 0x4c584e,
             ],
             (true, false) => [
-                0x172131, 0x172131, 0x1c2633, 0x243140, 0xeaf0f8, 0xb1c1d6, 0x3a75c8, 0xffffff,
+                0x14171c, 0x14171c, 0x1c222b, 0x243140, 0xeaf0f8, 0xb1c1d6, 0x3a75c8, 0xffffff,
                 0x294366, 0xeaf0f8, 0x394b60, 0x7b90a9, 0xffb8a9, 0x51302c, 0xffdc95, 0x4a3c23,
-                0xa3d6b5, 0x1c293b, 0x2c3d55, 0xeaf0f8, 0xc0ccdd, 0x131b26, 0x9fc7ff, 0xb1c1d6,
+                0xa3d6b5, 0x1c293b, 0x2c3d55, 0xeaf0f8, 0xc0ccdd, 0x111419, 0x9fc7ff, 0xb1c1d6,
             ],
             (true, true) => [
                 0x1a211f, 0x1a211f, 0x1f2724, 0x28332d, 0xe9eeea, 0xb3c1b8, 0x4f7a63, 0xffffff,
@@ -144,6 +168,7 @@ impl Theme {
         };
         Self {
             dark,
+            reduced_transparency: true,
             disabled_fg: color(disabled),
             hover: color(hover),
             row_hover: Hsla {
@@ -182,7 +207,7 @@ impl Theme {
             chrome_end: color(values[21]),
             focus: color(values[22]),
             sidebar_secondary: color(values[23]),
-            scrim: gpui::rgba(if dark { 0x00000073 } else { 0x2b384b26 }).into(),
+            scrim: gpui::rgba(if dark { 0x06080c99 } else { 0x241e146b }).into(),
         }
     }
 }

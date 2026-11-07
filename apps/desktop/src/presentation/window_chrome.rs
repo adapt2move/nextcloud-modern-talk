@@ -40,13 +40,10 @@ impl Desktop {
         let custom_buttons = cfg!(target_os = "windows")
             || (cfg!(target_os = "linux")
                 && matches!(window.window_decorations(), Decorations::Client { .. }));
-        let call_scrim = (self.incoming_visible()
-            || matches!(
-                self.overlay,
-                Some(
-                    Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent
-                )
-            ))
+        let call_scrim = matches!(
+            self.overlay,
+            Some(Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent)
+        )
         .then(|| self.modal_scrim_color());
         let drag = div()
             .id("window-drag-region")

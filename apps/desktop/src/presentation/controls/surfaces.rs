@@ -2,7 +2,7 @@
 use crate::presentation::{Desktop, Overlay};
 use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
 
-pub(in crate::presentation) const CONTENT_RADIUS: f32 = 12.;
+pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
 
 impl Desktop {
     pub(in crate::presentation) fn modal_scrim_color(&self) -> gpui::Hsla {
@@ -45,8 +45,8 @@ impl Desktop {
     }
     pub(in crate::presentation) fn style_dialog_shell<T: Styled>(&self, surface: T) -> T {
         surface
-            .bg(self.theme.surface)
-            .rounded(px(13.))
+            .bg(self.theme.content_material())
+            .rounded(px(16.))
             .border_1()
             .border_color(self.theme.border)
             .shadow_lg()
@@ -82,7 +82,7 @@ impl Desktop {
             .flex_col()
             .gap(px(4.))
             .p_1()
-            .rounded(px(10.))
+            .rounded(px(12.))
             .border_1()
             .border_color(self.theme.border)
             .bg(self.theme.surface)
@@ -95,24 +95,30 @@ impl Desktop {
         let color = if self.theme.dark {
             gpui::black()
         } else {
-            rgb(0x26354b).into()
+            rgb(0x281e0a).into()
         };
         div()
             .relative()
             .size_full()
             .rounded(px(CONTENT_RADIUS))
-            .bg(self.theme.surface)
+            .bg(self.theme.content_material())
+            .border_1()
+            .border_color(if self.theme.dark {
+                gpui::rgba(0xffffff10)
+            } else {
+                gpui::rgba(0x46371e14)
+            })
             .shadow(vec![
                 BoxShadow {
-                    color: color.opacity(if self.theme.dark { 0.18 } else { 0.045 }),
+                    color: color.opacity(if self.theme.dark { 0.18 } else { 0.05 }),
                     offset: point(px(0.), px(1.)),
-                    blur_radius: px(3.),
+                    blur_radius: px(2.),
                     spread_radius: px(0.),
                 },
                 BoxShadow {
-                    color: color.opacity(if self.theme.dark { 0.22 } else { 0.065 }),
-                    offset: point(px(0.), px(3.)),
-                    blur_radius: px(10.),
+                    color: color.opacity(if self.theme.dark { 0.35 } else { 0.07 }),
+                    offset: point(px(0.), px(8.)),
+                    blur_radius: px(24.),
                     spread_radius: px(0.),
                 },
             ])
