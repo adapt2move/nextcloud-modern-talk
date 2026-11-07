@@ -221,7 +221,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("details") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
-        Some("thread" | "thread-paged") => Some(Overlay::Thread),
+        Some("thread" | "thread-options" | "thread-paged") => Some(Overlay::Thread),
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("discover") => Some(Overlay::Discover),
@@ -290,7 +290,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 println!("NATIVE_MONOSPACE_FONT family=GoogleSansCode digit={sample} id={id:?} ascent={:?} descent={:?} width={:?}",cx.text_system().ascent(id,px(12.)),cx.text_system().descent(id,px(12.)),line.width);
             }
         }
-            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),scale:saved.active.scale.percent()},bridge,window,cx))
+            cx.new(|cx|Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:options.scenario.as_deref()==Some("thread-options"),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),scale:saved.active.scale.percent()},bridge,window,cx))
         });
     match window {
         Ok(window) => {

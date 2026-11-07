@@ -52,6 +52,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "thread-error",
     "thread-list",
+    "thread-options",
     "thread-paged",
     "thread-compose",
     "private-reply",
@@ -294,6 +295,16 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 },
             ));
         }
+        return state;
+    }
+    if scenario == Some("thread-options") {
+        let mut state = snapshot(Some("thread"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            if row.local_id == 1 {
+                row.metadata.edit = Decision::Allowed;
+            }
+            row
+        }));
         return state;
     }
     if matches!(
@@ -1352,7 +1363,9 @@ impl DevelopmentPort {
             .then_some(scenario == Some("chat-reactions-pending")),
             reaction_diagnostics: 0,
             thread_fixture: match scenario {
-                Some("chat-edit" | "thread" | "thread-list" | "thread-paged") => Some(false),
+                Some(
+                    "chat-edit" | "thread" | "thread-list" | "thread-options" | "thread-paged",
+                ) => Some(false),
                 Some("thread-error") => Some(true),
                 _ => None,
             },
@@ -1368,6 +1381,7 @@ impl DevelopmentPort {
                         | "thread"
                         | "thread-error"
                         | "thread-list"
+                        | "thread-options"
                         | "thread-paged"
                         | "chat-send-pending"
                         | "unread-divider"

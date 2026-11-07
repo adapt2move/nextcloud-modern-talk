@@ -209,6 +209,7 @@ pub struct InitialView {
     pub prejoin: bool,
     pub onboarding: bool,
     pub threads_fixture: bool,
+    pub thread_options_fixture: bool,
     pub room_menu_fixture: bool,
     pub new_thread_fixture: bool,
     pub private_reply_fixture: bool,
@@ -371,6 +372,7 @@ impl Desktop {
             prejoin,
             onboarding,
             threads_fixture,
+            thread_options_fixture,
             room_menu_fixture,
             new_thread_fixture,
             private_reply_fixture,
@@ -645,6 +647,7 @@ impl Desktop {
                     },
                 );
             }
+            desktop.thread_options_open = thread_options_fixture;
         }
         if development
             && new_thread_fixture

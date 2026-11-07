@@ -194,6 +194,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('Escape closes the thread pane and returns to the room',
                ['Designteam'], ['Design review', 'THREADDRAFT'])
+    elif scenario == 'thread-options':
+        expect('thread options expose subscription and rename controls',
+               ['Thread nicht mehr folgen', 'Alle Antworten', 'Nur Erwähnungen', 'Thread umbenennen'])
+        click('umbenennen', xmin=800, ymin=100)
+        expect('thread rename opens an editable title', ['Design review', 'Speichern'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
