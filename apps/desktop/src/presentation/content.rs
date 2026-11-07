@@ -2577,6 +2577,13 @@ impl Desktop {
         } else {
             "Öffentlich"
         };
+        let voter_label = poll
+            .voters
+            .map(|count| self.lf("{n} Teilnehmende abgestimmt", &[("n", &count.to_string())]));
+        let meta_label = match voter_label {
+            Some(voters) => format!("{} · {} · {}", self.l(meta), self.l(privacy), voters),
+            None => format!("{} · {}", self.l(meta), self.l(privacy)),
+        };
         let mut body = div()
             .flex()
             .flex_col()
@@ -2598,22 +2605,7 @@ impl Desktop {
                     .flex_wrap()
                     .items_center()
                     .gap_2()
-                    .child(
-                        self.hint(&format!(
-                            "{} · {}{}",
-                            self.l(meta),
-                            self.l(privacy),
-                            poll.voters
-                                .map(|count| format!(
-                                    " · {}",
-                                    self.lf(
-                                        "{n} Teilnehmende abgestimmt",
-                                        &[("n", &count.to_string())]
-                                    )
-                                ))
-                                .unwrap_or_default()
-                        )),
-                    )
+                    .child(self.hint(&meta_label))
                     .when(!full, |d| {
                         d.child(
                             self.button(
