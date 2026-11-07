@@ -37,23 +37,34 @@ def exercise(scenario, env, xid, out, label, large=False):
             for field in ('left','top','width','height'):r[field]=str(int(r[field])//2)
         return path, words, normalized(' '.join(r['text'] for r in words))
 
-    def poll_option_hits(path):
+    def poll_title_anchor(words):
+        titles = [word for word in words if normalized(word['text']) == 'umfrage'
+                  and 200 < int(word['left']) < 1000 and int(word['top']) < 300]
+        if not titles:
+            return None
+        title = min(titles, key=lambda word: int(word['top']))
+        return int(title['left']) + 8, int(title['top'])
+
+    def poll_option_hits(path, words):
         # Whole-dialog OCR sometimes groups the outlined fields into graphics.
-        # At this inspected fixture size, OCR their interiors separately; click
-        # only an option whose placeholder is actually recognized.
+        # OCR each interior relative to the visible dialog title; the dialog's
+        # height changes with its contents. Click only recognized placeholders.
         if scenario not in ('poll-dialog', 'poll-drafts'):
             return []
         size = run(['identify', '-format', '%w %h', str(path)], env).stdout.split()
-        if size != ['1280', '800']:
+        anchor = poll_title_anchor(words)
+        if size != ['1280', '800'] or anchor is None:
             return []
+        x, top = anchor
+        first_y = top + 153
         hits = []
         crop_path = out / f'{label}-ocr-option.png'
-        for y in (282, 334):
-            run(['convert', str(path), '-crop', f'200x22+389+{y}', '+repage',
+        for y in (first_y, first_y + 52):
+            run(['convert', str(path), '-crop', f'240x22+{x}+{y}', '+repage',
                  '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop_path)], env)
             found = normalized(run(['tesseract', str(crop_path), 'stdout', '--psm', '7'], env).stdout)
             if 'antwortoption' in found.replace(' ', ''):
-                hits.append((469, y + 11))
+                hits.append((x + 80, y + 11))
         crop_path.unlink()
         return hits
 
@@ -114,17 +125,19 @@ def exercise(scenario, env, xid, out, label, large=False):
         if scenario == 'poll-dialog' and (width, height) == (1280, 800) and any(
                 term in ('TEAMESSEN', 'GARTEN', 'WERKSTATT') for term in required):
             # The small field text can be missed by whole-window OCR. Inspect
-            # the actual three native inputs at high contrast, in both themes.
+            # the actual three native inputs relative to the dialog title.
             field_path = out / f'{label}-ocr-poll-field.png'
-            for x, y, w in ((350, 222, 575), (382, 275, 420), (382, 327, 420)):
+            anchor = poll_title_anchor(words)
+            fields = [] if anchor is None else [(anchor[0], anchor[1] + dy, 575) for dy in (93, 146, 198)]
+            for x, y, w in fields:
                 image_args = ['convert', str(path), '-crop', f'{w}x36+{x}+{y}', '+repage',
                               '-resize', '400%', '-colorspace', 'gray']
                 if '-dark-' in label:
                     image_args.append('-negate')
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
-            field_path.unlink()
-        if 'Antwortoption' in required and poll_option_hits(path):
+            field_path.unlink(missing_ok=True)
+        if 'Antwortoption' in required and poll_option_hits(path, words):
             text += ' antwortoption'
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
@@ -186,8 +199,37 @@ def exercise(scenario, env, xid, out, label, large=False):
                     raise
                 time.sleep(.15)
 
+    def accent_button_hit(path, word, xmin, ymin):
+        # White labels inside a colored button are frequently missed by
+        # whole-window OCR. Find actual brand-colored button-sized regions,
+        # then require the requested label in an enlarged crop of that region.
+        # This follows layout changes without treating a dispatched click as
+        # evidence that the action succeeded.
+        for color in ('#356fc1', '#3a75c8', '#354f41', '#4f7a63'):
+            result = run(['convert', str(path), '-fuzz', '5%', '-fill', 'black',
+                          '+opaque', color, '-fill', 'white', '-opaque', color,
+                          '-define', 'connected-components:verbose=true',
+                          '-connected-components', '4', 'null:'], env)
+            for line in (result.stdout + result.stderr).splitlines():
+                match = re.search(r'\b(\d+)x(\d+)\+(\d+)\+(\d+).*srgb\(255,255,255\)', line)
+                if not match:
+                    continue
+                width, height, x, y = map(int, match.groups())
+                if width < 50 or not 25 <= height <= 60 or x < xmin or y < ymin:
+                    continue
+                crop = out / f'{label}-ocr-accent-button.png'
+                run(['convert', str(path), '-crop', f'{width}x{height}+{x}+{y}',
+                     '+repage', '-resize', '400%', '-colorspace', 'gray', '-auto-level',
+                     str(crop)], env)
+                text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '7'], env).stdout)
+                crop.unlink()
+                if normalized(word).replace(' ', '') in text.replace(' ', ''):
+                    return x + width // 2, y + height // 2
+        return None
+
     def click(word, xmin=0, ymin=0, inspected_point=None, dy=0, first=False):
         path, words, _ = observe()
+        observed_words = words
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if not choices:
             tsv=run(['tesseract',str(path),'stdout','--psm','6','tsv'],env).stdout
@@ -205,15 +247,26 @@ def exercise(scenario, env, xid, out, label, large=False):
             choices=[r for r in inverted if normalized(r['text'])==normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         # Tesseract occasionally confuses Manrope h/n and the fl ligature.
         # Fixed aliases only; the subsequent native state transition is asserted.
-        aliases={'teilnehmen':('teilnenmen','telinenmen'),'Auflegen':('auriegen','autlegen','auilegen')}
+        aliases={'teilnehmen':('teilnenmen','telinenmen'),'Auflegen':('auriegen','autlegen','auilegen'),
+                 'Entwürfe':('entwirfe',)}
         if not choices and word in aliases:
-            choices=[r for r in words if normalized(r['text']) in aliases[word] and int(r['left'])>=xmin and int(r['top'])>=ymin]
+            choices=[r for r in observed_words + words if normalized(r['text']) in aliases[word]
+                     and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if choices:
             hit = choices[0] if first else choices[-1]
             x = int(hit['left']) + int(hit['width']) // 2
             y = int(hit['top']) + int(hit['height']) // 2
-        elif word == 'Antwortoption' and (hits := poll_option_hits(path)):
+        elif word == 'Antwortoption' and (hits := poll_option_hits(path, observed_words)):
             x, y = hits[0] if first else hits[-1]
+        elif word in ('Veröffentlichen', 'Erinnern') and (hit := accent_button_hit(path, word, xmin, ymin)):
+            x, y = hit
+        elif word == 'discovery-search-input':
+            # The search input shares a row with its labeled primary button.
+            # Earlier and current layouts differ in their header/helper height.
+            hit = accent_button_hit(path, 'Suchen', 900, 150)
+            if not hit:
+                raise AssertionError('Cannot locate discovery search row')
+            x, y = hit[0] - 300, hit[1]
         elif inspected_point is not None:
             # Colored call controls are not reliably recognized by Tesseract.
             # These points were inspected on actual captures at the exact size.

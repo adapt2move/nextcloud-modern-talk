@@ -39,6 +39,7 @@ def capture(args, before_runtime_cleanup=None):
     manifest = {"schema": 1, "kind": "compiled GPUI native X11 UI development evidence", "backend_connected": False,
         "media_engine_attached": False, "media_frames": False, "platform_qualified": False,
         "preference_scope": "fresh private XDG configuration/data per scenario",
+        "material_preview_override": os.environ.get("TALK_UI_MATERIAL_PREVIEW") == "1",
         "binary_sha256": sha(binary), "source_files": source_manifest(root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
