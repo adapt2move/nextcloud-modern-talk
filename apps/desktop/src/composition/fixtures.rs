@@ -1216,6 +1216,7 @@ pub struct DevelopmentPort {
     chat_motion: bool,
     history_pagination: bool,
     chat_content: bool,
+    people_fixture: bool,
 }
 impl DevelopmentPort {
     pub fn new(scenario: Option<&str>) -> Self {
@@ -1254,6 +1255,7 @@ impl DevelopmentPort {
                 )
             ),
             chat_motion: scenario == Some("chat-motion"),
+            people_fixture: scenario == Some("people-card"),
             history_pagination: scenario == Some("history-pagination"),
             chat_content: matches!(
                 scenario,
@@ -1595,6 +1597,57 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
                 if self.chat_content {
                     content::configure(&mut self.snapshot);
+                }
+            }
+            UiIntent::Create {
+                account,
+                request,
+                action: talk_core::ui::conversation::CreateAction::DirectMember(person),
+            } if self.people_fixture => {
+                if self.snapshot.active_account != Some(account)
+                    || self.snapshot.selected != Some(person.context)
+                    || !self
+                        .snapshot
+                        .conversation_panel
+                        .as_ref()
+                        .is_some_and(|panel| {
+                            panel.context == person.context
+                                && panel.members_loaded
+                                && !panel.details_stale
+                                && panel
+                                    .members
+                                    .as_slice()
+                                    .iter()
+                                    .any(|member| member.id == person && !member.self_user)
+                        })
+                {
+                    return Err(SubmitError::StaleScope);
+                }
+                let direct = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| {
+                        row.kind == ConversationKind::Direct && row.title.as_str() == "Mara Fischer"
+                    })
+                    .map(|row| row.context)
+                    .ok_or(SubmitError::StaleScope)?;
+                populate(&mut self.snapshot, direct);
+                let mut panel = talk_core::ui::conversation::CreatePanel::new(account);
+                panel.result = Some(talk_core::ui::conversation::CreationResult {
+                    request,
+                    completion: Completion::ServerAccepted,
+                    conversation: Some(direct),
+                });
+                self.snapshot.create_panel = Some(panel);
+            }
+            UiIntent::AcknowledgeCreation { account, request } if self.people_fixture => {
+                if let Some(panel) = self.snapshot.create_panel.as_mut()
+                    && panel.account == account
+                    && panel.result.is_some_and(|result| result.request == request)
+                {
+                    panel.result = None;
                 }
             }
             UiIntent::SetFavorite {
@@ -1943,6 +1996,53 @@ impl NativeDesktopPort for DevelopmentPort {
 mod tests {
     use super::*;
     use talk_core::ui::MediaIntent;
+
+    #[test]
+    fn person_fixture_resolves_only_a_current_member_to_the_direct_room() {
+        let mut port = DevelopmentPort::new(Some("people-card"));
+        let account = port.snapshot.active_account.unwrap();
+        let person = port
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .members
+            .as_slice()[0]
+            .id;
+        let mut stale = person;
+        stale.local ^= 1;
+        let request = |member| UiIntent::Create {
+            account,
+            request: RequestId(71),
+            action: talk_core::ui::conversation::CreateAction::DirectMember(member),
+        };
+        assert_eq!(
+            port.try_submit(request(stale)),
+            Err(SubmitError::StaleScope)
+        );
+        assert_eq!(port.try_submit(request(person)), Ok(()));
+        let direct = port.snapshot.selected.unwrap();
+        assert_eq!(
+            port.snapshot
+                .create_panel
+                .as_ref()
+                .unwrap()
+                .result
+                .unwrap()
+                .conversation,
+            Some(direct)
+        );
+        assert_eq!(
+            port.snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|row| row.context == direct)
+                .unwrap()
+                .kind,
+            ConversationKind::Direct
+        );
+    }
     #[test]
     fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {
         use talk_core::ui::{conversation::RemoteState, messaging::MessageAction};

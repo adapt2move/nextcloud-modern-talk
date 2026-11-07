@@ -210,9 +210,24 @@ impl Desktop {
             );
         if values.is_some_and(|v| v.user_status_enabled == Some(true)) {
             for (index, choice, label, color) in [
-                (0usize, StatusChoice::Online, "Verfügbar", t.success),
-                (1, StatusChoice::Away, "Abwesend", t.warning),
-                (2, StatusChoice::DoNotDisturb, "Nicht stören", t.danger),
+                (
+                    0usize,
+                    StatusChoice::Online,
+                    "Verfügbar",
+                    t.presence_dot(Presence::Available),
+                ),
+                (
+                    1,
+                    StatusChoice::Away,
+                    "Abwesend",
+                    t.presence_dot(Presence::Away),
+                ),
+                (
+                    2,
+                    StatusChoice::DoNotDisturb,
+                    "Nicht stören",
+                    t.presence_dot(Presence::DoNotDisturb),
+                ),
                 (3, StatusChoice::Invisible, "Unsichtbar", t.muted),
             ] {
                 let selected = self.own_status_value() == Some(choice);

@@ -5,6 +5,7 @@ use super::{
     controls::{Availability, scoped_id},
 };
 use gpui::{Context, Div, FocusHandle, KeyDownEvent, Window, div, prelude::*, px};
+use std::time::{Duration, Instant};
 use talk_core::ui::{
     Decision,
     conversation::{CreateAction, DirectorySource, Member, MemberRole, PersonRef},
@@ -56,6 +57,81 @@ struct PendingMention {
     author_key: talk_core::ui::Text<256>,
     edit_generation: u64,
 }
+struct PendingCall {
+    source: ConversationRef,
+    request: RequestId,
+    target: Option<ConversationRef>,
+    started: Instant,
+}
+#[derive(Debug, PartialEq)]
+enum CallProgress {
+    Wait,
+    Cancel,
+    Failed,
+    Unavailable,
+    Start(talk_core::ui::CallScope),
+}
+impl PendingCall {
+    fn advance(
+        &mut self,
+        snapshot: &talk_core::ui::presentation::PresentationSnapshot,
+        now: Instant,
+    ) -> CallProgress {
+        use talk_core::ui::presentation::{Completion, ContentState};
+        if snapshot.active_account != Some(self.source.account) {
+            return CallProgress::Cancel;
+        }
+        if now.saturating_duration_since(self.started) >= Duration::from_secs(30) {
+            return CallProgress::Unavailable;
+        }
+        if self.target.is_none() {
+            let result = snapshot
+                .create_panel
+                .as_ref()
+                .filter(|panel| panel.account == self.source.account)
+                .and_then(|panel| panel.result)
+                .filter(|result| result.request == self.request);
+            if let Some(result) = result {
+                if result.completion != Completion::ServerAccepted {
+                    return CallProgress::Failed;
+                }
+                let Some(target) = result
+                    .conversation
+                    .filter(|target| target.account == self.source.account)
+                else {
+                    return CallProgress::Cancel;
+                };
+                self.target = Some(target);
+            } else if snapshot.selected != Some(self.source) {
+                return CallProgress::Cancel;
+            }
+        }
+        let Some(target) = self.target else {
+            return CallProgress::Wait;
+        };
+        if snapshot.selected != Some(target) {
+            return CallProgress::Cancel;
+        }
+        if snapshot.content == ContentState::Ready
+            && let Some(row) = snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .find(|row| row.context == target)
+        {
+            if row.kind == ConversationKind::Direct
+                && let Some(super::CallEntry::Direct(call)) =
+                    super::call_entry(row, snapshot.content)
+            {
+                return CallProgress::Start(call);
+            }
+            if row.call == Decision::Denied || row.kind != ConversationKind::Direct {
+                return CallProgress::Unavailable;
+            }
+        }
+        CallProgress::Wait
+    }
+}
 
 pub(super) struct Card {
     target: Option<Target>,
@@ -64,6 +140,7 @@ pub(super) struct Card {
     return_focus: Option<FocusHandle>,
     fixture_opened: bool,
     mention: Option<PendingMention>,
+    call: Option<PendingCall>,
 }
 impl Card {
     pub fn new(cx: &Context<Desktop>) -> Self {
@@ -74,6 +151,7 @@ impl Card {
             return_focus: None,
             fixture_opened: false,
             mention: None,
+            call: None,
         }
     }
     pub fn show_fixture(&mut self, context: ConversationRef, message: u128) {
@@ -109,6 +187,9 @@ fn presence(status: Presence) -> &'static str {
     }
 }
 impl Desktop {
+    pub(super) fn cancel_pending_person_call(&mut self) {
+        self.people_card.call = None;
+    }
     pub(super) fn person_member(&self, source: Source) -> Option<&Member> {
         let panel = self.snapshot.conversation_panel.as_ref().filter(|panel| {
             panel.context == source.context() && panel.members_loaded && !panel.details_stale
@@ -326,19 +407,86 @@ impl Desktop {
                 }
             }
             Action::Call(target) => {
-                if self.people_card.accepts(target, self.snapshot.selected)
-                    && self.person_is_current_direct(target.source)
-                    && self
-                        .selected()
-                        .is_some_and(|row| row.call == Decision::Allowed)
+                if !self.people_card.accepts(target, self.snapshot.selected) {
+                    return;
+                }
+                if self
+                    .people_card
+                    .call
+                    .as_ref()
+                    .is_some_and(|pending| pending.started.elapsed() >= Duration::from_secs(30))
                 {
+                    self.people_card.call = None;
+                }
+                if self.person_is_current_direct(target.source) {
+                    if self.selected_call().is_some() {
+                        self.dismiss_person(false, window);
+                        self.overlay = None;
+                        self.handle(LocalAction::Call, window, cx);
+                    }
+                } else if self.selected_call().is_some()
+                    && self.people_card.call.is_none()
+                    && let Some(person) = self
+                        .person_member(target.source)
+                        .filter(|m| !m.self_user && m.source == DirectorySource::User)
+                        .map(|m| m.id)
+                    && let Some(number) = self.room_ui.request.checked_add(1)
+                {
+                    self.room_ui.request = number;
                     self.dismiss_person(false, window);
                     self.overlay = None;
-                    self.handle(LocalAction::Call, window, cx);
+                    let request = RequestId(number);
+                    if self.submit(UiIntent::Create {
+                        account: person.context.account,
+                        request,
+                        action: CreateAction::DirectMember(person),
+                    }) {
+                        self.people_card.call = Some(PendingCall {
+                            source: person.context,
+                            request,
+                            target: None,
+                            started: Instant::now(),
+                        });
+                    }
                 }
             }
         }
         cx.notify();
+    }
+    /// A group-card call first resolves the person's direct room. Only the
+    /// matching result may continue, after that room's own call policy loads.
+    pub(super) fn refresh_person_call(&mut self) {
+        let Some(mut pending) = self.people_card.call.take() else {
+            return;
+        };
+        if self.incoming_visible() {
+            return;
+        }
+        match pending.advance(&self.snapshot, Instant::now()) {
+            CallProgress::Wait => self.people_card.call = Some(pending),
+            CallProgress::Cancel => {}
+            CallProgress::Failed => {
+                self.feedback = Some(super::feedback::Feedback::error(
+                    "Das Gespräch konnte nicht geöffnet werden. Bitte neu laden und erneut versuchen.",
+                ).in_conversation(pending.source));
+            }
+            CallProgress::Unavailable => {
+                let feedback = super::feedback::Feedback::info(
+                    "Anrufe sind für dieses Gespräch noch nicht verfügbar.",
+                );
+                self.feedback = Some(
+                    pending
+                        .target
+                        .map_or(feedback, |target| feedback.in_conversation(target)),
+                );
+            }
+            CallProgress::Start(call) => {
+                self.submit(UiIntent::StartDirect {
+                    call,
+                    media: talk_core::ui::MediaIntent::MicrophoneOnCameraOff,
+                });
+            }
+        }
     }
     pub(super) fn person_key(
         &mut self,
@@ -582,7 +730,9 @@ impl Desktop {
                 .justify_start(),
             );
         }
-        if direct && row.is_some_and(|r| r.call == Decision::Allowed) {
+        if (direct && row.is_some_and(|r| r.call == Decision::Allowed))
+            || (!direct && can_direct && self.selected_call().is_some())
+        {
             card = card.child(
                 self.button_with_leading_icon(
                     "person-call",
@@ -621,5 +771,92 @@ fn emoji_font() -> &'static str {
         "Segoe UI Emoji"
     } else {
         "Noto Color Emoji"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talk_core::ui::conversation::{CreatePanel, CreationResult};
+    use talk_core::ui::presentation::Completion;
+
+    #[test]
+    fn group_card_call_requires_matching_creation_and_current_direct_permission() {
+        let mut snapshot = crate::composition::test_snapshot(Some("people-card"));
+        let source = snapshot.selected.unwrap();
+        let target = snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|row| row.kind == ConversationKind::Direct)
+            .unwrap()
+            .context;
+        let now = Instant::now();
+        let mut pending = PendingCall {
+            source,
+            request: RequestId(5),
+            target: None,
+            started: now,
+        };
+        let mut panel = CreatePanel::new(source.account);
+        panel.result = Some(CreationResult {
+            request: RequestId(4),
+            completion: Completion::ServerAccepted,
+            conversation: Some(target),
+        });
+        snapshot.create_panel = Some(panel);
+        assert_eq!(pending.advance(&snapshot, now), CallProgress::Wait);
+        snapshot.selected = Some(target);
+        assert_eq!(pending.advance(&snapshot, now), CallProgress::Cancel);
+        snapshot
+            .create_panel
+            .as_mut()
+            .unwrap()
+            .result
+            .as_mut()
+            .unwrap()
+            .request = RequestId(5);
+        snapshot.conversations = {
+            let mut rows = snapshot.conversations.as_slice().to_vec();
+            rows.iter_mut()
+                .find(|row| row.context == target)
+                .unwrap()
+                .call = Decision::Unknown;
+            let mut result = talk_core::ui::Page::empty();
+            for row in rows {
+                result.try_push(row).unwrap();
+            }
+            result
+        };
+        assert_eq!(pending.advance(&snapshot, now), CallProgress::Wait);
+        let mut rows = snapshot.conversations.as_slice().to_vec();
+        let row = rows.iter_mut().find(|row| row.context == target).unwrap();
+        row.call = Decision::Denied;
+        let mut result = talk_core::ui::Page::empty();
+        for row in rows {
+            result.try_push(row).unwrap();
+        }
+        snapshot.conversations = result;
+        assert_eq!(pending.advance(&snapshot, now), CallProgress::Unavailable);
+        let mut rows = snapshot.conversations.as_slice().to_vec();
+        let row = rows.iter_mut().find(|row| row.context == target).unwrap();
+        row.call = Decision::Allowed;
+        let expected = row.call_scope.unwrap();
+        let mut result = talk_core::ui::Page::empty();
+        for row in rows {
+            result.try_push(row).unwrap();
+        }
+        snapshot.conversations = result;
+        assert_eq!(
+            pending.advance(&snapshot, now),
+            CallProgress::Start(expected)
+        );
+        snapshot.selected = Some(source);
+        assert_eq!(pending.advance(&snapshot, now), CallProgress::Cancel);
+        snapshot.selected = Some(target);
+        assert_eq!(
+            pending.advance(&snapshot, now + Duration::from_secs(30)),
+            CallProgress::Unavailable
+        );
     }
 }

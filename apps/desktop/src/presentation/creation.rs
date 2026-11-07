@@ -114,6 +114,7 @@ impl Desktop {
         });
     }
     pub(super) fn refresh_creation(&mut self, cx: &mut Context<Self>) {
+        self.refresh_person_call();
         let Some(panel) = &self.snapshot.create_panel else {
             return;
         };

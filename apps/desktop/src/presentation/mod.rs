@@ -1023,6 +1023,17 @@ impl Desktop {
         {
             return;
         }
+        if matches!(
+            &action,
+            LocalAction::Navigate(_)
+                | LocalAction::ReturnConversation
+                | LocalAction::Destination(_)
+                | LocalAction::Call
+                | LocalAction::Accept
+                | LocalAction::Intent(UiIntent::SelectAccount(_) | UiIntent::OpenConversation(_))
+        ) {
+            self.cancel_pending_person_call();
+        }
         if self.local_preference_action(&action, cx) {
             return;
         }
