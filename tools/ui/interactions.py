@@ -386,7 +386,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                 raise AssertionError('Explicit direct-call consent was not submitted exactly once')
             expect('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
         else:
-            point(500, 485)
+            point(580, 480)
             if consent_sent():
                 raise AssertionError('Declining submitted recording consent')
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
