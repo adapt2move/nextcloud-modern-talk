@@ -142,7 +142,11 @@ impl Desktop {
                             if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
                             ButtonStyle::Secondary,
                             Availability::when(!call.recording_pending && !call.recording_uncertain,
-                                "Eine Anfrage wird bereits bearbeitet."),
+                                if call.recording_uncertain {
+                                    "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei."
+                                } else {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                }),
                             if start { LocalAction::Open(Overlay::ConfirmRecording) }
                             else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::SetCallRecording { call: call.scope, start: false }) },
                             cx,
