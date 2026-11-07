@@ -164,6 +164,19 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape never hangs up a call', ['Verbindung wird angefragt'])
         click('Auflegen',inspected_point=(1200,800,862,682))
         expect('explicit leave returns to conversation', ['Nachricht an Produktteam'])
+    elif scenario == 'call-participants-raised':
+        # Exercise the real keyboard path with the call side panel focused.
+        # Fixture diagnostics contain only local identities and the hand state.
+        app_log = out / f'{label}.log'
+        key('h'); time.sleep(.5)
+        if 'UI_INTENT hand room=1 raised=true' not in app_log.read_text():
+            raise AssertionError('H did not raise the hand while participants are open')
+        key('h'); time.sleep(.5)
+        if 'UI_INTENT hand room=1 raised=false' not in app_log.read_text():
+            raise AssertionError('H did not lower the hand while participants are open')
+        key('Escape')
+        expect('Escape closes the call participants panel', absent=['Nicht im Anruf'])
+        checks.append({'check': 'H toggles the hand in the call participants panel', 'result': 'pass'})
     elif scenario == 'prejoin':
         key('Escape')
         expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])

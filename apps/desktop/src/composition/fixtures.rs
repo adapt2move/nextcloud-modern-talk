@@ -1421,6 +1421,12 @@ impl NativeDesktopPort for DevelopmentPort {
                 UiIntent::SetCamera { call, .. } => {
                     println!("UI_INTENT camera room={}", call.conversation.local)
                 }
+                UiIntent::SetCallHand { call, raised } => {
+                    println!(
+                        "UI_INTENT hand room={} raised={raised}",
+                        call.conversation.local
+                    )
+                }
                 UiIntent::ShareScreen(call) => {
                     println!("UI_INTENT share room={}", call.conversation.local)
                 }
