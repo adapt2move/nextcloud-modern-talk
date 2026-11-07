@@ -57,7 +57,9 @@ def exercise(scenario, env, xid, out, label, large=False):
             # Selected rows in dark overlays can be missed by whole-window OCR.
             # Inspect the actual centered content at higher contrast before failing.
             ocr_path=out/f'{label}-ocr-center.png'
-            crop=f'{width//2}x{height//2}+{width//4}+{height//4}'
+            # Wide dialogs extend beyond the central half of the window.
+            # Keep their leading labels intact in this contrast fallback.
+            crop=f'{width*3//4}x{height*3//4}+{width//8}+{height//8}'
             run(['convert',str(path),'-crop',crop,'+repage','-resize','300%',
                  '-colorspace','gray','-auto-level','-negate',str(ocr_path)],env)
             text += ' ' + normalized(run(['tesseract',str(ocr_path),'stdout','--psm','6'],env).stdout)
