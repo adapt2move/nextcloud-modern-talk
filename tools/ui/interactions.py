@@ -137,6 +137,22 @@ def exercise(scenario, env, xid, out, label, large=False):
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
             field_path.unlink(missing_ok=True)
+        if scenario in ('chat', 'busy') and 'NO MATCH' in required and (width, height) == (1280, 800):
+            # Whole-window OCR can treat the focused switcher input as a graphic.
+            # Read its actual contents relative to the visible dialog heading.
+            headings = [word for word in words if normalized(word['text']) == 'suchen'
+                        and int(word['left']) >= 260 and int(word['top']) >= 200]
+            if headings:
+                heading = min(headings, key=lambda word: int(word['top']))
+                x, y = int(heading['left']) + 13, int(heading['top']) + 60
+                field_path = out / f'{label}-ocr-switcher-field.png'
+                image_args = ['convert', str(path), '-crop', f'640x42+{x}+{y}', '+repage',
+                              '-resize', '400%', '-colorspace', 'gray']
+                if '-dark-' in label:
+                    image_args.append('-negate')
+                run(image_args + ['-auto-level', str(field_path)], env)
+                text += ' ' + normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+                field_path.unlink()
         if 'Antwortoption' in required and poll_option_hits(path, words):
             text += ' antwortoption'
         for term in required:
@@ -588,8 +604,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('direct send retires the fictional recording', ['Nachricht an Designteam'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
-        key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
+        key('ctrl+k'); type_text('NO MATCH')
+        expect_settled('local search visibly retains its query and reports no matching rows',
+                       ['NO MATCH', 'Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
