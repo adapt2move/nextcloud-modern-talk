@@ -1446,24 +1446,21 @@ impl Desktop {
         let (selected, index, _count) = group;
         let t = self.theme;
         let control = self
-            .button(
-                id,
-                label,
-                ButtonStyle::Quiet,
-                availability,
-                action.clone(),
-                cx,
+            .style_segment_option(
+                self.button(
+                    id,
+                    label,
+                    ButtonStyle::Quiet,
+                    availability,
+                    action.clone(),
+                    cx,
+                ),
+                selected,
             )
             .min_h(px(32.))
             .py_0()
             .px_2()
             .text_size(self.sp(12.))
-            .bg(if selected {
-                t.segment
-            } else {
-                gpui::transparent_black()
-            })
-            .when(selected, |d| d.border_color(t.input_border.opacity(0.45)))
             .text_color(if !availability.is_enabled() {
                 t.disabled_fg
             } else if selected {
@@ -1480,6 +1477,20 @@ impl Desktop {
             Some(group) => self.roving(control, group, index, cx),
             None => control,
         }
+    }
+
+    pub(super) fn style_segment_option<T: Styled>(&self, option: T, selected: bool) -> T {
+        option
+            .bg(if selected {
+                self.theme.segment
+            } else {
+                gpui::transparent_black()
+            })
+            .border_color(if selected {
+                self.theme.input_border
+            } else {
+                gpui::transparent_black()
+            })
     }
 
     pub fn person_avatar(&self, initials: &str, size: f32) -> Div {

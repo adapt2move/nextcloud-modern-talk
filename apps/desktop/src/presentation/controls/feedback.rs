@@ -46,12 +46,7 @@ impl Desktop {
         )
     }
 
-    pub(in crate::presentation) fn banner_with_leading(
-        &self,
-        role: BannerRole,
-        label: &str,
-        leading: impl IntoElement,
-    ) -> Div {
+    pub(in crate::presentation) fn banner_frame(&self, role: BannerRole) -> Div {
         let (foreground, background, _) = role.colors(self.theme);
         div()
             .min_h(px(36.))
@@ -67,6 +62,15 @@ impl Desktop {
             .text_color(foreground)
             .text_size(self.sp(12.))
             .line_height(self.sp(18.))
+    }
+
+    pub(in crate::presentation) fn banner_with_leading(
+        &self,
+        role: BannerRole,
+        label: &str,
+        leading: impl IntoElement,
+    ) -> Div {
+        self.banner_frame(role)
             .child(leading)
             .child(div().flex_1().min_w_0().child(label.to_owned()))
     }

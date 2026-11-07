@@ -2355,17 +2355,24 @@ impl Desktop {
                             .to_string(),
                     )],
                 );
-                self.button(
+                let availability = Availability::when(
+                    !self.poll_submission_blocked(),
+                    "Eine Anfrage wird bereits bearbeitet.",
+                );
+                self.style_tonal_chip(self.button(
                     "poll-drafts-toggle",
                     label,
                     ButtonStyle::Quiet,
-                    Availability::when(
-                        !self.poll_submission_blocked(),
-                        "Eine Anfrage wird bereits bearbeitet.",
-                    ),
+                    availability,
                     LocalAction::Content(Action::ToggleDrafts),
                     cx,
-                )
+                ))
+                .bg(self.theme.subtle)
+                .text_color(if availability.is_enabled() {
+                    self.theme.text
+                } else {
+                    self.theme.disabled_fg
+                })
             })
     }
 

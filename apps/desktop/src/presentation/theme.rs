@@ -333,6 +333,7 @@ mod tests {
                     );
                 }
                 assert!(contrast(t.input_border, t.surface) >= 3.0);
+                assert!(contrast(t.input_border, t.segment) >= 3.0);
                 for background in [
                     t.surface,
                     t.subtle,

@@ -183,14 +183,14 @@ impl Desktop {
             }
         };
         Some(
-            div()
+            self.banner_frame(crate::presentation::controls::BannerRole::Info)
                 .flex_none()
                 .min_h(px(32.))
                 .px_6()
                 .py_0()
-                .flex()
-                .items_center()
                 .gap_3()
+                .rounded(px(0.))
+                .border_0()
                 .border_b_1()
                 .border_color(theme.border.opacity(0.65))
                 .bg(crate::presentation::shell::chat_header::surface(theme))
