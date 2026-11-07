@@ -199,6 +199,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   fifteen minutes; negative results expire sooner. Only installation-owned
   reference-preview image routes are fetched, with bounded decoded image sizes.
   Provider selection and arbitrary embedded web content are not implemented.
+  Reference cards also depend on the server's providers and outbound access.
+  A resolver may return only the URL as its title, without a description or
+  thumbnail; this does not qualify rich public-site previews in an isolated lab.
 - Conversation creation supports local-directory invitations and the returned
   webinar, presentation and voice-room presets. Other special-purpose presets
   and non-user invitation sources are not offered in the creation flow.
