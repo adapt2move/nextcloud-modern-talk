@@ -80,7 +80,7 @@
     {
       "original_sha256": "410a0d3e3e2c443643859bdb4a240beca8fb012a391dc4b8f9191eb217a466cd",
       "path": "src/platform/windows/clipboard.rs",
-      "sha256": "19138d8de1260428b58c380a48ee443b01cb8c6fe2fdcdb5c3296990a11dc6c4"
+      "sha256": "e27760d8bed91a438ead11ad74970bdd05d2bae20d5b9ecff889438d329325db"
     },
     {
       "original_sha256": "b4b10b48cd3c31c1fa1390ca7eeb70c2c184db59ce1aeb387ca06563b342b010",

@@ -355,26 +355,26 @@ fn read_image_for_type(format_number: u32, format: ImageFormat) -> Option<Clipbo
 }
 
 fn read_files_from_clipboard() -> Option<ClipboardEntry> {
-    let paths = with_clipboard_data(CF_HDROP.0 as u32, |data_ptr, _size| {
-        let hdrop = HDROP(data_ptr);
-        let count = unsafe { DragQueryFileW(hdrop, DRAGDROP_GET_FILES_COUNT, None) };
-        let mut paths = Vec::new();
-        for index in 0..count.min(9) {
-            let length = unsafe { DragQueryFileW(hdrop, index, None) } as usize;
-            if length == 0 || length > 16_384 {
-                return Vec::new();
-            }
-            let mut buffer = vec![0u16; length + 1];
-            if unsafe { DragQueryFileW(hdrop, index, Some(buffer.as_mut_slice())) } == 0 {
-                return Vec::new();
-            }
-            let Ok(path) = String::from_utf16(&buffer[..length]) else {
-                return Vec::new();
-            };
-            paths.push(std::path::PathBuf::from(path));
+    // DragQueryFileW expects the clipboard's global-memory handle, not the
+    // pointer returned by GlobalLock. The clipboard retains ownership.
+    let handle = unsafe { GetClipboardData(CF_HDROP.0 as u32).ok()? };
+    let hdrop = HDROP(handle.0);
+    let count = unsafe { DragQueryFileW(hdrop, DRAGDROP_GET_FILES_COUNT, None) };
+    let mut paths = Vec::new();
+    for index in 0..count.min(9) {
+        let length = unsafe { DragQueryFileW(hdrop, index, None) } as usize;
+        if length == 0 || length > 16_384 {
+            return Some(ClipboardEntry::Files(Vec::new()));
         }
-        paths
-    })?;
+        let mut buffer = vec![0u16; length + 1];
+        if unsafe { DragQueryFileW(hdrop, index, Some(buffer.as_mut_slice())) } == 0 {
+            return Some(ClipboardEntry::Files(Vec::new()));
+        }
+        let Ok(path) = String::from_utf16(&buffer[..length]) else {
+            return Some(ClipboardEntry::Files(Vec::new()));
+        };
+        paths.push(std::path::PathBuf::from(path));
+    }
     Some(ClipboardEntry::Files(paths))
 }
 
