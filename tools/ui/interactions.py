@@ -46,8 +46,8 @@ def exercise(scenario, env, xid, out, label, large=False):
         ocr_path.unlink()
         if scenario == 'server' and (width, height) == (1280, 800):
             field_path = out / f'{label}-ocr-field.png'
-            run(['convert', str(path), '-crop', '416x48+596+304', '+repage', '-resize', '400%',
-                 '-colorspace', 'gray', '-auto-level', str(field_path)], env)
+            run(['convert', str(path), '-crop', '360x32+635+312', '+repage', '-resize', '400%',
+                 '-colorspace', 'gray', '-threshold', '75%', str(field_path)], env)
             text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
             field_path.unlink()
         if scenario == 'chat-cloud-files-offline' and (width, height) == (1280, 800):
@@ -260,7 +260,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             expect('poll field retains pasted text', [value])
         expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
-        click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
+        click('Veröffentlichen', inspected_point=(1280, 800, 865, 704))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
         expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
