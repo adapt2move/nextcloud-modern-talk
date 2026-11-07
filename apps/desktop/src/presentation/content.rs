@@ -975,6 +975,11 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .gap(px(2.))
+                    .when(
+                        voice.phase == VoicePhase::Review
+                            && self.content_ui.voice_levels.is_empty(),
+                        |d| d.child(self.hint(self.l("Aufnahme bereit zum Senden"))),
+                    )
                     .children(self.content_ui.voice_levels.iter().map(|level| {
                         div()
                             .w(px(3.))
@@ -2339,17 +2344,23 @@ impl Desktop {
             );
         }
         body = body
-            .child(div().flex().flex_wrap().gap_2().child(self.button(
-                "poll-add-option",
-                "Option hinzufügen",
-                ButtonStyle::Secondary,
-                Availability::when(
-                    !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
-                    "Die maximale Anzahl an Optionen ist erreicht.",
+            .child(
+                div().flex().flex_wrap().gap_2().child(
+                    self.button(
+                        "poll-add-option",
+                        "Option hinzufügen",
+                        ButtonStyle::Secondary,
+                        Availability::when(
+                            !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                            "Die maximale Anzahl an Optionen ist erreicht.",
+                        ),
+                        LocalAction::Content(Action::AddOption),
+                        cx,
+                    )
+                    .border_1()
+                    .border_color(self.theme.input_border),
                 ),
-                LocalAction::Content(Action::AddOption),
-                cx,
-            )))
+            )
             .child(self.dialog_row(
                 "Mehrere Antworten erlauben",
                 Some("Teilnehmende können mehr als eine Antwort wählen."),
@@ -2415,6 +2426,12 @@ impl Desktop {
                 super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create)
             })));
         }
+        if self.poll_draft(cx).is_none() {
+            body =
+                body.child(self.hint(
+                    self.l("Gib eine Frage und mindestens zwei unterschiedliche Optionen ein."),
+                ));
+        }
         let status = match self.snapshot.content_panel.poll_state {
             RemoteState::Failed(request, _) if request != RequestId(0) => {
                 Some("Die Umfrage konnte nicht gespeichert werden. Dein Entwurf bleibt erhalten.")
@@ -2465,7 +2482,6 @@ impl Desktop {
                 },
             ))
             .child(div().flex().items_center().gap_2()
-                .when(!valid, |d| d.child(self.hint(self.l("Gib eine Frage und mindestens zwei unterschiedliche Optionen ein."))))
                 .child(self.button("poll-cancel", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
                 .child(self.button(
                     "poll-submit",
