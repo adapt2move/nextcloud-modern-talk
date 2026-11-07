@@ -931,7 +931,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 3
             } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
                 2
-            } else if scenario == "room" {
+            } else if matches!(scenario, "room" | "prejoin") {
                 4
             } else {
                 1

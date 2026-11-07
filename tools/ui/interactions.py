@@ -458,8 +458,9 @@ def exercise(scenario, env, xid, out, label, large=False):
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
+        expect('conference prejoin starts open', ['Bereit', 'Jetzt', 'teil'])
         key('Escape')
-        expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])
+        expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
         # The conversation header exposes conference entry as an icon.
         run(['xdotool', 'mousemove', '--window', xid, '1181', '92', 'click', '1'], env)
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
