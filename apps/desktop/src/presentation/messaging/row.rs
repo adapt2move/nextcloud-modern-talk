@@ -324,7 +324,7 @@ impl Desktop {
                                 .or_else(|| self.selected().filter(|row| {
                                     !m.own && row.context == context
                                         && row.kind == talk_core::ui::presentation::ConversationKind::Direct
-                                        && row.title == m.author
+                                        && row.title.as_str() == m.author.as_str()
                                 }).map(|row| row.presence))
                                 .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
                             10., t.surface,
