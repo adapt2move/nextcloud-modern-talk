@@ -552,6 +552,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     if scenario == Some("thread-message-tools") {
         let mut state = snapshot(Some("thread"));
+        state.account_reminders = Some(talk_core::ui::presentation::AccountRemindersView {
+            scope: scope(),
+            support: FeatureSupport::Supported,
+            state: ContentState::Ready,
+            complete: true,
+            reminders: Page::empty(),
+        });
         if let Some(panel) = state.message_panel.as_mut() {
             for feature in [
                 talk_core::ui::messaging::MessageFeature::Reminders,
