@@ -503,6 +503,7 @@ pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::cont
             "chat-content"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -600,5 +601,38 @@ pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: boo
     if let Some(panel) = snapshot.message_panel.as_mut() {
         panel.uploads = page([file]);
         panel.uploads_running = !uncertain;
+    }
+}
+
+pub(super) fn staged_image(snapshot: &mut PresentationSnapshot) {
+    use talk_core::ui::messaging::{UploadState, UploadView};
+    let context = snapshot.selected.unwrap();
+    let file = UploadView {
+        id: 1,
+        name: text("Zwischenablage.png"),
+        bytes: Some(190313),
+        state: UploadState::Selected,
+        submitted: false,
+        transferred: 0,
+        uploaded: false,
+        server_message: None,
+    };
+    snapshot
+        .content_panel
+        .assets
+        .try_push(AssetView {
+            target: AssetTarget::Thumbnail(AttachmentRef {
+                context,
+                message: file.message_id(),
+                placeholder: text("upload"),
+            }),
+            state: AssetState::Ready { key: 2 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        })
+        .unwrap();
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.uploads = page([file]);
     }
 }

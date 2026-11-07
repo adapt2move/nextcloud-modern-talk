@@ -45,7 +45,28 @@ def exercise(scenario, env, xid, out, label, large=False):
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
         ocr_path.unlink()
         for term in required:
-            if normalized(term).replace(' ', '') not in text.replace(' ', ''):
+            # At small sizes Tesseract sometimes reads the highlighted German
+            # selection count's final letters as "ahit". Keep the numeric count
+            # and prefix exact; the subsequent staged chips verify both files.
+            selection_count = re.fullmatch(r'([12]) ausgewählt', term)
+            fuzzy_count = selection_count and re.search(
+                rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', text)
+            if selection_count and not fuzzy_count and (width, height) == (1280, 800):
+                # This inspected footer location is stable in the fixed-size
+                # fixture. A contrast-enhanced crop also works in dark mode.
+                count_path=out/f'{label}-ocr-count.png'
+                run(['convert', str(path), '-crop', '120x35+440+660', '+repage',
+                     '-resize', '400%', '-colorspace', 'gray', '-negate',
+                     '-contrast-stretch', '2%x2%', str(count_path)], env)
+                count_text=normalized(run(['tesseract', str(count_path), 'stdout', '--psm', '7'], env).stdout)
+                count_path.unlink()
+                fuzzy_count=re.search(rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', count_text)
+            aliases = {
+                'Projektübersicht.pdf': ('projektibersichtpdf', 'projektiibersichtpdf'),
+                'Zwischenablage.png': ('wischenablagepng',),
+            }
+            alternate = any(alias in text.replace(' ', '') for alias in aliases.get(term, ()))
+            if normalized(term).replace(' ', '') not in text.replace(' ', '') and not fuzzy_count and not alternate:
                 raise AssertionError(f'{name}: missing {term!r}; evidence {path.name}; OCR {text}')
         for term in absent:
             if normalized(term).replace(' ', '') in text.replace(' ', ''):
@@ -165,6 +186,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
     elif scenario == 'chat-cloud-files-offline':
         expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
+    elif scenario == 'chat-upload-preview':
+        expect('staged image has a composer chip', ['Zwischenablage.png', 'Bereit zum Senden'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

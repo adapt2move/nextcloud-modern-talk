@@ -58,6 +58,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content-failed",
     "chat-attachments",
     "chat-upload",
+    "chat-upload-preview",
     "chat-upload-uncertain",
     "chat-motion",
     "history",
@@ -394,6 +395,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "chat-cloud-files-offline"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -419,6 +421,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         if matches!(scenario, Some("chat-upload" | "chat-upload-uncertain")) {
             content::pending_upload(&mut state, scenario == Some("chat-upload-uncertain"));
+        }
+        if scenario == Some("chat-upload-preview") {
+            content::staged_image(&mut state);
         }
         if matches!(
             scenario,
@@ -1192,6 +1197,7 @@ impl DevelopmentPort {
                         | "chat-cloud-files-offline"
                         | "chat-attachments"
                         | "chat-upload"
+                        | "chat-upload-preview"
                         | "chat-upload-uncertain"
                         | "chat-content-progress"
                         | "chat-content-loading"

@@ -162,10 +162,12 @@ impl Desktop {
                         .items_center()
                         .gap_2()
                         .child(if let Some(preview) = preview {
-                            img(preview)
+                            div()
                                 .size(px(32.))
+                                .flex_none()
                                 .rounded(px(4.))
-                                .object_fit(ObjectFit::Cover)
+                                .overflow_hidden()
+                                .child(img(preview).size_full().object_fit(ObjectFit::Cover))
                                 .into_any_element()
                         } else {
                             self.scaled_icon("file", 22., self.theme.muted)
