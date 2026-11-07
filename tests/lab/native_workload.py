@@ -7,6 +7,30 @@ import urllib.request
 
 
 def seed(lab, rooms):
+    # NextCloud limits share creation to 20 per 600 seconds. This owned fixture
+    # needs 50 shares, all outside the timed workload. Preserve the full corpus
+    # and restore the exact server setting before any native measurement, also
+    # on preparation failure. Never change a production client or server here.
+    key = 'ratelimit.protection.enabled'
+    previous = lab.occ('config:system:get', key, '--default-value=unset').strip()
+    if previous not in ('unset', 'true', 'false'):
+        raise RuntimeError('Unexpected disposable fixture rate-limit configuration')
+    lab.occ('config:system:set', key, '--type=boolean', '--value=false')
+    try:
+        workload = _seed(lab, rooms)
+    finally:
+        if previous == 'unset':
+            lab.occ('config:system:delete', key)
+        else:
+            lab.occ('config:system:set', key, '--type=boolean', '--value=' + previous)
+        restored = lab.occ('config:system:get', key, '--default-value=unset').strip()
+        if restored != previous:
+            raise RuntimeError('Disposable fixture rate-limit setting was not restored')
+    workload['preparation'] = 'Share rate limit suspended only for synthetic seeding; exact prior setting restored and verified before timing'
+    return workload
+
+
+def _seed(lab, rooms):
     """Exactly 200 rooms; 1,000+ messages with images, polls, voice and threads.
 
     Preparation is outside every timed interval. The account and files belong
