@@ -226,7 +226,7 @@ fn control_colors(t: super::Theme, style: ButtonStyle, enabled: bool) -> (Hsla, 
         ButtonStyle::Primary => (t.accent, t.on_accent),
         ButtonStyle::Danger => (t.danger_bg, t.danger),
         ButtonStyle::Stage => (t.stage_panel, t.stage_text),
-        ButtonStyle::StageDanger => (gpui::rgb(0xc0483a).into(), gpui::white().into()),
+        ButtonStyle::StageDanger => (gpui::rgb(0xc0483a).into(), gpui::white()),
         ButtonStyle::Quiet => (gpui::transparent_black(), t.sidebar_secondary),
         ButtonStyle::Secondary => (t.surface, t.text),
     }
@@ -245,7 +245,7 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
     match (style, enabled) {
         (ButtonStyle::Primary, true) => t.on_accent,
         (ButtonStyle::Danger, true) => t.danger,
-        (ButtonStyle::StageDanger, true) => gpui::white().into(),
+        (ButtonStyle::StageDanger, true) => gpui::white(),
         (ButtonStyle::Stage | ButtonStyle::StageDanger, _) => t.stage_text,
         _ => t.focus,
     }
