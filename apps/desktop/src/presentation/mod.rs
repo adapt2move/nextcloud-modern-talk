@@ -3035,6 +3035,18 @@ impl Render for Desktop {
                     cx.notify();
                     return;
                 }
+                // Application settings must be routed before a focused text
+                // input can consume its modified keystroke. Keep IME and incoming
+                // call priority identical to the ordinary application handler.
+                let modifiers = event.keystroke.modifiers;
+                let primary = if cfg!(target_os = "macos") { modifiers.platform } else { modifiers.control };
+                if !composing && !this.incoming_visible() && event.keystroke.key == ","
+                    && primary && !modifiers.shift && !modifiers.alt
+                    && !(cfg!(target_os = "macos") && modifiers.control)
+                {
+                    this.key(event, window, cx);
+                    return;
+                }
                 cx.notify();
             }))
             .on_key_down(cx.listener(Self::key))

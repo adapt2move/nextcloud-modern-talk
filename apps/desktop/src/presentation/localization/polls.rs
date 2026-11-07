@@ -173,6 +173,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     ("Stimme zurückziehen", "Withdraw vote", "Retirar voto"),
+    ("Stimmen anzeigen", "Show voters", "Mostrar votantes"),
+    ("Stimmen ausblenden", "Hide voters", "Ocultar votantes"),
     (
         "Teilnehmende können mehr als eine Antwort wählen.",
         "Participants can choose more than one answer.",

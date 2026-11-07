@@ -244,7 +244,7 @@ fn waveform(file_id: &str) -> [u8; 40] {
     })
 }
 
-fn keyboard_position(position: u64, duration: u64, direction: i8) -> u64 {
+pub(super) fn keyboard_position(position: u64, duration: u64, direction: i8) -> u64 {
     if direction < 0 {
         position.saturating_sub(5_000)
     } else {
@@ -252,7 +252,7 @@ fn keyboard_position(position: u64, duration: u64, direction: i8) -> u64 {
     }
 }
 
-fn seek_position(bounds: gpui::Bounds<gpui::Pixels>, x: gpui::Pixels, duration_ms: u64) -> u64 {
+pub(super) fn seek_position(bounds: gpui::Bounds<gpui::Pixels>, x: gpui::Pixels, duration_ms: u64) -> u64 {
     let width = f32::from(bounds.size.width);
     let offset = f32::from(x - bounds.origin.x);
     if !width.is_finite() || width <= 0. || !offset.is_finite() {

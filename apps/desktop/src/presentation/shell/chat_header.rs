@@ -49,7 +49,7 @@ impl IntoElement for ScrollUnderHeader {
 
 impl Element for ScrollUnderHeader {
     type RequestLayoutState = LayoutId;
-    type PrepaintState = (AnyElement, Pixels);
+    type PrepaintState = (AnyElement, Bounds<Pixels>);
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -119,7 +119,7 @@ impl Element for ScrollUnderHeader {
         window.with_content_mask(Some(ContentMask { bounds: visible }), |window| {
             history.prepaint_at(bounds.origin, window, cx);
         });
-        (history, header_height.min(bounds.size.height))
+        (history, visible)
     }
 
     fn paint(
@@ -132,11 +132,13 @@ impl Element for ScrollUnderHeader {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let (history, _header_height) = prepaint;
+        let (history, visible) = prepaint;
         // GPUI registers tab stops while painting. Explicit sibling groups
         // retain header -> history -> composer navigation despite paint order.
         // The live list uses the enclosing panel's clip, including the header.
-        window.with_tab_group(Some(1), |window| history.paint(window, cx));
+        window.with_content_mask(Some(ContentMask { bounds: *visible }), |window| {
+            window.with_tab_group(Some(1), |window| history.paint(window, cx));
+        });
         window.with_tab_group(Some(0), |window| self.header.paint(window, cx));
     }
 }

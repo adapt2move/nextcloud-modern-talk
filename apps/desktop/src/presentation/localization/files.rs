@@ -85,6 +85,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Ordner auswählen", "Choose folder", "Elegir carpeta"),
     ("Sortieren nach", "Sort by", "Ordenar por"),
+    ("Sortieren: {name}", "Sort: {name}", "Ordenar: {name}"),
     (
         "Sortierung gilt für diese Seite.",
         "Sorting applies to this page.",

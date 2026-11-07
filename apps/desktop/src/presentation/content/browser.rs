@@ -343,8 +343,14 @@ impl Desktop {
                     ),
             );
         }
+        let sort_label = match browser.sort {
+            talk_core::ui::content::FileSort::Name => "Name",
+            talk_core::ui::content::FileSort::Modified => "Änderungsdatum",
+            talk_core::ui::content::FileSort::Size => "Größe",
+        };
         body = body.child(
-            self.segmented()
+            div().flex().flex_wrap().items_center().justify_between().gap_2()
+            .child(self.segmented()
                 .when(!self.content_ui.browser_history.is_empty(), |row| {
                     row.child(self.icon_button(
                         "cloud-history-back",
@@ -381,8 +387,21 @@ impl Desktop {
                         LocalAction::Content(Action::BrowserFavorites),
                         cx,
                     ))
-                }),
+                }))
+            .child(self.button("cloud-sort-toggle", self.lf("Sortieren: {name}", &[("name", self.l(sort_label))]),
+                ButtonStyle::Secondary, true, LocalAction::Content(Action::ToggleBrowserSort), cx)
+                .child(self.scaled_icon("chevron-down", 16., self.theme.muted))),
         );
+        if self.content_ui.browser_sort_open {
+            body = body.child(self.segmented().children([
+                (talk_core::ui::content::FileSort::Name, "Name"),
+                (talk_core::ui::content::FileSort::Modified, "Änderungsdatum"),
+                (talk_core::ui::content::FileSort::Size, "Größe"),
+            ].into_iter().enumerate().map(|(i, (sort, label))| self.chip(
+                ("cloud-sort", i), label, (browser.sort == sort, i, 3),
+                LocalAction::Content(Action::BrowserSort(sort)), cx,
+            ))));
+        }
         let parent = parent_path(path);
         let root = Text::new("/").expect("constant");
         let mut crumbs = div()
@@ -530,47 +549,6 @@ impl Desktop {
             ));
         }
         let entries = browser.entries.as_slice();
-        let sort_label = match browser.sort {
-            talk_core::ui::content::FileSort::Name => "Name",
-            talk_core::ui::content::FileSort::Modified => "Änderungsdatum",
-            talk_core::ui::content::FileSort::Size => "Größe",
-        };
-        body = body.child(
-            div()
-                .flex()
-                .flex_col()
-                .items_start()
-                .child(self.button_with_leading_icon(
-                    "cloud-sort-toggle",
-                    (sort_label, "chevron-down"),
-                    ButtonStyle::Secondary,
-                    true,
-                    LocalAction::Content(Action::ToggleBrowserSort),
-                    cx,
-                ))
-                .when(self.content_ui.browser_sort_open, |d| {
-                    d.child(
-                        self.segmented().children(
-                            [
-                                (talk_core::ui::content::FileSort::Name, "Name"),
-                                (talk_core::ui::content::FileSort::Modified, "Änderungsdatum"),
-                                (talk_core::ui::content::FileSort::Size, "Größe"),
-                            ]
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, (sort, label))| {
-                                self.chip(
-                                    ("cloud-sort", i),
-                                    label,
-                                    (browser.sort == sort, i, 3),
-                                    LocalAction::Content(Action::BrowserSort(sort)),
-                                    cx,
-                                )
-                            }),
-                        ),
-                    )
-                }),
-        );
         if browser
             .pagination
             .is_some_and(|(_, total)| total > PAGE_SIZE as u64)
@@ -689,7 +667,7 @@ impl Desktop {
                         )
                         .flex_1()
                         .min_w_0()
-                        .justify_start()
+                        .justify_start().px_0()
                         .child(
                             div()
                                 .min_w_0()

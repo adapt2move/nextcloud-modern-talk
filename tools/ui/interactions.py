@@ -326,8 +326,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['DRAFTALPHA', 'ausgelastet' if scenario == 'busy' else 'Nicht gesendet'])
         key('ctrl+comma')
         expect('settings shortcut opens modal', ['Einstellungen'])
-        click('Sage'); click('Dunkel')
-        expect('theme selection stays available after appearance change', ['Einstellungen','Sage'])
+        click('Darstellung'); click('Salbei'); click('Dunkel')
+        expect('theme selection stays available after appearance change', ['Einstellungen','Salbei'])
         path,_,_=observe()
         # Check the actual native canvas, not an OCR interpretation of selected text.
         rgb=run(['convert',str(path),'-format','%[fx:p{10,10}.r] %[fx:p{10,10}.g] %[fx:p{10,10}.b]','info:'],env).stdout

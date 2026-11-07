@@ -5,6 +5,11 @@ use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 12.;
 
 impl Desktop {
+    /// Common opaque dialog panel; callers own geometry, contents and focus.
+    pub(in crate::presentation) fn dialog_shell_surface(&self) -> Div {
+        div().bg(self.theme.surface).rounded(px(13.)).border_1()
+            .border_color(self.theme.border).shadow_lg()
+    }
     pub(in crate::presentation) fn context_menu_surface(&self) -> Div {
         div()
             .flex()

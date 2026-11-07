@@ -65,18 +65,22 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        _dot_size: f32,
+        dot_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
             return avatar;
         }
+        // The requested diameter excludes the two-point surface ring. Half of
+        // the footprint sits outside on each axis, keeping initials unobscured.
+        let diameter = if dot_size < 10. { 8. } else { 10. };
+        let footprint = diameter + 4.;
         div().flex_none().relative().child(avatar).child(
             div()
                 .absolute()
-                .right(px(-1.))
-                .bottom(px(-1.))
-                .size(px(14.))
+                .right(px(-footprint / 2.))
+                .bottom(px(-footprint / 2.))
+                .size(px(footprint))
                 .rounded_full()
                 .border_2()
                 .border_color(background)

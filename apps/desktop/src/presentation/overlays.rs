@@ -223,7 +223,7 @@ impl Desktop {
             .child(
                 self.dialog_panel(
                     DialogSurface::Overlay(overlay),
-                    div()
+                    self.dialog_shell_surface()
                         .w_full()
                         .max_w(px(width))
                         .max_h_full()
@@ -257,11 +257,6 @@ impl Desktop {
                         })
                         .flex()
                         .flex_col()
-                        .bg(t.surface)
-                        .rounded(px(13.))
-                        .border_1()
-                        .border_color(t.border)
-                        .shadow_lg()
                         .track_focus(&self.modal_focus)
                         .tab_group()
                         .occlude()
@@ -314,7 +309,7 @@ impl Desktop {
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
                         })
-                        .when(overlay == Overlay::CreatePoll, |d| {
+                        .when(overlay == Overlay::CreatePoll && !self.poll_drafts_open(), |d| {
                             d.child(self.poll_creation_footer(cx))
                         })
                         .when(overlay == Overlay::CloudFiles, |d| {

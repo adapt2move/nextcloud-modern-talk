@@ -71,6 +71,8 @@ pub(crate) enum Action {
     SubmitConfirmation(ConversationRef, u64),
     CancelConfirmation(ConversationRef, u64),
     Avatar,
+    ToggleAvatarPicker,
+    SelectAvatar(&'static str),
     Password,
     CopyGuestLink,
 }
@@ -82,6 +84,7 @@ pub(super) struct RoomUi {
     tab: Tab,
     members: members::Flow,
     loaded: bool,
+    avatar_picker_open: bool,
     name_observation: Option<(Text<256>, u64)>,
     description_observation: Option<(Text<4000>, u64)>,
     pub request: u64,
@@ -121,6 +124,7 @@ impl RoomUi {
             tab: Tab::General,
             members: members::Flow::default(),
             loaded: false,
+            avatar_picker_open: false,
             name_observation: None,
             description_observation: None,
             request: 0,
@@ -463,6 +467,11 @@ impl Desktop {
                     self.submit_room(command);
                     self.restore_member_page_focus();
                 }
+            }
+            Action::ToggleAvatarPicker => self.room_ui.avatar_picker_open = !self.room_ui.avatar_picker_open,
+            Action::SelectAvatar(emoji) => {
+                self.room_ui.avatar.update(cx, |input, _| input.set_context_value(emoji));
+                self.room_ui.avatar_picker_open = false;
             }
             Action::Avatar => {
                 if let Ok(emoji) = Text::new(self.room_ui.avatar.read(cx).content.as_str()) {
@@ -853,32 +862,16 @@ impl Desktop {
                         != d.description.as_ref().map_or("", |v| v.as_str());
                     let avatar_changed = !self.room_ui.avatar.read(cx).content.trim().is_empty();
                     about = about
-                        .child(
-                            div()
-                                .flex()
-                                .items_start()
-                                .gap_3()
-                                .child(self.conversation_avatar(row))
-                                .child(
-                                    self.room_field(
-                                        "Avatar",
-                                        &self.room_ui.avatar,
-                                        avatar_changed.then(|| {
-                                            self.button(
-                                                "room-avatar",
-                                                "Emoji als Avatar setzen",
-                                                ButtonStyle::Secondary,
-                                                self.room_available(RoomSetting::Avatar),
-                                                LocalAction::Room(Action::Avatar),
-                                                cx,
-                                            )
-                                        }),
-                                        cx,
-                                    )
-                                    .flex_1()
-                                    .min_w_0(),
-                                ),
-                        )
+                        .child(div().flex().items_center().gap_3()
+                            .child(self.conversation_avatar(row))
+                            .child(self.button("room-avatar-picker", "Emoji auswählen", ButtonStyle::Secondary,
+                                self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::ToggleAvatarPicker), cx))
+                            .when(avatar_changed, |d| d.child(self.button("room-avatar", "Emoji als Avatar setzen",
+                                ButtonStyle::Primary, self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::Avatar), cx))))
+                        .when(self.room_ui.avatar_picker_open, |d| d.child(div().flex().flex_wrap().gap_1().children(
+                            ["💬", "🎨", "👥", "🚀", "🌱", "☕", "🎯", "💡"].into_iter().enumerate().map(|(i, emoji)|
+                                self.button(("room-avatar-emoji", i), emoji, ButtonStyle::Quiet,
+                                    self.room_available(RoomSetting::Avatar), LocalAction::Room(Action::SelectAvatar(emoji)), cx)))))
                         .child(self.room_field(
                             "Name",
                             &self.room_ui.name,
@@ -912,7 +905,7 @@ impl Desktop {
                 }
                 let personal = self
                     .dialog_section(Some("Für dich"))
-                    .child(
+                    .when(row.archive == Decision::Allowed, |d| d.child(
                         self.button_with_leading_icon(
                             "room-archive",
                             (
@@ -932,7 +925,7 @@ impl Desktop {
                             cx,
                         )
                         .w_full(),
-                    )
+                    ))
                     .child(
                         self.button_with_leading_icon(
                             "room-local-groups",

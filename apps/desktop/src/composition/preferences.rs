@@ -341,6 +341,18 @@ impl ComputerSettingsPort for Bridge {
         *slot = Some((context, player, 2));
         Ok(())
     }
+    fn voice_review_seek(
+        &self, context: talk_core::ui::presentation::ConversationRef, position_ms: u64,
+    ) -> Result<(), DeviceError> {
+        if self.services.media.capture().is_some() { return Err(DeviceError::Busy); }
+        let devices = self.services.devices.as_ref().map_err(|e| *e)?;
+        if !devices.voice_snapshot().is_some_and(|voice| voice.context == context && voice.phase == talk_core::ui::content::VoicePhase::Review) {
+            return Err(DeviceError::Stale);
+        }
+        let slot = self.services.voice_player.borrow();
+        let (_, player, _) = slot.as_ref().filter(|(scope, _, _)| *scope == context).ok_or(DeviceError::Stale)?;
+        player.seek_ms(position_ms).map_err(|_| DeviceError::Unavailable)
+    }
     fn voice_review_speed(
         &self,
         context: talk_core::ui::presentation::ConversationRef,

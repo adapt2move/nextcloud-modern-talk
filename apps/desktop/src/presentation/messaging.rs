@@ -50,6 +50,7 @@ pub(crate) enum Action {
     CloseSearch,
     Locate(u128),
     CyclePin { current: u128, forward: bool },
+    TogglePinStrip,
     Schedule,
     CancelTime,
     Remind(u128),
@@ -1070,6 +1071,7 @@ impl Desktop {
             Action::ToggleSearch => self.toggle_conversation_search(window, cx),
             Action::CloseSearch => self.close_conversation_search(window, cx),
             Action::CyclePin { current, forward } => self.cycle_pin(context, current, forward),
+            Action::TogglePinStrip => self.toggle_pin_strip(context),
             Action::Locate(id) => {
                 if self.locate_message_smooth(context, id) {
                     if self.overlay == Some(Overlay::Files) {
@@ -1860,9 +1862,9 @@ impl Desktop {
         {
             let context = panel.context;
             body = body.child(self.hint(&format!(
-                "{} {} MiB",
+                "{} {}",
                 self.l("Maximale Dateigröße:"),
-                panel.file_limit / 1024 / 1024
+                super::localization::file_size(self.locale, Some(panel.file_limit))
             )));
             for message in panel.shared_files.as_slice() {
                 for (index, object) in message
@@ -2093,7 +2095,7 @@ impl Desktop {
                     self.composer_list_row(
                         self.settings_port
                             .local_datetime(scheduled.timestamp)
-                            .map(|time| format!("{} · {}", time.as_str(), scheduled.body.as_str()))
+                            .map(|time| format!("{} · {}", super::localization::local_datetime(self.locale, time.as_str()).unwrap_or_default(), scheduled.body.as_str()))
                             .unwrap_or_else(|| scheduled.body.as_str().to_owned()),
                         self.button(
                             ("schedule-cancel", scheduled.id as usize),
@@ -2120,7 +2122,7 @@ impl Desktop {
                     self.composer_list_row(
                         self.settings_port
                             .local_datetime(reminder.timestamp)
-                            .map(|time| format!("{} · {}", self.l("Erinnerung"), time.as_str()))
+                            .map(|time| format!("{} · {}", self.l("Erinnerung"), super::localization::local_datetime(self.locale, time.as_str()).unwrap_or_default()))
                             .unwrap_or_else(|| self.l("Erinnerung").to_owned()),
                         self.button(
                             ("reminder-cancel", reminder.message as usize),
