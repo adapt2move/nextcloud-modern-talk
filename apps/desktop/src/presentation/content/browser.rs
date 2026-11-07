@@ -765,7 +765,10 @@ impl Desktop {
                         .id(id)
                         .on_mouse_down(
                             gpui::MouseButton::Left,
-                            cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                // Leave the search editor so subsequent arrows and
+                                // type-ahead operate on the selected file list.
+                                this.modal_focus.focus(window);
                                 this.select_cloud_file(
                                     path.clone(),
                                     event.modifiers.shift,

@@ -239,17 +239,31 @@ pub(super) fn action(
             cloud_files(snapshot, path.as_str());
             Ok(())
         }
-        ContentAction::RecentFiles
-        | ContentAction::FavoriteFiles
-        | ContentAction::SearchFiles(_) => {
-            let section = match action {
-                ContentAction::RecentFiles => talk_core::ui::content::FileSection::Recent,
-                ContentAction::FavoriteFiles => talk_core::ui::content::FileSection::Favorites,
-                _ => talk_core::ui::content::FileSection::Search,
+        ContentAction::RecentFiles | ContentAction::FavoriteFiles => {
+            let section = if matches!(action, ContentAction::RecentFiles) {
+                talk_core::ui::content::FileSection::Recent
+            } else {
+                talk_core::ui::content::FileSection::Favorites
             };
             cloud_files(snapshot, "/");
             if let Some(browser) = &mut snapshot.content_panel.file_browser {
                 browser.section = section;
+            }
+            Ok(())
+        }
+        ContentAction::SearchFiles(term) => {
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = talk_core::ui::content::FileSection::Search;
+                let term = term.as_str().to_lowercase();
+                browser.entries = page(
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .filter(|entry| entry.name.as_str().to_lowercase().contains(&term))
+                        .cloned(),
+                );
             }
             Ok(())
         }

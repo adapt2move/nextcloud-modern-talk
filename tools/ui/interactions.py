@@ -173,14 +173,27 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+v')
         expect('native image paste stages an image chip', ['Fictional-paste.txt', 'clipboard.png'])
     elif scenario == 'chat-cloud-files':
+        click('Team', xmin=285, ymin=400)
+        expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
+        key('BackSpace')
+        expect('backspace navigates to the parent folder', ['Projektübersicht.pdf', 'Workshop.png'])
+        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
+        type_text('Workshop')
+        time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
+        expect('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
+        key('ctrl+a'); key('BackSpace')
+        time.sleep(.7)
+        expect('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
         click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
-        key('shift+Down')
-        expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
+        key('w'); key('ctrl+space')
+        expect('type-ahead and control-space select the matching file', ['2 ausgewählt'])
         key('ctrl+space')
         expect('control-space toggles the focused file', ['1 ausgewählt'])
-        key('ctrl+space')
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 555))
+        key('shift+Down')
+        expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
         expect('keyboard selection returns both cloud files to the composer',
                ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
