@@ -43,6 +43,7 @@ pub enum RoomSetting {
     Avatar,
     ReadOnly,
     Notifications,
+    CallNotifications,
     Important,
     Sensitive,
     Expiration,

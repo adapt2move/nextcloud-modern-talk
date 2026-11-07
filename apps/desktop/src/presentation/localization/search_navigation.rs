@@ -19,6 +19,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Gespräch", "Conversation", "Conversación"),
     (
+        "Gesprächsbenachrichtigungen",
+        "Conversation notifications",
+        "Notificaciones de la conversación",
+    ),
+    (
         "Keine passenden Gespräche oder Personen.",
         "No matching conversations or people.",
         "No hay conversaciones ni personas coincidentes.",
@@ -28,16 +33,21 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Use the arrow keys to select and Enter to open.",
         "Usa las flechas para seleccionar y Intro para abrir.",
     ),
-    ("Person", "Person", "Persona"),
     (
-        "Personensuche ist vorübergehend nicht verfügbar.",
-        "People search is temporarily unavailable.",
-        "La búsqueda de personas no está disponible temporalmente.",
+        "Nachrichten stummgeschaltet",
+        "Messages muted",
+        "Mensajes silenciados",
     ),
+    ("Person", "Person", "Persona"),
     (
         "Personensuche benötigt eine Verbindung.",
         "People search needs a connection.",
         "La búsqueda de personas requiere conexión.",
+    ),
+    (
+        "Personensuche ist vorübergehend nicht verfügbar.",
+        "People search is temporarily unavailable.",
+        "La búsqueda de personas no está disponible temporalmente.",
     ),
     ("Ungelesen", "Unread", "Sin leer"),
     (

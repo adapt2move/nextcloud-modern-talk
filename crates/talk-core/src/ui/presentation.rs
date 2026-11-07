@@ -349,6 +349,7 @@ pub struct ConversationView {
     pub kind: ConversationKind,
     pub unread: u32,
     pub unread_mention: Option<bool>,
+    pub notification_muted: Option<bool>,
     pub last_activity: Option<u64>,
     pub favorite: Option<bool>,
     pub organization: ConversationOrganization,

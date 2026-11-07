@@ -24,6 +24,12 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
+- The quick switcher searches loaded conversation names and the server's user
+  directory. It does not yet match group participant names. Sidebar unread and
+  mention filters are stored per durable account; mention state is unavailable
+  for cached rooms until a capable server supplies it. Conversation notification
+  changes use server-confirmed room settings; optimistic changes and a sidebar
+  notification menu are not yet implemented.
 - Typing indicators, voice messages, complete document viewers, account-wide
   content search and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
@@ -93,6 +99,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   need platform qualification. Windows is compile-checked only.
 - Native credential storage may be unavailable or report cleanup pending.
   The explicitly selected private-file fallback is persistent but unencrypted.
+- Local preferences saved by this version use schema 8; older clients cannot open
+  those preferences.
 - macOS profiles upgraded to the persistent volume association cannot be opened
   by v0.0.8 and older builds. A legacy profile whose mount device value changed
   needs the explicit storage reassociation action. Copied or replaced directories

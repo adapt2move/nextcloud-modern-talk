@@ -1558,6 +1558,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         },
         unread: r.unread_messages.unwrap_or(0),
         unread_mention: r.unread_mention,
+        notification_muted: r.notification_muted,
         last_activity: r.last_activity,
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {

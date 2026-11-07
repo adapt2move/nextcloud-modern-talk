@@ -1030,7 +1030,7 @@ impl Desktop {
                             "Anrufbenachrichtigungen",
                             "Anrufhinweise unabhängig von Nachrichten einstellen.",
                             d.call_notifications,
-                            RoomSetting::Notifications,
+                            RoomSetting::CallNotifications,
                             ConversationAction::SetCallNotifications(
                                 d.call_notifications != Some(true),
                             ),

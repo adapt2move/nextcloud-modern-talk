@@ -24,6 +24,7 @@ pub(super) struct Switcher {
     scheduled: Option<(talk_core::ui::AccountScope, String)>,
     failures: u8,
     last_failure: Option<talk_core::ui::presentation::RequestId>,
+    failure_reason: Option<talk_core::ui::UnavailableReason>,
 }
 
 // Match subsequences, favoring contiguous prefixes while retaining source order
@@ -53,6 +54,15 @@ fn score(name: &str, query: &str) -> Option<usize> {
     Some(256 + skipped)
 }
 
+fn retryable(reason: talk_core::ui::UnavailableReason) -> bool {
+    use talk_core::ui::{UnavailableReason as U, presentation::ConnectionFailure as C};
+    matches!(
+        reason,
+        U::Busy
+            | U::Connection(C::Unreachable | C::TimedOut | C::ServerUnavailable | C::RateLimited)
+    )
+}
+
 impl Desktop {
     pub(super) fn switcher_input_changed(&mut self, cx: &mut Context<Self>) {
         let query = self.search.read(cx).content.trim().to_lowercase();
@@ -63,6 +73,7 @@ impl Desktop {
             self.switcher.scheduled = None;
             self.switcher.failures = 0;
             self.switcher.last_failure = None;
+            self.switcher.failure_reason = None;
             self.schedule_switcher_directory(cx);
         }
         cx.notify();
@@ -107,6 +118,7 @@ impl Desktop {
     pub(super) fn switcher_directory_failed(
         &mut self,
         request: talk_core::ui::presentation::RequestId,
+        reason: talk_core::ui::UnavailableReason,
     ) {
         if self.overlay == Some(Overlay::Search)
             && self.directory_query.as_ref().is_some_and(|(account, q)| {
@@ -115,7 +127,8 @@ impl Desktop {
             && self.switcher.last_failure != Some(request)
         {
             self.switcher.last_failure = Some(request);
-            if self.switcher.failures < 2 {
+            self.switcher.failure_reason = Some(reason);
+            if retryable(reason) && self.switcher.failures < 2 {
                 self.switcher.failures += 1;
                 self.directory_query = None;
             }
@@ -214,9 +227,14 @@ impl Desktop {
         }
     }
 
+    pub(super) fn switcher_request_admitted(&mut self) {
+        self.switcher.failure_reason = None;
+    }
+
     pub(super) fn retry_switcher_people(&mut self, cx: &mut Context<Self>) {
         self.switcher.failures = 0;
         self.switcher.last_failure = None;
+        self.switcher.failure_reason = None;
         self.directory_query = None;
         self.schedule_switcher_directory(cx);
     }
@@ -342,17 +360,18 @@ impl Desktop {
             }
         }
         if self.active_account_connected()
-            && self.switcher.failures >= 2
-            && self.snapshot.create_panel.as_ref().is_some_and(|panel| {
-                matches!(
-                    panel.state,
-                    talk_core::ui::conversation::RemoteState::Failed(_, _)
-                )
-            })
+            && self
+                .directory_query
+                .as_ref()
+                .is_some_and(|(account, query)| {
+                    Some(*account) == self.snapshot.active_account && query == &self.switcher.query
+                })
+            && let Some(reason) = self.switcher.failure_reason
         {
-            body = body
-                .child(self.hint(self.l("Personensuche ist vorübergehend nicht verfügbar.")))
-                .child(self.button(
+            body =
+                body.child(self.hint(self.l("Personensuche ist vorübergehend nicht verfügbar.")));
+            if retryable(reason) && self.switcher.failures >= 2 {
+                body = body.child(self.button(
                     "switcher-retry",
                     "Erneut versuchen",
                     ButtonStyle::Secondary,
@@ -360,6 +379,7 @@ impl Desktop {
                     LocalAction::RetrySwitcherPeople,
                     cx,
                 ));
+            }
         }
         if !self.active_account_connected() && !self.switcher.query.is_empty() {
             body = body.child(self.hint(self.l("Personensuche benötigt eine Verbindung.")));

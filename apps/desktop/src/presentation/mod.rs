@@ -94,6 +94,7 @@ pub enum LocalAction {
     MessageIn(ConversationRef, messaging::Action),
     EmojiPicker(ConversationRef),
     Open(Overlay),
+    OpenRoomNotifications,
     Close,
     DismissFeedback,
     DismissActionToast(ConversationRef, u64),
@@ -1095,6 +1096,18 @@ impl Desktop {
             LocalAction::EmojiPicker(context) => {
                 if Some(context) == self.snapshot.selected {
                     self.show_composer_emoji(window, cx);
+                }
+            }
+            LocalAction::OpenRoomNotifications => {
+                self.handle(LocalAction::Open(Overlay::RoomInfo), window, cx);
+                if self.overlay == Some(Overlay::RoomInfo) {
+                    self.handle(
+                        LocalAction::Room(conversation_dialog::Action::Tab(
+                            conversation_dialog::Tab::Notifications,
+                        )),
+                        window,
+                        cx,
+                    );
                 }
             }
             LocalAction::Open(overlay) => {

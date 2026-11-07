@@ -343,6 +343,16 @@ pub(super) fn room(
             .has("mention-flag")
             .then(|| data.get("unreadMention").and_then(Value::as_bool))
             .flatten(),
+        notification_muted: caps
+            .has("notification-levels")
+            .then(
+                || match data.get("notificationLevel").and_then(Value::as_i64) {
+                    Some(0..=2) => Some(false),
+                    Some(3) => Some(true),
+                    _ => None,
+                },
+            )
+            .flatten(),
         last_activity: integer(data.get("lastActivity")),
         call_active: data.get("hasCall").and_then(Value::as_bool),
         sensitive: classified

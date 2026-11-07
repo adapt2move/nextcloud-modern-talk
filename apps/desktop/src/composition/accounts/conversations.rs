@@ -33,6 +33,7 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     let mut identity = room.clone();
     identity.unread_messages = None;
     identity.unread_mention = None;
+    identity.notification_muted = None;
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;
@@ -1089,6 +1090,7 @@ fn setting(s: wire::Setting) -> view::RoomSetting {
         W::Avatar => V::Avatar,
         W::ReadOnly => V::ReadOnly,
         W::Notifications => V::Notifications,
+        W::CallNotifications => V::CallNotifications,
         W::Important => V::Important,
         W::Sensitive => V::Sensitive,
         W::Expiration => V::Expiration,

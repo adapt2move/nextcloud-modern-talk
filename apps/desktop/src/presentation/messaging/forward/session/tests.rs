@@ -61,6 +61,7 @@ fn snapshot() -> PresentationSnapshot {
         kind: ConversationKind::Group,
         unread: 0,
         unread_mention: None,
+        notification_muted: None,
         last_activity: None,
         favorite: None,
         organization: ConversationOrganization {

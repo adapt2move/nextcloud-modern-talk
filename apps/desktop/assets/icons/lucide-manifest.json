@@ -46,6 +46,13 @@
       "transformation": "none"
     },
     {
+      "asset": "bell-off.svg",
+      "upstream_path": "icons/bell-off.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell-off.svg",
+      "sha256": "14ad2775c3a594f09a79c195531778ae51302f847a9c558f720340d1e450bd6a",
+      "transformation": "none"
+    },
+    {
       "asset": "bell.svg",
       "upstream_path": "icons/bell.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell.svg",

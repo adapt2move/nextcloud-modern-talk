@@ -362,6 +362,23 @@ impl Desktop {
                     cx,
                 ))
             })
+            .when(row.notification_muted.is_some(), |d| {
+                d.child(self.icon_button(
+                    "room-notification-settings",
+                    (
+                        if row.notification_muted == Some(true) {
+                            "bell-off"
+                        } else {
+                            "bell"
+                        },
+                        "Gesprächsbenachrichtigungen",
+                    ),
+                    ButtonStyle::Quiet,
+                    Availability::available().explained_elsewhere(),
+                    LocalAction::OpenRoomNotifications,
+                    cx,
+                ))
+            })
             .child(self.icon_button(
                 "room-info",
                 ("settings", "Gesprächseinstellungen"),
@@ -383,6 +400,14 @@ impl Desktop {
                         "call".into(),
                         call_availability.below_control(),
                         Some(call_name),
+                        cx,
+                    ))
+                })
+                .when(row.notification_muted.is_some(), |d| {
+                    d.child(self.reason_tip(
+                        "room-notification-settings".into(),
+                        Availability::available().below_control(),
+                        Some("Gesprächsbenachrichtigungen"),
                         cx,
                     ))
                 })

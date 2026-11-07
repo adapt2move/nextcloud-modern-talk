@@ -69,6 +69,7 @@ impl Desktop {
             action: CreateAction::FindPeople(bounded),
         }) {
             self.directory_query = Some((account, requested));
+            self.switcher_request_admitted();
         }
     }
     pub(super) fn open_creation(&mut self, cx: &mut Context<Self>) {
@@ -121,7 +122,7 @@ impl Desktop {
             request.observe(panel);
         }
         let failure = match panel.state {
-            RemoteState::Failed(request, _) => Some(request),
+            RemoteState::Failed(request, reason) => Some((request, reason)),
             _ => None,
         };
         if let Some(result) = panel.result
@@ -141,8 +142,8 @@ impl Desktop {
                 request: result.request,
             });
         }
-        if let Some(request) = failure {
-            self.switcher_directory_failed(request);
+        if let Some((request, reason)) = failure {
+            self.switcher_directory_failed(request, reason);
         }
         self.schedule_switcher_directory(cx);
     }

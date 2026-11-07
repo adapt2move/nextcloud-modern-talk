@@ -830,6 +830,15 @@ impl Desktop {
                 row.kind == ConversationKind::Direct && row.organization.classified == Some(true),
                 |d| d.child(self.scaled_icon("lock", 12., t.muted)),
             )
+            .when(row.notification_muted == Some(true), |d| {
+                d.child(self.status_icon(
+                    scoped_id(namespace, context, 0, 2),
+                    ("bell-off", "Nachrichten stummgeschaltet"),
+                    (13., t.muted),
+                    row_focus.clone(),
+                    cx,
+                ))
+            })
             .when(self.favorite_value(row) == Some(true), |d| {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 1),

@@ -164,6 +164,33 @@ async fn released_server_messaging_and_room_controls() {
         &mut client,
         &runtime,
         id,
+        400,
+        "mute-messages",
+        C::SetNotifications(NotificationLevel::Never),
+    )
+    .await;
+    let ProtocolReply::Conversations(rooms) = client
+        .request(context(&runtime), ProtocolRequest::ListConversations)
+        .await
+        .unwrap()
+    else {
+        panic!("conversation list")
+    };
+    let listed = rooms
+        .rooms
+        .as_slice()
+        .iter()
+        .find(|room| room.id == id)
+        .expect("fixture room is listed");
+    assert_eq!(listed.notification_muted, Some(true));
+    assert!(
+        listed.unread_mention.is_some(),
+        "mention flag must be observed on the pinned server"
+    );
+    settings(
+        &mut client,
+        &runtime,
+        id,
         4,
         "notification-level",
         C::SetNotifications(NotificationLevel::Mention),

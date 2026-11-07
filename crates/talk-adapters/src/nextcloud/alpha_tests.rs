@@ -553,6 +553,39 @@ fn settings_unknown_attributes_never_grant_owner_mutation() {
 }
 
 #[test]
+fn message_and_call_notification_capabilities_are_independent() {
+    let mut data = room();
+    data["notificationLevel"] = json!(3);
+    let id = ConversationId {
+        account: scope().account,
+        host: HostId::from_local(1),
+        local: 1,
+    };
+    let caps = wire::Capabilities::decode(&features(&["notification-levels"])).unwrap();
+    let room = wire::room(&data, id, &caps).unwrap();
+    assert_eq!(room.notification_muted, Some(true));
+    assert_eq!(
+        conversation::control(Setting::Notifications, &room, &data, &caps).server,
+        FeatureSupport::Supported
+    );
+    assert_eq!(
+        conversation::control(Setting::CallNotifications, &room, &data, &caps).server,
+        FeatureSupport::Unsupported
+    );
+    let caps = wire::Capabilities::decode(&features(&["notification-calls"])).unwrap();
+    let room = wire::room(&data, id, &caps).unwrap();
+    assert_eq!(room.notification_muted, None);
+    assert_eq!(
+        conversation::control(Setting::Notifications, &room, &data, &caps).server,
+        FeatureSupport::Unsupported
+    );
+    assert_eq!(
+        conversation::control(Setting::CallNotifications, &room, &data, &caps).server,
+        FeatureSupport::Supported
+    );
+}
+
+#[test]
 fn csv_import_control_requires_its_feature_and_invitation_authority() {
     let mut data = room();
     data["participantType"] = json!(1);

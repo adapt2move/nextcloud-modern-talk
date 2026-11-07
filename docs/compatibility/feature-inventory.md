@@ -61,7 +61,7 @@ Evidence: S03–S05, S08, S15, S20–S21.
 | F-043 | Sensitive conversation presentation | Partial | B; `sensitive-conversations`; classified enforcement independent **Alpha:** Sensitive/classified redaction is enforced; all export/cache surfaces remain future scope. | P1 | [CONV-004](../product/conversations.md#conv-004), [STATE-006](../product/journeys-and-states.md#state-006) |
 | F-044 | Expiration, leave/delete, clear history, unbind | Partial | B; `message-expiration`, `clear-history`, `unbind-conversation`; applicable ownership/retention **Alpha:** Expiry, leave/delete and history actions exist; unbind and all retention variants are incomplete. | P1 enforcement / P3 controls | [CONV-010](../product/conversations.md#conv-010) |
 | F-045 | Extend a direct conversation | Planned | B; supported creation/object contract; explicit new audience/history | P3 | [CONV-002](../product/conversations.md#conv-002) |
-| F-046 | User/directory/phonebook search | Partial | B; server search and optional local `phonebook-search`; privacy permissions **Alpha:** The main search includes account-scoped local-user directory results and direct-room creation; phonebook-specific integration is absent. | P1 users / P3 phonebook | [CONV-006](../product/conversations.md#conv-006) |
+| F-046 | User/directory/phonebook search | Partial | B; server search and optional local `phonebook-search`; privacy permissions **Alpha:** The switcher matches loaded conversation names, orders by observed activity, and requests account-scoped directory results with a debounce; it can open or create a direct room. Participant-name matching and phonebook-specific integration are absent. | P1 users / P3 phonebook | [CONV-006](../product/conversations.md#conv-006) |
 
 ## Messages and retrieval
 

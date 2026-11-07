@@ -1285,6 +1285,7 @@ mod tests {
             },
             unread_messages: Some(4),
             unread_mention: None,
+            notification_muted: None,
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,
