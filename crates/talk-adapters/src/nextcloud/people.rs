@@ -5,6 +5,7 @@ use nextcloud_talk_api as api;
 use talk_core::policy::Moment;
 use talk_core::protocol::conversation::{Recipient, RecipientId, RecipientSource};
 
+#[derive(Clone)]
 pub(super) struct PersonBinding {
     pub(super) id: RecipientId,
     pub(super) actor_id: String,

@@ -87,6 +87,10 @@ pub enum LocalAction {
     Window(window_chrome::Action),
     Content(content::Action),
     CreateMode(bool),
+    CreatePublic(bool),
+    CreatePreset(Option<talk_core::ui::Text<128>>),
+    AddCreationInvite(talk_core::ui::conversation::AccountPersonRef),
+    RemoveCreationInvite(talk_core::ui::conversation::AccountPersonRef),
     FindPeople,
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
@@ -453,7 +457,8 @@ impl Desktop {
             };
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
-        let discovery_search = cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
+        let discovery_search =
+            cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -615,6 +620,19 @@ impl Desktop {
                 .search
                 .update(cx, |i, _| i.set_value(term.as_deref().unwrap_or("Produkt")));
             desktop.switcher_input_changed(cx);
+        }
+        if development
+            && initial_overlay == Some(Overlay::Create)
+            && desktop.snapshot.create_panel.is_some()
+        {
+            desktop.room_ui.create_direct = false;
+            desktop
+                .conversation_name
+                .update(cx, |i, _| i.set_value("Projekt Atlas"));
+            desktop
+                .room_ui
+                .description
+                .update(cx, |i, _| i.set_value("Ideen und Updates für das Projekt."));
         }
         if development {
             desktop
@@ -1065,6 +1083,14 @@ impl Desktop {
             LocalAction::Window(action) => action.perform(window),
             LocalAction::Content(action) => self.content_action(action, window, cx),
             LocalAction::CreateMode(direct) => self.room_ui.create_direct = direct,
+            LocalAction::CreatePublic(public) => self.room_ui.create_public = public,
+            LocalAction::CreatePreset(preset) => self.room_ui.create_preset = preset,
+            LocalAction::AddCreationInvite(person) => {
+                self.submit_creation(talk_core::ui::conversation::CreateAction::AddInvite(person))
+            }
+            LocalAction::RemoveCreationInvite(person) => self.submit_creation(
+                talk_core::ui::conversation::CreateAction::RemoveInvite(person),
+            ),
             LocalAction::FindPeople => {
                 if let Ok(query) =
                     talk_core::ui::Text::new(self.room_ui.search.read(cx).content.trim())
@@ -1075,10 +1101,16 @@ impl Desktop {
                 }
             }
             LocalAction::CreateConversation => {
-                if let Ok(name) =
-                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim())
-                {
-                    self.submit_creation(talk_core::ui::conversation::CreateAction::Group(name));
+                if let (Ok(name), Ok(description)) = (
+                    talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim()),
+                    talk_core::ui::Text::new(self.room_ui.description.read(cx).content.trim()),
+                ) {
+                    self.submit_creation(talk_core::ui::conversation::CreateAction::Conversation {
+                        name,
+                        description,
+                        public: self.room_ui.create_public,
+                        preset: self.room_ui.create_preset.clone(),
+                    });
                 }
             }
             LocalAction::CreateDirect(person) => {
@@ -1270,8 +1302,12 @@ impl Desktop {
             }
             LocalAction::DiscoverSearch => self.search_discovery(cx),
             LocalAction::DiscoverJoin(context) => self.join_discovery(context),
-            LocalAction::ToggleReference(context, message, ordinal) => self.toggle_reference(context, message, ordinal),
-            LocalAction::OpenReference(context, message, ordinal) => self.open_reference(context, message, ordinal),
+            LocalAction::ToggleReference(context, message, ordinal) => {
+                self.toggle_reference(context, message, ordinal)
+            }
+            LocalAction::OpenReference(context, message, ordinal) => {
+                self.open_reference(context, message, ordinal)
+            }
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -2247,8 +2283,15 @@ impl Render for Desktop {
         }
         self.configure_member_inputs(incoming, cx);
         if self.overlay == Some(Overlay::Create) {
-            self.room_ui.search.update(cx, |i, _| {
-                i.interactive = !incoming && self.room_ui.create_direct
+            self.room_ui
+                .search
+                .update(cx, |i, _| i.interactive = !incoming);
+            self.room_ui.description.update(cx, |i, _| {
+                i.interactive = !incoming
+                    && !self.room_ui.create_direct
+                    && self.snapshot.create_panel.as_ref().is_some_and(|p| {
+                        p.extended == talk_core::ui::presentation::FeatureSupport::Supported
+                    });
             });
         }
         for input in [&self.message_ui.search, &self.message_ui.time_input] {

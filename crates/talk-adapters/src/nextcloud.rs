@@ -4,9 +4,10 @@ pub(crate) mod avatars;
 mod call_policy;
 mod content;
 mod conversation;
-mod discover;
+mod creation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
+mod discover;
 mod live;
 mod meeting;
 mod meeting_runtime;
@@ -16,8 +17,8 @@ mod notifications;
 mod pdf_preview;
 mod people;
 mod preferences;
-mod references;
 mod projection;
+mod references;
 mod search;
 mod tags;
 #[cfg(any(test, feature = "backend-test"))]
@@ -121,6 +122,8 @@ pub struct NextcloudClient {
     members: Vec<conversation::MemberBinding>,
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
+    creation_people: Vec<people::PersonBinding>,
+    creation_presets: Option<Vec<nextcloud_talk_api::creation::Preset>>,
     listed_rooms: Vec<discover::ListedRoom>,
     listed_join_uncertain: Option<ConversationId>,
     direct_attempts: Vec<people::DirectAttempt>,
@@ -224,6 +227,8 @@ impl NextcloudClient {
             members: Vec::new(),
             recipients: Vec::new(),
             people: Vec::new(),
+            creation_people: Vec::new(),
+            creation_presets: None,
             listed_rooms: Vec::new(),
             listed_join_uncertain: None,
             direct_attempts: Vec::new(),
@@ -792,6 +797,16 @@ impl NextcloudClient {
         let caps = self.capabilities(context).await?;
         self.supported(&caps)?;
         match request {
+            ProtocolRequest::InspectCreation => self.inspect_creation(context, &caps).await,
+            ProtocolRequest::StageCreationPerson(person) => {
+                self.stage_creation_person(context, person)
+            }
+            ProtocolRequest::UnstageCreationPerson(person) => {
+                self.unstage_creation_person(context, person)
+            }
+            ProtocolRequest::CreateConversation(room) => {
+                self.create_conversation(context, room, &caps).await
+            }
             ProtocolRequest::SearchMessages(query) => {
                 self.account_search(context, query, &caps).await
             }
@@ -864,7 +879,10 @@ impl NextcloudClient {
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
                 self.transport.validate(context)?;
-                if self.listed_join_uncertain.is_some_and(|id| rooms.as_slice().iter().any(|room| room.id == id)) {
+                if self
+                    .listed_join_uncertain
+                    .is_some_and(|id| rooms.as_slice().iter().any(|room| room.id == id))
+                {
                     self.listed_join_uncertain = None;
                 }
                 let retained_avatars: Vec<_> = rooms
@@ -1153,6 +1171,7 @@ impl NextcloudPort for NextcloudClient {
                         | ProtocolRequest::ReorderTags { .. }
                         | ProtocolRequest::SetConversationTags { .. }
                         | ProtocolRequest::CreateGroup { .. }
+                        | ProtocolRequest::CreateConversation(_)
                         | ProtocolRequest::CreateDirect { .. }
                         | ProtocolRequest::MarkRead(_)
                         | ProtocolRequest::LeaveConversation(_)

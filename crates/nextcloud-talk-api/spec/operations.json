@@ -691,9 +691,9 @@
       "operation_id": "preset-get-presets",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/presets/room",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::CreationPresets",
+      "scope": "Bounded Talk 24/25 preset list; see nextcloud/spreed lib/Controller/PresetController.php and lib/RoomPresets/Parameter.php. The application merges default, selected, user and forced values."
     },
     {
       "operation_id": "public_share_auth-create-room",
@@ -772,8 +772,8 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room",
       "status": "partial",
-      "api": "Request::CreateGroup | Request::CreateDirect",
-      "scope": "Basic group creation and local-user direct rooms. Other creation modes and extended parameters remain unsupported."
+      "api": "Request::CreateGroup | Request::CreateDirect | Request::CreateConversation",
+      "scope": "Bounded group, public and local-user direct creation with optional parameters and participants; see nextcloud/spreed lib/Controller/RoomController.php. Status 202 retains partial-invitation information."
     },
     {
       "operation_id": "room-get-listed-rooms",

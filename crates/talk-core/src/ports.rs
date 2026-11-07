@@ -90,7 +90,10 @@ pub struct OperationContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
     SearchMessages(crate::protocol::search::Query),
-    ResolveReference { message: MessageId, url: crate::protocol::reference::ReferenceUrl },
+    ResolveReference {
+        message: MessageId,
+        url: crate::protocol::reference::ReferenceUrl,
+    },
     Content {
         operation: OperationId,
         command: crate::protocol::content::ContentCommand,
@@ -167,6 +170,10 @@ pub enum ProtocolRequest {
     CreateGroup {
         name: Text<256>,
     },
+    InspectCreation,
+    StageCreationPerson(crate::protocol::conversation::RecipientId),
+    UnstageCreationPerson(crate::protocol::conversation::RecipientId),
+    CreateConversation(crate::protocol::creation::Room),
     FindPeople {
         query: Text<256>,
     },
@@ -182,6 +189,12 @@ pub enum ProtocolRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolReply {
+    CreationOptions(crate::protocol::creation::Options),
+    CreationPerson(crate::protocol::conversation::RecipientId),
+    CreatedConversation {
+        room: crate::protocol::Conversation,
+        incomplete_invitations: bool,
+    },
     SearchMessages(crate::protocol::search::Results),
     Content {
         operation: OperationId,

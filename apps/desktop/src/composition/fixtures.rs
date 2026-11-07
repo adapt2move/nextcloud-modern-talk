@@ -207,17 +207,27 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         first.body = text("Hier ist der Entwurf: https://example.test/studio");
         first.attachments = Page::empty();
         first.metadata.rich = Page::empty();
-        state.messages = page(std::iter::once(first).chain(state.messages.as_slice().iter().skip(1).cloned()));
+        state.messages =
+            page(std::iter::once(first).chain(state.messages.as_slice().iter().skip(1).cloned()));
         state.reference_previews = page([talk_core::ui::reference::Preview {
-            context, message: 1, ordinal: 0,
+            context,
+            message: 1,
+            ordinal: 0,
             title: text("Ein ruhiger Ort für neue Ideen"),
             description: Some(text("Ein fiktiver Einblick in das neue Studiokonzept.")),
         }]);
         state.content_panel.account = Some(context.account);
         state.content_panel.context = Some(context);
         state.content_panel.assets = page([talk_core::ui::content::AssetView {
-            target: talk_core::ui::content::AssetTarget::Reference { context, message: 1, ordinal: 0 },
-            state: talk_core::ui::content::AssetState::Ready { key: 42 }, emoji: None, color: None, document_pages: None,
+            target: talk_core::ui::content::AssetTarget::Reference {
+                context,
+                message: 1,
+                ordinal: 0,
+            },
+            state: talk_core::ui::content::AssetState::Ready { key: 42 },
+            emoji: None,
+            color: None,
+            document_pages: None,
         }]);
         return state;
     }
@@ -968,16 +978,82 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             account
         }));
         s.discover_panel = Some(talk_core::ui::discover::Panel {
-            account: scope(), request: RequestId(1), query: text(""),
+            account: scope(),
+            request: RequestId(1),
+            query: text(""),
             support: talk_core::ui::presentation::FeatureSupport::Supported,
             state: talk_core::ui::conversation::RemoteState::Idle,
             rooms: page([
-                talk_core::ui::discover::Room { context: context(7), name: text("Designrunde"), description: Some(text("Ideen, Entwürfe und offene Fragen aus dem Designteam.")), participants: Some(18), join: Decision::Allowed },
-                talk_core::ui::discover::Room { context: context(8), name: text("Kaffeepause"), description: Some(text("Ein Ort für kurze Gespräche zwischendurch.")), participants: Some(9), join: Decision::Allowed },
-                talk_core::ui::discover::Room { context: context(9), name: text("Community-Projekte"), description: Some(text("Gemeinsam an neuen Projekten arbeiten.")), participants: None, join: Decision::Allowed },
+                talk_core::ui::discover::Room {
+                    context: context(7),
+                    name: text("Designrunde"),
+                    description: Some(text(
+                        "Ideen, Entwürfe und offene Fragen aus dem Designteam.",
+                    )),
+                    participants: Some(18),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(8),
+                    name: text("Kaffeepause"),
+                    description: Some(text("Ein Ort für kurze Gespräche zwischendurch.")),
+                    participants: Some(9),
+                    join: Decision::Allowed,
+                },
+                talk_core::ui::discover::Room {
+                    context: context(9),
+                    name: text("Community-Projekte"),
+                    description: Some(text("Gemeinsam an neuen Projekten arbeiten.")),
+                    participants: None,
+                    join: Decision::Allowed,
+                },
             ]),
-            loaded: true, joining: None, uncertain: false,
+            loaded: true,
+            joining: None,
+            uncertain: false,
         });
+    }
+    if matches!(scenario, "create34" | "create35") {
+        use talk_core::ui::conversation::{
+            AccountPerson, AccountPersonRef, CreatePanel, CreationPreset,
+        };
+        let mut panel = CreatePanel::new(scope());
+        panel.group = Decision::Allowed;
+        panel.extended = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.public = talk_core::ui::presentation::FeatureSupport::Supported;
+        panel.private_allowed = true;
+        panel.public_allowed = true;
+        panel.invites = page([
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 1,
+                },
+                name: text("Mara Fischer"),
+                label: text("Design"),
+            },
+            AccountPerson {
+                id: AccountPersonRef {
+                    account: scope(),
+                    local: 2,
+                },
+                name: text("Jonas Weber"),
+                label: text("Produkt"),
+            },
+        ]);
+        panel.presets = page([
+            CreationPreset {
+                id: text("webinar"),
+                name: text("Webinar"),
+                description: text("Für moderierte Veranstaltungen."),
+            },
+            CreationPreset {
+                id: text("presentation"),
+                name: text("Präsentation"),
+                description: text("Für gemeinsame Präsentationen."),
+            },
+        ]);
+        s.create_panel = Some(panel);
     }
     s
 }

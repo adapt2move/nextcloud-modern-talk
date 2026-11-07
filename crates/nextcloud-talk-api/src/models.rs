@@ -92,6 +92,8 @@ impl Account {
 }
 #[derive(Clone, Debug)]
 pub struct Room {
+    /// The room exists, but at least one requested invitation was rejected.
+    pub incomplete_invitations: bool,
     pub avatar_version: Option<String>,
     pub custom_avatar: Option<bool>,
     pub token: String,
@@ -148,6 +150,7 @@ impl Room {
         }
         let v = &v;
         let result = Self {
+            incomplete_invitations: v.get("invalidParticipants").is_some(),
             avatar_version: string(v.get("avatarVersion"), 128)?,
             custom_avatar: v.get("isCustomAvatar").and_then(Value::as_bool),
             token: string(v.get("token"), 30)?.ok_or(ErrorKind::Malformed)?,

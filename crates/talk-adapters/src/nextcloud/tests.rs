@@ -3,6 +3,8 @@ use super::*;
 mod alpha_tests;
 #[path = "content_tests.rs"]
 mod content_tests;
+#[path = "creation_tests.rs"]
+mod creation_tests;
 #[path = "discover_tests.rs"]
 mod discover_tests;
 #[path = "note_tests.rs"]
@@ -13,10 +15,10 @@ mod notification_tests;
 mod people_tests;
 #[path = "read_tests.rs"]
 mod read_tests;
-#[path = "references_tests.rs"]
-mod references_tests;
 #[path = "reconcile_tests.rs"]
 mod reconcile_tests;
+#[path = "references_tests.rs"]
+mod references_tests;
 #[path = "search_tests.rs"]
 mod search_tests;
 #[path = "tag_tests.rs"]

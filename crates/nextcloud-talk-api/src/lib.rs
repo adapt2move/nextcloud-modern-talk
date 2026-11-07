@@ -6,6 +6,7 @@
 pub mod chat;
 pub mod content;
 pub mod conversation;
+pub mod creation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
 mod error;
@@ -102,6 +103,8 @@ pub enum Request {
     CreateGroup {
         name: String,
     },
+    CreationPresets,
+    CreateConversation(creation::Room),
     /// Server-filtered local users available when starting a conversation.
     FindPeople {
         search: String,
@@ -154,6 +157,7 @@ pub enum Request {
     LeaveCall(RoomToken),
 }
 pub enum Reply {
+    CreationPresets(Vec<creation::Preset>),
     SearchProvider(Option<search::Provider>),
     Reference(Option<references::Resolved>),
     Chat(chat::Response),
@@ -333,7 +337,9 @@ impl Client {
         }
         let create_room = matches!(
             request,
-            Request::CreateGroup { .. } | Request::CreateDirect { .. }
+            Request::CreateGroup { .. }
+                | Request::CreateDirect { .. }
+                | Request::CreateConversation(_)
         );
         let full_room_list = matches!(&request, Request::Rooms);
         if let Request::CreateDirect { user } = &request
@@ -555,7 +561,9 @@ impl Client {
         })?;
         // Typed decoding alone does not correlate a server response to this request.
         match (&request, &decoded) {
-            (Request::ResolveReference(expected), Reply::Reference(Some(reference))) if &reference.reference != expected => {
+            (Request::ResolveReference(expected), Reply::Reference(Some(reference)))
+                if &reference.reference != expected =>
+            {
                 return Err(self.error(ErrorKind::WrongScope));
             }
             (Request::Room(expected), Reply::Room(room)) if room.token != expected.as_str() => {
@@ -717,6 +725,7 @@ impl Client {
 }
 #[derive(Clone, Copy)]
 enum Kind {
+    CreationPresets,
     SearchProviders,
     Reference,
     Chat(chat::ResponseKind),
@@ -762,6 +771,14 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::CreateConversation(room) => return creation::plan(room),
+        Request::CreationPresets => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/presets/room".into(),
+            vec![],
+            vec![],
+            Kind::CreationPresets,
+        ),
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
         Request::SearchProviders => (
@@ -1109,6 +1126,7 @@ fn list<T>(
 fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
     let v = &r.data;
     Ok(match kind {
+        Kind::CreationPresets => return creation::decode(v),
         Kind::SearchProviders => return search::providers(v),
         Kind::Reference => return references::decode(v),
         Kind::Chat(kind) => return chat::decode(kind, v),
@@ -1123,7 +1141,11 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
             }
             Reply::Rooms(list(v, 100, Room::decode)?)
         }
-        Kind::Room => Reply::Room(Room::decode(v)?),
+        Kind::Room => {
+            let mut room = Room::decode(v)?;
+            room.incomplete_invitations |= r.status == 202;
+            Reply::Room(room)
+        }
         Kind::Participants => Reply::Participants(list(v, 100, Participant::decode)?),
         Kind::History => Reply::History {
             messages: list(v, 50, Message::decode)?,
