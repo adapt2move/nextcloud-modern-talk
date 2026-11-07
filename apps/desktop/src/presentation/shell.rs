@@ -412,9 +412,7 @@ impl Desktop {
                             .absolute()
                             .top(px(3.))
                             .right(px(3.))
-                            .size(px(6.))
-                            .rounded_full()
-                            .bg(t.success),
+                            .child(self.call_live_dot()),
                     )
                 } else {
                     self.icon_button(

@@ -124,6 +124,23 @@ impl Desktop {
         }
     }
 
+    pub(super) fn call_live_dot(&self) -> AnyElement {
+        let dot = div()
+            .size(gpui::px(6.))
+            .rounded_full()
+            .bg(self.theme.success);
+        if self.reduced_motion {
+            dot.into_any_element()
+        } else {
+            dot.with_animation(
+                "room-live-call-dot",
+                Animation::new(Duration::from_millis(1600)).repeat(),
+                |dot, progress| dot.opacity(0.7 + 0.3 * (1. - (2. * progress - 1.).abs())),
+            )
+            .into_any_element()
+        }
+    }
+
     pub(super) fn incoming_call_avatar(&self, avatar: Div) -> AnyElement {
         let ring = div()
             .p(gpui::px(6.))
