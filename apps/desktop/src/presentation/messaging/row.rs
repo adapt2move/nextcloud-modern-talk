@@ -648,24 +648,22 @@ impl Desktop {
                                         .focus(|s| s.opacity(1.)),
                                 )
                             })
-                            .when(!m.own, |d| {
-                                d.child(
-                                    self.icon_button(
-                                        row_id("message-reply", 0),
-                                        ("reply", "Antworten"),
-                                        ButtonStyle::Quiet,
-                                        Availability::when(
-                                            if thread { self.thread_can_reply(context, m) } else { self.can_reply_to(m) },
-                                            "Auf diese Nachricht kann nicht geantwortet werden.",
-                                        ),
-                                        LocalAction::MessageIn(context, if thread { Action::ThreadReply(m.local_id) } else { Action::Reply(m.local_id) }),
-                                        cx,
-                                    )
-                                    .opacity(0.)
-                                    .group_hover(action_group.clone(), |s| s.opacity(1.))
-                                    .focus(|s| s.opacity(1.)),
+                            .child(
+                                self.icon_button(
+                                    row_id("message-reply", 0),
+                                    ("reply", "Antworten"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(
+                                        if thread { self.thread_can_reply(context, m) } else { self.can_reply_to(m) },
+                                        "Auf diese Nachricht kann nicht geantwortet werden.",
+                                    ),
+                                    LocalAction::MessageIn(context, if thread { Action::ThreadReply(m.local_id) } else { Action::Reply(m.local_id) }),
+                                    cx,
                                 )
-                            })
+                                .opacity(0.)
+                                .group_hover(action_group.clone(), |s| s.opacity(1.))
+                                .focus(|s| s.opacity(1.)),
+                            )
                             .when(
                                 !thread && self.can_open_thread(context, m.metadata.thread.unwrap_or(m.local_id))
                                     && (m.metadata.thread.is_some() || m.reply_count > 0),
