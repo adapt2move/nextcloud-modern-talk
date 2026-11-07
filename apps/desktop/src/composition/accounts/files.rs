@@ -316,6 +316,9 @@ impl Accounts {
                 edit_generation: *edit_generation,
             });
         }
+        if matches!(p.kind, Kind::Avatar) {
+            self.avatar_dialog = Some((p.request, p.context));
+        }
         self.picker_open = true;
         Some(p)
     }
@@ -336,9 +339,16 @@ impl Accounts {
             return;
         }
         if matches!(picker.kind, Kind::Avatar) {
+            if self.avatar_dialog != Some((picker.request, picker.context)) {
+                return;
+            }
+            self.avatar_dialog = None;
             self.picker_open = false;
-            if self.avatar_picker.take() != Some((picker.request, picker.context))
-                || self.current(picker.context.account).is_err()
+            if self.avatar_picker != Some((picker.request, picker.context)) {
+                return;
+            }
+            self.avatar_picker = None;
+            if self.current(picker.context.account).is_err()
                 || !avatar_available(&self.snapshot, picker.context)
             {
                 return;
@@ -362,6 +372,10 @@ impl Accounts {
                 {
                     panel.state =
                         talk_core::ui::conversation::RemoteState::Failed(picker.request, reason);
+                    panel.result = Some(talk_core::ui::conversation::RoomResult {
+                        request: picker.request,
+                        completion: Completion::Failed(reason),
+                    });
                 }
                 self.touch();
             }
@@ -595,6 +609,42 @@ mod tests {
         }
         model.snapshot.active_account = None;
         assert!(!csv_available(&model.snapshot, selection.context));
+    }
+    #[test]
+    fn avatar_picker_rechecks_policy_and_old_callbacks_cannot_release_a_new_dialog() {
+        let (mut model, selection) = csv_model();
+        assert!(avatar_available(&model.snapshot, selection.context));
+        let old = Picker {
+            request: RequestId(91),
+            context: selection.context,
+            kind: Kind::Avatar,
+        };
+        model.avatar_picker = Some((old.request, old.context));
+        model.picker = Some(old.clone());
+        let dialog = model.take_picker().unwrap();
+        model.clear_content();
+        assert!(model.avatar_picker.is_none());
+        assert!(model.picker_open);
+        model.finish_picker(dialog.clone(), Ok(Some(PathBuf::from("stale.png"))));
+        assert!(!model.picker_open);
+        assert!(model.snapshot.conversation_panel.is_none());
+        model.picker_open = true;
+        model.avatar_dialog = Some((RequestId(92), selection.context));
+        model.avatar_picker = model.avatar_dialog;
+        model.finish_picker(dialog, Err(()));
+        assert!(model.picker_open);
+        assert_eq!(
+            model.avatar_picker,
+            Some((RequestId(92), selection.context))
+        );
+        model.snapshot = super::super::super::fixtures::snapshot(Some("details-ready"));
+        model
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .unwrap()
+            .details_stale = true;
+        assert!(!avatar_available(&model.snapshot, selection.context));
     }
     #[test]
     fn cancellation_acknowledges_only_exact_result_and_preserves_other_ticket() {

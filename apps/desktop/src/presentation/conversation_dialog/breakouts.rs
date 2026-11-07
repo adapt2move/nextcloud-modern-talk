@@ -19,6 +19,7 @@ pub(crate) enum Action {
     Remove,
     Broadcast,
     Switch(ConversationRef),
+    OpenAssigned(ConversationRef),
     Assistance,
 }
 pub(super) struct State {
@@ -181,6 +182,9 @@ impl Desktop {
                 }
             }
             Action::Switch(target) => self.submit_room(ConversationAction::SwitchBreakout(target)),
+            Action::OpenAssigned(target) => {
+                self.submit_room(ConversationAction::OpenAssignedBreakout(target))
+            }
             Action::Assistance => self.submit_room(ConversationAction::RequestBreakoutAssistance),
         }
         cx.notify();
@@ -214,14 +218,21 @@ impl Desktop {
             return Some(section);
         }
         if moderator {
-            let mut mode = div().flex().flex_col().gap_1().child(self.select_control(
-                "breakout-mode",
-                self.l(mode_label(state.mode)).to_owned(),
-                state.mode_open,
-                available,
-                LocalAction::Room(super::Action::Breakouts(Action::ToggleMode)),
-                cx,
-            ));
+            let mut mode = div()
+                .flex_none()
+                .w(self.sp(220.))
+                .max_w(gpui::relative(0.55))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(self.select_control(
+                    "breakout-mode",
+                    self.l(mode_label(state.mode)).to_owned(),
+                    state.mode_open,
+                    available,
+                    LocalAction::Room(super::Action::Breakouts(Action::ToggleMode)),
+                    cx,
+                ));
             if state.mode_open {
                 for item in [
                     BreakoutMode::Automatic,
@@ -295,9 +306,15 @@ impl Desktop {
                         let expanded = state.member_open == Some(member.id);
                         let label = chosen
                             .map(|index| self.lf("Gruppe {n}", &[("n", &(index + 1).to_string())]))
-                            .unwrap_or_else(|| self.l("Nicht zugewiesen").to_owned());
-                        let mut selector =
-                            div().flex().flex_col().gap_1().child(self.select_control(
+                            .unwrap_or_else(|| self.l("Keine Auswahl").to_owned());
+                        let mut selector = div()
+                            .flex_none()
+                            .w(self.sp(220.))
+                            .max_w(gpui::relative(0.55))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(self.select_control(
                                 gpui::ElementId::Name(
                                     format!("breakout-member-{:032x}", member.id.local).into(),
                                 ),
@@ -448,6 +465,30 @@ impl Desktop {
                                     "Bitte warte, bis die Aktion abgeschlossen ist.",
                                 ),
                                 LocalAction::Room(super::Action::Breakouts(Action::Switch(
+                                    room.context,
+                                ))),
+                                cx,
+                            ),
+                        );
+                    } else if !moderator && room.assigned && details.breakout_started == Some(true)
+                    {
+                        row = row.child(
+                            self.button(
+                                gpui::ElementId::Name(
+                                    format!(
+                                        "breakout-assigned-{:032x}",
+                                        room.context.conversation.local
+                                    )
+                                    .into(),
+                                ),
+                                if call_open {
+                                    "Anruf verlassen und öffnen"
+                                } else {
+                                    "Zugewiesenen Gruppenraum öffnen"
+                                },
+                                ButtonStyle::Quiet,
+                                !panel.state.pending(),
+                                LocalAction::Room(super::Action::Breakouts(Action::OpenAssigned(
                                     room.context,
                                 ))),
                                 cx,

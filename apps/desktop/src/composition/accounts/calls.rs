@@ -15,6 +15,7 @@ pub(super) struct BreakoutLeave {
     request: RequestId,
     context: ConversationRef,
     target: ConversationRef,
+    assigned: bool,
     deadline: Instant,
 }
 
@@ -157,6 +158,7 @@ impl Accounts {
         context: ConversationRef,
         target: ConversationRef,
         scope: CallScope,
+        assigned: bool,
     ) -> Result<(), SubmitError> {
         use talk_core::ui::conversation::{BreakoutMode, RemoteState};
         self.current(context.account)?;
@@ -184,7 +186,18 @@ impl Accounts {
                             .any(|room| room.context == target)
                         || !panel.details.as_ref().is_some_and(|details| {
                             details.breakout_supported
-                                && details.breakout_mode == Some(BreakoutMode::Free)
+                                && (if assigned {
+                                    matches!(
+                                        details.breakout_mode,
+                                        Some(BreakoutMode::Automatic | BreakoutMode::Manual)
+                                    ) && panel
+                                        .breakout_rooms
+                                        .as_slice()
+                                        .iter()
+                                        .any(|room| room.context == target && room.assigned)
+                                } else {
+                                    details.breakout_mode == Some(BreakoutMode::Free)
+                                })
                                 && details.breakout_started == Some(true)
                         })
                 })
@@ -197,13 +210,14 @@ impl Accounts {
         self.request(
             scope.account,
             ProtocolRequest::Meeting(Command::Stop(scope)),
-            Purpose::BreakoutLeave(scope, request, context, target),
+            Purpose::BreakoutLeave(scope, request, context, target, assigned),
         )?;
         self.breakout_leave = Some(BreakoutLeave {
             scope,
             request,
             context,
             target,
+            assigned,
             deadline: Instant::now() + Duration::from_secs(60),
         });
         if let Some(panel) = self.snapshot.conversation_panel.as_mut() {
@@ -219,16 +233,15 @@ impl Accounts {
         request: RequestId,
         context: ConversationRef,
         target: ConversationRef,
+        assigned: bool,
         result: Result<RuntimeReply, IdentityError>,
     ) {
-        let ended = matches!(&result, Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(value)))
-            if value.call == scope && value.phase == Phase::Ended);
-        self.complete_call(scope, result);
         let valid = self.breakout_leave.as_ref().is_some_and(|pending| {
             pending.scope == scope
                 && pending.request == request
                 && pending.context == context
                 && pending.target == target
+                && pending.assigned == assigned
                 && Instant::now() < pending.deadline
         });
         if !valid
@@ -238,16 +251,18 @@ impl Accounts {
             return;
         }
         self.breakout_leave = None;
-        if ended
-            && self
-                .room_action(
-                    request,
-                    context,
-                    talk_core::ui::conversation::ConversationAction::SwitchBreakout(target),
-                )
-                .is_ok()
-        {
-            return;
+        let ended = matches!(&result, Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(value)))
+            if value.call == scope && value.phase == Phase::Ended);
+        self.complete_call(scope, result);
+        if ended {
+            let action = if assigned {
+                talk_core::ui::conversation::ConversationAction::OpenAssignedBreakout(target)
+            } else {
+                talk_core::ui::conversation::ConversationAction::SwitchBreakout(target)
+            };
+            if self.room_action(request, context, action).is_ok() {
+                return;
+            }
         }
         self.fail_breakout_leave(request, context);
     }
@@ -275,6 +290,10 @@ impl Accounts {
                 request,
                 UnavailableReason::PolicyStale,
             );
+            panel.result = Some(talk_core::ui::conversation::RoomResult {
+                request,
+                completion: Completion::Failed(UnavailableReason::PolicyStale),
+            });
             self.touch();
         }
     }
@@ -648,6 +667,7 @@ impl Accounts {
                 matches!(
                     pending.purpose,
                     Purpose::Room(_, _, _, conversations::Work::BreakoutSwitch)
+                        | Purpose::BreakoutLeave(..)
                 )
             })
         {
@@ -941,6 +961,70 @@ mod action_tests {
             title: Some(text("Incoming fixture")),
             eligible: true,
         }
+    }
+    #[test]
+    fn breakout_leave_blocks_new_calls_and_stale_completions_cannot_replace_a_new_ticket() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("breakout-free"));
+        let context = model.snapshot.selected.unwrap();
+        let target = model
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .unwrap()
+            .breakout_rooms
+            .as_slice()[0]
+            .context;
+        let scope = call();
+        model.call_ui = Some(CallUi {
+            scope,
+            title: text("Synthetic call"),
+            direct: false,
+            wishes: MediaWishes::default(),
+        });
+        model.snapshot.call = Some(project(
+            invitation(scope).call.as_ref().unwrap(),
+            &text("Synthetic call"),
+            false,
+        ));
+        model.breakout_leave = Some(BreakoutLeave {
+            scope,
+            request: RequestId(2),
+            context,
+            target,
+            assigned: false,
+            deadline: Instant::now() + Duration::from_secs(60),
+        });
+        assert_eq!(
+            model.start_call(scope, Entry::GroupAudio, MediaWishes::default(), false),
+            Err(SubmitError::Busy)
+        );
+        model.complete_breakout_leave(
+            scope,
+            RequestId(1),
+            context,
+            target,
+            false,
+            Err(IdentityError::Request(ErrorKind::Deadline)),
+        );
+        assert_eq!(model.breakout_leave.as_ref().unwrap().request, RequestId(2));
+        assert_eq!(
+            model.snapshot.call.as_ref().unwrap().stage,
+            CallStage::Incoming
+        );
+        model.clear_content();
+        model.complete_breakout_leave(
+            scope,
+            RequestId(2),
+            context,
+            target,
+            false,
+            Err(IdentityError::Request(ErrorKind::Deadline)),
+        );
+        assert_eq!(
+            model.snapshot.call.as_ref().unwrap().stage,
+            CallStage::Incoming
+        );
     }
     #[test]
     fn inactive_account_can_offer_without_selecting_or_capturing_and_other_errors_cannot_revoke_it()

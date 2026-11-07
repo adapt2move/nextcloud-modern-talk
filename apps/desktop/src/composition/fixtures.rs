@@ -64,6 +64,7 @@ pub const SCENARIOS: &[&str] = &[
     "room-avatar",
     "breakout-configure",
     "breakout-free",
+    "breakout-assigned",
     "breakout-help",
     "thread-error",
     "chat-content",
@@ -614,6 +615,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "lobby-settings"
                 | "breakout-configure"
                 | "breakout-free"
+                | "breakout-assigned"
                 | "breakout-help"
         )
     ) {
@@ -630,7 +632,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         if matches!(
             scenario,
-            Some("breakout-configure" | "breakout-free" | "breakout-help")
+            Some("breakout-configure" | "breakout-free" | "breakout-assigned" | "breakout-help")
         ) && let Some(panel) = state.conversation_panel.as_mut()
         {
             use talk_core::ui::conversation::{
@@ -672,12 +674,24 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 BreakoutRoom {
                     context: super::fixtures::context(101),
                     name: text("Gruppe 1"),
+                    assigned: true,
                 },
                 BreakoutRoom {
                     context: super::fixtures::context(102),
                     name: text("Gruppe 2"),
+                    assigned: false,
                 },
             ]);
+            if scenario == Some("breakout-assigned") {
+                panel.breakout_rooms = page(
+                    panel
+                        .breakout_rooms
+                        .as_slice()
+                        .iter()
+                        .filter(|room| room.assigned)
+                        .cloned(),
+                );
+            }
             panel.breakout_loaded = true;
         }
         return state;

@@ -75,6 +75,7 @@ enum Purpose {
         RequestId,
         ConversationRef,
         ConversationRef,
+        bool,
     ),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
@@ -131,6 +132,7 @@ pub struct Accounts {
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
     breakout_leave: Option<calls::BreakoutLeave>,
+    breakout_observation: Option<(ConversationRef, Page<protocol::Conversation, 20>)>,
     call_poll_at: Instant,
     call_events: calls::CallEvents,
     call_actions: std::sync::Arc<calls::CallActions>,
@@ -165,6 +167,7 @@ pub struct Accounts {
     picker: Option<files::Picker>,
     picker_open: bool,
     avatar_picker: Option<(RequestId, ConversationRef)>,
+    avatar_dialog: Option<(RequestId, ConversationRef)>,
     csv_file_owner: files::CsvOwner,
     attachment_owner: files::Owner,
     message_poll_at: Instant,
@@ -186,6 +189,7 @@ impl Accounts {
             media,
             call_ui: None,
             breakout_leave: None,
+            breakout_observation: None,
             call_poll_at: Instant::now(),
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -219,6 +223,7 @@ impl Accounts {
             picker: None,
             picker_open: false,
             avatar_picker: None,
+            avatar_dialog: None,
             csv_file_owner: files::CsvOwner::default(),
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
@@ -232,6 +237,14 @@ impl Accounts {
     pub fn shutdown(&mut self) {
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.kind, files::Kind::Avatar))
+        {
+            self.picker = None;
+        }
         self.stop_video();
         self.queued_send = None;
         self.queued_read.clear();
@@ -332,6 +345,7 @@ impl Accounts {
         self.cancel_csv_file();
         self.avatar_picker = None;
         self.breakout_leave = None;
+        self.breakout_observation = None;
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -705,7 +719,7 @@ impl Accounts {
                 self.cache_history(context);
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
-            Purpose::BreakoutLeave(scope, request, context, target) => self.complete_breakout_leave(scope, request, context, target, result),
+            Purpose::BreakoutLeave(scope, request, context, target, assigned) => self.complete_breakout_leave(scope, request, context, target, assigned, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
             Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),

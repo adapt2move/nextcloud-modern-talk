@@ -182,6 +182,14 @@ pub(super) fn unavailable(value: conversation::Availability) -> &'static str {
     }
 }
 impl Desktop {
+    pub(crate) fn fixture_room_avatar(&mut self, cx: &mut Context<Self>) {
+        if !self.development {
+            return;
+        }
+        self.room_ui.context = self.snapshot.selected;
+        self.room_ui.tab = Tab::General;
+        self.refresh_room_dialog(cx);
+    }
     pub(crate) fn fixture_lobby_settings(&mut self, cx: &mut Context<Self>) {
         if !self.development {
             return;

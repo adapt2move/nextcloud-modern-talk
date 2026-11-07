@@ -544,6 +544,7 @@ impl NextcloudClient {
         };
         let breakout_supported = caps.has("breakout-rooms-v1")
             && caps.breakouts_enabled == Some(true)
+            && !wire::is_federated(data)
             && !room.unknown_restrictions
             && !room.classified
             && !room.channel;
@@ -788,13 +789,16 @@ impl NextcloudClient {
                 .transport
                 .api_request(c, api::Request::UploadRoomAvatar { room: token, png })
                 .await;
-            self.settle_action(operation, result.as_ref().err());
-            let api::Reply::Room(value) = result? else {
-                return Err(self.error(ErrorKind::Uncertain));
+            let result = match result {
+                Ok(api::Reply::Room(value)) => self
+                    .conversation_details(id, &value.project(), &fresh)
+                    .map(|details| ConversationResult::Details(Box::new(details)))
+                    .map_err(|_| self.error(ErrorKind::Uncertain)),
+                Ok(_) => Err(self.error(ErrorKind::Uncertain)),
+                Err(error) => Err(error),
             };
-            return Ok(ConversationResult::Details(Box::new(
-                self.conversation_details(id, &value.project(), &fresh)?,
-            )));
+            self.settle_action(operation, result.as_ref().err());
+            return result;
         }
         if command == C::Leave {
             self.allowed(room.actions.leave_conversation)?;

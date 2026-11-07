@@ -14,7 +14,7 @@ use talk_core::protocol::conversation::{
     NotificationLevel, RecipientSource, Setting,
 };
 use talk_core::protocol::messaging::{
-    ComposeOptions, MessagingCommand as M, MessagingResult as MR,
+    ComposeOptions, MessagingCommand as M, MessagingFeature, MessagingResult as MR,
 };
 use talk_core::protocol::{FeatureSupport, MessageId, MessageKind, Role, SendState};
 fn scope() -> AccountScope {
@@ -137,6 +137,34 @@ async fn released_server_messaging_and_room_controls() {
         .await
         .unwrap();
     let id = client.fixture_conversation().unwrap();
+    let MR::Capabilities(message_caps) = m(
+        &mut client,
+        &runtime,
+        id,
+        999,
+        "provider-capabilities",
+        M::Capabilities,
+    )
+    .await
+    else {
+        panic!("messaging capabilities")
+    };
+    for feature in [MessagingFeature::Translation, MessagingFeature::Summary] {
+        let availability = message_caps
+            .actions
+            .as_slice()
+            .iter()
+            .find(|(key, _)| *key == feature)
+            .unwrap()
+            .1;
+        assert_ne!(
+            availability.server,
+            FeatureSupport::Supported,
+            "the lab has no translation or summary provider"
+        );
+    }
+    assert!(message_caps.summary_offer.is_none());
+    println!("alpha-backend provider-absent-gates: pass");
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {
@@ -210,6 +238,44 @@ async fn released_server_messaging_and_room_controls() {
             C::StartBreakouts,
         )
         .await;
+        let mut bob = test_support::from_private_fixture(
+            &root.join("bob.json"),
+            scope(),
+            HostId::from_local(700),
+            runtime.clone(),
+        )
+        .expect("private synthetic participant fixture");
+        bob.request(context(&runtime), ProtocolRequest::InspectAccount)
+            .await
+            .unwrap();
+        let bob_parent = bob.fixture_conversation().unwrap();
+        let CR::BreakoutRooms(assigned) = settings(
+            &mut bob,
+            &runtime,
+            bob_parent,
+            2001,
+            "breakout-assigned-room",
+            C::BreakoutRooms,
+        )
+        .await
+        else {
+            panic!("assigned room")
+        };
+        assert_eq!(assigned.as_slice().len(), 1);
+        let child = &assigned.as_slice()[0];
+        assert_eq!(
+            child.actions.read_messages,
+            talk_core::policy::Decision::Allowed
+        );
+        settings(
+            &mut bob,
+            &runtime,
+            child.id,
+            2002,
+            "breakout-request-help",
+            C::RequestBreakoutAssistance,
+        )
+        .await;
         settings(
             &mut client,
             &runtime,
@@ -234,6 +300,72 @@ async fn released_server_messaging_and_room_controls() {
             id,
             1007,
             "breakout-remove",
+            C::RemoveBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1008,
+            "breakout-configure-free",
+            C::ConfigureBreakouts {
+                amount: 2,
+                mode: BreakoutMode::Free,
+                assignments: talk_core::bounded::Page::empty(),
+            },
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1009,
+            "breakout-start-free",
+            C::StartBreakouts,
+        )
+        .await;
+        let CR::BreakoutRooms(choices) = settings(
+            &mut bob,
+            &runtime,
+            bob_parent,
+            2003,
+            "breakout-free-choices",
+            C::BreakoutRooms,
+        )
+        .await
+        else {
+            panic!("free choices")
+        };
+        assert_eq!(choices.as_slice().len(), 2);
+        let chosen = choices.as_slice()[0].id;
+        assert!(matches!(
+            settings(
+                &mut bob,
+                &runtime,
+                bob_parent,
+                2004,
+                "breakout-switch",
+                C::SwitchBreakout(chosen)
+            )
+            .await,
+            CR::BreakoutSwitched(_)
+        ));
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1010,
+            "breakout-stop-free",
+            C::StopBreakouts,
+        )
+        .await;
+        settings(
+            &mut client,
+            &runtime,
+            id,
+            1011,
+            "breakout-remove-free",
             C::RemoveBreakouts,
         )
         .await;

@@ -7,6 +7,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Salir de la llamada y cambiar",
     ),
     (
+        "Anruf verlassen und öffnen",
+        "Leave call and open",
+        "Salir de la llamada y abrir",
+    ),
+    (
         "Anzahl der Gruppenräume",
         "Number of breakout rooms",
         "Número de salas",
@@ -50,6 +55,7 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Switch to room",
         "Cambiar de sala",
     ),
+    ("Keine Auswahl", "No selection", "Sin selección"),
     ("Manuell zuweisen", "Assign manually", "Asignar manualmente"),
     ("Mehr Gruppenräume", "More breakout rooms", "Más salas"),
     (
@@ -72,6 +78,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Weniger Gruppenräume",
         "Fewer breakout rooms",
         "Menos salas",
+    ),
+    (
+        "Zugewiesenen Gruppenraum öffnen",
+        "Open assigned room",
+        "Abrir sala asignada",
     ),
     ("Zuweisung", "Assignment", "Asignación"),
     (

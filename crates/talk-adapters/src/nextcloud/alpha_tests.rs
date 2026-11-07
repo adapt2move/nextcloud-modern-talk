@@ -20,6 +20,79 @@ fn features(names: &[&str]) -> Value {
 fn message(id: u64) -> Value {
     json!({"id":id,"token":"testroom","actorType":"users","actorId":"fixture_user","actorDisplayName":"Fixture","messageType":"comment","message":"original","timestamp":1,"referenceId":"","isReplyable":true,"messageParameters":{},"reactions":{},"reactionsSelf":[]})
 }
+
+#[tokio::test]
+async fn avatar_upload_rechecks_authority_and_sends_bounded_multipart() {
+    for major in [34, 35] {
+        for revoked in [false, true] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["features"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("avatar"));
+            let mut moderator = room();
+            moderator["participantType"] = json!(1);
+            let mut observed = moderator.clone();
+            if revoked {
+                observed["participantType"] = json!(3);
+            }
+            let mut replies = vec![
+                Reply::data(capabilities.clone()),
+                Reply::data(moderator.clone()),
+                Reply::data(capabilities),
+                Reply::data(observed),
+            ];
+            if !revoked {
+                replies.push(Reply::data(moderator));
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("private-avatar.png");
+            image::RgbaImage::from_pixel(8, 4, image::Rgba([10, 20, 30, 255]))
+                .save(&path)
+                .unwrap();
+            let result = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::ConversationSettings {
+                        conversation,
+                        operation: OperationId::from_local(123),
+                        command: C::SetImageAvatar {
+                            local_path: Text::new(path.to_str().unwrap()).unwrap(),
+                        },
+                    },
+                )
+                .await;
+            if revoked {
+                assert_eq!(result.err().unwrap().kind, ErrorKind::PermissionDenied);
+                assert_eq!(server.count(), 4);
+            } else {
+                assert!(matches!(
+                    result,
+                    Ok(ProtocolReply::ConversationSettings {
+                        result: CR::Details(_),
+                        ..
+                    })
+                ));
+                let seen = server.seen.lock().unwrap();
+                let bytes = &seen[4];
+                let headers = String::from_utf8_lossy(bytes).to_lowercase();
+                assert!(
+                    headers.starts_with(
+                        "post /cloud/ocs/v2.php/apps/spreed/api/v1/room/testroom/avatar"
+                    )
+                );
+                assert!(headers.contains("multipart/form-data; boundary="));
+                assert!(headers.contains("name=\"file\""));
+                assert!(!headers.contains("private-avatar.png"));
+                assert!(bytes.windows(8).any(|part| part == b"\x89PNG\r\n\x1a\n"));
+            }
+        }
+    }
+}
 #[tokio::test]
 async fn reminder_writes_publish_only_confirmed_values_and_keep_read_failure_uncertain() {
     for major in [34, 35] {

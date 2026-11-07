@@ -97,6 +97,8 @@ pub struct BreakoutAssignment {
 pub struct BreakoutRoom {
     pub context: ConversationRef,
     pub name: Text<256>,
+    /// The server returned this user as a participant in the child room.
+    pub assigned: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DirectorySource {
@@ -372,6 +374,7 @@ pub enum ConversationAction {
     RemoveBreakouts,
     BroadcastBreakouts(Text<4096>),
     SwitchBreakout(ConversationRef),
+    OpenAssignedBreakout(ConversationRef),
     RequestBreakoutAssistance,
 }
 impl ConversationAction {
