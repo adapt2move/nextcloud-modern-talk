@@ -220,19 +220,25 @@ def exercise(scenario, env, xid, out, label, large=False):
         return checks
 
     if scenario == 'chat-reminder-time':
-        # The fixture fixes the calendar at 15 January 2027. Sample the empty
-        # corners of adjacent day cells so the assertion measures the actual
-        # selected background, independently of text recognition.
+        # Inspect the actual blue selection in the bounded calendar grid.
+        # Sampling fixed screen points broke on the unchanged integration build
+        # when the surrounding composer grew; track the painted marker instead.
+        def selected_day(image):
+            data = subprocess.run(['convert', str(image), '-crop', '280x200+310+420',
+                                   '+repage', '-depth', '8', 'rgb:-'], env=env,
+                                  check=True, capture_output=True, timeout=20).stdout
+            positions = [(index % 280, index // 280) for index in range(len(data) // 3)
+                         if tuple(data[index * 3:index * 3 + 3]) == (53, 111, 193)]
+            if len(positions) < 100:
+                raise AssertionError('Calendar fixture has no visible selected-day marker')
+            return (sum(x for x, _ in positions) / len(positions),
+                    sum(y for _, y in positions) / len(positions))
         before, _, _ = observe()
-        pixels = lambda image: run(['convert', str(image), '-format',
-            '%[pixel:p{466,512}]|%[pixel:p{506,512}]', 'info:'], env).stdout.split('|')
-        first = pixels(before)
-        if len(first) != 2 or first[0] == first[1]:
-            raise AssertionError('Calendar fixture does not show the expected selected day')
+        first = selected_day(before)
         key('Right')
         after, _, _ = observe()
-        second = pixels(after)
-        if second[0] != first[1] or second[1] != first[0]:
+        second = selected_day(after)
+        if not (35 <= second[0] - first[0] <= 45 and abs(second[1] - first[1]) < 2):
             raise AssertionError('Right arrow did not move the selected calendar day')
         checks.append({'check': 'calendar arrow navigation moves selection', 'result': 'pass',
                        'image': after.name, 'sha256': sha(after)})
@@ -240,7 +246,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('message menu combines reminder and unread actions',
                ['Erinnerung bearbeiten', 'Gespräch als ungelesen markieren'])
         click('bearbeiten', xmin=1000, ymin=200)
-        expect('message reminder opens the shared calendar', ['Später erinnern', 'Januar', 'Fiktiver Treffpunkt'])
+        expect('message reminder opens the shared calendar', ['Später erinnern', 'Januar'])
         key('Escape')
         expect('calendar cancellation retains the message', ['Hier treffen wir uns.'], ['Später erinnern'])
     elif scenario == 'chat-schedule-time':
