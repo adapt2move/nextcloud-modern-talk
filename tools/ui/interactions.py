@@ -207,7 +207,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
         key('BackSpace')
         expect('backspace navigates to the parent folder', ['Projektübersicht.pdf', 'Workshop.png'])
-        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
+        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 208))
         type_text('Workshop')
         time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
         expect('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])

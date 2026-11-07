@@ -2134,8 +2134,8 @@ impl NativeDesktopPort for DevelopmentPort {
                         for file in panel.uploads.as_slice().iter().filter(|f| !f.submitted) {
                             let row = message(
                                 file.message_id(),
-                                "Fictional author",
-                                "FA",
+                                "Alex Sommer",
+                                "AS",
                                 "10:00",
                                 if first { caption.as_str() } else { "" },
                                 true,

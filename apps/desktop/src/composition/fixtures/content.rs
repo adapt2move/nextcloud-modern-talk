@@ -813,10 +813,10 @@ pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: boo
     };
     let mut row = snapshot.messages.as_slice()[0].clone();
     row.local_id = file.message_id();
-    row.author = text("Fictional author");
-    row.initials = text("FA");
+    row.author = text("Alex Sommer");
+    row.initials = text("AS");
     row.own = true;
-    row.body = text("My favourite");
+    row.body = text("Mein Favorit");
     row.attachments = Page::empty();
     row.metadata = Default::default();
     row.delivery = talk_core::ui::presentation::DeliveryState::Pending;
