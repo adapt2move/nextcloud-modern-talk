@@ -110,6 +110,7 @@ impl Outbox {
                     context: room.context,
                     message: u128::from(*message),
                     timestamp: *timestamp,
+                    preview: None,
                 });
             }
         }

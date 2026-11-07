@@ -555,6 +555,8 @@ pub struct AccountReminderView {
     pub context: ConversationRef,
     pub message: u128,
     pub timestamp: u64,
+    /// Available only when the bounded room history already contains the message.
+    pub preview: Option<Text<160>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

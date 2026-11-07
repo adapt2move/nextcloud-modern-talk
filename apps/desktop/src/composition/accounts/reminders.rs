@@ -1,6 +1,6 @@
 //! Bounded account reminder observations. A selected room is not required.
 use super::*;
-use talk_core::ui::presentation::{AccountReminderView, AccountRemindersView};
+use talk_core::ui::presentation::{AccountReminderView, AccountRemindersView, MessageView};
 
 struct Entry {
     scope: AccountScope,
@@ -205,10 +205,21 @@ impl Accounts {
                         context,
                         message: u128::from(reminder.message.sequence),
                         timestamp: reminder.timestamp,
+                        preview: None,
                     });
                 }
             }
             self.outbox.project_reminders(scope, rooms, &mut reminders);
+            for reminder in &mut reminders {
+                reminder.preview = self.history.get(reminder.context).and_then(|history| {
+                    history
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .find(|message| message.local_id == reminder.message)
+                        .and_then(reminder_preview)
+                });
+            }
             reminders.sort_by_key(|reminder| reminder.timestamp);
             Some(AccountRemindersView {
                 scope,
@@ -355,10 +366,40 @@ impl Accounts {
     }
 }
 
+fn reminder_preview(message: &MessageView) -> Option<Text<160>> {
+    // Expiring content is not repeated outside its history row.
+    if message.metadata.deleted || message.metadata.system || message.metadata.expires_at.is_some()
+    {
+        return None;
+    }
+    let value = message
+        .body
+        .as_str()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!value.is_empty()).then(|| text(&value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use talk_core::protocol::messaging::{AccountReminders, MessageReminder};
+
+    #[test]
+    fn cached_preview_is_bounded_and_never_repeats_removed_or_expiring_content() {
+        let snapshot = super::super::super::fixtures::snapshot(Some("chat-ux"));
+        let mut message = snapshot.messages.as_slice()[0].clone();
+        message.body = text(&format!("{}  next\nline", "ä".repeat(200)));
+        let preview = reminder_preview(&message).unwrap();
+        assert!(preview.as_str().len() <= 160);
+        assert!(preview.as_str().ends_with('…'));
+        message.metadata.deleted = true;
+        assert!(reminder_preview(&message).is_none());
+        message.metadata.deleted = false;
+        message.metadata.expires_at = Some(1);
+        assert!(reminder_preview(&message).is_none());
+    }
 
     #[test]
     fn projection_is_account_scoped_sorted_and_reports_unknown_rooms() {

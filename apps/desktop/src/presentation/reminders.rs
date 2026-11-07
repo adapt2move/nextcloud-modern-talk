@@ -62,6 +62,14 @@ impl Desktop {
                                 .text_ellipsis()
                                 .child(room.title.as_str().to_owned()),
                         )
+                        .when_some(reminder.preview.as_ref(), |column, preview| {
+                            column.child(
+                                div()
+                                    .w_full()
+                                    .text_ellipsis()
+                                    .child(preview.as_str().to_owned()),
+                            )
+                        })
                         .child(
                             div()
                                 .text_size(self.sp(12.))

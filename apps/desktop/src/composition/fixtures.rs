@@ -338,6 +338,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             .map(|(index, room)| AccountReminderView {
                 context: room.context,
                 message: 45 + index as u128,
+                preview: Some(text(match index {
+                    0 => "Die neue Navigation ist bereit für einen letzten Blick.",
+                    1 => "Den Entwurf besprechen wir morgen.",
+                    _ => "Ich schicke dir die Notizen später.",
+                })),
                 timestamp: if index == 0 {
                     1_800_003_600
                 } else {
