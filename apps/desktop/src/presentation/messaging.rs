@@ -3199,7 +3199,7 @@ impl Desktop {
             .bg(self.theme.surface)
             .overflow_hidden()
     }
-    fn composer_list_row(&self, text: String, action: gpui::Stateful<Div>) -> Div {
+    fn composer_list_row(&self, text: String, action: impl IntoElement) -> Div {
         div()
             .flex()
             .items_center()
