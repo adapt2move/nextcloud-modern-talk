@@ -221,7 +221,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("details") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
-        Some("thread" | "thread-options" | "thread-offline" | "thread-paged") => Some(Overlay::Thread),
+        Some("thread" | "thread-options" | "thread-offline" | "thread-paged") => {
+            Some(Overlay::Thread)
+        }
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("discover") => Some(Overlay::Discover),
