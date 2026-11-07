@@ -111,6 +111,7 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ToggleCallParticipants,
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -328,6 +329,7 @@ pub struct Desktop {
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_participants_open: bool,
     call_reactions_open: Option<CallScope>,
     call_focus: Option<(CallScope, u128)>,
     call_speaker: Option<CallScope>,
@@ -647,7 +649,8 @@ impl Desktop {
             archive_request: 0,
             navigation_open: false,
             sidebar_hidden: false,
-            call_chat_open: true,
+            call_chat_open: false,
+            call_participants_open: false,
             call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
             call_focus: None,
             call_speaker,
@@ -1686,11 +1689,20 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::ToggleCallParticipants => {
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
+                    self.handle(LocalAction::Open(Overlay::CallParticipants), window, cx);
+                } else {
+                    self.call_participants_open = !self.call_participants_open;
+                    self.call_chat_open = false;
+                }
+            }
             LocalAction::ToggleCallChat => {
-                if window.viewport_size().width < px(1000.) || self.scale >= 150 {
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
                     self.call_chat_open = !self.call_chat_open;
+                    self.call_participants_open = false;
                 }
             }
             LocalAction::DismissIncoming => {
@@ -2109,9 +2121,7 @@ impl Desktop {
                 }
             }
             LocalAction::SelectDevice(kind, selection) => {
-                let from_call = self
-                    .call_device_picker
-                    .is_some_and(|(_, current)| current == kind);
+                let from_call = self.call_device_picker.is_some();
                 if from_call {
                     self.call_device_picker = None;
                     if let Some(focus) = self

@@ -50,7 +50,6 @@ pub fn text(locale: Locale, key: &str) -> &str {
 #[derive(Clone, Copy)]
 pub enum Count {
     Participants,
-    VisibleParticipants,
     Replies,
 }
 impl Desktop {
@@ -58,8 +57,6 @@ impl Desktop {
         let key = match (kind, n == 1) {
             (Count::Participants, true) => "{n} teilnehmende Person",
             (Count::Participants, false) => "{n} Teilnehmende",
-            (Count::VisibleParticipants, true) => "{n} teilnehmende Person angezeigt",
-            (Count::VisibleParticipants, false) => "{n} Teilnehmende angezeigt",
             (Count::Replies, true) => "{n} Antwort",
             (Count::Replies, false) => "{n} Antworten",
         };

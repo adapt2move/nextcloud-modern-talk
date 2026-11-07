@@ -22,15 +22,15 @@ pub(super) fn call_devices() -> talk_core::preferences::devices::DeviceSnapshot 
     for (id, label, kind) in [
         (
             "fixture-mic-studio",
-            "Studio microphone",
+            "Studiomikrofon",
             DeviceKind::Microphone,
         ),
         (
             "fixture-mic-laptop",
-            "Laptop microphone",
+            "Laptopmikrofon",
             DeviceKind::Microphone,
         ),
-        ("fixture-camera", "Laptop camera", DeviceKind::Camera),
+        ("fixture-camera", "Laptopkamera", DeviceKind::Camera),
     ] {
         if let Ok(id) = DeviceId::new(id) {
             let _ = devices.try_push(DeviceInfo {
@@ -931,7 +931,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 3
             } else if matches!(scenario, "voice" | "voice-room" | "prejoin-voice") {
                 2
-            } else if scenario == "room" {
+            } else if matches!(scenario, "room" | "prejoin") {
                 4
             } else {
                 1

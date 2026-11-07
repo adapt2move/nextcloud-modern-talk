@@ -256,12 +256,17 @@ impl Desktop {
     pub fn call_view(&self, window: &Window, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let call = self.snapshot.call.as_ref().expect("call projection");
-        let wide = window.viewport_size().width >= px(1000.) && self.scale < 150;
+        let wide = window.viewport_size().width >= px(900.) && self.scale < 150;
         if matches!(call.stage, CallStage::Ended | CallStage::Failed) {
             return self.call_outcome(call.stage == CallStage::Failed, cx);
         }
-        let show_chat = super::docked_call_chat(wide, self.call_chat_open, self.overlay);
-        let (stage_height, feature_height, filmstrip_height) =
+        let joined = matches!(
+            call.stage,
+            CallStage::Active | CallStage::Connecting | CallStage::Reconnecting
+        );
+        let show_chat = joined && super::docked_call_chat(wide, self.call_chat_open, self.overlay);
+        let show_people = joined && wide && self.call_participants_open && self.overlay.is_none();
+        let (stage_height, feature_height, _filmstrip_height) =
             stage_metrics(f32::from(window.viewport_size().height));
         let status = match call.stage {
             CallStage::Incoming => "Eingehender Anruf",
@@ -269,7 +274,7 @@ impl Desktop {
             CallStage::Connecting => "Verbindung wird aufgebaut …",
             CallStage::Active => "Im Gespräch",
             CallStage::Reconnecting => "Verbindung unterbrochen",
-            CallStage::Required(_) => "Beitritt wartet auf Freigabe",
+            CallStage::Required(_) => "Wartet auf Freigabe",
             CallStage::Ended => "Anruf beendet",
             CallStage::Failed => "Verbindung fehlgeschlagen",
         };
@@ -299,142 +304,127 @@ impl Desktop {
         }
         if call.stage == CallStage::Reconnecting {
             stage = stage.child(
-                self.reveal(
-                    "call-reconnecting",
-                    div()
-                        .flex_none()
-                        .p_4()
-                        .rounded(px(10.))
-                        .bg(t.warning_bg)
-                        .text_color(t.warning)
-                        .child(self.l("Verbindung unterbrochen"))
-                        .child(div().text_size(self.sp(12.)).child(self.l(
-                            "Mikrofon, Kamera und Freigabe bleiben beim erneuten Verbinden aus.",
-                        )))
-                        .child(self.button(
-                            "reconnect-call",
-                            "Erneut verbinden",
-                            ButtonStyle::Secondary,
-                            true,
-                            LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
-                            cx,
-                        )),
-                ),
-            );
-        }
-        if let CallStage::Required(gate) = call.stage {
-            let reason = match gate {
-                RequiredGate::MicrophonePermission => "Mikrofonfreigabe erforderlich",
-                RequiredGate::CameraPermission => "Kamerafreigabe erforderlich",
-                RequiredGate::ScreenPermission => "Bildschirmfreigabe erforderlich",
-                RequiredGate::RecordingConsent => "Zustimmung zur Aufzeichnung erforderlich",
-                RequiredGate::SecurityPolicy => "Sicherheitsvorgabe noch nicht erfüllt",
-                RequiredGate::Lobby => "Du wartest im Warteraum",
-            };
-            stage = stage.child(
                 div()
                     .flex_none()
-                    .p_4()
-                    .rounded(px(10.))
+                    .h(px(32.))
+                    .px_3()
+                    .rounded(px(8.))
                     .bg(t.warning_bg)
                     .text_color(t.warning)
+                    .text_size(self.sp(12.))
                     .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(self.l(reason))
-                    .child(self.hint(self.l(
-                        "Der Beitritt wird erst fortgesetzt, wenn diese Voraussetzung erfüllt ist.",
-                    )))
+                    .items_center()
+                    .gap_2()
+                    .child(self.scaled_icon("refresh", 16., t.warning))
+                    .child(self.l("Verbindung wird wiederhergestellt …"))
                     .child(self.button(
-                        "required-gate",
-                        if gate == RequiredGate::RecordingConsent {
-                            "Zustimmung prüfen"
-                        } else {
-                            "Freigabe prüfen"
-                        },
+                        "reconnect-call",
+                        "Erneut verbinden",
                         ButtonStyle::Secondary,
-                        gate == RequiredGate::RecordingConsent,
-                        if gate == RequiredGate::RecordingConsent {
-                            LocalAction::Open(Overlay::RecordingConsent)
-                        } else {
-                            LocalAction::Intent(UiIntent::ResolveRequiredGate {
-                                call: call.scope,
-                                gate,
-                            })
-                        },
+                        true,
+                        LocalAction::Intent(UiIntent::ReconnectCall(call.scope)),
                         cx,
                     )),
             );
         }
-        if let Some(screen) = call
-            .screen_stage()
-            .filter(|screen| screen.tile.kind == CallTileKind::Screen)
-        {
-            let image = self
-                .call_images
-                .iter()
-                .find(|(scope, tile, _, _)| *scope == call.scope && *tile == screen.tile)
-                .map(|(_, _, _, image)| image);
-            let visual = if let Some(image) = image {
-                div().w_full().flex_1().min_h_0().child(
-                    img(image.clone())
-                        .w_full()
-                        .h_full()
-                        .object_fit(gpui::ObjectFit::Contain),
-                )
-            } else {
+        if let CallStage::Required(gate) = call.stage {
+            let (title, description) = match gate {
+                RequiredGate::MicrophonePermission => (
+                    "Mikrofonfreigabe erforderlich",
+                    "Talk braucht Zugriff auf dein Mikrofon, um dich hörbar zu machen.",
+                ),
+                RequiredGate::CameraPermission => (
+                    "Kamerafreigabe erforderlich",
+                    "Talk braucht Zugriff auf deine Kamera, um dich sichtbar zu machen.",
+                ),
+                RequiredGate::ScreenPermission => (
+                    "Bildschirmfreigabe erforderlich",
+                    "Die Bildschirmfreigabe benötigt eine Freigabe.",
+                ),
+                RequiredGate::RecordingConsent => (
+                    "Zustimmung zur Aufzeichnung erforderlich",
+                    "Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.",
+                ),
+                RequiredGate::SecurityPolicy => (
+                    "Sicherheitsvorgabe noch nicht erfüllt",
+                    "Die Sicherheitsvorgaben für diesen Anruf sind noch nicht erfüllt.",
+                ),
+                RequiredGate::Lobby => (
+                    "Du wartest im Warteraum",
+                    "Die Moderation lässt dich gleich hinein.",
+                ),
+            };
+            stage = stage.child(
                 div()
                     .flex_1()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(480.))
+                            .p_6()
+                            .rounded(px(12.))
+                            .bg(t.surface)
+                            .text_color(t.text)
+                            .flex()
+                            .flex_col()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .text_size(self.sp(20.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(self.l(title)),
+                            )
+                            .child(self.hint(self.l(description)))
+                            .when(gate == RequiredGate::RecordingConsent, |d| {
+                                d.child(self.button(
+                                    "required-gate",
+                                    "Zustimmung prüfen",
+                                    ButtonStyle::Secondary,
+                                    true,
+                                    LocalAction::Open(Overlay::RecordingConsent),
+                                    cx,
+                                ))
+                            }),
+                    ),
+            );
+        }
+        if matches!(call.stage, CallStage::Outgoing) {
+            stage = stage.child(
+                div()
+                    .flex_1()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .items_center()
                     .justify_center()
                     .gap_4()
-                    .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
                     .child(
-                        div()
-                            .text_size(self.sp(13.))
-                            .text_color(t.stage_muted)
-                            .child(self.l("Der geteilte Inhalt ist hier noch nicht verfügbar.")),
+                        self.person_avatar(
+                            call.participants
+                                .as_slice()
+                                .iter()
+                                .find(|p| !p.self_user)
+                                .map_or("?", |p| p.initials.as_str()),
+                            96.,
+                        ),
                     )
-            };
-            stage = stage.child(
-                div()
-                    .w_full()
-                    .h(px(feature_height))
-                    .flex_none()
-                    .rounded(px(12.))
-                    .bg(t.stage_panel)
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_4()
-                    .p_4()
-                    .child(visual)
-                    .child(self.lf(
-                        "{name} teilt den Bildschirm",
-                        &[("name", screen.name.as_str())],
+                    .child(div().text_size(self.sp(20.)).child(
+                        self.lf("{name} wird angerufen …", &[("name", call.title.as_str())]),
                     ))
-                    .when_some(screen.dimensions, |stage, (width, height)| {
-                        stage.child(
-                            self.hint(&format!("{width} × {height}"))
-                                .text_color(t.stage_muted),
-                        )
-                    })
-                    .when(!screen.flowing, |stage| {
-                        stage.child(
-                            self.hint(self.l("Warte auf Bildschirmdaten …"))
-                                .text_color(t.stage_muted),
-                        )
-                    }),
+                    .child(self.button(
+                        "outgoing-leave",
+                        "Auflegen",
+                        ButtonStyle::Danger,
+                        true,
+                        LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
+                        cx,
+                    )),
             );
         }
-        // Reserve the docked chat before choosing a grid so tiles keep a
-        // useful width when the panel opens or the window is narrow.
-        let stage_width =
-            (f32::from(window.viewport_size().width) - if show_chat { 300. } else { 0. } - 56.)
-                .max(160.);
-        let columns = gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
         let pinned = self.call_focus.and_then(|(scope, id)| {
             (scope == call.scope
                 && call
@@ -444,248 +434,369 @@ impl Desktop {
                     .any(|p| p.local_id == id))
             .then_some(id)
         });
-        let focused = pinned.or_else(|| {
-            if self.call_speaker != Some(call.scope) || call.screen_stage().is_some() {
-                return None;
-            }
-            call.participants
-                .as_slice()
-                .iter()
-                .find(|participant| participant.speaking)
-                .or_else(|| call.participants.as_slice().first())
-                .map(|participant| participant.local_id)
-        });
-        let filmstrip = focused.is_some() || call.screen_stage().is_some();
-        let count = call.participants.as_slice().len();
-        let strip_count = count.saturating_sub(usize::from(focused.is_some())).max(1);
-        let rows = count.max(1).div_ceil(usize::from(columns));
-        let tile_height = if filmstrip {
-            filmstrip_height
-        } else if count <= 2 {
-            330.
-        } else {
-            ((stage_height - rows.saturating_sub(1) as f32 * 12.) / rows as f32).clamp(160., 210.)
-        };
-        let mut feature = None;
-        let tile_width = if filmstrip {
-            200.
-        } else {
-            ((stage_width - f32::from(columns.saturating_sub(1)) * 12.) / f32::from(columns))
-                .max(160.)
-        };
-        let mut tiles = div()
-            .flex()
-            .flex_wrap()
-            .justify_center()
-            .gap_3()
-            .when(filmstrip, |d| {
-                d.w(px(
-                    strip_count as f32 * 200. + strip_count.saturating_sub(1) as f32 * 12.
-                ))
-            })
-            .when(!filmstrip, |d| d.w_full())
-            // The viewport scrolls rows that cannot fit at narrow sizes.
-            .flex_none();
-        for participant in call.participants.as_slice() {
-            let image = self
-                .call_images
-                .iter()
-                .find(|(scope, local, _, _)| {
-                    *scope == call.scope && Some(*local) == call.camera_tile(participant.local_id)
-                })
-                .map(|(_, _, _, image)| image);
-            let visual = if let Some(image) = image {
-                div().w_full().flex_1().min_h_0().child(
-                    img(image.clone())
-                        .w_full()
-                        .h_full()
-                        .object_fit(gpui::ObjectFit::Contain),
-                )
-            } else {
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(self.person_avatar(
-                        participant.initials.as_str(),
-                        if focused == Some(participant.local_id) {
-                            104.
-                        } else if filmstrip {
-                            64.
-                        } else {
-                            84.
-                        },
-                    ))
-            };
-            let tile = div()
-                .relative()
-                .min_w_0()
-                .when(focused == Some(participant.local_id), |tile| tile.w_full())
-                .when(focused != Some(participant.local_id), |tile| {
-                    tile.w(px(tile_width))
-                })
-                .min_h(px(if focused == Some(participant.local_id) {
-                    feature_height
+        if !matches!(call.stage, CallStage::Required(_) | CallStage::Outgoing) {
+            if let Some(screen) = call
+                .screen_stage()
+                .filter(|screen| screen.tile.kind == CallTileKind::Screen)
+            {
+                let image = self
+                    .call_images
+                    .iter()
+                    .find(|(scope, tile, _, _)| *scope == call.scope && *tile == screen.tile)
+                    .map(|(_, _, _, image)| image);
+                let visual = if let Some(image) = image {
+                    div().w_full().flex_1().min_h_0().child(
+                        img(image.clone())
+                            .w_full()
+                            .h_full()
+                            .object_fit(gpui::ObjectFit::Contain),
+                    )
                 } else {
-                    tile_height
-                }))
-                .rounded(px(12.))
-                .border_2()
-                .border_color(if participant.speaking {
-                    stage_speaking_color(t)
-                } else {
-                    t.stage_panel
-                })
-                .group("call-tile")
-                .bg(t.stage_panel)
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .p_4()
-                .child(visual)
-                .children(self.call_reaction(
-                    call.scope,
-                    if participant.self_user {
-                        None
-                    } else {
-                        Some(participant.local_id)
-                    },
-                ))
-                .child(
                     div()
-                        .flex_none()
-                        .w_full()
-                        .min_w_0()
+                        .flex_1()
                         .flex()
+                        .flex_col()
                         .items_center()
-                        .gap_2()
+                        .justify_center()
+                        .gap_4()
+                        .child(self.scaled_icon("monitor-up", 40., t.stage_muted))
                         .child(
                             div()
-                                .flex_1()
-                                .min_w_0()
                                 .text_size(self.sp(13.))
-                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(t.stage_muted)
                                 .child(
-                                    if participant.self_user && participant.name.as_str().is_empty()
-                                    {
-                                        self.l("Du").to_owned()
-                                    } else {
-                                        format!(
-                                            "{}{}",
-                                            participant.name.as_str(),
-                                            if participant.self_user {
-                                                self.l(" · Du")
-                                            } else {
-                                                ""
-                                            }
-                                        )
-                                    },
+                                    self.l("Der geteilte Inhalt ist hier noch nicht verfügbar."),
                                 ),
                         )
-                        .when(participant.call_microphone == Some(false), |row| {
-                            row.child(self.scaled_icon("mic-off", 14., t.stage_muted))
+                };
+                stage = stage.child(
+                    div()
+                        .w_full()
+                        .h(px(feature_height))
+                        .flex_none()
+                        .rounded(px(12.))
+                        .bg(t.stage_panel)
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_4()
+                        .p_4()
+                        .child(visual)
+                        .child(self.lf(
+                            "{name} teilt den Bildschirm",
+                            &[("name", screen.name.as_str())],
+                        ))
+                        .when(!screen.flowing, |stage| {
+                            stage.child(
+                                self.hint(self.l("Warte auf Bildschirmdaten …"))
+                                    .text_color(t.stage_muted),
+                            )
                         }),
-                )
-                .when(participant.raised_hand, |tile| {
-                    tile.child(
-                        self.call_hand_badge(
-                            gpui::SharedString::from(format!(
-                                "call-hand-badge-{}-{}",
-                                call.scope.call.as_local(),
-                                participant.local_id
-                            ))
-                            .into(),
-                            div()
-                                .absolute()
-                                .top(px(12.))
-                                .left(px(12.))
-                                .size(px(30.))
-                                .rounded_full()
-                                .bg(t.stage)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(self.scaled_icon(
-                                    "hand",
-                                    16.,
-                                    if t.dark { t.warning } else { t.warning_bg },
-                                )),
-                        ),
-                    )
-                })
-                .child(
-                    self.icon_button(
-                        gpui::SharedString::from(format!("focus-call-{}", participant.local_id)),
-                        (
-                            "pin",
-                            if focused == Some(participant.local_id) {
-                                "Raster"
-                            } else {
-                                "Person hervorheben"
-                            },
-                        ),
-                        ButtonStyle::Stage,
-                        Availability::available().hinted(),
-                        LocalAction::FocusCallParticipant(
-                            call.scope,
-                            if focused == Some(participant.local_id) {
-                                None
-                            } else {
-                                Some(participant.local_id)
-                            },
-                        ),
-                        cx,
-                    )
-                    .absolute()
-                    .top(px(8.))
-                    .right(px(8.))
-                    .opacity(if focused == Some(participant.local_id) {
-                        1.
-                    } else {
-                        0.
-                    })
-                    .group_hover("call-tile", |style| style.opacity(1.))
-                    .focus(|style| style.opacity(1.)),
                 );
-            let tile = self.reveal(
-                gpui::SharedString::from(format!(
-                    "call-tile-{}-{}",
-                    call.scope.call.as_local(),
-                    participant.local_id
-                )),
-                tile,
-            );
-            if focused == Some(participant.local_id) {
-                feature = Some(tile);
-            } else {
-                tiles = tiles.child(tile);
             }
-        }
-        if let Some(tile) = feature {
-            stage = stage.child(tile);
-        }
-        if call.participants.as_slice().is_empty() {
-            tiles = tiles.child(
-                div()
-                    .p_6()
-                    .child(self.l("Teilnehmerdaten noch nicht verfügbar.")),
-            );
-        }
-        stage = if filmstrip {
-            stage.child(
-                div()
-                    .id("call-filmstrip")
-                    .w_full()
+            // Reserve the docked chat before choosing a grid so tiles keep a
+            // useful width when the panel opens or the window is narrow.
+            let stage_width = (f32::from(window.viewport_size().width)
+                - if show_chat || show_people { 300. } else { 0. }
+                - 56.)
+                .max(160.);
+            let columns =
+                gallery_columns(stage_width, self.scale, call.participants.as_slice().len());
+            let focused = pinned.or_else(|| {
+                if self.call_speaker != Some(call.scope) || call.screen_stage().is_some() {
+                    return None;
+                }
+                call.participants
+                    .as_slice()
+                    .iter()
+                    .find(|participant| participant.speaking)
+                    .or_else(|| call.participants.as_slice().first())
+                    .map(|participant| participant.local_id)
+            });
+            let filmstrip = focused.is_some() || call.screen_stage().is_some();
+            let count = call.participants.as_slice().len();
+            let pip = call.direct
+                && count == 2
+                && !filmstrip
+                && call.participants.as_slice().iter().any(|p| p.self_user)
+                && call.participants.as_slice().iter().any(|p| !p.self_user);
+            let strip_count = count.saturating_sub(usize::from(focused.is_some())).max(1);
+            let rows = count.max(1).div_ceil(usize::from(columns));
+            let tile_width = if pip {
+                stage_width.min(stage_height * 16. / 9.)
+            } else if filmstrip {
+                160.
+            } else {
+                ((stage_width - f32::from(columns.saturating_sub(1)) * 12.) / f32::from(columns))
+                    .min(
+                        ((stage_height - rows.saturating_sub(1) as f32 * 12.) / rows as f32) * 16.
+                            / 9.,
+                    )
+                    .max(160.)
+            };
+            let tile_height = tile_width * 9. / 16.;
+            let mut feature = None;
+            let mut self_pip = None;
+            let mut tiles = div()
+                .flex()
+                .flex_wrap()
+                .justify_center()
+                .gap_3()
+                .when(filmstrip, |d| {
+                    d.w(px(
+                        strip_count as f32 * 160. + strip_count.saturating_sub(1) as f32 * 12.
+                    ))
+                })
+                .when(!filmstrip, |d| d.w_full())
+                // The viewport scrolls rows that cannot fit at narrow sizes.
+                .flex_none();
+            for participant in call.participants.as_slice() {
+                let image = self
+                    .call_images
+                    .iter()
+                    .find(|(scope, local, _, _)| {
+                        *scope == call.scope
+                            && Some(*local) == call.camera_tile(participant.local_id)
+                    })
+                    .map(|(_, _, _, image)| image);
+                let visual =
+                    if let Some(image) = image {
+                        div().w_full().flex_1().min_h_0().child(
+                            img(image.clone())
+                                .w_full()
+                                .h_full()
+                                .object_fit(gpui::ObjectFit::Contain),
+                        )
+                    } else {
+                        div().flex_1().flex().items_center().justify_center().child(
+                            self.person_avatar(
+                                participant.initials.as_str(),
+                                if focused == Some(participant.local_id) {
+                                    104.
+                                } else if filmstrip {
+                                    64.
+                                } else {
+                                    (tile_height * 0.4).clamp(56., 128.)
+                                },
+                            ),
+                        )
+                    };
+                let tile = div()
+                    .relative()
                     .min_w_0()
-                    .overflow_x_scroll()
-                    .child(tiles),
-            )
-        } else {
-            stage.child(tiles)
-        };
+                    .when(focused == Some(participant.local_id), |tile| tile.w_full())
+                    .when(focused != Some(participant.local_id), |tile| {
+                        tile.w(px(if pip && participant.self_user {
+                            200.
+                        } else {
+                            tile_width
+                        }))
+                    })
+                    .h(px(if focused == Some(participant.local_id) {
+                        feature_height
+                    } else if pip && participant.self_user {
+                        112.
+                    } else {
+                        tile_height
+                    }))
+                    .rounded(px(12.))
+                    .border_2()
+                    .border_color(if participant.speaking {
+                        stage_speaking_color(t)
+                    } else {
+                        t.stage_panel
+                    })
+                    .group("call-tile")
+                    .bg(t.stage_panel)
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .p_4()
+                    .child(visual)
+                    .children(self.call_reaction(
+                        call.scope,
+                        if participant.self_user {
+                            None
+                        } else {
+                            Some(participant.local_id)
+                        },
+                    ))
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom(px(8.))
+                            .left(px(8.))
+                            .max_w_full()
+                            .px_2()
+                            .py_1()
+                            .rounded(px(8.))
+                            .bg(gpui::rgba(0x00000073))
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(self.sp(13.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(
+                                        if participant.self_user
+                                            && participant.name.as_str().is_empty()
+                                        {
+                                            self.l("Du").to_owned()
+                                        } else {
+                                            format!(
+                                                "{}{}",
+                                                participant.name.as_str(),
+                                                if participant.self_user {
+                                                    self.l(" (Du)")
+                                                } else {
+                                                    ""
+                                                }
+                                            )
+                                        },
+                                    ),
+                            )
+                            .when(participant.call_microphone == Some(false), |row| {
+                                row.child(self.scaled_icon("mic-off", 14., t.stage_muted))
+                            }),
+                    )
+                    .when(participant.raised_hand, |tile| {
+                        tile.child(
+                            self.call_hand_badge(
+                                gpui::SharedString::from(format!(
+                                    "call-hand-badge-{}-{}",
+                                    call.scope.call.as_local(),
+                                    participant.local_id
+                                ))
+                                .into(),
+                                div()
+                                    .absolute()
+                                    .top(px(12.))
+                                    .right(px(12.))
+                                    .size(px(24.))
+                                    .rounded_full()
+                                    .bg(t.stage)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(self.scaled_icon(
+                                        "hand",
+                                        16.,
+                                        if t.dark { t.warning } else { t.warning_bg },
+                                    )),
+                            ),
+                        )
+                    })
+                    .child(
+                        self.icon_button(
+                            gpui::SharedString::from(format!(
+                                "focus-call-{}",
+                                participant.local_id
+                            )),
+                            (
+                                "pin",
+                                if focused == Some(participant.local_id) {
+                                    "Raster"
+                                } else {
+                                    "Person hervorheben"
+                                },
+                            ),
+                            ButtonStyle::Stage,
+                            Availability::available().hinted(),
+                            LocalAction::FocusCallParticipant(
+                                call.scope,
+                                if focused == Some(participant.local_id) {
+                                    None
+                                } else {
+                                    Some(participant.local_id)
+                                },
+                            ),
+                            cx,
+                        )
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(8.))
+                        .opacity(if focused == Some(participant.local_id) {
+                            1.
+                        } else {
+                            0.
+                        })
+                        .group_hover("call-tile", |style| style.opacity(1.))
+                        .focus(|style| style.opacity(1.)),
+                    );
+                let tile = self.reveal(
+                    gpui::SharedString::from(format!(
+                        "call-tile-{}-{}",
+                        call.scope.call.as_local(),
+                        participant.local_id
+                    )),
+                    tile,
+                );
+                if pip && participant.self_user {
+                    self_pip = Some(tile);
+                } else if focused == Some(participant.local_id) {
+                    feature = Some(tile);
+                } else {
+                    tiles = tiles.child(tile);
+                }
+            }
+            if let Some(tile) = feature {
+                stage = stage.child(tile);
+            }
+            if call.participants.as_slice().is_empty() {
+                tiles = tiles.child(
+                    div()
+                        .p_6()
+                        .child(self.l("Teilnehmerdaten noch nicht verfügbar.")),
+                );
+            }
+            stage = if pip {
+                stage.child(
+                    div()
+                        .flex_1()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .relative()
+                                .w(px(tile_width))
+                                .h(px(tile_height))
+                                .child(tiles)
+                                .when_some(self_pip, |d, tile| {
+                                    d.child(
+                                        div().absolute().bottom(px(12.)).right(px(12.)).child(tile),
+                                    )
+                                }),
+                        ),
+                )
+            } else if filmstrip {
+                stage.child(
+                    div()
+                        .id("call-filmstrip")
+                        .w_full()
+                        .min_w_0()
+                        .overflow_x_scroll()
+                        .child(tiles),
+                )
+            } else {
+                stage.child(
+                    div()
+                        .flex_1()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(tiles),
+                )
+            };
+        }
         let body = div()
             .flex_1()
             .min_h_0()
@@ -697,8 +808,40 @@ impl Desktop {
                         .w(px(300.))
                         .flex_none()
                         .bg(t.surface)
+                        .border_l_1()
+                        .border_color(t.border)
                         .text_color(t.text)
                         .child(self.call_chat(cx)),
+                )
+            })
+            .when(show_people, |d| {
+                d.child(
+                    div()
+                        .w(px(300.))
+                        .flex_none()
+                        .bg(t.surface)
+                        .border_l_1()
+                        .border_color(t.border)
+                        .text_color(t.text)
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .px_4()
+                                .py_4()
+                                .border_b_1()
+                                .border_color(t.border)
+                                .text_size(self.sp(16.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(call.title.as_str().to_owned()),
+                        )
+                        .child(
+                            self.scroll_area(super::navigation::Region::Overlay)
+                                .flex_1()
+                                .min_h_0()
+                                .p_4()
+                                .child(self.call_participants_body(cx)),
+                        ),
                 )
             });
         let mut primary_controls = div()
@@ -784,22 +927,17 @@ impl Desktop {
                 )
                 .size(px(44.))
                 .min_h(px(44.))
-                .rounded_full();
-            let mut group = div().relative().flex().items_center().child(control);
-            if id != "screen-share" && matches!(state, MediaState::Unavailable | MediaState::Denied)
-            {
-                group = group.child(
-                    div()
-                        .absolute()
-                        .top(px(0.))
-                        .left(px(34.))
-                        .size(px(9.))
-                        .rounded_full()
-                        .bg(if t.dark { t.warning } else { t.warning_bg })
-                        .border_1()
-                        .border_color(t.stage),
-                );
-            }
+                .rounded_full()
+                .when(id != "screen-share" && state != MediaState::Active, |d| {
+                    d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
+                });
+            let mut group = div()
+                .relative()
+                .flex()
+                .items_center()
+                .rounded_full()
+                .bg(t.stage_panel)
+                .child(control);
             if let Some(kind) = match id {
                 "microphone" => Some(talk_core::preferences::devices::DeviceKind::Microphone),
                 "camera" => Some(talk_core::preferences::devices::DeviceKind::Camera),
@@ -821,7 +959,9 @@ impl Desktop {
                         LocalAction::CallDevicePicker(call.scope, kind),
                         cx,
                     )
-                    .w(px(22.))
+                    .w(px(28.))
+                    .border_l_1()
+                    .border_color(t.stage)
                     .rounded_full(),
                 );
                 if self.call_device_picker == Some((call.scope, kind)) {
@@ -924,7 +1064,7 @@ impl Desktop {
                 "call-participants",
                 "users",
                 "Personen",
-                LocalAction::Open(Overlay::CallParticipants),
+                LocalAction::ToggleCallParticipants,
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
         ] {
@@ -939,7 +1079,11 @@ impl Desktop {
                 )
                 .size(px(44.))
                 .min_h(px(44.))
-                .rounded_full(),
+                .rounded_full()
+                .when(
+                    (id == "call-chat" && show_chat) || (id == "call-participants" && show_people),
+                    |d| d.bg(t.accent),
+                ),
             );
         }
         let controls = div()
@@ -951,25 +1095,18 @@ impl Desktop {
             .py_3()
             .border_t_1()
             .border_color(t.stage_panel)
-            .child(div().w(px(56.)).flex_none())
+            .child(div().w(px(120.)).flex_none())
             .child(primary_controls)
             .child(
-                self.icon_button(
+                self.button_with_icon(
                     "leave-call",
-                    (
-                        "phone-down",
-                        if call.direct {
-                            "Auflegen"
-                        } else {
-                            "Anruf verlassen"
-                        },
-                    ),
+                    ("Verlassen", "phone-down"),
                     ButtonStyle::StageDanger,
-                    Availability::available().hinted(),
+                    true,
                     LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
                     cx,
                 )
-                .w(px(56.))
+                .min_w(px(120.))
                 .h(px(44.))
                 .min_h(px(44.))
                 .rounded_full(),
@@ -1002,20 +1139,20 @@ impl Desktop {
                                             .text_size(self.sp(16.))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_ellipsis()
-                                            .child(call.title.as_str().to_owned()),
+                                            .child(format!("{}{}", call.title.as_str(), self.call_started.filter(|(scope, _)| *scope == call.scope).map(|(_, started)| { let seconds = started.elapsed().as_secs(); format!(" · {}:{:02}", seconds / 60, seconds % 60) }).unwrap_or_default())),
                                     )
                                     .child(
                                         div()
                                             .text_size(self.sp(12.))
                                             .text_color(t.stage_muted)
-                                            .child(format!(
+                                            .child(if matches!(call.stage, CallStage::Required(_)) { self.l(status).to_owned() } else { format!(
                                                 "{} · {}",
                                                 self.l(status),
                                                 self.count(
-                                                    super::localization::Count::VisibleParticipants,
+                                                    super::localization::Count::Participants,
                                                     call.participants.as_slice().len() as u64
                                                 )
-                                            )),
+                                            ) }),
                                     ),
                             )
                             .when(call.participants.as_slice().len() > 1, |header| {
@@ -1024,7 +1161,7 @@ impl Desktop {
                                 header.child(self.icon_button(
                                     "call-layout",
                                     (
-                                        if speaker_mode { "grid" } else { "speaker" },
+                                        if speaker_mode { "grid" } else { "user" },
                                         if speaker_mode {
                                             "Raster"
                                         } else {
@@ -1041,7 +1178,7 @@ impl Desktop {
                                 header.child(div().px_3().py_1().rounded_full()
                                     .bg(if t.dark { t.danger_bg } else { t.danger })
                                     .text_color(if t.dark { t.danger } else { t.danger_bg }).text_size(self.sp(12.))
-                                    .font_weight(FontWeight::BOLD).child(self.l("REC")))
+                                    .font_weight(FontWeight::BOLD).child(format!("● {}", self.l("Aufzeichnung läuft"))))
                             })
                             .child(self.icon_button(
                                 "minimize-call",
@@ -1081,7 +1218,7 @@ impl Desktop {
                         )
                     })
                     .child(body)
-                    .child(controls),
+                    .when(!matches!(call.stage, CallStage::Outgoing | CallStage::Required(_)), |d| d.child(controls)),
             )
             .bg(t.stage),
         )
@@ -1102,8 +1239,8 @@ impl Desktop {
         let id = gpui::SharedString::from(format!("call-reaction-animation-{}", reaction.sequence));
         let element = div()
             .absolute()
-            .right(px(12.))
-            .bottom(px(20.))
+            .left(gpui::relative(0.5))
+            .bottom(gpui::relative(0.5))
             .text_size(self.sp(34.))
             .child(reaction.emoji.as_str().to_owned());
         Some(if fixture {
@@ -1184,7 +1321,8 @@ impl Desktop {
                 .border_b_1()
                 .border_color(t.border)
                 .font_weight(FontWeight::MEDIUM)
-                .child(self.l("Chat")),
+                .text_size(self.sp(16.))
+                .child(call.title.as_str().to_owned()),
         );
         if let Some(row) = row {
             body = body

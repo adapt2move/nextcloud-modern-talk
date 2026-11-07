@@ -52,11 +52,7 @@ impl Desktop {
             .when(traffic_lights && !navigation, |d| d.pl(px(88.)))
             .text_size(px(12.))
             .text_color(self.theme.muted)
-            .child(if self.development {
-                "Talk · UI development"
-            } else {
-                "Talk"
-            })
+            .child("NextCloud Talk")
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
                     if cfg!(target_os = "macos") {
