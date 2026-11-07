@@ -177,6 +177,45 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('Escape closes the call participants panel', absent=['Nicht im Anruf'])
         checks.append({'check': 'H toggles the hand in the call participants panel', 'result': 'pass'})
+    elif scenario in ('gate-recording', 'gate-recording-direct'):
+        # The following points were inspected at this exact fixture size. The
+        # fixture log reports only the local room identity, never media data.
+        path, _, _ = observe()
+        size = tuple(map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split()))
+        if size != (1280, 800):
+            raise AssertionError('Consent interaction requires the inspected 1280x800 layout')
+        app_log = out / f'{label}.log'
+        def consent_sent():
+            return app_log.read_text().count('UI_INTENT recording-consent room=')
+        def point(x, y):
+            run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
+            time.sleep(.35)
+        point(660, 485)  # Initially disabled: no implicit consent.
+        if consent_sent():
+            raise AssertionError('Unselected recording consent was submitted')
+        point(468, 437)  # Select the switch, then use its keyboard path to clear it.
+        key('space'); time.sleep(.35)
+        point(660, 485)
+        if consent_sent():
+            raise AssertionError('Cleared recording consent was submitted')
+        point(468, 437)
+        key('Escape'); time.sleep(.35)
+        point(500, 235)  # Reopen from the still-required gate.
+        point(660, 485)
+        if consent_sent():
+            raise AssertionError('Reopened consent retained an earlier selection')
+        point(468, 437)
+        if scenario == 'gate-recording-direct':
+            point(660, 485)
+            if consent_sent() != 1:
+                raise AssertionError('Explicit direct-call consent was not submitted exactly once')
+            expect('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
+        else:
+            point(500, 485)
+            if consent_sent():
+                raise AssertionError('Declining submitted recording consent')
+            expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
+        checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
         key('Escape')
         expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])
