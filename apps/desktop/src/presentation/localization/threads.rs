@@ -1,15 +1,5 @@
 //! Thread navigation labels; user content is never translated.
 pub const MESSAGES: &[(&str, &str, &str)] = &[
-    (
-        "Ältere Antworten laden",
-        "Load older replies",
-        "Cargar respuestas anteriores",
-    ),
-    (
-        "Neueste Antworten anzeigen",
-        "Show latest replies",
-        "Mostrar respuestas recientes",
-    ),
     ("Alle Antworten", "All replies", "Todas las respuestas"),
     (
         "Anhänge in Threads sind noch nicht verfügbar.",
@@ -35,6 +25,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Neuer Thread · Titel aus der Nachricht",
         "New thread · title from the message",
         "Hilo nuevo · título a partir del mensaje",
+    ),
+    (
+        "Neueste Antworten anzeigen",
+        "Show latest replies",
+        "Mostrar respuestas recientes",
     ),
     ("Nur Erwähnungen", "Mentions only", "Solo menciones"),
     (
@@ -79,4 +74,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Vorherige Threads", "Previous threads", "Hilos anteriores"),
     ("Weitere Threads", "More threads", "Más hilos"),
+    (
+        "Ältere Antworten laden",
+        "Load older replies",
+        "Cargar respuestas anteriores",
+    ),
 ];
