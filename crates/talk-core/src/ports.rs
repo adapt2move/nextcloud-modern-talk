@@ -106,6 +106,8 @@ pub enum ProtocolRequest {
     PollIncomingCalls,
     /// Read-only account-wide Notifications observation; never a chat/read-marker poll.
     PollMessageNotifications,
+    /// Bounded account-wide reminder observation, without a selected conversation.
+    UpcomingReminders,
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
     Meeting(crate::calls::Command),
@@ -192,6 +194,7 @@ pub enum ProtocolReply {
     },
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
+    UpcomingReminders(crate::protocol::messaging::AccountReminders),
     LiveEvents(crate::protocol::AccountLiveEvents),
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),

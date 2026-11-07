@@ -16,6 +16,7 @@ mod pdf_preview;
 mod people;
 mod preferences;
 mod projection;
+mod reminders;
 mod tags;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod test_support;
@@ -715,6 +716,9 @@ impl NextcloudClient {
             ProtocolRequest::PollIncomingCalls => return self.poll_incoming_calls(context).await,
             ProtocolRequest::PollMessageNotifications => {
                 return self.poll_message_notifications(context).await;
+            }
+            ProtocolRequest::UpcomingReminders => {
+                return self.upcoming_reminders(context).await;
             }
             ProtocolRequest::PollLiveEvents => {
                 return self

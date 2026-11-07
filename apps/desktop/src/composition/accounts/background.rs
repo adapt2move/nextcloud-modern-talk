@@ -385,6 +385,7 @@ impl Purpose {
             Self::Create(_, s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
+            | Self::AccountReminders(s, _)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
             | Self::Tags(s)
@@ -521,6 +522,7 @@ impl Accounts {
         self.background.sync(&scopes, Instant::now());
         self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
+        self.reminders.retain_accounts(&scopes);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if pending

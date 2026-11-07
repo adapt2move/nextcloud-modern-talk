@@ -221,6 +221,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("details" | "lobby-settings") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
+        Some("account-reminders") => Some(Overlay::Reminders),
         Some("thread") => Some(Overlay::Thread),
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
@@ -388,7 +389,13 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             Ok(surface) => surface,
                             Err(_) => break,
                         };
-                    preview_services.poll_notifications(background);
+                    if let Some(activation) = preview_services.poll_notifications(background) {
+                        let _ = window.update(cx, |view, window, cx| {
+                            view.activate_notification(activation, window, cx);
+                            window.activate_window();
+                        });
+                        let _ = cx.update(|cx| cx.activate(true));
+                    }
                     let _ = cx.update(|cx| {
                         lifecycle::refresh_menus(&preview_services, &mut menu_locale, cx);
                     });

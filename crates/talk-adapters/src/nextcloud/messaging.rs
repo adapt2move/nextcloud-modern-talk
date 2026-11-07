@@ -1493,7 +1493,22 @@ impl NextcloudClient {
                 Ok(R::Scheduled(out))
             }
             api::Reply::Chat(WireResponse::Schedule(v)) => {
-                Ok(R::Schedule(Box::new(self.scheduled(v, id)?)))
+                let scheduled = self.scheduled(v, id)?;
+                let matches_request = match &command {
+                    C::Schedule { text, send_at, options } => {
+                        scheduled.text == *text && scheduled.send_at == *send_at
+                            && scheduled.options.reply_to == options.reply_to
+                            && scheduled.options.thread == options.thread
+                            && scheduled.options.silent == options.silent
+                    }
+                    C::EditScheduled { id, text, send_at, silent } => {
+                        scheduled.id == *id && scheduled.text == *text
+                            && scheduled.send_at == *send_at && scheduled.options.silent == *silent
+                    }
+                    _ => false,
+                };
+                if !matches_request { return Err(self.error(ErrorKind::Uncertain)); }
+                Ok(R::Schedule(Box::new(scheduled)))
             }
             api::Reply::Chat(WireResponse::Threads(values)) => {
                 let mut out = Page::empty();

@@ -65,6 +65,8 @@ impl AppCredential {
 /// Semantic operations only. There is no authenticated URL, method, header or form API.
 /// Readback/reconciliation policy and application permission decisions belong to the caller.
 pub enum Request {
+    /// Account-wide reminder list; it does not require an active room session.
+    UpcomingReminders,
     Chat {
         room: RoomToken,
         command: chat::Command,
@@ -746,6 +748,13 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::UpcomingReminders => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/chat/upcoming-reminders".into(),
+            vec![],
+            vec![],
+            Kind::Chat(chat::ResponseKind::Reminders),
+        ),
         Request::Chat { room, command } => return chat::plan(room, command),
         Request::Conversation { room, command } => return conversation::plan(room, command),
         Request::Account => (

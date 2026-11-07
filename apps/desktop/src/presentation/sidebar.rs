@@ -286,6 +286,29 @@ impl Desktop {
                 SidebarDestination::Archive,
                 cx,
             ))
+            .when(
+                self.snapshot
+                    .account_reminders
+                    .as_ref()
+                    .is_some_and(|view| {
+                        Some(view.scope) == self.snapshot.active_account
+                            && view.support == FeatureSupport::Supported
+                    }),
+                |sidebar| {
+                    sidebar.child(
+                        self.button_with_leading_icon(
+                            "nav-reminders",
+                            ("Erinnerungen", "clock"),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Open(Overlay::Reminders),
+                            cx,
+                        )
+                        .w_full()
+                        .justify_start(),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex_none()

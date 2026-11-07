@@ -592,6 +592,14 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot.account_reminders.as_ref().is_some_and(|view| {
+        Some(view.scope) != snapshot.active_account
+            || view.reminders.as_slice().iter().any(|reminder| {
+                reminder.context.account != view.scope || !reminder.context.is_consistent()
+            })
+    }) {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -829,6 +837,7 @@ mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),

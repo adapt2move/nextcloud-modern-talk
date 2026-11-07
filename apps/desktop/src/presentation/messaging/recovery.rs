@@ -101,7 +101,7 @@ impl Desktop {
                                 !row.metadata.deleted && row.metadata.edit != Decision::Denied
                             })
                 }
-                FailedDraftKind::Schedule(_) => {
+                FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => {
                     self.message_feature_enabled(MessageFeature::Schedules)
                 }
             }
@@ -209,7 +209,7 @@ impl Desktop {
                 .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(match draft.kind {
                     FailedDraftKind::Send => "Senden fehlgeschlagen",
                     FailedDraftKind::Edit(_) => "Änderung fehlgeschlagen",
-                    FailedDraftKind::Schedule(_) => "Planung fehlgeschlagen",
+                    FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => "Planung fehlgeschlagen",
                 })))
                 .when(drafts.len() > 1, |row| row
                     .child(self.icon_button(scoped_id("failed-previous", context, 0, 0), ("arrow-left", "Vorheriger Entwurf"), ButtonStyle::Quiet,

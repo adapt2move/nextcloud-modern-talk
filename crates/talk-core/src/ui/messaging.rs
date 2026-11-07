@@ -140,6 +140,9 @@ pub struct Scheduled {
     pub timestamp: u64,
     /// A zero send time means Talk has stopped trying to send this message.
     pub failed_original_timestamp: Option<u64>,
+    /// Editing is unavailable when the complete server text exceeds the editor limit.
+    pub editable: bool,
+    pub silent: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UploadedFile {
@@ -204,6 +207,7 @@ pub enum FailedDraftKind {
     Send,
     Edit(u128),
     Schedule(u64),
+    EditScheduled(u128),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FailedDraft {
@@ -384,6 +388,12 @@ pub enum MessageAction {
         body: Text<4096>,
         timestamp: u64,
         target: ComposeTarget,
+    },
+    EditScheduled {
+        id: u128,
+        body: Text<4096>,
+        timestamp: u64,
+        silent: bool,
     },
     Scheduled,
     CancelScheduled(u128),

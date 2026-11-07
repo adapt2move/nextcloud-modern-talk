@@ -925,6 +925,32 @@ impl Desktop {
             None
         }
     }
+    pub(super) fn submit_open_reminder(&mut self, context: ConversationRef, message: u128) -> bool {
+        let Some(next) = self.message_ui.request.checked_add(1) else {
+            return false;
+        };
+        self.message_ui.request = next;
+        self.submit(UiIntent::OpenReminder {
+            request: RequestId(next),
+            context,
+            message,
+        })
+    }
+    pub(super) fn submit_notification_message(
+        &mut self,
+        context: ConversationRef,
+        message: u128,
+    ) -> bool {
+        let Some(next) = self.message_ui.request.checked_add(1) else {
+            return false;
+        };
+        self.message_ui.request = next;
+        self.submit(UiIntent::OpenNotificationMessage {
+            request: RequestId(next),
+            context,
+            message,
+        })
+    }
     pub(super) fn message_action(
         &mut self,
         action: Action,

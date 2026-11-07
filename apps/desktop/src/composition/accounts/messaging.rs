@@ -17,11 +17,13 @@ pub(super) enum Work {
     Forward(ConversationRef),
     Reminder(u128),
     CancelScheduled(u128),
+    EditScheduled(u128),
     Reaction(u128),
     Files,
     Search,
     Reminders,
     Scheduled,
+    ScheduledPoll,
     Pins,
     PinChange { message: u128, pinned: bool },
     Share,
@@ -40,6 +42,7 @@ impl Work {
                 | Self::Forward(_)
                 | Self::Reminder(_)
                 | Self::CancelScheduled(_)
+                | Self::EditScheduled(_)
                 | Self::Reaction(_)
                 | Self::PinChange { .. }
                 | Self::Share
@@ -74,7 +77,12 @@ impl Work {
     pub(super) fn background(self) -> bool {
         matches!(
             self,
-            Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata | Self::Recovery
+            Self::Latest
+                | Self::Prefetch
+                | Self::Poll
+                | Self::Metadata
+                | Self::Recovery
+                | Self::ScheduledPoll
         )
     }
 }
@@ -377,6 +385,7 @@ impl Accounts {
         if self.pending.iter().any(|p| {
             matches!(p.purpose, Purpose::Message(_, c, _, w)
                 if c == context && (w == work || w.backward() && work.backward()
+                    || matches!(w, Work::Scheduled | Work::ScheduledPoll) && matches!(work, Work::Scheduled | Work::ScheduledPoll)
                     || matches!((w, work), (Work::Reaction(_), Work::Reaction(_)))
                     || work == Work::Poll && w == Work::History
                         && !self.history.get(context).is_some_and(|h| h.loaded)))
@@ -505,6 +514,26 @@ impl Accounts {
         if self.snapshot.content == ContentState::Denied {
             return;
         }
+        let now = Instant::now();
+        if self
+            .scheduled_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(view::MessageFeature::Schedules)
+                        .enabled()
+            })
+        {
+            self.scheduled_poll = Some((context, now + Duration::from_secs(30)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Scheduled,
+                Work::ScheduledPoll,
+            );
+        }
         if self.history.get(context).is_some_and(|h| h.needs_pins()) {
             let _ = self.start_message(
                 RequestId(0),
@@ -547,7 +576,13 @@ impl Accounts {
             return result;
         }
         if let Some(result) = self.queue_message_action(request, context, &action) {
+            if result.is_ok() && matches!(action, view::MessageAction::Reminder { .. }) {
+                self.reminder_changed(context.account);
+            }
             return result;
+        }
+        if matches!(action, view::MessageAction::EditScheduled { .. }) {
+            return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
         }
         let view::MessageAction::Send { body, target } = &action else {
             return self.dispatch_message_action(request, context, action);
@@ -668,6 +703,7 @@ impl Accounts {
             V::Forward { destination, .. } => Work::Forward(*destination),
             V::Reminder { message, .. } => Work::Reminder(*message),
             V::CancelScheduled(id) => Work::CancelScheduled(*id),
+            V::EditScheduled { id, .. } => Work::EditScheduled(*id),
             _ => Work::Action,
         };
         if work == Work::Send
@@ -803,6 +839,9 @@ impl Accounts {
                 options: options(context, target)?,
             },
             V::Scheduled => W::Scheduled,
+            V::EditScheduled { id, body, timestamp, silent } => W::EditScheduled {
+                id: message_id(context, id)?, text: text(body.as_str()), send_at: timestamp, silent,
+            },
             V::CancelScheduled(id) => W::CancelScheduled(message_id(context, id)?),
             V::Forward {
                 message,
@@ -1016,6 +1055,7 @@ impl Accounts {
                 (Work::Search, Ok(wire::MessagingResult::Search { .. }))
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::ScheduledPoll, Ok(wire::MessagingResult::Scheduled(_)))
                 | (
                     Work::Files | Work::Pins | Work::Metadata,
                     Ok(wire::MessagingResult::Messages { .. }),
@@ -1024,6 +1064,7 @@ impl Accounts {
                     Work::Search
                     | Work::Reminders
                     | Work::Scheduled
+                    | Work::ScheduledPoll
                     | Work::Files
                     | Work::Pins
                     | Work::Metadata,
@@ -1037,6 +1078,12 @@ impl Accounts {
         if let Work::Reaction(target) = work
             && !matches!(&result, Ok(wire::MessagingResult::Reactions { message, .. })
                 if u128::from(message.sequence) == target)
+            && result.is_ok()
+        {
+            result = Err(Completion::Uncertain);
+        }
+        if let Work::EditScheduled(target) = work
+            && !matches!(&result, Ok(wire::MessagingResult::Schedule(value)) if u128::from(value.id.sequence) == target)
             && result.is_ok()
         {
             result = Err(Completion::Uncertain);
@@ -1057,6 +1104,9 @@ impl Accounts {
         }
         self.history
             .reconcile_reactions(context, operation, work, &mut result);
+        if let Work::Reminder(message) = work {
+            self.observe_reminder_result(context, message, &result);
+        }
         let queued = self.outbox_result(operation, &result);
         if !self.history.complete(
             context,
@@ -1235,35 +1285,7 @@ impl Accounts {
                                 })),
                         );
                     }
-                    wire::MessagingResult::Scheduled(schedules) => {
-                        panel.scheduled =
-                            page(schedules.as_slice().iter().map(|s| view::Scheduled {
-                                id: u128::from(s.id.sequence),
-                                body: text(s.text.as_str()),
-                                timestamp: s.send_at,
-                                failed_original_timestamp:
-                                    (s.send_at == 0).then_some(s.original_send_at).flatten(),
-                            }));
-                    }
-                    wire::MessagingResult::Schedule(schedule) => {
-                        panel.scheduled = page(
-                            panel
-                                .scheduled
-                                .as_slice()
-                                .iter()
-                                .filter(|s| s.id != u128::from(schedule.id.sequence))
-                                .take(99)
-                                .cloned()
-                                .chain(std::iter::once(view::Scheduled {
-                                    id: u128::from(schedule.id.sequence),
-                                    body: text(schedule.text.as_str()),
-                                    timestamp: schedule.send_at,
-                                    failed_original_timestamp: (schedule.send_at == 0)
-                                        .then_some(schedule.original_send_at)
-                                        .flatten(),
-                                })),
-                        );
-                    }
+                    wire::MessagingResult::Scheduled(_) | wire::MessagingResult::Schedule(_) => (),
                     wire::MessagingResult::Uploaded { path, bytes } => {
                         let name = panel.upload_name.take().unwrap_or_else(|| text("File"));
                         panel.uploaded = Some(view::UploadedFile {
@@ -1276,16 +1298,6 @@ impl Accounts {
                         panel.file_saved = Some(u64::from(bytes))
                     }
                     wire::MessagingResult::Changed => {
-                        if let Work::CancelScheduled(id) = work {
-                            panel.scheduled = page(
-                                panel
-                                    .scheduled
-                                    .as_slice()
-                                    .iter()
-                                    .filter(|s| s.id != id)
-                                    .cloned(),
-                            );
-                        }
                         reload = !matches!(work, Work::Read(_) | Work::Typing | Work::Unread);
                         if let Work::Read(id) = work {
                             let reached_latest = self
@@ -1527,6 +1539,19 @@ fn diagnostic_result(
         }
     }
     Some(event)
+}
+
+pub(super) fn scheduled_view(schedule: &wire::ScheduledMessage) -> view::Scheduled {
+    view::Scheduled {
+        id: u128::from(schedule.id.sequence),
+        body: text(schedule.text.as_str()),
+        timestamp: schedule.send_at,
+        failed_original_timestamp: (schedule.send_at == 0)
+            .then_some(schedule.original_send_at)
+            .flatten(),
+        editable: schedule.text.as_str().len() <= 4096,
+        silent: schedule.options.silent,
+    }
 }
 
 fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> bool {

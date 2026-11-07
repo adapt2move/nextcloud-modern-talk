@@ -219,6 +219,7 @@ pub enum OutboxKind {
     Reminder,
     Schedule,
     CancelScheduled,
+    EditScheduled,
 }
 impl OutboxKind {
     fn code(self) -> i64 {
@@ -232,6 +233,7 @@ impl OutboxKind {
             Self::Reminder => 6,
             Self::Schedule => 7,
             Self::CancelScheduled => 8,
+            Self::EditScheduled => 9,
         }
     }
     fn parse(code: i64) -> Result<Self> {
@@ -245,6 +247,7 @@ impl OutboxKind {
             6 => Self::Reminder,
             7 => Self::Schedule,
             8 => Self::CancelScheduled,
+            9 => Self::EditScheduled,
             _ => return Err(DataError::Corrupt),
         })
     }
@@ -713,7 +716,7 @@ impl Store {
             || record.phase != OutboxPhase::Queued
             || !matches!(
                 record.kind,
-                OutboxKind::Send | OutboxKind::Edit | OutboxKind::Schedule
+                OutboxKind::Send | OutboxKind::Edit | OutboxKind::Schedule | OutboxKind::EditScheduled
             )
         {
             return Err(DataError::InvalidInput);

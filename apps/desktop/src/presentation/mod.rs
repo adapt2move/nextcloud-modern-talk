@@ -22,6 +22,7 @@ mod overlays;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
+mod reminders;
 mod selectable;
 mod settings;
 mod settings_pages;
@@ -63,6 +64,7 @@ pub enum Overlay {
     Organize,
     ContentPreview,
     CreatePoll,
+    Reminders,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
@@ -102,6 +104,7 @@ pub enum LocalAction {
     ToggleNavigation,
     ToggleCallChat,
     Navigate(ConversationRef),
+    OpenReminder(ConversationRef, u128),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
     Favorite(ConversationRef, bool),
@@ -882,6 +885,33 @@ impl Desktop {
             }
         }
     }
+    pub(crate) fn activate_notification(
+        &mut self,
+        activation: talk_core::preferences::notifications::NotificationActivation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let talk_core::preferences::notifications::NotificationActivation::OpenMessage {
+            scope,
+            conversation,
+            message,
+        } = activation
+        else {
+            return;
+        };
+        let context = ConversationRef {
+            account: scope,
+            conversation,
+        };
+        if self.save_draft(cx) && self.submit_notification_message(context, u128::from(message)) {
+            self.overlay = None;
+            self.return_focus = None;
+            self.navigation_open = false;
+            self.destination = SidebarDestination::Conversations;
+            self.root_focus.focus(window);
+        }
+        cx.notify();
+    }
     // Deferred GPUI elements render after the surrounding surface has finished.
     // Restore their captured interaction policy for every nested control.
     fn in_surface<R>(&mut self, inert: bool, render: impl FnOnce(&Self) -> R) -> R {
@@ -1095,6 +1125,11 @@ impl Desktop {
                     self.return_focus = window.focused(cx);
                 }
                 self.overlay = Some(overlay);
+                if overlay == Overlay::Reminders
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshAccountReminders(scope));
+                }
                 if overlay == Overlay::Settings
                     && self.settings_tab == preferences::SettingsTab::Notifications
                 {
@@ -1293,6 +1328,15 @@ impl Desktop {
                         self.overlay = None;
                         self.root_focus.focus(window);
                     }
+                }
+            }
+            LocalAction::OpenReminder(context, message) => {
+                if self.save_draft(cx) && self.submit_open_reminder(context, message) {
+                    self.overlay = None;
+                    self.return_focus = None;
+                    self.navigation_open = false;
+                    self.destination = SidebarDestination::Conversations;
+                    self.root_focus.focus(window);
                 }
             }
             LocalAction::Destination(destination) => self.destination = destination,

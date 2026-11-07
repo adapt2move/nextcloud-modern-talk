@@ -76,6 +76,8 @@ pub(super) struct History {
     pins_state: RemoteState,
     pins_loaded: bool,
     pins_read_at: Option<Instant>,
+    schedules: Page<talk_core::ui::messaging::Scheduled, 100>,
+    schedules_version: Version,
 }
 impl History {
     fn new(context: ConversationRef) -> Self {
@@ -104,6 +106,8 @@ impl History {
             pins_state: RemoteState::Idle,
             pins_loaded: false,
             pins_read_at: None,
+            schedules: Page::empty(),
+            schedules_version: Version(0, false),
         }
     }
     pub(super) fn project(&self, panel: &mut MessagePanel) {
@@ -120,6 +124,7 @@ impl History {
         panel.pinned_messages = self.pins.clone();
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
+        panel.scheduled = self.schedules.clone();
         if let Some((expires, _, capabilities)) = &self.capabilities
             && Instant::now() < *expires
         {
@@ -746,6 +751,47 @@ impl Cache {
             // Refresh membership/excerpts through a separately observed GET.
             // Busy admission leaves this eligible for the next bounded owner tick.
             room.pins_read_at = None;
+        }
+        match result {
+            Ok(MessagingResult::Scheduled(values))
+                if matches!(work, Work::Scheduled | Work::ScheduledPoll)
+                    && flight.version >= room.schedules_version =>
+            {
+                room.schedules = page(
+                    values
+                        .as_slice()
+                        .iter()
+                        .map(super::messaging::scheduled_view),
+                );
+                room.schedules_version = flight.version;
+            }
+            Ok(MessagingResult::Schedule(value)) => {
+                let value = super::messaging::scheduled_view(value);
+                let id = value.id;
+                room.schedules = page(
+                    room.schedules
+                        .as_slice()
+                        .iter()
+                        .filter(|known| known.id != id)
+                        .take(99)
+                        .cloned()
+                        .chain(std::iter::once(value)),
+                );
+                room.schedules_version = mutation_version;
+            }
+            Ok(MessagingResult::Changed) if matches!(work, Work::CancelScheduled(_)) => {
+                if let Work::CancelScheduled(id) = work {
+                    room.schedules = page(
+                        room.schedules
+                            .as_slice()
+                            .iter()
+                            .filter(|known| known.id != id)
+                            .cloned(),
+                    );
+                    room.schedules_version = mutation_version;
+                }
+            }
+            _ => {}
         }
         let capabilities = match result {
             Ok(MessagingResult::Messages { capabilities, .. }) => capabilities.as_ref(),

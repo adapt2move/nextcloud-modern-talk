@@ -12,6 +12,7 @@ mod notifications;
 mod outbox;
 mod preview;
 mod reads;
+mod reminders;
 mod removal;
 mod startup;
 mod update;
@@ -61,6 +62,7 @@ enum Purpose {
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
+    AccountReminders(AccountScope, u64),
     LiveEvents(AccountScope),
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
@@ -143,6 +145,7 @@ pub struct Accounts {
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
+    reminders: reminders::Reminders,
     background: background::Background,
     history: history::Cache,
     cache: cache::Cache,
@@ -152,6 +155,7 @@ pub struct Accounts {
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
+    scheduled_poll: Option<(ConversationRef, Instant)>,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -189,6 +193,7 @@ impl Accounts {
             room_invite: None,
             message_search: None,
             notices: notifications::Notices::default(),
+            reminders: reminders::Reminders::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
@@ -198,6 +203,7 @@ impl Accounts {
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
+            scheduled_poll: None,
         }))
     }
     pub fn shutdown(&mut self) {
@@ -338,6 +344,7 @@ impl Accounts {
         self.snapshot.tag_state = ContentState::Unconfigured;
         self.load_tags = None;
         self.clear_content();
+        self.project_account_reminders();
         self.load_rooms = scope;
         self.touch();
     }
@@ -542,6 +549,7 @@ impl Accounts {
         self.tick_content();
         self.tick_file_work();
         self.tick_background();
+        self.tick_account_reminders();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -668,6 +676,7 @@ impl Accounts {
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
+            Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),
             Purpose::LiveEvents(scope) => {
                 if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
                     return;
@@ -1304,6 +1313,26 @@ impl Accounts {
                 self.select(Some(scope));
             }
             UiIntent::OpenConversation(context) => self.open(context)?,
+            UiIntent::RefreshAccountReminders(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_account_reminders(scope);
+            }
+            UiIntent::OpenReminder {
+                request,
+                context,
+                message,
+            } => {
+                self.open_reminder(request, context, message)?;
+            }
+            UiIntent::OpenNotificationMessage {
+                request,
+                context,
+                message,
+            } => {
+                self.open_notification_message(request, context, message)?;
+            }
             UiIntent::Refresh(context) => {
                 self.current(context.account)?;
                 let already_selected = self.snapshot.selected == Some(context);

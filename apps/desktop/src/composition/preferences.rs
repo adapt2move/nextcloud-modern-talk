@@ -84,9 +84,12 @@ impl Services {
         self.notification_sequence.set(next);
         Ok(RequestId(next))
     }
-    pub fn poll_notifications(&self, background: bool) {
+    pub fn poll_notifications(
+        &self,
+        background: bool,
+    ) -> Option<talk_core::preferences::notifications::NotificationActivation> {
         let (Some(accounts), Ok(runtime)) = (&self.accounts, &self.notifications) else {
-            return;
+            return None;
         };
         runtime.update_visibility(background);
         let mut accounts = accounts.borrow_mut();
@@ -159,6 +162,7 @@ impl Services {
                 accounts.settle_message_notification(kind);
             }
         }
+        runtime.take_message_activation()
     }
     pub(super) fn shutdown_requested(&self) -> bool {
         self.shutdown_deadline.get().is_some()

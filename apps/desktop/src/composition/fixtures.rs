@@ -52,6 +52,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-message-tools",
     "chat-reminder-time",
     "chat-reminder-menu",
+    "account-reminders",
     "chat-schedule-time",
     "lobby-settings",
     "thread-error",
@@ -201,6 +202,32 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("account-reminders") {
+        use talk_core::ui::presentation::{
+            AccountReminderView, AccountRemindersView, FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        let reminders = state
+            .conversations
+            .as_slice()
+            .iter()
+            .take(3)
+            .enumerate()
+            .map(|(index, room)| AccountReminderView {
+                context: room.context,
+                message: 45 + index as u128,
+                timestamp: 1_800_003_600 + index as u64 * 3600,
+            })
+            .collect::<Vec<_>>();
+        state.account_reminders = Some(AccountRemindersView {
+            scope: scope(),
+            support: FeatureSupport::Supported,
+            state: ContentState::Ready,
+            complete: true,
+            reminders: page(reminders),
+        });
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
@@ -291,12 +318,16 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     body: text("Fiktive Nachricht für morgen"),
                     timestamp: 1_800_090_000,
                     failed_original_timestamp: None,
+                    editable: true,
+                    silent: false,
                 },
                 Scheduled {
                     id: 42,
                     body: text("Fiktive Nachricht erneut prüfen"),
                     timestamp: 0,
                     failed_original_timestamp: Some(1_800_003_600),
+                    editable: true,
+                    silent: false,
                 },
             ]);
         }
@@ -580,6 +611,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         tags: Page::empty(),
         tag_state: ContentState::Unconfigured,
         organization_result: None,
+        account_reminders: None,
         selected: None,
         content: ContentState::Unconfigured,
         messages: Page::empty(),

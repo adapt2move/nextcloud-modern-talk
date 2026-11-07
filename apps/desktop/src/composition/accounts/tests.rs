@@ -749,6 +749,7 @@ pub(super) fn model() -> Accounts {
         room_invite: None,
         message_search: None,
         notices: notifications::Notices::default(),
+        reminders: reminders::Reminders::default(),
         background: background::Background::default(),
         history: history::Cache::default(),
         cache: cache::Cache::default(),
@@ -758,6 +759,7 @@ pub(super) fn model() -> Accounts {
         attachment_owner: files::Owner::default(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
+        scheduled_poll: None,
     }
 }
 fn completion(scope: AccountScope, current: bool, reply: ProtocolReply) -> ConnectionCompletion {

@@ -67,6 +67,14 @@ pub struct MessageReminder {
     pub timestamp: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountReminders {
+    pub scope: crate::ids::AccountScope,
+    pub supported: bool,
+    /// False when the server returned a room which has not been bound locally.
+    pub complete: bool,
+    pub reminders: Page<MessageReminder, 100>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScheduledMessage {
     pub id: MessageId,
     pub text: Text<131072>,

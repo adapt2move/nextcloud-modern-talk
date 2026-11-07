@@ -23,15 +23,16 @@ use talk_core::{
         notifications::{
             self, BannerBackend, DeliveryOutcome, NativeCallAction, NativeCallActionCompletion,
             NativeCallActions, NativeNotificationCapabilities, NotificationAccessAction,
-            NotificationAccessOperation, NotificationAccessSnapshot, NotificationAuthorization,
-            NotificationCategory, NotificationCompletion, NotificationError, NotificationEvent,
-            NotificationKind, NotificationSources, NotificationState, SoundBackend,
-            SourceAvailability,
+            NotificationAccessOperation, NotificationAccessSnapshot, NotificationActivation,
+            NotificationAuthorization, NotificationCategory, NotificationCompletion,
+            NotificationError, NotificationEvent, NotificationKind, NotificationSources,
+            NotificationState, SoundBackend, SourceAvailability,
         },
     },
 };
 
 mod access;
+mod activation;
 mod macos;
 
 #[cfg(test)]
@@ -49,6 +50,8 @@ struct State {
     policy: NotificationPreferences,
     locale: Locale,
     actions: VecDeque<NativeCallActionCompletion>,
+    activations: VecDeque<NotificationActivation>,
+    activation_hosts: usize,
     capabilities: NativeNotificationCapabilities,
     pending: [Option<NotificationEvent>; 3],
     pending_at: [Option<Instant>; 3],
@@ -70,6 +73,8 @@ impl State {
             policy,
             locale: Locale::English,
             actions: VecDeque::new(),
+            activations: VecDeque::new(),
+            activation_hosts: 0,
             capabilities: NativeNotificationCapabilities {
                 banners: BannerBackend::Unavailable,
                 sounds: SoundBackend::Unavailable,
@@ -412,6 +417,9 @@ impl NotificationRuntime {
     pub fn take_action_completion(&self) -> Option<NativeCallActionCompletion> {
         self.shared.lock().actions.pop_front()
     }
+    pub fn take_message_activation(&self) -> Option<NotificationActivation> {
+        self.shared.lock().activations.pop_front()
+    }
     pub fn update_policy(&self, policy: NotificationPreferences) {
         self.shared.lock().policy = policy;
         self.shared.wake.notify_one();
@@ -622,7 +630,7 @@ fn outcome(result: Result<(), NotificationError>) -> DeliveryOutcome {
     }
 }
 fn deliver_pair(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     event: &NotificationEvent,
     dispatcher: Option<&dyn NotificationCallDispatcher>,
 ) -> (DeliveryOutcome, DeliveryOutcome) {
@@ -634,6 +642,12 @@ fn deliver_pair(
     };
     if !banner && !sound {
         return (DeliveryOutcome::Suppressed, DeliveryOutcome::Suppressed);
+    }
+    if banner
+        && matches!(event.kind, NotificationKind::MessageReminder { .. })
+        && let Some(delivery) = activation::deliver(shared, event, sound)
+    {
+        return delivery;
     }
     if cfg!(target_os = "macos") {
         return macos::deliver(shared, event, banner, sound, dispatcher);
@@ -681,6 +695,9 @@ fn deliver_pair(
     )
 }
 fn linux_sound_supported(shared: &Shared, event: &NotificationEvent) -> bool {
+    linux_daemon_supports(shared, event, "sound")
+}
+fn linux_daemon_supports(shared: &Shared, event: &NotificationEvent, capability: &str) -> bool {
     let result = super::native_process::capture(
         Command::new("gdbus").args([
             "call",
@@ -693,9 +710,20 @@ fn linux_sound_supported(shared: &Shared, event: &NotificationEvent) -> bool {
             "org.freedesktop.Notifications.GetCapabilities",
         ]),
         Duration::from_secs(2),
-        || !check(shared, event, Effect::Sound).unwrap_or(false),
+        || {
+            !check(
+                shared,
+                event,
+                if capability == "sound" {
+                    Effect::Sound
+                } else {
+                    Effect::Banner
+                },
+            )
+            .unwrap_or(false)
+        },
     );
-    result.is_ok_and(|output| output.split(['\'', '"']).any(|part| part == "sound"))
+    result.is_ok_and(|output| output.split(['\'', '"']).any(|part| part == capability))
 }
 fn execute(
     shared: &Shared,
@@ -797,6 +825,13 @@ fn linux_sound_file(kind: NotificationKind) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 fn linux_command(event: &NotificationEvent, sound_file: Option<&Path>) -> Command {
+    linux_command_with_action(event, sound_file, None)
+}
+fn linux_command_with_action(
+    event: &NotificationEvent,
+    sound_file: Option<&Path>,
+    action: Option<&str>,
+) -> Command {
     let body = event
         .body
         .as_str()
@@ -822,6 +857,9 @@ fn linux_command(event: &NotificationEvent, sound_file: Option<&Path>) -> Comman
         let mut hint = std::ffi::OsString::from("--hint=string:sound-file:");
         hint.push(path);
         command.arg(hint);
+    }
+    if let Some(action) = action {
+        command.arg(format!("--action=default={action}"));
     }
     command.args(["--", event.title.as_str(), &body]);
     command

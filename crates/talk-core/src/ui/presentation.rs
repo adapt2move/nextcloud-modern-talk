@@ -526,6 +526,8 @@ pub struct PresentationSnapshot {
     pub tags: Page<TagView, 102>,
     pub tag_state: ContentState,
     pub organization_result: Option<OrganizationResult>,
+    /// Upcoming reminders belong to the active account, independently of selection.
+    pub account_reminders: Option<AccountRemindersView>,
     /// History/files/participants below belong to exactly this runtime+host context.
     pub selected: Option<ConversationRef>,
     pub content: ContentState,
@@ -545,6 +547,23 @@ pub struct ConversationListState {
     pub content: ContentState,
     /// False for partial/unknown lists; absence is not an authoritative empty list.
     pub complete: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountReminderView {
+    pub context: ConversationRef,
+    pub message: u128,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountRemindersView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub state: ContentState,
+    /// False if the server returned reminders in rooms outside the observed list.
+    pub complete: bool,
+    pub reminders: Page<AccountReminderView, 100>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -645,6 +664,19 @@ pub enum UiIntent {
     },
     SelectAccount(AccountScope),
     OpenConversation(ConversationRef),
+    RefreshAccountReminders(AccountScope),
+    OpenReminder {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
+    /// Native activation is only navigation; the account owner revalidates the
+    /// runtime and room before loading this message context.
+    OpenNotificationMessage {
+        request: RequestId,
+        context: ConversationRef,
+        message: u128,
+    },
     SetArchived {
         request: RequestId,
         context: ConversationRef,

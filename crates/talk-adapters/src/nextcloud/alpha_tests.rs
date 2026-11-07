@@ -781,3 +781,55 @@ async fn upcoming_reminders_have_an_independent_server_capability() {
         assert_eq!(get(MessagingFeature::UpcomingReminders), upcoming);
     }
 }
+
+#[tokio::test]
+async fn account_reminders_do_not_require_a_selected_room_and_keep_unknown_rooms_partial() {
+    for major in [34, 35] {
+        for supported in [false, true] {
+            let mut capabilities = caps(major);
+            if supported {
+                capabilities["capabilities"]["spreed"]["features"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("upcoming-reminders"));
+            }
+            let mut replies = vec![Reply::data(capabilities)];
+            if supported {
+                replies.push(Reply::data(json!([
+                    {"roomToken":"testroom", "messageId":7, "reminderTimestamp":200},
+                    {"roomToken":"otherroom", "messageId":8, "reminderTimestamp":300},
+                    {"roomToken":"unknownroom", "messageId":9, "reminderTimestamp":400}
+                ])));
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let first = bind(&mut client);
+            let mut other = room();
+            other["token"] = json!("otherroom");
+            other["id"] = json!(2);
+            let second = client.bind_room(&other).unwrap();
+            let ProtocolReply::UpcomingReminders(result) = client
+                .request(context(&runtime), ProtocolRequest::UpcomingReminders)
+                .await
+                .unwrap()
+            else {
+                panic!("expected reminders")
+            };
+            assert_eq!(result.supported, supported);
+            assert_eq!(result.complete, !supported);
+            if supported {
+                assert_eq!(result.reminders.as_slice().len(), 2);
+                assert_eq!(result.reminders.as_slice()[0].message.conversation, first);
+                assert_eq!(result.reminders.as_slice()[1].message.conversation, second);
+                let requests = server.seen.lock().unwrap();
+                assert!(String::from_utf8_lossy(&requests[1]).starts_with(
+                    "GET /cloud/ocs/v2.php/apps/spreed/api/v1/chat/upcoming-reminders"
+                ));
+            } else {
+                assert!(result.reminders.as_slice().is_empty());
+                assert_eq!(server.count(), 1);
+            }
+        }
+    }
+}

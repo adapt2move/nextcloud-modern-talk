@@ -122,6 +122,7 @@ fn snapshot() -> PresentationSnapshot {
         tags: Page::empty(),
         tag_state: ContentState::Ready,
         organization_result: None,
+        account_reminders: None,
         selected: Some(source),
         content: ContentState::Ready,
         messages: page([message()]),
