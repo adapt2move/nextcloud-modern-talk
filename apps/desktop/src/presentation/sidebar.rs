@@ -1001,7 +1001,8 @@ impl Desktop {
                 // Only the currently owned call has authoritative, scoped
                 // participant identities; other active rooms retain the badge.
                 if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
-                    call.scope.account == context.account
+                    !self.docked_call()
+                        && call.scope.account == context.account
                         && call.scope.conversation == context.conversation
                         && matches!(call.stage, talk_core::ui::presentation::CallStage::Active)
                 }) {

@@ -53,6 +53,7 @@ def capture(args, before_runtime_cleanup=None):
         xlog = open(out / "xvfb.log", "w")
         xvfb = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1600x1200x24", "-nolisten", "tcp", "-noreset"], pass_fds=(write_fd,), stdout=xlog, stderr=xlog)
         os.close(write_fd)
+        window_manager = None
         try:
             if not select.select([read_fd], [], [], 15)[0]:
                 raise RuntimeError("Owned Xvfb did not expose a display within 15 seconds")
@@ -60,6 +61,11 @@ def capture(args, before_runtime_cleanup=None):
             if not display.isdigit():
                 raise RuntimeError("Xvfb returned an invalid display")
             env["DISPLAY"] = ":" + display
+            if args.call_fullscreen:
+                window_manager = subprocess.Popen(["openbox"], env=env, stdout=xlog, stderr=xlog)
+                time.sleep(.5)
+                if window_manager.poll() is not None:
+                    raise RuntimeError("Fullscreen capture requires a working X11 window manager")
             manifest["vulkan"] = run(["vulkaninfo", "--summary"], env).stdout
             cases = args.scenarios.split(",")
             for case in cases:
@@ -99,6 +105,8 @@ def capture(args, before_runtime_cleanup=None):
                         run(["xdotool", "windowmove", "--sync", xid, "0", "0"], env)
                         run(["xdotool", "windowsize", "--sync", xid, str(args.width), str(args.height)], env)
                         run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                        if args.settle_seconds:
+                            time.sleep(args.settle_seconds)
                         screenshot = out / f"{label}.png"
                         # A visible X11 window can precede its first Vulkan frame,
                         # especially during cold shader compilation on software GPUs.
@@ -114,12 +122,24 @@ def capture(args, before_runtime_cleanup=None):
                             if time.monotonic() >= paint_deadline:
                                 raise RuntimeError(f"Native window stayed blank: {label}")
                             time.sleep(0.5)
+                        if args.call_fullscreen:
+                            run(["xdotool", "windowactivate", "--sync", xid], env)
+                            # The call fixture's header action owns fullscreen. Use
+                            # the native control, then capture the resulting window.
+                            run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
+                            time.sleep(.75)
+                            wm_state = run(["xprop", "-id", xid, "_NET_WM_STATE"], env).stdout
+                            if "_NET_WM_STATE_FULLSCREEN" not in wm_state:
+                                raise RuntimeError("Call header did not enter window-manager fullscreen")
+                            run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                            run(["import", "-window", xid, str(screenshot)], env)
                         status = Path(f"/proc/{app.pid}/status").read_text()
                         memory = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith(("VmRSS:", "VmHWM:", "Threads:"))}
+                        actual_size = [int(part) for part in run(["identify", "-format", "%w %h", str(screenshot)], env).stdout.split()]
                         manifest["captures"].append({"scenario": scenario, "appearance": appearance, "theme": theme, "image": screenshot.name,
                             "sha256": sha(screenshot), "first_visible_window_ms": first_window_ms, "process_sample": memory,
                             "measurement_limit": "single Linux diagnostic sample; excludes GPU/Xvfb/other processes; not Q.PERF acceptance",
-                            "window_size": [args.width, args.height], "command": ["talk-desktop"] + command[1:]})
+                            "window_size": actual_size, "fullscreen": args.call_fullscreen, "command": ["talk-desktop"] + command[1:]})
                         if args.interactions:
                             from interactions import exercise
                             manifest["captures"][-1]["interactions"] = exercise(scenario, env, xid, out, label, args.scale>=150)
@@ -139,6 +159,9 @@ def capture(args, before_runtime_cleanup=None):
             if before_runtime_cleanup is not None:
                 before_runtime_cleanup(env)
             os.close(read_fd)
+            if window_manager is not None:
+                window_manager.terminate()
+                window_manager.wait(timeout=5)
             xvfb.terminate()
             try:
                 xvfb.wait(timeout=5)
@@ -156,5 +179,7 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--scale", type=int, choices=[100,125,150,200], default=100)
+    parser.add_argument("--settle-seconds", type=float, default=0, help="Wait for a bounded timed state before capture")
+    parser.add_argument("--call-fullscreen", action="store_true", help="Activate the call header fullscreen control before capture")
     parser.add_argument("--interactions", action="store_true", help="Run native keyboard/mouse checks; requires tesseract-ocr")
     capture(parser.parse_args())

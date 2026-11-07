@@ -153,6 +153,8 @@ pub(super) struct CallUi {
     title: Text<256>,
     direct: bool,
     wishes: MediaWishes,
+    replacement_generation: bool,
+    explicit_restart: bool,
 }
 impl Accounts {
     pub(super) fn leave_for_breakout(
@@ -446,6 +448,8 @@ impl Accounts {
                 title: title.clone(),
                 direct: true,
                 wishes: MediaWishes::default(),
+                replacement_generation: false,
+                explicit_restart: false,
             });
             self.snapshot.conversations =
                 page(self.snapshot.conversations.as_slice().iter().map(|row| {
@@ -743,7 +747,38 @@ impl Accounts {
                         .filter(|u| u.scope == *call)
                         .ok_or(SubmitError::StaleScope)?;
                     ui.wishes = MediaWishes::default();
+                    ui.explicit_restart = true;
                     Command::Reconnect(*call)
+                }
+                UiIntent::RecoverCallMedia(call) => {
+                    let ui = self
+                        .call_ui
+                        .as_ref()
+                        .filter(|u| u.scope == *call && u.replacement_generation)
+                        .ok_or(SubmitError::StaleScope)?;
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == ui.scope && view.stage == CallStage::Active)
+                        .ok_or(SubmitError::StaleScope)?;
+                    let remote = |id| {
+                        view.participants
+                            .as_slice()
+                            .iter()
+                            .any(|p| !p.self_user && p.local_id == id)
+                    };
+                    if !view.participants.as_slice().iter().any(|p| !p.self_user)
+                        || view.remote_audio_received > 0
+                        || view
+                            .streams
+                            .as_slice()
+                            .iter()
+                            .any(|stream| stream.flowing && remote(stream.participant))
+                    {
+                        return Err(SubmitError::StaleScope);
+                    }
+                    Command::RecoverMedia(*call)
                 }
                 UiIntent::DeclineDirect(call) => {
                     if self.ringing_call() != Some(*call) {
@@ -784,11 +819,15 @@ impl Accounts {
                 _ => return Ok(()),
             };
             let scope = command.scope();
+            let recovery = matches!(command, Command::RecoverMedia(_));
             self.request(
                 scope.account,
                 ProtocolRequest::Meeting(command),
                 Purpose::Call(scope),
             )?;
+            if recovery && let Some(ui) = self.call_ui.as_mut().filter(|ui| ui.scope == scope) {
+                ui.explicit_restart = true;
+            }
             Ok(())
         })();
         matches!(
@@ -807,6 +846,7 @@ impl Accounts {
                 | UiIntent::ShareScreen(_)
                 | UiIntent::StopScreen(_)
                 | UiIntent::ReconnectCall(_)
+                | UiIntent::RecoverCallMedia(_)
                 | UiIntent::ResolveRequiredGate { .. }
                 | UiIntent::Legacy(
                     UserIntent::PrepareConference(_)
@@ -889,6 +929,8 @@ impl Accounts {
             title: title.clone(),
             direct,
             wishes,
+            replacement_generation: false,
+            explicit_restart: false,
         });
         self.snapshot.call = Some(CallView {
             scope,
@@ -905,6 +947,8 @@ impl Accounts {
             share: MediaState::Unavailable,
             sharing: ScreenShareState::Idle,
             streams: Page::empty(),
+            replacement_generation: false,
+            remote_audio_received: 0,
             recording: talk_core::ui::presentation::CallRecordingState::Unknown,
             recording_control: None,
             recording_pending: false,
@@ -1002,6 +1046,14 @@ impl Accounts {
                 if value.call.account == requested.account
                     && value.call.conversation == requested.conversation =>
             {
+                if value.call != requested {
+                    let prior_was_live = self.snapshot.call.as_ref().is_some_and(|call| {
+                        call.scope == requested
+                            && matches!(call.stage, CallStage::Active | CallStage::Reconnecting)
+                    });
+                    ui.replacement_generation = !ui.explicit_restart && prior_was_live;
+                    ui.explicit_restart = false;
+                }
                 ui.scope = value.call;
                 ui.wishes = value.wishes;
                 let account = self
@@ -1010,7 +1062,9 @@ impl Accounts {
                     .as_slice()
                     .iter()
                     .find(|account| account.scope == value.call.account);
-                self.snapshot.call = Some(project(&value, &ui.title, ui.direct, account));
+                let mut view = project(&value, &ui.title, ui.direct, account);
+                view.replacement_generation = ui.replacement_generation;
+                self.snapshot.call = Some(view);
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
                         let mut row = row.clone();
@@ -1129,6 +1183,8 @@ fn project(
                 flowing: p.flowing,
             }
         })),
+        replacement_generation: false,
+        remote_audio_received: value.counters.audio_received,
         recording: match value.recording {
             talk_core::policy::RecordingState::Inactive => {
                 talk_core::ui::presentation::CallRecordingState::Inactive
@@ -1342,6 +1398,48 @@ mod action_tests {
             Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(snapshot))),
         );
         assert!(!model.call_ui.as_ref().unwrap().wishes.microphone);
+    }
+    #[test]
+    fn generation_replacement_is_scoped_and_explicit_restart_is_not_misidentified() {
+        let mut model = super::super::tests::model();
+        let old = call();
+        let incoming = invitation(old);
+        let mut snapshot = incoming.call.clone().unwrap();
+        model.apply_incoming(
+            old.account,
+            incoming,
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        snapshot.phase = Phase::Active;
+        model.complete_call(
+            old,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(
+                snapshot.clone(),
+            ))),
+        );
+        assert!(!model.snapshot.call.as_ref().unwrap().replacement_generation);
+        let mut fresh = old;
+        fresh.call = CallGeneration::from_local(6);
+        snapshot.call = fresh;
+        model.complete_call(
+            old,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(
+                snapshot.clone(),
+            ))),
+        );
+        assert!(model.snapshot.call.as_ref().unwrap().replacement_generation);
+        // An obsolete completion cannot overwrite the adopted generation.
+        model.complete_call(old, Err(IdentityError::Request(ErrorKind::Transport)));
+        assert_eq!(model.snapshot.call.as_ref().unwrap().scope, fresh);
+        model.call_ui.as_mut().unwrap().explicit_restart = true;
+        let mut next = fresh;
+        next.call = CallGeneration::from_local(7);
+        snapshot.call = next;
+        model.complete_call(
+            fresh,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(snapshot))),
+        );
+        assert!(!model.snapshot.call.as_ref().unwrap().replacement_generation);
     }
     #[test]
     fn stream_metadata_preserves_actor_identity_and_keeps_screens_out_of_people() {

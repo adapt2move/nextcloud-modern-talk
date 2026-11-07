@@ -277,6 +277,13 @@
       "transformation": "none"
     },
     {
+      "asset": "maximize-2.svg",
+      "upstream_path": "icons/maximize-2.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/maximize-2.svg",
+      "sha256": "f81488c6b37714d3aa402209ba9696bbc4e318d3b400a8eeba7188f25eb81340",
+      "transformation": "none"
+    },
+    {
       "asset": "megaphone.svg",
       "upstream_path": "icons/megaphone.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/megaphone.svg",
@@ -295,6 +302,13 @@
       "upstream_path": "icons/mic.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic.svg",
       "sha256": "2db62a8268f7a16f0bd0f062ccd21ec4a3733d19a9d88f5332798b4ce437b757",
+      "transformation": "none"
+    },
+    {
+      "asset": "minimize-2.svg",
+      "upstream_path": "icons/minimize-2.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/minimize-2.svg",
+      "sha256": "29f4686d2c30f76def7057230d08737228e5f4d9bed3ebc2341d019bb1803837",
       "transformation": "none"
     },
     {
@@ -540,6 +554,13 @@
       "upstream_path": "icons/video.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/video.svg",
       "sha256": "d4fb6587f282c1152b953fe9494cd8ccafdf1e9f44957fbb7fe8dc7af0457597",
+      "transformation": "none"
+    },
+    {
+      "asset": "wifi-off.svg",
+      "upstream_path": "icons/wifi-off.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/wifi-off.svg",
+      "sha256": "318b290106e55c3505933f434d3663524206c7a44165a89508774fba4fdbaadd",
       "transformation": "none"
     },
     {

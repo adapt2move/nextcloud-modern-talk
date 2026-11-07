@@ -460,6 +460,8 @@ pub enum Command {
     },
     Consent(CallScope),
     Reconnect(CallScope),
+    /// Explicit re-admission of an existing call after missing remote media.
+    RecoverMedia(CallScope),
     Stop(CallScope),
     Observe(CallScope),
     StartScreenShare(CallScope),
@@ -478,6 +480,7 @@ impl Command {
             Self::Consent(call)
             | Self::EndEveryone(call)
             | Self::Reconnect(call)
+            | Self::RecoverMedia(call)
             | Self::Stop(call)
             | Self::Observe(call)
             | Self::StartScreenShare(call)

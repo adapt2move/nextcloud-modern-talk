@@ -22,15 +22,15 @@ pub(super) fn call_devices() -> talk_core::preferences::devices::DeviceSnapshot 
     for (id, label, kind) in [
         (
             "fixture-mic-studio",
-            "Studio microphone",
+            "Studiomikrofon",
             DeviceKind::Microphone,
         ),
         (
             "fixture-mic-laptop",
-            "Laptop microphone",
+            "Laptopmikrofon",
             DeviceKind::Microphone,
         ),
-        ("fixture-camera", "Laptop camera", DeviceKind::Camera),
+        ("fixture-camera", "Laptopkamera", DeviceKind::Camera),
     ] {
         if let Ok(id) = DeviceId::new(id) {
             let _ = devices.try_push(DeviceInfo {
@@ -196,6 +196,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-error-unknown",
     "call-controls",
     "call-gallery",
+    "call-recovery",
     "call-participants-raised",
     "call-dock",
     "call-devices",
@@ -1715,6 +1716,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error-unknown"
             | "call-controls"
             | "call-gallery"
+            | "call-recovery"
             | "call-participants-raised"
             | "call-dock"
             | "call-devices"
@@ -1803,6 +1805,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 ScreenShareState::Idle
             },
             streams: Page::empty(),
+            replacement_generation: scenario == "call-recovery",
+            remote_audio_received: 0,
             recording: match scenario {
                 "call-recording" => talk_core::ui::presentation::CallRecordingState::Active,
                 "call-recording-failed" => talk_core::ui::presentation::CallRecordingState::Failed,
@@ -2542,9 +2546,8 @@ impl NativeDesktopPort for DevelopmentPort {
             );
         }
         // Content probes can exhaust the general quota before a user sends.
-        // Reserve four send diagnostics for the explicit chat interaction fixture.
-        if self.chat_ux
-            && self.chat_ux_send_diagnostics < 4
+        // Reserve four send diagnostics independently of automatic read probes.
+        if self.chat_ux_send_diagnostics < 4
             && let UiIntent::Message {
                 context,
                 action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },
@@ -3356,6 +3359,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     share: MediaState::Unavailable,
                     sharing: ScreenShareState::Idle,
                     streams: Page::empty(),
+                    replacement_generation: false,
+                    remote_audio_received: 0,
                     recording: talk_core::ui::presentation::CallRecordingState::Unknown,
                     recording_control: None,
                     recording_pending: false,
@@ -3377,6 +3382,24 @@ impl NativeDesktopPort for DevelopmentPort {
                         page(participants())
                     },
                 });
+            }
+            UiIntent::RecoverCallMedia(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.replacement_generation
+                            && view.stage == CallStage::Active
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.replacement_generation = false;
+                view.stage = CallStage::Connecting;
+                println!(
+                    "UI_INTENT recover-call-media room={}",
+                    call.conversation.local
+                );
             }
             UiIntent::SetCallRecording { call, start } => {
                 let view = self

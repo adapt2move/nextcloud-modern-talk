@@ -1,4 +1,5 @@
 pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
+    (" (Du)", " (You)", " (Tú)"),
     (
         "Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.",
         "Everyone will leave the call. The conversation and its messages remain.",
@@ -94,6 +95,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     (
+        "Dauer {duration}",
+        "Duration {duration}",
+        "Duración {duration}",
+    ),
+    (
         "Dein Bildschirm wird geteilt.",
         "Your screen is being shared.",
         "Se está compartiendo tu pantalla.",
@@ -114,14 +120,34 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
     ),
     (
+        "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.",
+        "The server will record this call’s audio and video. Everyone will be informed.",
+        "El servidor grabará el audio y el vídeo de esta llamada. Se informará a todas las personas participantes.",
+    ),
+    (
         "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.",
         "The recording change could not be confirmed. Check its status and rejoin if needed.",
         "No se pudo confirmar el cambio de grabación. Comprueba su estado y vuelve a unirte si es necesario.",
     ),
     (
+        "Die Bildschirmfreigabe benötigt eine Freigabe.",
+        "Screen sharing requires permission.",
+        "Compartir pantalla requiere autorización.",
+    ),
+    (
         "Die Bildschirmfreigabe hat zu lange gedauert. Versuche es erneut.",
         "Screen sharing timed out. Try again.",
         "Se ha agotado el tiempo para compartir pantalla. Inténtalo de nuevo.",
+    ),
+    (
+        "Die Moderation lässt dich gleich hinein.",
+        "A moderator will admit you shortly.",
+        "Una persona moderadora te dejará entrar pronto.",
+    ),
+    (
+        "Die Sicherheitsvorgaben für diesen Anruf sind noch nicht erfüllt.",
+        "The security requirements for this call are not yet satisfied.",
+        "Aún no se cumplen los requisitos de seguridad de esta llamada.",
     ),
     (
         "Die geteilte Quelle wurde geschlossen. Wähle erneut einen Bildschirm oder ein Fenster.",
@@ -144,11 +170,17 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "End for everyone",
         "Finalizar para todas las personas",
     ),
+    (
+        "Gerätewechsel stoppt die Übertragung.",
+        "Changing devices stops the stream.",
+        "Cambiar de dispositivo detiene la transmisión.",
+    ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
     ("Hand heben (H)", "Raise hand (H)", "Levantar la mano (H)"),
     ("Hand senken", "Lower hand", "Bajar la mano"),
     ("Hand senken (H)", "Lower hand (H)", "Bajar la mano (H)"),
+    ("Hände", "Hands", "Manos"),
     (
         "Ich stimme einer Aufzeichnung zu.",
         "I agree to a recording.",
@@ -176,6 +208,12 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Requesting ring…",
         "Solicitando llamada…",
     ),
+    ("Laptopkamera", "Laptop camera", "Cámara del portátil"),
+    (
+        "Laptopmikrofon",
+        "Laptop microphone",
+        "Micrófono del portátil",
+    ),
     (
         "Mikrofon auswählen",
         "Choose microphone",
@@ -187,6 +225,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Encender micrófono (M)",
     ),
     (
+        "Mikrofon und Kamera bleiben bis zur Annahme aus.",
+        "Your microphone and camera stay off until you accept.",
+        "El micrófono y la cámara permanecen apagados hasta que aceptes.",
+    ),
+    (
         "Mit Video annehmen",
         "Accept with video",
         "Aceptar con vídeo",
@@ -196,6 +239,8 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Start video call",
         "Iniciar videollamada",
     ),
+    ("Moderation", "Moderation", "Moderación"),
+    ("Neu beitreten", "Rejoin", "Volver a unirse"),
     ("Nicht beitreten", "Do not join", "No unirse"),
     ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),
     (
@@ -213,6 +258,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("Reaktion senden", "Send reaction", "Enviar reacción"),
     ("Sprecheransicht", "Speaker view", "Vista de orador"),
     ("Spricht", "Speaking", "Hablando"),
+    (
+        "Studiomikrofon",
+        "Studio microphone",
+        "Micrófono de estudio",
+    ),
     ("Stummschalten (M)", "Mute (M)", "Silenciar (M)"),
     (
         "Stummschaltung angefragt",
@@ -230,6 +280,21 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Solicitando silencio…",
     ),
     (
+        "Systemeinstellungen sind auf diesem System nicht verfügbar.",
+        "System settings are unavailable on this system.",
+        "Los ajustes del sistema no están disponibles en este sistema.",
+    ),
+    (
+        "Talk braucht Zugriff auf dein Mikrofon, um dich hörbar zu machen.",
+        "Talk needs access to your microphone so others can hear you.",
+        "Talk necesita acceso al micrófono para que puedan oírte.",
+    ),
+    (
+        "Talk braucht Zugriff auf deine Kamera, um dich sichtbar zu machen.",
+        "Talk needs access to your camera so others can see you.",
+        "Talk necesita acceso a la cámara para que puedan verte.",
+    ),
+    (
         "Tastenkürzel: H",
         "Keyboard shortcut: H",
         "Atajo de teclado: H",
@@ -245,6 +310,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Atajo de teclado: V",
     ),
     (
+        "Ton oder Bild fehlen?",
+        "Missing sound or video?",
+        "¿Falta sonido o imagen?",
+    ),
+    (
         "Vollbild umschalten",
         "Toggle fullscreen",
         "Alternar pantalla completa",
@@ -253,6 +323,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Warte auf Bildschirmdaten …",
         "Waiting for screen data…",
         "Esperando datos de pantalla…",
+    ),
+    (
+        "Wartet auf Freigabe",
+        "Waiting for approval",
+        "Esperando autorización",
+    ),
+    (
+        "Weitere Anrufaktionen",
+        "More call actions",
+        "Más acciones de llamada",
     ),
     (
         "Wähle den Bildschirm oder das Fenster für die Freigabe.",
@@ -270,8 +350,18 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Revisar consentimiento",
     ),
     (
+        "{name} ruft an",
+        "{name} is calling",
+        "{name} está llamando",
+    ),
+    (
         "{name} teilt den Bildschirm",
         "{name} is sharing their screen",
         "{name} está compartiendo su pantalla",
+    ),
+    (
+        "{name} wird angerufen …",
+        "Calling {name}…",
+        "Llamando a {name}…",
     ),
 ];

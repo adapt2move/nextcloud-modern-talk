@@ -162,7 +162,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                     raise
                 time.sleep(.15)
 
-    def click(word, xmin=0, ymin=0, inspected_point=None):
+    def click(word, xmin=0, ymin=0, inspected_point=None, dy=0, first=False):
         path, words, _ = observe()
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if not choices:
@@ -185,7 +185,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         if not choices and word in aliases:
             choices=[r for r in words if normalized(r['text']) in aliases[word] and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if choices:
-            hit = choices[-1]
+            hit = choices[0] if first else choices[-1]
             x = int(hit['left']) + int(hit['width']) // 2
             y = int(hit['top']) + int(hit['height']) // 2
         elif inspected_point is not None:
@@ -199,7 +199,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             print(f'Native {word} click uses inspected ({x}, {y}) in {path.name}; OCR unavailable',flush=True)
         else:
             raise AssertionError(f'Cannot locate native control {word!r}')
-        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
+        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y + dy), 'click', '1'], env)
 
     if large:
         if scenario in ('chat','prejoin','settings'):
@@ -672,13 +672,24 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('ansehen')
         expect('dismiss keeps a discoverable incoming call', ['Eingehender Anruf ansehen'], ['Annehmen'])
         click('ansehen')
-        # The blue accept icon is distinct from the two adjacent call actions.
-        run(['xdotool', 'mousemove', '--window', xid, '605', '502', 'click', '1'], env)
+        click('Annehmen', ymin=200, dy=-36, first=True)
         expect('direct accept bypasses optional conference prejoin', ['Verbindung wird aufgebaut'], ['Bereit'])
         key('Escape')
         expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
-        click('Auflegen',inspected_point=(1280,800,1225,754))
+        click('Verlassen')
         expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
+    elif scenario == 'call-ended':
+        expect('ended call surface is shown first', ['Anruf beendet'])
+        time.sleep(4)
+        expect('ended call returns to conversation after a short delay', ['Nachricht an Produktteam'], ['Anruf beendet'])
+    elif scenario == 'call-recovery':
+        expect('missing media recovery offers rejoin after the waiting period', ['beitreten'])
+        click('beitreten', inspected_point=(1280,800,220,155))
+        time.sleep(.5)
+        log = (out / f'{label}.log').read_text()
+        if log.count('UI_INTENT recover-call-media room=') != 1:
+            raise AssertionError('Recovery did not submit exactly one scoped intent')
+        expect('explicit recovery starts a fresh admission', ['Verbindung wird aufgebaut'], ['Ton oder Bild fehlen'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
         # Fixture diagnostics contain only local identities and the hand state.
@@ -738,7 +749,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Cleared recording consent was submitted')
         point(468, 437)
         key('Escape'); time.sleep(.35)
-        point(500, 235)  # Reopen from the still-required gate.
+        click('prüfen')  # Reopen from the still-required gate.
         point(660, 485)
         if consent_sent():
             raise AssertionError('Reopened consent retained an earlier selection')
@@ -749,20 +760,25 @@ def exercise(scenario, env, xid, out, label, large=False):
                 raise AssertionError('Explicit direct-call consent was not submitted exactly once')
             expect('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
         else:
-            point(500, 485)
+            point(580, 480)
             if consent_sent():
                 raise AssertionError('Declining submitted recording consent')
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
         expect('conference prejoin starts open', ['Bereit', 'Jetzt', 'teil'])
-        time.sleep(.7)  # Wait for the first-frame prejoin focus handoff.
+        time.sleep(1)  # Allow the first frame to mount and focus the modal.
         key('Escape')
+        time.sleep(.8)  # Let the native compositor present the returned room.
         expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
-        # The conversation header exposes conference entry as an icon.
-        run(['xdotool', 'mousemove', '--window', xid, '1181', '92', 'click', '1'], env)
+        click('Beitreten', inspected_point=(1280,800,1181,92))
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        # The primary entry button is separate from the similarly worded helper.
-        run(['xdotool', 'mousemove', '--window', xid, '1050', '500', 'click', '1'], env)
+        # OCR can see the same word in the explanatory sentence but miss the
+        # blue button. The next state verifies this inspected native hit point.
+        path, _, _ = observe()
+        size = tuple(map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split()))
+        if size != (1280, 800):
+            raise AssertionError('Prejoin interaction requires the inspected 1280x800 layout')
+        run(['xdotool', 'mousemove', '--window', xid, '1080', '500', 'click', '1'], env)
         expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks

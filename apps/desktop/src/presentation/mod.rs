@@ -49,6 +49,8 @@ use gpui::{
 use input::TextInput;
 use state::{CallEntry, Drafts, call_entry, valid_snapshot};
 use std::time::Instant;
+
+const CALL_CLOCK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 use talk_core::ui::presentation::{
     CallStage, Completion, ContentState, ConversationRef, ConversationView, NativeDesktopPort,
     PresentationSnapshot, RequestId, ServerInput, StorageChoice, UiIntent,
@@ -125,6 +127,10 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ToggleCallParticipants,
+    ToggleCallModeration,
+    ToggleCallSecondary,
+    DismissRecordingFailure(CallScope),
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -382,11 +388,21 @@ pub struct Desktop {
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_participants_open: bool,
+    call_moderation_open: bool,
+    call_secondary_open: bool,
     call_reactions_open: Option<CallScope>,
     call_focus: Option<(CallScope, u128)>,
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
+    call_reconnecting_since: Option<(CallScope, Instant)>,
+    call_ended_since: Option<(CallScope, Instant)>,
+    call_ended_duration: Option<(CallScope, std::time::Duration)>,
+    call_ended_frame_pending: Option<CallScope>,
+    dismissed_recording_failure: Option<CallScope>,
+    call_recovery: call::recovery::Recovery,
+    call_clock: Option<gpui::Task<()>>,
     recording_consent: call::consent::State,
     fixture_call_reaction: Option<(CallScope, u64)>,
     recent_call_reaction: Option<(
@@ -600,7 +616,7 @@ impl Desktop {
         } else {
             None
         };
-        if initial_overlay.is_some() {
+        if initial_overlay.is_some() || prejoin.is_some() {
             modal_focus.focus(window)
         } else {
             root_focus.focus(window)
@@ -663,6 +679,11 @@ impl Desktop {
             .as_ref()
             .filter(|call| call.stage == CallStage::Active)
             .map(|call| (call.scope, std::time::Instant::now()));
+        let call_reconnecting_since = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Reconnecting)
+            .map(|call| (call.scope, Instant::now()));
         let recent_call_reaction = snapshot.call.as_ref().and_then(|call| {
             call.latest_reaction
                 .clone()
@@ -761,12 +782,22 @@ impl Desktop {
             archive_request: 0,
             navigation_open: false,
             sidebar_hidden: false,
-            call_chat_open: true,
+            call_chat_open: false,
+            call_participants_open: false,
+            call_moderation_open: false,
+            call_secondary_open: false,
             call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
             call_focus: None,
             call_speaker,
             call_minimized,
             call_started,
+            call_reconnecting_since,
+            call_ended_since: None,
+            call_ended_duration: None,
+            call_ended_frame_pending: None,
+            dismissed_recording_failure: None,
+            call_recovery: call::recovery::Recovery::default(),
+            call_clock: None,
             recording_consent,
             recent_call_reaction,
             fixture_call_reaction,
@@ -947,6 +978,48 @@ impl Desktop {
             desktop.show_reaction_authors(context, message, emoji, true);
         }
         desktop
+            .call_recovery
+            .observe(desktop.snapshot.call.as_ref(), Instant::now());
+        desktop.refresh_message_ui(cx);
+        if desktop
+            .snapshot
+            .call
+            .as_ref()
+            .is_some_and(|c| matches!(c.stage, CallStage::Active | CallStage::Reconnecting))
+        {
+            desktop.start_call_clock(cx);
+        }
+        desktop
+    }
+    // One weak, retained clock drives elapsed labels and reconnect disclosure.
+    // It is cancelled as soon as the observed call leaves these stages.
+    fn start_call_clock(&mut self, cx: &mut Context<Self>) {
+        if self.call_clock.is_some() {
+            return;
+        }
+        self.call_clock = Some(cx.spawn(async move |desktop, cx| {
+            loop {
+                cx.background_executor().timer(CALL_CLOCK_INTERVAL).await;
+                let keep = desktop.update(cx, |this, cx| {
+                    if let Some((scope, at)) = this.call_ended_since
+                        && at.elapsed() >= std::time::Duration::from_secs(3)
+                        && this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        })
+                    {
+                        this.dismissed_terminal_call = Some(scope);
+                        this.call_ended_since = None;
+                        cx.notify();
+                        return false;
+                    }
+                    cx.notify();
+                    true
+                });
+                if !matches!(keep, Ok(true)) {
+                    break;
+                }
+            }
+        }));
     }
     fn account_name(&self, account: &talk_core::ui::presentation::AccountView) -> String {
         if account.label.as_str().is_empty() {
@@ -1003,6 +1076,17 @@ impl Desktop {
             return;
         }
         self.projection_blocked = false;
+        self.call_recovery
+            .observe(next.call.as_ref(), Instant::now());
+        if self.snapshot.call.as_ref().map(|call| call.scope)
+            != next.call.as_ref().map(|call| call.scope)
+        {
+            self.call_chat_open = false;
+            self.call_participants_open = false;
+            self.call_moderation_open = false;
+            self.call_secondary_open = false;
+            self.call_clock = None;
+        }
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
         let thread_unchanged = self.thread_parent.is_none_or(|(context, _)| {
@@ -1171,11 +1255,35 @@ impl Desktop {
         {
             self.call_minimized = None;
         }
-        if self
-            .call_started
-            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        if let Some((scope, started)) = self.call_started
+            && next.call.as_ref().is_none_or(|call| call.scope != scope)
         {
-            self.call_started = None;
+            self.call_started = next
+                .call
+                .as_ref()
+                .filter(|call| {
+                    call.replacement_generation
+                        && call.scope.account == scope.account
+                        && call.scope.conversation == scope.conversation
+                })
+                .map(|call| (call.scope, started));
+        }
+        if let Some(call) = next
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Ended)
+        {
+            if self
+                .call_ended_duration
+                .is_none_or(|(scope, _)| scope != call.scope)
+            {
+                self.call_ended_duration = self
+                    .call_started
+                    .filter(|(scope, _)| *scope == call.scope)
+                    .map(|(scope, started)| (scope, started.elapsed()));
+            }
+        } else {
+            self.call_ended_duration = None;
         }
         if self
             .call_reactions_open
@@ -1197,6 +1305,47 @@ impl Desktop {
                 .filter(|call| call.stage == CallStage::Active)
         {
             self.call_started = Some((call.scope, std::time::Instant::now()));
+        }
+        if let Some(call) = next
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Reconnecting)
+        {
+            if self
+                .call_reconnecting_since
+                .is_none_or(|(scope, _)| scope != call.scope)
+            {
+                self.call_reconnecting_since = Some((call.scope, Instant::now()));
+            }
+        } else {
+            self.call_reconnecting_since = None;
+        }
+        if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Ended)
+        {
+            self.call_ended_since = None;
+            self.call_ended_frame_pending = None;
+        }
+        if next.call.as_ref().is_none_or(|call| {
+            call.recording != talk_core::ui::presentation::CallRecordingState::Failed
+                || Some(call.scope) != self.dismissed_recording_failure
+        }) {
+            self.dismissed_recording_failure = None;
+        }
+        if next
+            .call
+            .as_ref()
+            .is_some_and(|call| matches!(call.stage, CallStage::Active | CallStage::Reconnecting))
+        {
+            self.start_call_clock(cx);
+        } else if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Ended)
+        {
+            self.call_clock = None;
         }
         if next
             .call
@@ -1222,6 +1371,10 @@ impl Desktop {
         self.retain_thread_edit();
         if self.waiting_in_lobby() {
             self.call_chat_open = false;
+            self.call_participants_open = false;
+            self.call_secondary_open = false;
+            self.call_reactions_open = None;
+            self.call_device_picker = None;
             if self
                 .overlay
                 .is_some_and(|overlay| !lobby_allows_overlay(overlay))
@@ -1746,6 +1899,7 @@ impl Desktop {
                 self.call_device_picker = None;
                 self.device_picker = None;
                 self.call_reactions_open = None;
+                self.call_moderation_open = false;
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
@@ -1973,6 +2127,7 @@ impl Desktop {
                 }) {
                     self.call_minimized = Some(scope);
                     self.call_reactions_open = None;
+                    self.call_secondary_open = false;
                     self.call_device_picker = None;
                     self.device_picker = None;
                     self.root_focus.focus(window);
@@ -1998,6 +2153,7 @@ impl Desktop {
                     .as_ref()
                     .is_some_and(|call| call.scope == scope)
                 {
+                    self.call_secondary_open = false;
                     window.toggle_fullscreen();
                 }
             }
@@ -2141,14 +2297,40 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::DismissRecordingFailure(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && call.recording == talk_core::ui::presentation::CallRecordingState::Failed
+                }) {
+                    self.dismissed_recording_failure = Some(scope);
+                }
+            }
+            LocalAction::ToggleCallSecondary => {
+                self.call_secondary_open = !self.call_secondary_open
+            }
+            LocalAction::ToggleCallModeration => {
+                self.call_moderation_open = !self.call_moderation_open
+            }
+            LocalAction::ToggleCallParticipants => {
+                self.call_secondary_open = false;
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
+                    self.handle(LocalAction::Open(Overlay::CallParticipants), window, cx);
+                } else {
+                    self.call_participants_open = !self.call_participants_open;
+                    self.call_moderation_open = false;
+                    self.call_chat_open = false;
+                }
+            }
             LocalAction::ToggleCallChat => {
                 if self.waiting_in_lobby() {
                     return;
                 }
-                if window.viewport_size().width < px(1000.) || self.scale >= 150 {
+                self.call_secondary_open = false;
+                if window.viewport_size().width < px(900.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
                     self.call_chat_open = !self.call_chat_open;
+                    self.call_participants_open = false;
                 }
             }
             LocalAction::DismissIncoming => {
@@ -2236,6 +2418,10 @@ impl Desktop {
                     self.pending_prejoin_return = self.prejoin_return_focus.take();
                     None
                 } else {
+                    self.call_chat_open = false;
+                    self.call_participants_open = false;
+                    self.call_moderation_open = false;
+                    self.call_secondary_open = false;
                     None
                 };
                 if let Some(focus) = target.filter(|f| self.root_focus.contains(f, window)) {
@@ -2713,9 +2899,7 @@ impl Desktop {
                 }
             }
             LocalAction::SelectDevice(kind, selection) => {
-                let from_call = self
-                    .call_device_picker
-                    .is_some_and(|(_, current)| current == kind);
+                let from_call = self.call_device_picker.is_some();
                 if from_call {
                     self.call_device_picker = None;
                     if let Some(focus) = self
@@ -3289,6 +3473,29 @@ impl Render for Desktop {
                 window.request_animation_frame();
             }
         }
+        if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+            call.stage == CallStage::Ended && self.dismissed_terminal_call != Some(call.scope)
+        }) && self.call_ended_since.is_none()
+            && self.call_ended_frame_pending != Some(call.scope)
+        {
+            let scope = call.scope;
+            self.call_ended_frame_pending = Some(scope);
+            let weak = cx.weak_entity();
+            window.on_next_frame(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if this.call_ended_frame_pending == Some(scope) {
+                        this.call_ended_frame_pending = None;
+                        if this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        }) && this.dismissed_terminal_call != Some(scope)
+                        {
+                            this.call_ended_since = Some((scope, Instant::now()));
+                            this.start_call_clock(cx);
+                        }
+                    }
+                });
+            });
+        }
         self.text_selection
             .update(cx, |owner, _| owner.begin_frame());
         // Retained parent focus includes toolbar controls reached by Tab.
@@ -3529,7 +3736,17 @@ impl Render for Desktop {
             i.borderless = true;
         });
         if let Some(row) = self.selected() {
-            let placeholder = self.lf("Nachricht an {name}", &[("name", row.title.as_str())]);
+            let name = self
+                .snapshot
+                .call
+                .as_ref()
+                .filter(|call| {
+                    (self.call_chat_open || self.overlay == Some(Overlay::CallChat))
+                        && call.scope.account == row.context.account
+                        && call.scope.conversation == row.context.conversation
+                })
+                .map_or(row.title.as_str(), |call| call.title.as_str());
+            let placeholder = self.lf("Nachricht an {name}", &[("name", name)]);
             self.composer
                 .update(cx, |i, _| i.set_placeholder(&placeholder));
         }
@@ -3908,6 +4125,9 @@ impl Render for Desktop {
                     self.discovery_search.focus_handle(cx).focus(window);
                     None
                 }
+                Some(Overlay::ConfirmEndCall) => Some("cancel-end-everyone".into()),
+                Some(Overlay::ConfirmRecording) => Some("cancel-recording".into()),
+                Some(Overlay::RecordingConsent) => Some("decline-recording-consent".into()),
                 Some(Overlay::CreatePoll) => {
                     self.content_ui.question.focus_handle(cx).focus(window);
                     None

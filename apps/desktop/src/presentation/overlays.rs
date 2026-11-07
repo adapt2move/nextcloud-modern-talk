@@ -237,126 +237,24 @@ impl Desktop {
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
+        let header_title = if matches!(overlay, Overlay::CallParticipants | Overlay::CallChat) {
+            self.snapshot.call.as_ref().map_or_else(
+                || self.l(title).to_owned(),
+                |call| call.title.as_str().to_owned(),
+            )
+        } else {
+            self.l(title).to_owned()
+        };
         let body = match overlay {
             Overlay::Files => self.shared_contents(cx),
             Overlay::CloudFiles => self.cloud_files_body(cx),
             Overlay::RoomInfo | Overlay::Participants => self.details_body(overlay, cx),
-            Overlay::CallParticipants => {
-                let mut body = div().flex().flex_col().gap_3();
-                if let Some(call) = &self.snapshot.call {
-                    body = body.child(self.hint(call.title.as_str()));
-                    body = body.child(self.hint(self.l("Im Anruf")));
-                    for raised in [true, false] {
-                        for p in call
-                            .participants
-                            .as_slice()
-                            .iter()
-                            .filter(|p| p.raised_hand == raised)
-                        {
-                            body = body.child(self.call_participant_row(p, call, cx));
-                        }
-                    }
-                    if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
-                        body = body.child(self.hint(self.l("Nicht im Anruf")));
-                        for person in call.invitees.as_slice() {
-                            use talk_core::ui::presentation::{CallRingOutcome, UiIntent};
-                            let status = call
-                                .ring_status
-                                .filter(|status| status.target == person.local_id);
-                            let label = status.map(|status| match status.outcome {
-                                CallRingOutcome::Pending => "Klingeln wird angefragt …",
-                                CallRingOutcome::Requested => "Klingeln angefragt",
-                                CallRingOutcome::Failed => "Klingeln nicht möglich",
-                            });
-                            let pending = call
-                                .ring_status
-                                .is_some_and(|status| status.outcome == CallRingOutcome::Pending);
-                            body = body.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .py_3()
-                                    .child(self.person_avatar(person.initials.as_str(), 36.))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .flex()
-                                            .flex_col()
-                                            .child(
-                                                div()
-                                                    .text_ellipsis()
-                                                    .child(person.name.as_str().to_owned()),
-                                            )
-                                            .when_some(label, |row, label| {
-                                                row.child(self.hint(self.l(label)))
-                                            }),
-                                    )
-                                    .when(person.ring_allowed, |row| {
-                                        row.child(
-                                            self.icon_button(
-                                                gpui::SharedString::from(format!(
-                                                    "ring-call-{}",
-                                                    person.local_id
-                                                )),
-                                                ("phone-outgoing", "Erneut klingeln"),
-                                                ButtonStyle::Quiet,
-                                                Availability::when(
-                                                    !pending,
-                                                    "Eine Anfrage wird bereits bearbeitet.",
-                                                )
-                                                .hinted(),
-                                                LocalAction::Intent(
-                                                    UiIntent::RingCallParticipant {
-                                                        call: call.scope,
-                                                        target: person.local_id,
-                                                    },
-                                                ),
-                                                cx,
-                                            ),
-                                        )
-                                    }),
-                            );
-                        }
-                    }
-                    if call.recording_pending {
-                        body = body.child(self.hint(self.l("Aufzeichnung wird aktualisiert …")));
-                    }
-                    if call.recording_uncertain {
-                        body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.")));
-                    }
-                    if let Some(start) = call.recording_control {
-                        body = body.child(self.button(
-                            "call-recording-control",
-                            if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
-                            ButtonStyle::Secondary,
-                            Availability::when(!call.recording_pending && !call.recording_uncertain,
-                                if call.recording_uncertain {
-                                    "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei."
-                                } else {
-                                    "Eine Anfrage wird bereits bearbeitet."
-                                }),
-                            if start { LocalAction::Open(Overlay::ConfirmRecording) }
-                            else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::SetCallRecording { call: call.scope, start: false }) },
-                            cx,
-                        ));
-                    }
-                    if call.can_end_everyone {
-                        body = body.child(self.button(
-                            "end-everyone", "Für alle beenden", ButtonStyle::Secondary,
-                            Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
-                            LocalAction::Open(Overlay::ConfirmEndCall), cx,
-                        ));
-                    }
-                }
-                body
-            }
+            Overlay::CallParticipants => self.call_participants_body(cx),
             Overlay::CallChat => self.call_chat(cx),
             Overlay::ConfirmRecording => div().flex().flex_col().gap_4()
-                .child(self.hint(self.l("Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.")))
-                .child(div().flex().flex_wrap().gap_3()
-                    .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Secondary, true, LocalAction::Close, cx))
+                .child(self.hint(self.l("Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.")))
+                .child(div().flex().flex_wrap().justify_end().gap_3()
+                    .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
                     .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
             Overlay::RecordingConsent => {
                 let mut body = div().flex().flex_col().gap_4()
@@ -366,17 +264,18 @@ impl Desktop {
                     body = body.child(div().flex().items_center().gap_3()
                         .child(self.switch("recording-consent-switch", "Ich stimme einer Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
                         .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer Aufzeichnung zu."))))
-                        .child(div().flex().flex_wrap().gap_3()
-                            .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Secondary, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
-                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
+                        .when(!selected, |d| d.child(self.hint(self.l("Bestätige zuerst die Zustimmung."))))
+                        .child(div().flex().flex_wrap().justify_end().gap_3()
+                            .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Quiet, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
+                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx).when(!selected, |d| d.bg(t.subtle).text_color(t.muted))));
                 }
                 body
             }
             Overlay::ConfirmEndCall => div().flex().flex_col().gap_4()
                 .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
-                .child(div().flex().flex_wrap().gap_3()
-                    .child(self.button("cancel-end-everyone", "Abbrechen", ButtonStyle::Secondary, true, LocalAction::Close, cx))
-                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx))),
+                .child(div().flex().flex_wrap().justify_end().gap_3()
+                    .child(self.button("cancel-end-everyone", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
+                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx).bg(gpui::rgb(0x9e3e32)).text_color(gpui::white()))),
             Overlay::Thread => self.thread_body(cx),
             Overlay::Search => self.search_body(cx),
             Overlay::Create => self.creation_body(cx),
@@ -401,6 +300,16 @@ impl Desktop {
                 .into_any_element()
         };
         self.dialog_scrim()
+            .bg(
+                if matches!(
+                    overlay,
+                    Overlay::ConfirmRecording | Overlay::ConfirmEndCall | Overlay::RecordingConsent
+                ) {
+                    gpui::rgba(0x0f172a80).into()
+                } else {
+                    t.scrim
+                },
+            )
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(
@@ -414,8 +323,8 @@ impl Desktop {
                         .when(side, |d| d.h_full())
                         // Reserve space for wrapped titles and action rows;
                         // content can still scroll at larger text scales.
-                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
-                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
+                        .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(210.)))
+                        .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(210.)))
                         .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
                         .when(
                             matches!(
@@ -459,11 +368,11 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .flex_1()
-                                        .text_size(self.sp(20.))
+                                        .text_size(self.sp(if side { 16. } else { 20. }))
                                         // Keep the single-word consent title visible when
                                         // large text leaves little room beside the close control.
                                         .when(overlay == Overlay::RecordingConsent, |title| {
-                                            title.flex_1().text_size(self.sp(24.).min(px(40.)))
+                                            title.flex_1().text_size(self.sp(20.).min(px(40.)))
                                         })
                                         .when(
                                             matches!(
@@ -475,19 +384,29 @@ impl Desktop {
                                             |title| title.line_height(self.sp(30.)),
                                         )
                                         .font_weight(FontWeight::BOLD)
-                                        .child(self.l(title)),
+                                        .child(header_title),
                                 )
                                 .when(overlay == Overlay::CreatePoll, |d| {
                                     d.children(self.poll_drafts_header(cx))
                                 })
-                                .child(self.icon_button(
-                                    "close-overlay",
-                                    ("x", "Schließen"),
-                                    ButtonStyle::Quiet,
-                                    Availability::available(),
-                                    LocalAction::Close,
-                                    cx,
-                                )),
+                                .when(
+                                    !matches!(
+                                        overlay,
+                                        Overlay::ConfirmRecording
+                                            | Overlay::ConfirmEndCall
+                                            | Overlay::RecordingConsent
+                                    ),
+                                    |d| {
+                                        d.child(self.icon_button(
+                                            "close-overlay",
+                                            ("x", "Schließen"),
+                                            ButtonStyle::Quiet,
+                                            Availability::available(),
+                                            LocalAction::Close,
+                                            cx,
+                                        ))
+                                    },
+                                ),
                         )
                         .when(
                             overlay == Overlay::Thread && self.thread_options_open,
@@ -523,6 +442,141 @@ impl Desktop {
                 ),
             )
     }
+    pub(super) fn call_participants_body(&self, cx: &Context<Self>) -> Div {
+        let mut body = div().flex().flex_col().gap_3();
+        if let Some(call) = &self.snapshot.call {
+            if call.recording_control.is_some() || call.can_end_everyone {
+                body = body.child(div().flex().justify_end().child(self.icon_button(
+                    "call-moderation",
+                    ("more", "Moderation"),
+                    ButtonStyle::Quiet,
+                    Availability::available().hinted(),
+                    LocalAction::ToggleCallModeration,
+                    cx,
+                )));
+            }
+            body = body.child(self.hint(&format!(
+                "{} · {}",
+                self.l("Im Anruf"),
+                call.participants.as_slice().len()
+            )));
+            for raised in [true, false] {
+                if raised && call.participants.as_slice().iter().any(|p| p.raised_hand) {
+                    body = body.child(self.hint(self.l("Hände")));
+                }
+                for p in call
+                    .participants
+                    .as_slice()
+                    .iter()
+                    .filter(|p| p.raised_hand == raised)
+                {
+                    body = body.child(self.call_participant_row(p, call, cx));
+                }
+            }
+            if call.invitees_loaded && !call.invitees.as_slice().is_empty() {
+                body = body.child(self.hint(&format!(
+                    "{} · {}",
+                    self.l("Nicht im Anruf"),
+                    call.invitees.as_slice().len()
+                )));
+                for person in call.invitees.as_slice() {
+                    use talk_core::ui::presentation::{CallRingOutcome, UiIntent};
+                    let status = call
+                        .ring_status
+                        .filter(|status| status.target == person.local_id);
+                    let label = status.map(|status| match status.outcome {
+                        CallRingOutcome::Pending => "Klingeln wird angefragt …",
+                        CallRingOutcome::Requested => "Klingeln angefragt",
+                        CallRingOutcome::Failed => "Klingeln nicht möglich",
+                    });
+                    let pending = call
+                        .ring_status
+                        .is_some_and(|status| status.outcome == CallRingOutcome::Pending);
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .py_3()
+                            .child(self.person_avatar(person.initials.as_str(), 36.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .text_ellipsis()
+                                            .child(person.name.as_str().to_owned()),
+                                    )
+                                    .when_some(label, |row, label| {
+                                        row.child(self.hint(self.l(label)))
+                                    }),
+                            )
+                            .when(person.ring_allowed, |row| {
+                                row.child(
+                                    self.icon_button(
+                                        gpui::SharedString::from(format!(
+                                            "ring-call-{}",
+                                            person.local_id
+                                        )),
+                                        ("phone-outgoing", "Erneut klingeln"),
+                                        ButtonStyle::Quiet,
+                                        Availability::when(
+                                            !pending,
+                                            "Eine Anfrage wird bereits bearbeitet.",
+                                        )
+                                        .hinted(),
+                                        LocalAction::Intent(UiIntent::RingCallParticipant {
+                                            call: call.scope,
+                                            target: person.local_id,
+                                        }),
+                                        cx,
+                                    ),
+                                )
+                            }),
+                    );
+                }
+            }
+            if call.recording_pending {
+                body = body.child(self.hint(self.l("Aufzeichnung wird aktualisiert …")));
+            }
+            if call.recording_uncertain {
+                body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.")));
+            }
+            if self.call_moderation_open
+                && let Some(start) = call.recording_control
+            {
+                body = body.child(self.button(
+                            "call-recording-control",
+                            if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
+                            ButtonStyle::Secondary,
+                            Availability::when(!call.recording_pending && !call.recording_uncertain,
+                                if call.recording_uncertain {
+                                    "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei."
+                                } else {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                }),
+                            if start { LocalAction::Open(Overlay::ConfirmRecording) }
+                            else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::SetCallRecording { call: call.scope, start: false }) },
+                            cx,
+                        ));
+            }
+            if self.call_moderation_open && call.can_end_everyone {
+                body = body.child(div().border_t_1().border_color(self.theme.border));
+                body = body.child(self.button(
+                    "end-everyone",
+                    "Für alle beenden",
+                    ButtonStyle::Danger,
+                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet."),
+                    LocalAction::Open(Overlay::ConfirmEndCall),
+                    cx,
+                ));
+            }
+        }
+        body
+    }
     fn call_participant_row(
         &self,
         p: &ParticipantView,
@@ -530,38 +584,28 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
-        let mut details = div().flex().flex_wrap().items_center().gap_2();
-        if p.speaking {
-            details = details.child(self.hint(self.l("Spricht")));
-        }
-        if p.raised_hand {
-            details = details
-                .child(self.scaled_icon("hand", 14., t.muted))
-                .child(self.hint(self.l("Hand gehoben")));
-        }
-        if let Some(on) = p.call_microphone {
-            details = details
-                .child(self.scaled_icon(if on { "mic" } else { "mic-off" }, 14., t.muted))
-                .child(self.hint(self.l(if on { "Mikrofon an" } else { "Mikrofon aus" })));
-        }
-        if let Some(on) = p.call_camera {
-            details = details
-                .child(self.scaled_icon(if on { "video" } else { "video-off" }, 14., t.muted))
-                .child(self.hint(self.l(if on { "Kamera an" } else { "Kamera aus" })));
-        }
+        let details = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .when(p.raised_hand, |d| {
+                d.child(self.scaled_icon("hand", 16., t.muted))
+            })
+            .when(p.call_microphone == Some(false), |d| {
+                d.child(self.scaled_icon("mic-off", 16., t.muted))
+            })
+            .when(p.call_camera == Some(false), |d| {
+                d.child(self.scaled_icon("video-off", 16., t.muted))
+            })
+            .when(p.speaking, |d| {
+                d.child(self.scaled_icon("mic", 16., t.success))
+            });
         let mut text = div()
             .flex_1()
             .min_w_0()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .text_ellipsis()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(p.name.as_str().to_owned()),
-            )
-            .child(details);
+            .text_ellipsis()
+            .font_weight(FontWeight::MEDIUM)
+            .child(p.name.as_str().to_owned());
         if let Some(status) = call
             .mute_status
             .filter(|status| status.target == p.local_id)
@@ -577,11 +621,10 @@ impl Desktop {
             .flex()
             .items_center()
             .gap_3()
-            .py_3()
-            .border_b_1()
-            .border_color(t.border)
-            .child(self.person_avatar(p.initials.as_str(), 36.))
-            .child(text);
+            .min_h(px(48.))
+            .child(self.person_avatar(p.initials.as_str(), 32.))
+            .child(text)
+            .child(details);
         if p.call_can_mute {
             row = row.child(self.icon_button(
                 gpui::SharedString::from(format!("mute-call-{}", p.local_id)),

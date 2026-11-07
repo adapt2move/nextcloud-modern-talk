@@ -36,7 +36,6 @@ pub struct Theme {
     pub stage_panel: Hsla,
     pub stage_text: Hsla,
     pub stage_muted: Hsla,
-    pub stage_disabled: Hsla,
 }
 fn color(value: u32) -> Hsla {
     rgb(value).into()
@@ -180,7 +179,6 @@ impl Theme {
             stage_panel: color(values[18]),
             stage_text: color(values[19]),
             stage_muted: color(values[20]),
-            stage_disabled: color(if sage { 0x78887c } else { 0x758493 }),
             chrome_end: color(values[21]),
             focus: color(values[22]),
             sidebar_secondary: color(values[23]),

@@ -558,6 +558,10 @@ pub struct CallView {
     pub share: MediaState,
     pub sharing: ScreenShareState,
     pub streams: Page<CallStreamView, 16>,
+    /// True only when the owner observed an automatic same-call generation replacement.
+    pub replacement_generation: bool,
+    /// Decoded remote audio packets in this generation; video flow is in `streams`.
+    pub remote_audio_received: u64,
     pub recording: CallRecordingState,
     /// Some(true) starts, Some(false) stops; None hides unsupported controls.
     pub recording_control: Option<bool>,
@@ -992,6 +996,7 @@ pub enum UiIntent {
     ShareScreen(CallScope),
     StopScreen(CallScope),
     ReconnectCall(CallScope),
+    RecoverCallMedia(CallScope),
     ResolveRequiredGate {
         call: CallScope,
         gate: RequiredGate,

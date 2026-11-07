@@ -71,6 +71,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   An explicit web-peer call leave/rejoin restores AV in the exercised case.
   This is separate from the qualified interruption/resume of a surviving HPB
   session; automatic replacement with this peer remains unqualified.
+  After an observed automatic generation replacement, the call view offers an
+  explicit rejoin if peers remain present and no decoded remote audio or video
+  has flowed in that generation for ten seconds. This revalidates admission and
+  consent and retains microphone/camera intent; it does not repair the remote
+  peer's HPB state or promise AV recovery.
 - Guest/federated media and required call E2EE remain unavailable.
 - The call view has adaptive gallery, local focus and a speaking-level-based
   speaker view. The level is a short-lived indicator from received audio or

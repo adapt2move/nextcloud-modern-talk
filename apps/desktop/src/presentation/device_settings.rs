@@ -416,34 +416,101 @@ impl Desktop {
         let (_, kind) = self
             .call_device_picker
             .filter(|(current, _)| *current == scope)?;
-        let chosen = match kind {
-            DeviceKind::Microphone => &self.preferences.active.devices.microphone,
-            DeviceKind::Camera => &self.preferences.active.devices.camera,
-            DeviceKind::Speaker => &self.preferences.active.devices.speaker,
+        let kinds: &[DeviceKind] = if kind == DeviceKind::Microphone {
+            &[DeviceKind::Microphone, DeviceKind::Speaker]
+        } else {
+            &[DeviceKind::Camera]
         };
-        let label = match chosen {
-            DeviceSelection::SystemDefault => self.l("Systemstandard").to_owned(),
-            DeviceSelection::Specific(id) => self
-                .devices
-                .as_ref()
-                .ok()
-                .and_then(|snapshot| {
-                    snapshot
-                        .devices
-                        .as_slice()
-                        .iter()
-                        .find(|device| device.kind == kind && device.id == *id)
-                })
-                .map_or_else(
-                    || self.l("Ausgewähltes Gerät nicht verfügbar").to_owned(),
-                    |device| device.label.as_str().to_owned(),
-                ),
-        };
-        Some(div().id("call-device-popover").absolute().left(px(-32.)).bottom(px(54.)).w(px(300.))
-            .max_h(px(360.)).overflow_y_scroll().occlude().rounded(px(10.))
-            .border_1().border_color(self.theme.border).bg(self.theme.surface).text_color(self.theme.text).shadow_lg().p_3()
-            .child(self.hint(self.l("Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.")))
-            .child(self.device_selector(kind, chosen, label, None, cx)))
+        let mut list = div()
+            .id("call-device-popover")
+            .absolute()
+            .left(px(-32.))
+            .bottom(px(54.))
+            .w(px(300.))
+            .max_h(px(360.))
+            .overflow_y_scroll()
+            .occlude()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(self.theme.border)
+            .bg(self.theme.surface)
+            .text_color(self.theme.text)
+            .shadow_lg()
+            .p_3();
+        for (index, &section) in kinds.iter().enumerate() {
+            let chosen = match section {
+                DeviceKind::Microphone => &self.preferences.active.devices.microphone,
+                DeviceKind::Speaker => &self.preferences.active.devices.speaker,
+                DeviceKind::Camera => &self.preferences.active.devices.camera,
+            };
+            list = list.child(
+                div()
+                    .when(index > 0, |d| {
+                        d.mt_2().pt_2().border_t_1().border_color(self.theme.border)
+                    })
+                    .text_size(self.sp(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.l(match section {
+                        DeviceKind::Microphone => "Mikrofon",
+                        DeviceKind::Speaker => "Lautsprecher",
+                        DeviceKind::Camera => "Kamera",
+                    })),
+            );
+            let option = |id: ElementId, label: String, selection: DeviceSelection| {
+                let selected = *chosen == selection;
+                self.control(
+                    id,
+                    ButtonStyle::Quiet,
+                    self.settings_availability(),
+                    LocalAction::SelectDevice(section, selection),
+                    cx,
+                )
+                .h(px(36.))
+                .min_h(px(36.))
+                .w_full()
+                .justify_between()
+                .child(div().min_w_0().flex_1().text_ellipsis().child(label))
+                .child(div().w(px(16.)).when(selected, |d| {
+                    d.child(self.scaled_icon("check", 16., self.theme.accent))
+                }))
+            };
+            list = list.child(option(
+                ("device-default", section as usize).into(),
+                self.l("Systemstandard").to_owned(),
+                DeviceSelection::SystemDefault,
+            ));
+            if let Ok(snapshot) = &self.devices {
+                for device in snapshot
+                    .devices
+                    .as_slice()
+                    .iter()
+                    .filter(|d| d.kind == section)
+                {
+                    list = list.child(option(
+                        device_option_id(section, &device.id),
+                        self.l(device.label.as_str()).to_owned(),
+                        DeviceSelection::Specific(device.id.clone()),
+                    ));
+                }
+            }
+        }
+        list = list
+            .child(
+                self.hint(self.l("Gerätewechsel stoppt die Übertragung."))
+                    .text_ellipsis(),
+            )
+            .child(
+                self.button(
+                    "call-device-settings",
+                    "Geräteeinstellungen öffnen",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::OpenDeviceSettings,
+                    cx,
+                )
+                .w_full(),
+            );
+        Some(list)
     }
 
     pub(super) fn device_page(&self, cx: &Context<Self>) -> Div {
