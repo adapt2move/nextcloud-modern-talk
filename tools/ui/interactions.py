@@ -147,8 +147,8 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(['xdotool', 'mousemove', '--window', xid, '1000', '650', 'click', '1'], env)
         expect('outside click dismisses the person card', absent=['Abwesend'])
         click('Mara', xmin=300, ymin=180)
-        click('Anrufen', xmin=280, ymin=200)
-        expect('group person call resolves the fictional direct room', ['Verbindung wird aufgebaut'])
+        key('Tab'); key('Tab'); key('Return')
+        expect('keyboard activation resolves the fictional direct call', ['Verbindung wird aufgebaut'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
         click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')
