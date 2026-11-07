@@ -3,10 +3,11 @@ mod content;
 mod dialog;
 pub(super) use content::images as content_images;
 use talk_core::ui::presentation::{
-    AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
-    ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
-    NativeDesktopPort, NativeStoreState, ParticipantView, Presence, PresentationSnapshot,
-    RequestId, RequiredGate, ScreenShareState, StorageStatus, SubmissionResult, UiIntent,
+    AccountView, CallStage, CallStreamView, CallTileKind, CallView, Completion, ContentState,
+    ConversationKind, ConversationRef, ConversationView, DeliveryState, FileView, LoginFailure,
+    LoginPhase, LoginView, MediaState, NativeDesktopPort, NativeStoreState, ParticipantView,
+    Presence, PresentationSnapshot, RequestId, RequiredGate, ScreenShareState, StorageStatus,
+    SubmissionResult, UiIntent,
 };
 use talk_core::ui::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
@@ -1005,8 +1006,6 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             1
         };
         s.call = Some(CallView {
-            sharing: ScreenShareState::Idle,
-            streams: Page::empty(),
             scope: call_scope(id),
             title: text(if direct {
                 "Mara Fischer"
@@ -2694,5 +2693,41 @@ mod tests {
         ))))
         .unwrap();
         assert!(port.take_snapshot().unwrap().call.is_none());
+    }
+    #[test]
+    fn fixture_screen_stage_uses_stream_identity_and_metadata() {
+        let mut snapshot = snapshot(Some("call-screen-stage"));
+        let call = snapshot.call.as_mut().unwrap();
+        let screen = call.screen_stage().unwrap();
+        assert_eq!(screen.tile.local_id, 9001);
+        assert_eq!(screen.dimensions, Some((1280, 720)));
+        assert!(!screen.flowing);
+        assert!(
+            call.participants
+                .as_slice()
+                .iter()
+                .all(|p| p.local_id != screen.tile.local_id)
+        );
+        let participant = call.participants.as_slice()[0].local_id;
+        let mut streams = call.streams.as_slice().to_vec();
+        let camera = streams
+            .iter_mut()
+            .find(|s| s.participant == participant && s.kind == CallTileKind::Camera)
+            .unwrap();
+        camera.local_id = 9002;
+        call.streams = Page::empty();
+        for stream in streams {
+            call.streams.try_push(stream).unwrap();
+        }
+        assert_eq!(
+            call.camera_tile(participant),
+            Some(talk_core::ui::presentation::CallTileId {
+                local_id: 9002,
+                kind: CallTileKind::Camera
+            })
+        );
+        call.streams = talk_core::ui::Page::empty();
+        assert!(call.screen_stage().is_none());
+        assert!(call.camera_tile(participant).is_none());
     }
 }

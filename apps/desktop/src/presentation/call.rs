@@ -14,8 +14,7 @@ use talk_core::ui::presentation::{
 const MAX_CALL_TILES: usize = 18;
 
 impl Desktop {
-    /// Existing camera-frame producer. Screen producers can pass typed tile
-    /// identities to `set_call_tiles` once their scoped snapshot is connected.
+    /// Resolve scoped stream frames through the authoritative snapshot metadata.
     pub fn set_call_images(
         &mut self,
         scope: Option<talk_core::ui::CallScope>,
@@ -283,6 +282,21 @@ impl Desktop {
             .flex()
             .flex_col()
             .gap_4();
+        if let Some(label) = sharing_label(call.sharing) {
+            stage = stage.child(
+                div()
+                    .flex_none()
+                    .p_3()
+                    .rounded(px(10.))
+                    .bg(t.stage_panel)
+                    .text_color(if matches!(call.sharing, ScreenShareState::Failed(_)) {
+                        t.warning
+                    } else {
+                        t.stage_text
+                    })
+                    .child(self.l(label)),
+            );
+        }
         if call.stage == CallStage::Reconnecting {
             stage = stage.child(
                 self.reveal(
@@ -471,12 +485,7 @@ impl Desktop {
                 .call_images
                 .iter()
                 .find(|(scope, local, _, _)| {
-                    *scope == call.scope
-                        && *local
-                            == CallTileId {
-                                local_id: participant.local_id,
-                                kind: CallTileKind::Camera,
-                            }
+                    *scope == call.scope && Some(*local) == call.camera_tile(participant.local_id)
                 })
                 .map(|(_, _, _, image)| image);
             let visual = if let Some(image) = image {
@@ -1370,25 +1379,8 @@ mod media_contract_tests {
                 talk_core::preferences::Locale::English,
                 talk_core::preferences::Locale::Spanish,
             ] {
-                assert_ne!(super::super::localization::text(locale, key), key);
+                assert_ne!(crate::presentation::localization::text(locale, key), key);
             }
         }
-    }
-    #[test]
-    fn fixture_screen_stage_uses_stream_identity_and_metadata() {
-        let mut snapshot = crate::composition::fixtures::snapshot(Some("call-screen-stage"));
-        let call = snapshot.call.as_mut().unwrap();
-        let screen = call.screen_stage().unwrap();
-        assert_eq!(screen.tile.local_id, 9001);
-        assert_eq!(screen.dimensions, Some((1280, 720)));
-        assert!(!screen.flowing);
-        assert!(
-            call.participants
-                .as_slice()
-                .iter()
-                .all(|p| p.local_id != screen.tile.local_id)
-        );
-        call.streams = talk_core::ui::Page::empty();
-        assert!(call.screen_stage().is_none());
     }
 }

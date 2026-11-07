@@ -983,7 +983,7 @@ async fn media_loop(
                                 engine.screen_profile();
                                 let mut identity = [0; 16]; getrandom::fill(&mut identity).map_err(|_| ())?;
                                 peers.push(Peer { screen_announced: Vec::with_capacity(16), share_epoch: 0, recovery: None, restart_pending: false, restarts: 0, stream, dimensions: None, last_frame: None, local: u128::from_le_bytes(identity),
-                                    status: StatusSnapshot::default(), session: from.clone(), negotiation: None,
+                                    status: StatusSnapshot::default(), speaking: speaking::Speaking::default(), session: from.clone(), negotiation: None,
                                     engine, remote: false, candidates: Vec::with_capacity(64), connected: false,
                                     role: Role::Subscriber, subscription_requested: true });
                             }
@@ -1228,7 +1228,7 @@ async fn media_loop(
                     let sdp = engine.offer().await.map_err(|_| ())?;
                     send(&writes, Write::Signal(destination.clone(), negotiation.clone(), Signal::Description(sdp), StreamKind::Screen))?;
                     peers.push(Peer { screen_announced: Vec::with_capacity(16), share_epoch, recovery: None, restart_pending: false, restarts: 0, stream: StreamKind::Screen, dimensions: None, last_frame: None, local: 0,
-                        status: StatusSnapshot::default(), session: destination, negotiation: Some(negotiation),
+                        status: StatusSnapshot::default(), speaking: speaking::Speaking::default(), session: destination, negotiation: Some(negotiation),
                         engine, remote: false, candidates: Vec::with_capacity(64), connected: false, role, subscription_requested: false });
                 }
             }

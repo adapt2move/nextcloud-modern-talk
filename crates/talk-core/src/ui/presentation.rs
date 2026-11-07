@@ -572,6 +572,16 @@ pub struct CallView {
 }
 
 impl CallView {
+    /// Resolve a participant's camera without conflating actor and stream IDs.
+    pub fn camera_tile(&self, participant: u128) -> Option<CallTileId> {
+        let stream = self.streams.as_slice().iter().find(|stream| {
+            stream.kind == CallTileKind::Camera && stream.participant == participant
+        })?;
+        Some(CallTileId {
+            local_id: stream.local_id,
+            kind: stream.kind,
+        })
+    }
     /// A presentation projection of the admitted stream; never separate authority.
     pub fn screen_stage(&self) -> Option<CallScreenStage> {
         let stream = self
