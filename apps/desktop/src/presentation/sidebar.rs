@@ -278,11 +278,16 @@ impl Desktop {
                 .bg(t.subtle)
                 .mb_2()
                 .child(div().flex_1())
-                .child(self.hint(if cfg!(target_os = "macos") {
-                    "⌘ K"
-                } else {
-                    self.l("Strg K")
-                })),
+                .child(
+                    self.style_tonal_chip(self.hint(if cfg!(target_os = "macos") {
+                        "⌘ K"
+                    } else {
+                        self.l("Strg K")
+                    }))
+                    .bg(t.surface)
+                    .border_1()
+                    .border_color(t.border),
+                ),
             )
             .child(self.sidebar_destination(
                 "nav-inbox",

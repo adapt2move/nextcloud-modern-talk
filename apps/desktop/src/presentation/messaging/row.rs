@@ -191,6 +191,13 @@ impl Desktop {
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
                         .child(metadata(&time_label))
+                        .when_some(delivery.filter(|_| !continuation), |d, indicator| {
+                            d.child(self.delivery_indicator(
+                                indicator,
+                                row_id("message-delivery", 0),
+                                cx,
+                            ))
+                        })
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
                         }),
@@ -692,7 +699,7 @@ impl Desktop {
                 })
                 .child(content)
                 .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
-                .when(!m.metadata.deleted && (pinned || delivery.is_some()), |d| {
+                .when(!m.metadata.deleted && (pinned || (continuation && delivery.is_some())), |d| {
                     let status = div().flex_none().flex().items_center().gap(px(4.))
                         .when(pinned, |d| {
                             let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -710,7 +717,7 @@ impl Desktop {
                                 cx,
                             ).min_w(px(24.)).min_h(self.sp(20.)).h(self.sp(20.)).p_0())
                         })
-                        .when_some(delivery, |d, indicator| {
+                        .when_some(delivery.filter(|_| continuation), |d, indicator| {
                             d.child(self.delivery_indicator(indicator, row_id("message-delivery", 0), cx))
                         });
                     let mut status = status;

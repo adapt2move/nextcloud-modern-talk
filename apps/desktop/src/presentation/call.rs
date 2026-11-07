@@ -1469,10 +1469,15 @@ impl Desktop {
                                     .flex_1()
                                     .min_w_0()
                                     .child(
-                                        self.style_panel_title(div())
+                                        self.style_panel_title(div().flex().items_center().gap_2())
                                             .text_color(t.stage_text)
-                                            .text_ellipsis()
-                                            .child(format!("{}{}", call.title.as_str(), self.call_started.filter(|(scope, _)| *scope == call.scope).map(|(_, started)| { let seconds = started.elapsed().as_secs(); format!(" · {}:{:02}", seconds / 60, seconds % 60) }).unwrap_or_default())),
+                                            .child(div().min_w_0().text_ellipsis().child(call.title.as_str().to_owned()))
+                                            .when_some(self.call_started.filter(|(scope, _)| *scope == call.scope), |title, (_, started)| {
+                                                let seconds = started.elapsed().as_secs();
+                                                let mut font = gpui::font("Google Sans");
+                                                font.features = gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
+                                                title.child(div().flex_none().font(font).font_weight(FontWeight::NORMAL).text_size(self.sp(12.)).text_color(t.stage_muted).child(format!("{}:{:02}", seconds / 60, seconds % 60)))
+                                            }),
                                     )
                                     .child(
                                         div()
