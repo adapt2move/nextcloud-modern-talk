@@ -439,7 +439,7 @@ impl Desktop {
                     |device| device.label.as_str().to_owned(),
                 ),
         };
-        Some(div().id("call-device-popover").absolute().right(px(16.)).bottom(px(100.)).w(px(300.))
+        Some(div().id("call-device-popover").absolute().left(px(-32.)).bottom(px(54.)).w(px(300.))
             .max_h(px(360.)).overflow_y_scroll().occlude().rounded(px(10.))
             .border_1().border_color(self.theme.border).bg(self.theme.surface).text_color(self.theme.text).shadow_lg().p_3()
             .child(self.hint(self.l("Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.")))

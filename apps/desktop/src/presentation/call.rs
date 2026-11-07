@@ -804,6 +804,9 @@ impl Desktop {
                     .w(px(22.))
                     .rounded_full(),
                 );
+                if self.call_device_picker == Some((call.scope, kind)) {
+                    group = group.children(self.call_device_popover(call.scope, cx));
+                }
             }
             primary_controls = primary_controls.child(group);
         }
@@ -1058,8 +1061,7 @@ impl Desktop {
                         )
                     })
                     .child(body)
-                    .child(controls)
-                    .children(self.call_device_popover(call.scope, cx)),
+                    .child(controls),
             )
             .bg(t.stage),
         )
