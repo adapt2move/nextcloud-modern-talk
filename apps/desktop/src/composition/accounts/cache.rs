@@ -543,9 +543,12 @@ fn cleanup_diagnostic(outcome: DiagnosticOutcome) {
     diagnostics::record(event);
 }
 fn eligible(a: &talk_adapters::identity::ConnectionAccount) -> bool {
-    matches!(a.summary.storage, StoredState::Eligible(_))
-        && !a.summary.suppression_unconfirmed
-        && !a.summary.cleanup_pending
+    // A committed credential can coexist with cleanup of an abandoned attempt
+    // in another provider (notably native-store failure followed by file save).
+    // That residual obligation must remain visible, but cannot disable ordinary
+    // cache/outbox storage under the sole committed eligibility. Unresolved or
+    // suppressed accounts still fail closed; cached data grants no live scope.
+    matches!(a.summary.storage, StoredState::Eligible(_)) && !a.summary.suppression_unconfirmed
 }
 fn local_context(account: AccountScope, key: &NavigationRoomKey) -> Option<ConversationRef> {
     let local = u128::from_str_radix(key.as_str().strip_prefix("r1:")?, 16).ok()?;
@@ -2208,6 +2211,42 @@ mod tests {
             outbox: Page::empty(),
         }
     }
+    #[test]
+    fn eligible_fallback_with_residual_cleanup_restores_cache_without_network_authority() {
+        let mut model = super::super::tests::model();
+        let mut state = connection_state(None, false);
+        let mut accounts = state.accounts.as_slice().to_vec();
+        accounts[0].summary.cleanup_pending = true;
+        let account = accounts[0].summary.account;
+        state.accounts = page(accounts);
+        model.sync_accounts(&state);
+        let generation = model.cache.accounts[0].generation;
+        model.complete_data(
+            Work::Load(account, generation),
+            Ok(RuntimeReply::AccountData {
+                account,
+                result: Ok(DataResult::Snapshot(disk_snapshot())),
+            }),
+        );
+        model.sync_accounts(&state);
+        let scope = model.snapshot.active_account.unwrap();
+        assert!(model.cache.is_local(scope));
+        let context = model.snapshot.conversations.as_slice()[0].context;
+        assert!(model.cache.is_presentation(context));
+        assert_eq!(scope.runtime.as_local(), 0);
+        assert_eq!(context.conversation.host.as_local(), 0);
+        assert_eq!(model.cache.context(account, &stable()), None);
+
+        let mut accounts = state.accounts.as_slice().to_vec();
+        accounts[0].summary.suppression_unconfirmed = true;
+        state.accounts = page(accounts);
+        model.sync_accounts(&state);
+        assert!(model.cache.accounts.is_empty());
+        assert!(model.snapshot.accounts.as_slice().is_empty());
+        model.sync_accounts(&connection_state(None, true));
+        assert!(model.cache.accounts.is_empty());
+    }
+
     #[test]
     fn logout_and_reauthentication_fence_late_disk_results_and_cached_scope_rebinds_without_authority()
      {
