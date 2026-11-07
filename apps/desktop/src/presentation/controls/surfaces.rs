@@ -7,7 +7,35 @@ use crate::presentation::theme::Elevation;
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
 
+#[derive(Clone, Copy)]
+pub(in crate::presentation) enum CardStyle {
+    Inset,
+    Raised,
+    Outlined,
+}
+
 impl Desktop {
+    pub(in crate::presentation) fn style_panel_title<T: Styled>(&self, title: T) -> T {
+        title
+            .text_size(self.sp(18.))
+            .line_height(self.sp(24.))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(self.theme.text)
+    }
+
+    pub(in crate::presentation) fn style_card<T: Styled>(&self, card: T, style: CardStyle) -> T {
+        let card = card.rounded(px(12.));
+        match style {
+            CardStyle::Inset => card.bg(self.theme.subtle),
+            CardStyle::Raised => card
+                .bg(self.theme.surface)
+                .border_1()
+                .border_color(self.theme.border)
+                .shadow(self.theme.elevation(Elevation::Raised)),
+            CardStyle::Outlined => card.border_1().border_color(self.theme.border),
+        }
+    }
+
     pub(in crate::presentation) fn modal_scrim_color(&self) -> gpui::Hsla {
         if self.incoming_visible() {
             gpui::rgba(0x0f172a66).into()

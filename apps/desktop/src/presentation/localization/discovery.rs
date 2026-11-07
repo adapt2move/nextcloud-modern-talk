@@ -48,8 +48,8 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se encontraron conversaciones abiertas.",
     ),
     (
-        "Offene Gespräche suchen …",
-        "Search open conversations …",
-        "Buscar conversaciones abiertas…",
+        "Freigegebene Gespräche suchen …",
+        "Search available conversations …",
+        "Buscar conversaciones disponibles…",
     ),
 ];

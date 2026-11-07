@@ -3204,12 +3204,9 @@ impl Desktop {
             ))
     }
     fn composer_card(&self) -> Div {
-        div()
+        self.style_card(div(), super::controls::CardStyle::Outlined)
             .flex()
             .flex_col()
-            .rounded(px(12.))
-            .border_1()
-            .border_color(self.theme.border)
             .bg(self.theme.surface)
             .overflow_hidden()
     }

@@ -90,32 +90,25 @@ impl Desktop {
         let busy = panel.is_some_and(|p| p.state.pending() || p.uncertain);
         let unsupported = panel.is_some_and(|p| p.support == FeatureSupport::Unsupported);
         let query = self.discovery_search.read(cx).content.trim().to_lowercase();
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                self.hint(self.l("Finde Gespräche, die für dich im Verzeichnis freigegeben sind.")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        self.input_surface(&self.discovery_search, cx)
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.discovery_search.clone()),
-                    )
-                    .child(self.button(
-                        "discover-search",
-                        "Suchen",
-                        ButtonStyle::Primary,
-                        self.active_account_connected() && !busy && !unsupported,
-                        LocalAction::DiscoverSearch,
-                        cx,
-                    )),
-            );
+        let mut body = div().flex().flex_col().gap_4().child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    self.input_surface(&self.discovery_search, cx)
+                        .flex_1()
+                        .min_w_0()
+                        .child(self.discovery_search.clone()),
+                )
+                .child(self.button(
+                    "discover-search",
+                    "Suchen",
+                    ButtonStyle::Primary,
+                    self.active_account_connected() && !busy && !unsupported,
+                    LocalAction::DiscoverSearch,
+                    cx,
+                )),
+        );
         if !self.active_account_connected() {
             body = body.child(self.banner(
                 BannerRole::Warning,
@@ -178,14 +171,11 @@ impl Desktop {
                     ));
             }
             body = body.child(
-                div()
+                self.style_card(div(), super::controls::CardStyle::Raised)
                     .flex()
                     .items_center()
                     .gap_3()
                     .p_3()
-                    .rounded(px(12.))
-                    .border_1()
-                    .border_color(self.theme.border)
                     .child(details)
                     .child(
                         self.button(

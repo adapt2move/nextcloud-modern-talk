@@ -645,7 +645,7 @@ impl Desktop {
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
         let discovery_search =
-            cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
+            cx.new(|cx| TextInput::new("Freigegebene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -3648,7 +3648,7 @@ impl Render for Desktop {
             input.theme = t;
             input.text_scale = f32::from(self.scale) / 100.;
             input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
-            input.set_placeholder(self.l("Offene Gespräche suchen …"));
+            input.set_placeholder(self.l("Freigegebene Gespräche suchen …"));
         });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {

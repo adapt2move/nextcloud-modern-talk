@@ -724,14 +724,7 @@ impl Desktop {
                                     )
                                     .when_some(member, |d, member| {
                                         d.child(
-                                            div()
-                                                .flex_none()
-                                                .rounded(px(5.))
-                                                .bg(self.theme.selected)
-                                                .px_1()
-                                                .text_size(self.sp(12.))
-                                                .text_color(self.theme.selected_text)
-                                                .child(self.l(role(member.role))),
+                                            self.tonal_chip(self.l(role(member.role)).to_owned()),
                                         )
                                     }),
                             )
@@ -741,12 +734,10 @@ impl Desktop {
                                     .items_center()
                                     .gap_1()
                                     .when(state != Presence::Unknown, |d| {
-                                        d.child(
-                                            div()
-                                                .size(px(8.))
-                                                .rounded_full()
-                                                .bg(self.theme.presence_dot(state)),
-                                        )
+                                        d.child(self.presence_indicator(
+                                            self.theme.presence_dot(state),
+                                            self.theme.surface,
+                                        ))
                                     })
                                     .child(self.hint(self.l(presence(state)))),
                             ),
@@ -787,10 +778,9 @@ impl Desktop {
             });
         if direct && self.composer_available() {
             card = card.child(
-                self.button_with_leading_icon(
+                self.menu_item(
                     "person-compose",
                     ("Nachricht senden", "chat"),
-                    ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Compose(target)),
                     cx,
@@ -800,10 +790,9 @@ impl Desktop {
             );
         } else if can_direct {
             card = card.child(
-                self.button_with_leading_icon(
+                self.menu_item(
                     "person-direct",
                     ("Nachricht senden", "chat"),
-                    ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Direct(target)),
                     cx,
@@ -816,10 +805,9 @@ impl Desktop {
             || (!direct && can_direct && self.selected_call().is_some())
         {
             card = card.child(
-                self.button_with_leading_icon(
+                self.menu_item(
                     "person-call",
                     ("Anrufen", "phone"),
-                    ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Call(target)),
                     cx,
@@ -830,10 +818,9 @@ impl Desktop {
         }
         if self.person_can_mention(source) {
             card = card.child(
-                self.button_with_leading_icon(
+                self.menu_item(
                     "person-mention",
                     ("Erwähnen", "at"),
-                    ButtonStyle::Quiet,
                     true,
                     LocalAction::Person(Action::Mention(target)),
                     cx,

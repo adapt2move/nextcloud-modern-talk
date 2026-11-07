@@ -186,10 +186,10 @@ impl Theme {
             ],
         };
         let (disabled, hover, segment) = match (dark, sage) {
-            (false, false) => (0x8797ad, 0xeaf0f8, 0xffffff),
-            (false, true) => (0x879586, 0xeef1eb, 0xffffff),
-            (true, false) => (0x5d6d81, 0x293646, 0x2e3b4d),
-            (true, true) => (0x5c6f62, 0x2d3a32, 0x33413a),
+            (false, false) => (0x4a5b73, 0xeaf0f8, 0xffffff),
+            (false, true) => (0x4c584e, 0xeef1eb, 0xffffff),
+            (true, false) => (0x9fb2c9, 0x293646, 0x2e3b4d),
+            (true, true) => (0x9bafa1, 0x2d3a32, 0x33413a),
         };
         Self {
             dark,
@@ -353,12 +353,21 @@ mod tests {
                         "selected marker {palette:?}/{appearance:?}: {}",
                         contrast(t.input_border, track)
                     );
+                }
+                for background in [
+                    t.surface,
+                    t.subtle,
+                    t.canvas,
+                    t.chrome_end,
+                    t.selected,
+                    t.segment,
+                ] {
                     assert!(
-                        contrast(t.disabled_fg, track) < contrast(t.muted, track) * 0.7,
-                        "disabled must be visibly weaker"
+                        contrast(t.disabled_fg, background) >= 4.5,
+                        "disabled labels {palette:?}/{appearance:?}: {}",
+                        contrast(t.disabled_fg, background)
                     );
                 }
-                assert!((2.0..3.6).contains(&contrast(t.disabled_fg, t.surface)));
                 if t.dark {
                     // Raised selection must increase lightness; its accessible
                     // marker, not that small luminance difference, carries state.

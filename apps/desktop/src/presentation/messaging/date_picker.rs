@@ -204,6 +204,8 @@ impl Desktop {
                 cx,
             )
         };
+        let mut tabular_digits = gpui::font("Google Sans");
+        tabular_digits.features = gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
         grid.child(
             div()
                 .flex()
@@ -214,7 +216,7 @@ impl Desktop {
                 .child(step("hour-down", "chevron-down", "Stunden verringern", -60))
                 .child(
                     div()
-                        .font_family("Google Sans Code")
+                        .font(tabular_digits.clone())
                         .child(format!("{:02}", picker.hour())),
                 )
                 .child(step("hour-up", "chevron-up", "Stunden erhöhen", 60))
@@ -227,7 +229,7 @@ impl Desktop {
                 ))
                 .child(
                     div()
-                        .font_family("Google Sans Code")
+                        .font(tabular_digits)
                         .child(format!("{:02}", picker.minute())),
                 )
                 .child(step("minute-up", "chevron-up", "Minuten erhöhen", 5)),

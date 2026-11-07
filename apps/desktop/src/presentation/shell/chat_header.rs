@@ -177,7 +177,7 @@ mod tests {
                 let original = Theme::resolve(palette, mode, gpui::WindowAppearance::Light);
                 let header = theme(original, palette);
                 let tint = gpui::Rgba::from(header.surface);
-                let alphas = [1., if header.dark { 0.92 } else { 0.98 }];
+                let alphas = [1., if header.dark { 0.92 } else { 0.95 }];
                 for alpha in alphas {
                     for underlying in [0., 1.] {
                         let background = gpui::Rgba {

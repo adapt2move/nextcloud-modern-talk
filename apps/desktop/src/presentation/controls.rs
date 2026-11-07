@@ -6,10 +6,11 @@ mod skeletons;
 mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
 pub(super) use crate::presentation::controls::feedback::BannerRole;
+pub(super) use crate::presentation::controls::forms::RowSize;
 pub(super) use crate::presentation::controls::material::{Materials, Texture};
 pub(super) use crate::presentation::controls::material::{glass, glass_corners};
 pub(super) use crate::presentation::controls::skeletons::Skeleton;
-pub(super) use crate::presentation::controls::surfaces::CONTENT_RADIUS;
+pub(super) use crate::presentation::controls::surfaces::{CONTENT_RADIUS, CardStyle};
 use gpui::{
     Context, Div, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, SharedString, Stateful,
     div, prelude::*, px, svg,
@@ -997,6 +998,17 @@ impl Desktop {
             theme: self.theme,
         }
     }
+
+    pub(super) fn value_tip(
+        &self,
+        id: ElementId,
+        label: impl Into<SharedString>,
+        cx: &Context<Self>,
+    ) -> ReasonTip {
+        let mut tip = self.reason_tip(id, Availability::available().hinted(), Some("Konto"), cx);
+        tip.label = label.into();
+        tip
+    }
     pub(super) fn button(
         &self,
         id: impl Into<ElementId>,
@@ -1141,10 +1153,13 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let availability = availability.into();
-        self.control(id, ButtonStyle::Secondary, availability, action, cx)
+        let mut availability = availability.into();
+        availability.hover_hint = !availability.enabled && !availability.explained_elsewhere;
+        let id = id.into();
+        self.control(id.clone(), ButtonStyle::Secondary, availability, action, cx)
             .min_w_0()
             .justify_between()
+            .border_color(self.theme.input_border)
             .bg(if expanded {
                 self.theme.selected
             } else {
@@ -1174,6 +1189,9 @@ impl Desktop {
                         ))
                     }),
             )
+            .when(!self.background_inert && availability.hover_hint, |d| {
+                d.child(self.reason_tip(id, availability, None, cx))
+            })
     }
     pub(super) fn option_row(
         &self,
@@ -1251,7 +1269,7 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(content.1, 18., foreground)),
+                    .child(self.scaled_icon(content.1, 16., foreground)),
             )
     }
     pub(super) fn button_with_leading_icon(
@@ -1271,13 +1289,35 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(content.1, 18., foreground)),
+                    .child(self.scaled_icon(content.1, 16., foreground)),
             )
             .child(
                 div()
                     .opacity(if availability.pending { 0. } else { 1. })
                     .child(self.l(content.0)),
             )
+    }
+    pub(super) fn menu_item(
+        &self,
+        id: impl Into<ElementId>,
+        content: (&'static str, &'static str),
+        availability: impl Into<Availability>,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        self.style_list_row(
+            self.button_with_leading_icon(
+                id,
+                content,
+                ButtonStyle::Quiet,
+                availability,
+                action,
+                cx,
+            ),
+            RowSize::Regular,
+        )
+        .w_full()
+        .justify_start()
     }
     pub(super) fn icon_button(
         &self,
@@ -1288,7 +1328,7 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        self.styled_icon_button(id, symbol, (style, 34., 8.), availability, action, cx)
+        self.styled_icon_button(id, symbol, (style, 32., 8., 20.), availability, action, cx)
     }
     pub(super) fn round_icon_button(
         &self,
@@ -1299,7 +1339,7 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        self.styled_icon_button(id, symbol, (style, 52., 26.), availability, action, cx)
+        self.styled_icon_button(id, symbol, (style, 52., 26., 20.), availability, action, cx)
     }
     pub(super) fn compact_round_icon_button(
         &self,
@@ -1310,18 +1350,18 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        self.styled_icon_button(id, symbol, (style, 34., 17.), availability, action, cx)
+        self.styled_icon_button(id, symbol, (style, 34., 17., 16.), availability, action, cx)
     }
     fn styled_icon_button(
         &self,
         id: impl Into<ElementId>,
         symbol: (&'static str, &'static str),
-        geometry: (ButtonStyle, f32, f32),
+        geometry: (ButtonStyle, f32, f32, f32),
         availability: Availability,
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        let (style, extent, radius) = geometry;
+        let (style, extent, radius, icon_size) = geometry;
         let id = id.into();
         let (name, label) = symbol;
         let t = self.control_theme(&id);
@@ -1336,7 +1376,7 @@ impl Desktop {
                 div()
                     .flex_none()
                     .opacity(if availability.pending { 0. } else { 1. })
-                    .child(self.scaled_icon(name, 18., color)),
+                    .child(self.scaled_icon(name, icon_size, color)),
             )
             .when(availability.pending, |d| {
                 d.child(self.pending_overlay(color))
@@ -1361,11 +1401,30 @@ impl Desktop {
         action: LocalAction,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
+        self.chip_with_availability(id, label, group, Availability::available(), action, cx)
+    }
+
+    pub(super) fn chip_with_availability(
+        &self,
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        group: (bool, usize, usize),
+        availability: Availability,
+        action: LocalAction,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
         let id = id.into();
         let (selected, index, _count) = group;
         let t = self.theme;
         let control = self
-            .button(id, label, ButtonStyle::Quiet, true, action.clone(), cx)
+            .button(
+                id,
+                label,
+                ButtonStyle::Quiet,
+                availability,
+                action.clone(),
+                cx,
+            )
             .min_h(px(32.))
             .py_0()
             .px_2()
@@ -1376,7 +1435,9 @@ impl Desktop {
                 gpui::transparent_black()
             })
             .when(selected, |d| d.border_color(t.input_border.opacity(0.45)))
-            .text_color(if selected {
+            .text_color(if !availability.is_enabled() {
+                t.disabled_fg
+            } else if selected {
                 t.text
             } else {
                 t.sidebar_secondary
@@ -1398,6 +1459,31 @@ impl Desktop {
             .fold(0usize, |n, c| n.wrapping_mul(31).wrapping_add(c as usize));
         let (bg, fg) = self.theme.avatar(seed);
         let extent = size * (f32::from(self.scale) / 100.).sqrt();
+        self.avatar_shape(size)
+            .bg(bg)
+            .when(!self.theme.reduced_transparency, |avatar| {
+                let highlight = Hsla {
+                    l: (bg.l + 0.025).min(1.),
+                    ..bg
+                };
+                avatar
+                    .bg(gpui::linear_gradient(
+                        180.,
+                        gpui::linear_color_stop(highlight, 0.),
+                        gpui::linear_color_stop(bg, 1.),
+                    ))
+                    .border_1()
+                    .border_color(self.theme.inner_highlight())
+            })
+            .text_color(fg)
+            .text_size(px((extent * 0.36).max(12.)))
+            .line_height(px((extent * 0.5).max(18.)))
+            .font_weight(FontWeight::MEDIUM)
+            .child(initials.to_owned())
+    }
+
+    pub(super) fn avatar_shape(&self, size: f32) -> Div {
+        let extent = size * (f32::from(self.scale) / 100.).sqrt();
         div()
             .flex_none()
             .size(px(extent))
@@ -1405,12 +1491,49 @@ impl Desktop {
             .flex()
             .items_center()
             .justify_center()
-            .bg(bg)
-            .text_color(fg)
-            .text_size(px((extent * 0.36).max(12.)))
-            .line_height(px((extent * 0.5).max(18.)))
+    }
+
+    pub(super) fn presence_indicator(&self, color: Hsla, background: Hsla) -> Div {
+        div()
+            .flex_none()
+            .size(px(14.))
+            .rounded_full()
+            .border_2()
+            .border_color(background)
+            .bg(color)
+    }
+
+    pub(super) fn count_badge(&self, label: impl Into<SharedString>) -> Div {
+        let label: SharedString = label.into();
+        div()
+            .flex_none()
+            .min_w(px(18.))
+            .h(px(18.))
+            .px_1()
+            .rounded_full()
+            .bg(self.theme.accent)
+            .text_color(self.theme.on_accent)
+            .font_family("Google Sans Code")
             .font_weight(FontWeight::MEDIUM)
-            .child(initials.to_owned())
+            .text_size(px(11.))
+            .line_height(px(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_center()
+            .child(label)
+    }
+
+    pub(super) fn tonal_chip(&self, label: impl Into<SharedString>) -> Div {
+        let label: SharedString = label.into();
+        div()
+            .flex_none()
+            .rounded(px(6.))
+            .bg(self.theme.selected)
+            .px_1()
+            .text_size(self.sp(12.))
+            .text_color(self.theme.selected_text)
+            .child(label)
     }
     pub fn avatar(&self, initials: &str, large: bool) -> Div {
         self.person_avatar(initials, if large { 72. } else { 36. })

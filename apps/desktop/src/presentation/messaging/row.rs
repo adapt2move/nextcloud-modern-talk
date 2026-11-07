@@ -309,10 +309,8 @@ impl Desktop {
                 })
             {
                 content.child(
-                    div()
+                    self.style_card(div(), crate::presentation::controls::CardStyle::Inset)
                         .p_3()
-                        .rounded_lg()
-                        .bg(t.subtle)
                         .flex()
                         .items_center()
                         .gap_3()
@@ -367,10 +365,8 @@ impl Desktop {
                 content.child(self.poll_card(id, cx))
             } else {
                 content.child(
-                    div()
+                    self.style_card(div(), crate::presentation::controls::CardStyle::Inset)
                         .p_3()
-                        .rounded_lg()
-                        .bg(t.subtle)
                         .child(object.name.as_str().to_owned())
                         .child(self.hint(self.l(match object.kind.as_str() {
                             "file" => "Datei",
@@ -592,7 +588,7 @@ impl Desktop {
                     .justify_start()
                     .p_0()
                     .min_h(px(28.))
-                    .text_color(t.accent)
+                    .text_color(t.selected_text)
                     .child(self.scaled_icon("chat", 14., t.accent))
                     .children(
                         recent
@@ -625,7 +621,7 @@ impl Desktop {
             row.child(
                 div().px_6().py_2().flex().items_center().gap_2()
                     .child(div().flex_1().h(px(1.)).bg(t.accent))
-                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.accent).child(self.l("Neue Nachrichten")))
+                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.selected_text).child(self.l("Neue Nachrichten")))
                     .child(div().flex_1().h(px(1.)).bg(t.accent)),
             )
         })

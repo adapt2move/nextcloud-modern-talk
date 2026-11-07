@@ -36,7 +36,7 @@ reuse their paint when geometry and clipping stay unchanged; no animation or
 per-frame noise generation is used. Input fields use opaque backgrounds.
 
 Floating surfaces use an 18 pt backdrop blur behind a palette-colored tint
-(98% light, 92% dark), a hairline and a one-point light inner highlight. The
+(95% light, 92% dark), a hairline and a one-point light inner highlight. The
 renderer paints the original opaque surface when backdrop blur is unavailable.
 Reduce Transparency also uses opaque surfaces and disables decorative textures
 and glass. Unknown platform preference is treated as Reduce Transparency. The

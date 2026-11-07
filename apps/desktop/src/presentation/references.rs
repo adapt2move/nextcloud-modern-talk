@@ -198,15 +198,13 @@ impl Desktop {
                     label =
                         label.child(div().text_ellipsis().child(self.hint(description.as_str())));
                 }
-                let card: Div = div()
+                let card: Div = self
+                    .style_card(div(), super::controls::CardStyle::Outlined)
                     .flex()
                     .items_center()
                     .gap_2()
                     .p_2()
                     .max_w(px(520.))
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(self.theme.border)
                     .child(thumbnail)
                     .child(
                         self.button(

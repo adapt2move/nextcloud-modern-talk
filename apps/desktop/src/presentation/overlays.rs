@@ -166,25 +166,21 @@ impl Desktop {
             .flex()
             .flex_col()
             .child(if self.current_thread_details().is_some() {
-                self.control(
+                self.style_panel_title(self.control(
                     "thread-options",
                     ButtonStyle::Quiet,
                     Availability::available(),
                     LocalAction::ToggleThreadOptions,
                     cx,
-                )
+                ))
                 .justify_start()
                 .p_0()
                 .min_h(px(24.))
-                .text_size(self.sp(16.))
-                .font_weight(FontWeight::SEMIBOLD)
                 .child(heading.to_owned())
                 .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
                 .into_any_element()
             } else {
-                div()
-                    .text_size(self.sp(16.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                self.style_panel_title(div())
                     .child(heading.to_owned())
                     .into_any_element()
             })
@@ -299,6 +295,19 @@ impl Desktop {
                 .child(body)
                 .into_any_element()
         };
+        let preferred_height = match overlay {
+            Overlay::CreatePoll => self.poll_dialog_preferred_height(),
+            Overlay::CloudFiles => {
+                let rows = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map_or(2, |browser| browser.entries.as_slice().len().clamp(2, 7));
+                (320. + rows as f32 * 48.).min(632.)
+            }
+            _ => 632.,
+        };
         self.dialog_scrim()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
@@ -328,7 +337,7 @@ impl Desktop {
                                 d.h(px((f32::from(window.viewport_size().height)
                                     - super::window_chrome::HEIGHT
                                     - 66.)
-                                    .min(632.)))
+                                    .min(f32::from(self.sp(preferred_height)))))
                             },
                         )
                         .when(!side, |d| {

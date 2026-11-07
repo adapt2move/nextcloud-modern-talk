@@ -77,6 +77,39 @@ impl Desktop {
             .child(self.hint(label))
     }
 
+    pub(in crate::presentation) fn empty_state(
+        &self,
+        leading: impl IntoElement,
+        title: impl Into<gpui::SharedString>,
+        detail: &str,
+    ) -> Div {
+        let title: gpui::SharedString = title.into();
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .text_center()
+            .children(self.materials.layer(
+                if self.theme.dark {
+                    super::Texture::PatternDark
+                } else {
+                    super::Texture::PatternLight
+                },
+                self.theme.reduced_transparency,
+            ))
+            .child(leading)
+            .child(
+                div()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(self.theme.text)
+                    .child(title),
+            )
+            .child(self.hint(detail))
+    }
+
     pub(in crate::presentation) fn loading_row(&self, label: &str) -> Div {
         div()
             .min_h(px(40.))

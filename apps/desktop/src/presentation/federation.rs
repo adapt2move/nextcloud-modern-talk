@@ -40,7 +40,7 @@ impl Desktop {
                 })
             };
             body = body.child(
-                div()
+                self.style_list_row(div(), super::controls::RowSize::Regular)
                     .flex()
                     .flex_wrap()
                     .items_center()

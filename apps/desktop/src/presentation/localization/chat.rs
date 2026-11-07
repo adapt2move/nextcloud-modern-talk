@@ -12,6 +12,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Angeheftet", "Pinned", "Fijado"),
     (
+        "Die Nachricht wird gesendet, sobald die Verbindung wieder da ist.",
+        "The message will be sent when the connection returns.",
+        "El mensaje se enviará cuando vuelva la conexión.",
+    ),
+    (
         "Angeheftete Nachricht anzeigen",
         "Show pinned message",
         "Mostrar mensaje fijado",

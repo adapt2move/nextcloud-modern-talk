@@ -308,13 +308,16 @@ impl Desktop {
                             _ => "Gespräch",
                         };
                         body = body.child(
-                            self.button(
-                                super::controls::scoped_id("switcher-room", *id, 0, 0),
-                                "",
-                                ButtonStyle::Quiet,
-                                true,
-                                LocalAction::Navigate(*id),
-                                cx,
+                            self.style_list_row(
+                                self.button(
+                                    super::controls::scoped_id("switcher-room", *id, 0, 0),
+                                    "",
+                                    ButtonStyle::Quiet,
+                                    true,
+                                    LocalAction::Navigate(*id),
+                                    cx,
+                                ),
+                                super::controls::RowSize::Detailed,
                             )
                             .w_full()
                             .justify_start()
@@ -337,30 +340,16 @@ impl Desktop {
                             )
                             .child(self.hint(self.l(kind)))
                             .when(room.unread_mention == Some(true), |d| {
-                                d.child(
-                                    div()
-                                        .rounded_full()
-                                        .bg(self.theme.accent)
-                                        .px_2()
-                                        .text_color(self.theme.on_accent)
-                                        .child("@"),
-                                )
+                                d.child(self.count_badge("@"))
                             })
                             .when(
                                 room.unread > 0 && room.unread_mention != Some(true),
                                 |d| {
-                                    d.child(
-                                        div()
-                                            .rounded_full()
-                                            .bg(self.theme.accent)
-                                            .px_2()
-                                            .text_color(self.theme.on_accent)
-                                            .child(if room.unread > 99 {
-                                                "99+".to_owned()
-                                            } else {
-                                                room.unread.to_string()
-                                            }),
-                                    )
+                                    d.child(self.count_badge(if room.unread > 99 {
+                                        "99+".to_owned()
+                                    } else {
+                                        room.unread.to_string()
+                                    }))
                                 },
                             ),
                         );

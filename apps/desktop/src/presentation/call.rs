@@ -469,7 +469,7 @@ impl Desktop {
                     .gap_4()
                     .child(
                         self.incoming_call_avatar(
-                            self.call_stage_avatar(
+                            self.person_avatar(
                                 call.participants
                                     .as_slice()
                                     .iter()
@@ -641,7 +641,7 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(self.call_stage_avatar(
+                        .child(self.person_avatar(
                             participant.initials.as_str(),
                             if focused == Some(participant.local_id) {
                                 104.
@@ -1215,20 +1215,22 @@ impl Desktop {
             );
             if !call.reactions.as_slice().is_empty() && self.call_reactions_open == Some(call.scope)
             {
-                let mut menu = div()
-                    .id("call-reaction-menu")
-                    .absolute()
-                    .bottom(px(54.))
-                    .left(px(-72.))
-                    .w(px(320.))
+                let mut menu = self
+                    .style_floating_surface(
+                        div()
+                            .id("call-reaction-menu")
+                            .absolute()
+                            .bottom(px(54.))
+                            .left(px(-72.))
+                            .w(px(320.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
                     .max_h(px(200.))
                     .overflow_y_scroll()
                     .p_2()
-                    .rounded(px(12.))
-                    .border_1()
-                    .border_color(t.border)
-                    .bg(t.stage_panel)
-                    .shadow_lg()
                     .flex()
                     .flex_wrap()
                     .gap_1();
@@ -1291,20 +1293,10 @@ impl Desktop {
                     |button| {
                         button.when(chat_unread > 0, |d| {
                             d.child(
-                                div()
+                                self.count_badge(chat_unread.min(99).to_string())
                                     .absolute()
                                     .top(px(-2.))
-                                    .right(px(-2.))
-                                    .min_w(px(18.))
-                                    .h(px(18.))
-                                    .px_1()
-                                    .rounded_full()
-                                    .bg(t.accent)
-                                    .text_color(t.on_accent)
-                                    .text_size(px(12.))
-                                    .line_height(px(18.))
-                                    .text_center()
-                                    .child(chat_unread.min(99).to_string()),
+                                    .right(px(-2.)),
                             )
                         })
                     },
@@ -1335,20 +1327,10 @@ impl Desktop {
                     && chat_unread > 0,
                 |button| {
                     button.child(
-                        div()
+                        self.count_badge(chat_unread.min(99).to_string())
                             .absolute()
                             .top(px(-2.))
-                            .right(px(-2.))
-                            .min_w(px(18.))
-                            .h(px(18.))
-                            .px_1()
-                            .rounded_full()
-                            .bg(t.accent)
-                            .text_color(t.on_accent)
-                            .text_size(px(12.))
-                            .line_height(px(18.))
-                            .text_center()
-                            .child(chat_unread.min(99).to_string()),
+                            .right(px(-2.)),
                     )
                 },
             ),
@@ -1356,50 +1338,49 @@ impl Desktop {
         if narrow_controls {
             if self.call_secondary_open {
                 more = more.child(
-                    div()
-                        .absolute()
-                        .bottom(px(54.))
-                        .right(px(0.))
-                        .p_2()
-                        .rounded(px(12.))
-                        .bg(t.stage_panel)
-                        .shadow_lg()
-                        .occlude()
-                        .child(interaction_controls.child(navigation_controls)),
+                    self.style_floating_surface(
+                        div().absolute().bottom(px(54.)).right(px(0.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
+                    .p_2()
+                    .occlude()
+                    .child(interaction_controls.child(navigation_controls)),
                 );
             }
             primary_controls = primary_controls.child(more);
         } else {
             if self.call_secondary_open {
                 more = more.child(
-                    div()
-                        .absolute()
-                        .bottom(px(54.))
-                        .right(px(0.))
-                        .w(px(240.))
-                        .p_2()
-                        .rounded(px(12.))
-                        .bg(t.stage_panel)
-                        .shadow_lg()
-                        .occlude()
-                        .flex()
-                        .flex_col()
-                        .child(self.button_with_leading_icon(
-                            "call-more-minimize",
-                            ("Anruf minimieren", "chevron-down"),
-                            ButtonStyle::Stage,
-                            Availability::available(),
-                            LocalAction::MinimizeCall(call.scope),
-                            cx,
-                        ))
-                        .child(self.button_with_leading_icon(
-                            "call-more-fullscreen",
-                            ("Vollbild umschalten", "maximize-2"),
-                            ButtonStyle::Stage,
-                            Availability::available(),
-                            LocalAction::ToggleCallFullscreen(call.scope),
-                            cx,
-                        )),
+                    self.style_floating_surface(
+                        div().absolute().bottom(px(54.)).right(px(0.)).w(px(240.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
+                    .p_2()
+                    .occlude()
+                    .flex()
+                    .flex_col()
+                    .child(self.button_with_leading_icon(
+                        "call-more-minimize",
+                        ("Anruf minimieren", "chevron-down"),
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        LocalAction::MinimizeCall(call.scope),
+                        cx,
+                    ))
+                    .child(self.button_with_leading_icon(
+                        "call-more-fullscreen",
+                        ("Vollbild umschalten", "maximize-2"),
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        LocalAction::ToggleCallFullscreen(call.scope),
+                        cx,
+                    )),
                 );
             }
             primary_controls = primary_controls
@@ -1464,9 +1445,8 @@ impl Desktop {
                                     .flex_1()
                                     .min_w_0()
                                     .child(
-                                        div()
-                                            .text_size(self.sp(16.))
-                                            .font_weight(FontWeight::MEDIUM)
+                                        self.style_panel_title(div())
+                                            .text_color(t.stage_text)
                                             .text_ellipsis()
                                             .child(format!("{}{}", call.title.as_str(), self.call_started.filter(|(scope, _)| *scope == call.scope).map(|(_, started)| { let seconds = started.elapsed().as_secs(); format!(" · {}:{:02}", seconds / 60, seconds % 60) }).unwrap_or_default())),
                                     )
@@ -1582,25 +1562,6 @@ impl Desktop {
         } else {
             self.call_reaction_motion(id.into(), element)
         })
-    }
-    fn call_stage_avatar(&self, initials: &str, size: f32) -> Div {
-        let seed = initials
-            .bytes()
-            .fold(0usize, |n, b| n.wrapping_mul(31).wrapping_add(b as usize));
-        let colors = [0x645287, 0x436d80, 0x87583e, 0x4e725e, 0x725366];
-        div()
-            .flex_none()
-            .size(px(size))
-            .rounded(px(size * 0.28))
-            .bg(gpui::rgb(colors[seed % colors.len()]))
-            .text_color(gpui::white())
-            .text_size(px(size * 0.36))
-            .line_height(px(size * 0.5))
-            .font_weight(FontWeight::MEDIUM)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(initials.to_owned())
     }
     fn call_outcome(&self, failed: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;

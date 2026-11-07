@@ -6,7 +6,7 @@ use gpui::{
 };
 
 const TILE: f32 = 128.;
-const LIGHT_GLASS_ALPHA: f32 = 0.98;
+const LIGHT_GLASS_ALPHA: f32 = 0.95;
 const DARK_GLASS_ALPHA: f32 = 0.92;
 // A window cannot create an unbounded number of retained decorative views.
 const MAX_TILES_PER_AXIS: usize = 64;
@@ -85,7 +85,12 @@ mod tests {
                     let glass = blend(theme.surface.opacity(alpha).into(), backdrop.into());
                     for grain in [gpui::black(), gpui::white()] {
                         let background = blend(grain.opacity(6. / 255.).into(), glass);
-                        for color in [theme.text, theme.muted, theme.selected_text] {
+                        for color in [
+                            theme.text,
+                            theme.muted,
+                            theme.selected_text,
+                            theme.disabled_fg,
+                        ] {
                             assert!(
                                 contrast(color.into(), background) >= 4.5,
                                 "{palette:?} {appearance:?}"

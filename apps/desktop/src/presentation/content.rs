@@ -1087,16 +1087,8 @@ impl Desktop {
             .flex().flex_col().gap_2()
             .child(self.typing_slot(context))
             .child(
-                div()
-                    .min_h(px(96.))
+                self.composer_frame()
                     .justify_center()
-                    .p_3()
-                    .rounded(px(12.))
-                    .border_1()
-                    .border_color(self.theme.input_border)
-                    .flex()
-                    .flex_col()
-                    .gap_2()
                     .child(body)
                     .when(voice.phase == VoicePhase::Review && self.media_offline(), |d| {
                         d.child(self.hint(self.l("Verbinde dich erneut, um die Aufnahme zu senden.")))
@@ -1450,14 +1442,7 @@ impl Desktop {
     }
     pub(super) fn projected_avatar(&self, target: AssetTarget, size: f32) -> Option<Div> {
         let extent = px(size * (f32::from(self.scale) / 100.).sqrt());
-        let base = div()
-            .flex_none()
-            .size(extent)
-            .rounded(extent * 0.28)
-            .overflow_hidden()
-            .flex()
-            .items_center()
-            .justify_center();
+        let base = self.avatar_shape(size).overflow_hidden();
         let asset = self
             .asset(&target)
             .filter(|asset| matches!(asset.state, AssetState::Ready { .. }))
@@ -2349,6 +2334,11 @@ impl Desktop {
     pub(super) fn poll_drafts_open(&self) -> bool {
         self.content_ui.drafts_open
     }
+    pub(super) fn poll_dialog_preferred_height(&self) -> f32 {
+        let additional_options = self.content_ui.option_count.saturating_sub(2) as f32;
+        let vote_limit = if self.content_ui.multiple { 48. } else { 0. };
+        (520. + additional_options * 52. + vote_limit).min(632.)
+    }
     pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
         (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
             .then(|| {
@@ -2548,75 +2538,83 @@ impl Desktop {
             body = body.child(
                 div()
                     .group(group.clone())
+                    .relative()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(self.hint(&(index + 1).to_string()).w(px(24.)))
                     .child(
                         self.input_surface(input, cx)
                             .flex_1()
                             .min_w_0()
+                            .pr(px(100.))
                             .child(input.clone()),
                     )
                     .child(
-                        self.icon_button(
-                            ("poll-option-up", index),
-                            ("chevron-up", "Nach oben"),
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                !busy && index > 0,
-                                if busy {
-                                    "Eine Anfrage wird bereits bearbeitet."
-                                } else {
-                                    "Die Option ist bereits an erster Stelle."
-                                },
+                        div()
+                            .absolute()
+                            .right(px(2.))
+                            .top(px(2.))
+                            .flex()
+                            .items_center()
+                            .child(
+                                self.icon_button(
+                                    ("poll-option-up", index),
+                                    ("chevron-up", "Nach oben"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(
+                                        !busy && index > 0,
+                                        if busy {
+                                            "Eine Anfrage wird bereits bearbeitet."
+                                        } else {
+                                            "Die Option ist bereits an erster Stelle."
+                                        },
+                                    ),
+                                    LocalAction::Content(Action::MoveOption { index, up: true }),
+                                    cx,
+                                )
+                                .opacity(0.)
+                                .group_hover(group.clone(), |style| style.opacity(1.))
+                                .focus(|style| style.opacity(1.)),
+                            )
+                            .child(
+                                self.icon_button(
+                                    ("poll-option-down", index),
+                                    ("chevron-down", "Nach unten"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(
+                                        !busy && index + 1 < self.content_ui.option_count,
+                                        if busy {
+                                            "Eine Anfrage wird bereits bearbeitet."
+                                        } else {
+                                            "Die Option ist bereits an letzter Stelle."
+                                        },
+                                    ),
+                                    LocalAction::Content(Action::MoveOption { index, up: false }),
+                                    cx,
+                                )
+                                .opacity(0.)
+                                .group_hover(group.clone(), |style| style.opacity(1.))
+                                .focus(|style| style.opacity(1.)),
+                            )
+                            .child(
+                                self.icon_button(
+                                    ("poll-option-remove", index),
+                                    ("trash-2", "Entfernen"),
+                                    ButtonStyle::Quiet,
+                                    Availability::when(
+                                        !busy && self.content_ui.option_count > 2,
+                                        if busy {
+                                            "Eine Anfrage wird bereits bearbeitet."
+                                        } else {
+                                            "Mindestens zwei Antwortoptionen sind erforderlich."
+                                        },
+                                    ),
+                                    LocalAction::Content(Action::RemoveOption(index)),
+                                    cx,
+                                )
+                                .opacity(0.)
+                                .group_hover(group.clone(), |style| style.opacity(1.))
+                                .focus(|style| style.opacity(1.)),
                             ),
-                            LocalAction::Content(Action::MoveOption { index, up: true }),
-                            cx,
-                        )
-                        .opacity(0.)
-                        .group_hover(group.clone(), |style| style.opacity(1.))
-                        .focus(|style| style.opacity(1.)),
-                    )
-                    .child(
-                        self.icon_button(
-                            ("poll-option-down", index),
-                            ("chevron-down", "Nach unten"),
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                !busy && index + 1 < self.content_ui.option_count,
-                                if busy {
-                                    "Eine Anfrage wird bereits bearbeitet."
-                                } else {
-                                    "Die Option ist bereits an letzter Stelle."
-                                },
-                            ),
-                            LocalAction::Content(Action::MoveOption { index, up: false }),
-                            cx,
-                        )
-                        .opacity(0.)
-                        .group_hover(group.clone(), |style| style.opacity(1.))
-                        .focus(|style| style.opacity(1.)),
-                    )
-                    .child(
-                        self.icon_button(
-                            ("poll-option-remove", index),
-                            ("trash-2", "Entfernen"),
-                            ButtonStyle::Quiet,
-                            Availability::when(
-                                !busy && self.content_ui.option_count > 2,
-                                if busy {
-                                    "Eine Anfrage wird bereits bearbeitet."
-                                } else {
-                                    "Mindestens zwei Antwortoptionen sind erforderlich."
-                                },
-                            ),
-                            LocalAction::Content(Action::RemoveOption(index)),
-                            cx,
-                        )
-                        .opacity(0.)
-                        .group_hover(group.clone(), |style| style.opacity(1.))
-                        .focus(|style| style.opacity(1.)),
                     ),
             );
         }
@@ -2633,21 +2631,27 @@ impl Desktop {
             );
         }
         body = body
-            .child(div().flex().flex_wrap().gap_2().child(self.button(
-                "poll-add-option",
-                "Option hinzufügen",
-                ButtonStyle::Quiet,
-                Availability::when(
-                    !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
-                    if busy {
-                        "Eine Anfrage wird bereits bearbeitet."
-                    } else {
-                        "Die maximale Anzahl an Optionen ist erreicht."
-                    },
-                ),
-                LocalAction::Content(Action::AddOption),
-                cx,
-            )))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(self.button_with_leading_icon(
+                        "poll-add-option",
+                        ("Option hinzufügen", "plus"),
+                        ButtonStyle::Quiet,
+                        Availability::when(
+                            !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                            if busy {
+                                "Eine Anfrage wird bereits bearbeitet."
+                            } else {
+                                "Die maximale Anzahl an Optionen ist erreicht."
+                            },
+                        ),
+                        LocalAction::Content(Action::AddOption),
+                        cx,
+                    )),
+            )
             .child(
                 self.dialog_row(
                     "Mehrere Antworten erlauben",
@@ -2805,13 +2809,12 @@ impl Desktop {
                     self.hint(self.l("Umfragen werden von diesem Server nicht unterstützt.")),
                 );
             }
-            return div()
+            return self
+                .style_card(div(), super::controls::CardStyle::Inset)
                 .flex()
                 .flex_col()
                 .gap_2()
                 .p_3()
-                .rounded(px(8.))
-                .bg(self.theme.subtle)
                 .child(self.hint(self.l(if self.media_offline() {
                     "Die Verbindung ist derzeit nicht bereit."
                 } else {
@@ -2894,7 +2897,9 @@ impl Desktop {
             .w_full()
             .max_w(px(if full { 620. } else { 480. }))
             .gap_2()
-            .when(!full, |d| d.p_4().bg(self.theme.subtle).rounded(px(12.)))
+            .when(!full, |d| {
+                self.style_card(d.p_4(), super::controls::CardStyle::Inset)
+            })
             .child(
                 div()
                     .w_full()

@@ -352,29 +352,13 @@ impl Desktop {
                         .w_full()
                         .justify_start()
                         .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex_none()
-                                .min_w(px(18.))
-                                .h(px(18.))
-                                .px_1()
-                                .rounded_full()
-                                .bg(t.accent)
-                                .text_color(t.on_accent)
-                                .font_family("Google Sans Code")
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_size(px(11.))
-                                .line_height(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_center()
-                                .child(if view.invitations.as_slice().len() > 99 {
-                                    "99+".to_owned()
-                                } else {
-                                    view.invitations.as_slice().len().to_string()
-                                }),
-                        ),
+                        .child(self.count_badge(
+                            if view.invitations.as_slice().len() > 99 {
+                                "99+".to_owned()
+                            } else {
+                                view.invitations.as_slice().len().to_string()
+                            },
+                        )),
                     )
                 },
             )
@@ -461,14 +445,10 @@ impl Desktop {
                 .into_iter()
                 .enumerate()
                 .map(|(index, (value, label))| {
-                    self.button(
+                    self.chip_with_availability(
                         ("sidebar-filter", index),
                         label,
-                        if value == filter {
-                            ButtonStyle::Secondary
-                        } else {
-                            ButtonStyle::Quiet
-                        },
+                        (value == filter, index, 3),
                         Availability::when(
                             can_filter
                                 && (value != SidebarFilter::Mentions
@@ -486,9 +466,6 @@ impl Desktop {
                     .flex_1()
                     .px_1()
                     .min_w_0()
-                    .when(value == filter, |d| {
-                        d.bg(t.segment).border_color(t.input_border.opacity(0.45))
-                    })
                     .text_size(self.sp(12.))
                 }),
             ),
@@ -771,12 +748,12 @@ impl Desktop {
                     .child(list),
             )
         };
+        let profile_id: gpui::ElementId = "own-status-menu".into();
         let profile = self
-            .button(
-                "own-status-menu",
-                "",
+            .control(
+                profile_id.clone(),
                 ButtonStyle::Quiet,
-                account.is_some(),
+                Availability::when(account.is_some(), "Noch kein Konto verbunden.").hinted(),
                 LocalAction::ToggleOwnStatus,
                 cx,
             )
@@ -822,27 +799,31 @@ impl Desktop {
                                 },
                             )),
                     )
-                    .when_some(account, |d, a| {
-                        d.child(
-                            div()
-                                .w_full()
-                                .text_size(self.sp(12.))
-                                .text_color(t.sidebar_secondary)
-                                .text_ellipsis()
-                                .child(
-                                    self.snapshot
-                                        .content_panel
-                                        .organization
-                                        .as_ref()
-                                        .filter(|name| {
-                                            self.snapshot.content_panel.account == Some(a.scope)
-                                                && !name.as_str().trim().is_empty()
-                                        })
-                                        .map_or(a.server_label.as_str(), |name| name.as_str())
-                                        .to_owned(),
-                                ),
-                        )
-                    }),
+                    .when_some(
+                        account.and_then(|a| {
+                            self.snapshot
+                                .content_panel
+                                .organization
+                                .as_ref()
+                                .filter(|name| {
+                                    self.snapshot.content_panel.account == Some(a.scope)
+                                        && !name.as_str().trim().is_empty()
+                                })
+                        }),
+                        |d, organization| {
+                            d.child(
+                                div()
+                                    .w_full()
+                                    .text_size(self.sp(12.))
+                                    .text_color(t.sidebar_secondary)
+                                    .text_ellipsis()
+                                    .child(organization.as_str().to_owned()),
+                            )
+                        },
+                    ),
+            )
+            .children(
+                account.map(|a| self.value_tip(profile_id, a.server_label.as_str().to_owned(), cx)),
             );
         let sidebar = sidebar.when(
             self.docked_call()
@@ -959,13 +940,16 @@ impl Desktop {
             self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::MarkUnread);
         let menu_open = self.room_menu == Some((context, namespace));
         let control = self
-            .button(
-                id,
-                "",
-                ButtonStyle::Quiet,
-                true,
-                LocalAction::Navigate(context),
-                cx,
+            .style_list_row(
+                self.button(
+                    id,
+                    "",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Navigate(context),
+                    cx,
+                ),
+                super::controls::RowSize::Compact,
             )
             .flex_none()
             .w_full()
@@ -1057,35 +1041,19 @@ impl Desktop {
                             ConversationKind::Direct | ConversationKind::NoteToSelf
                         )
                     {
-                        div()
-                            .flex_none()
-                            .min_w(px(18.))
-                            .h(px(18.))
-                            .px_1()
-                            .rounded_full()
-                            .bg(t.accent)
-                            .text_color(t.on_accent)
-                            .font_family("Google Sans Code")
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_size(px(12.))
-                            .line_height(px(14.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_center()
-                            .child(format!(
-                                "{}{}",
-                                if row.unread_direct_mention == Some(true) {
-                                    "@ "
-                                } else {
-                                    ""
-                                },
-                                if row.unread > 99 {
-                                    "99+".to_owned()
-                                } else {
-                                    row.unread.to_string()
-                                }
-                            ))
+                        self.count_badge(format!(
+                            "{}{}",
+                            if row.unread_direct_mention == Some(true) {
+                                "@ "
+                            } else {
+                                ""
+                            },
+                            if row.unread > 99 {
+                                "99+".to_owned()
+                            } else {
+                                row.unread.to_string()
+                            }
+                        ))
                     } else {
                         div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
                     },
@@ -1186,10 +1154,9 @@ impl Desktop {
                     self.context_menu_surface()
                         .ml_2()
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id("sidebar-room-notifications", context, 0, 0),
                                 ("Benachrichtigungen", "bell"),
-                                ButtonStyle::Quiet,
                                 Availability::available(),
                                 LocalAction::SidebarRoomNotifications(context),
                                 cx,
@@ -1197,7 +1164,7 @@ impl Desktop {
                             .w_full(),
                         )
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id("sidebar-room-archive", context, 0, 0),
                                 (
                                     if row.archived == Some(true) {
@@ -1207,7 +1174,6 @@ impl Desktop {
                                     },
                                     "inbox",
                                 ),
-                                ButtonStyle::Quiet,
                                 Availability::when(
                                     row.archive == Decision::Allowed && row.archived.is_some(),
                                     "Der Archivstatus kann derzeit nicht geändert werden.",
@@ -1218,10 +1184,9 @@ impl Desktop {
                             .w_full(),
                         )
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id(namespace, context, 1, 2),
                                 ("Als ungelesen markieren", "inbox"),
-                                ButtonStyle::Quiet,
                                 Availability::when(
                                     can_mark_unread,
                                     "Auf diesem Server nicht verfügbar.",

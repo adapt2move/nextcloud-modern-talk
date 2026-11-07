@@ -353,8 +353,10 @@ impl Desktop {
                                 LocalAction::MessageIn(context, Action::ChooseTime(choice)),
                                 cx,
                             )
+                            .w_full()
+                            .justify_start()
                         }),
-                    ).child(div().pt_2().child(self.button(
+                    ).child(div().w_full().flex().justify_end().pt_2().child(self.button(
                             "submit-message-time",
                             if reminder {
                                 "Erinnern"

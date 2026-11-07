@@ -196,8 +196,13 @@ impl Desktop {
                 .bg(crate::presentation::shell::chat_header::surface(theme))
                 .relative()
                 .child(self.pin_header_anchor(context, selected))
-                .child(self.scaled_icon("pin", 15., theme.accent))
-                .child(self.hint(self.l("Angeheftet")))
+                .child(self.status_icon(
+                    scoped_id("pin-banner-label", context, selected, 0),
+                    ("pin", "Angeheftet"),
+                    (15., theme.accent),
+                    None,
+                    cx,
+                ))
                 .when(!pins.collapsed, |d| {
                     d.child(
                         self.control(

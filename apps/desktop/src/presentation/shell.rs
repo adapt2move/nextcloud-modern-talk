@@ -33,10 +33,7 @@ impl Desktop {
                 if row.kind == ConversationKind::Direct {
                     self.person_avatar(row.initials.as_str(), 36.)
                 } else {
-                    div()
-                        .flex_none()
-                        .size(px(36.))
-                        .rounded(px(12.))
+                    self.avatar_shape(36.)
                         .bg(t.selected)
                         .flex()
                         .items_center()
@@ -76,15 +73,10 @@ impl Desktop {
         let diameter = 10.;
         let footprint = diameter + 4.;
         div().flex_none().relative().child(avatar).child(
-            div()
+            self.presence_indicator(self.theme.presence_dot(presence), background)
                 .absolute()
                 .right(px(-footprint / 2.))
-                .bottom(px(-footprint / 2.))
-                .size(px(footprint))
-                .rounded_full()
-                .border_2()
-                .border_color(background)
-                .bg(self.theme.presence_dot(presence)),
+                .bottom(px(-footprint / 2.)),
         )
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {
@@ -185,25 +177,14 @@ impl Desktop {
                 );
             }
             return self.content_card(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .flex_col()
-                    .gap_4()
-                    .children(self.materials.layer(
-                        if t.dark {
-                            super::controls::Texture::PatternDark
-                        } else {
-                            super::controls::Texture::PatternLight
-                        },
-                        t.reduced_transparency,
-                    ))
-                    .child(self.l("Wähle ein Gespräch."))
-                    .when(self.local_feedback_visible(), |d| {
-                        d.child(self.feedback_view(cx))
-                    }),
+                self.empty_state(
+                    self.scaled_icon("chat", 24., t.muted),
+                    self.l("Wähle ein Gespräch.").to_owned(),
+                    "",
+                )
+                .when(self.local_feedback_visible(), |d| {
+                    d.child(self.feedback_view(cx))
+                }),
             );
         };
         let joining = self
@@ -278,14 +259,7 @@ impl Desktop {
             (Some(presence), false) => format!("{presence} · {custom_status}"),
             (Some(presence), true) => presence.to_owned(),
             (None, false) if row.kind == ConversationKind::Direct => custom_status,
-            _ => format!(
-                "{}{}",
-                self.l(kind),
-                row.participants.map_or(String::new(), |n| format!(
-                    " · {}",
-                    self.count(super::localization::Count::Participants, u64::from(n))
-                ))
-            ),
+            _ => self.l(kind).to_owned(),
         };
         let header = div()
             .id("conversation-header")
@@ -323,7 +297,7 @@ impl Desktop {
                             .items_center()
                             .gap_2()
                             .child(
-                                self.control(
+                                self.style_panel_title(self.control(
                                     "conversation-title",
                                     ButtonStyle::Quiet,
                                     title_availability.hinted().explained_elsewhere(),
@@ -332,14 +306,12 @@ impl Desktop {
                                         super::messaging::Action::Files,
                                     ),
                                     cx,
-                                )
+                                ))
                                 .min_w_0()
                                 .justify_start()
                                 .p_0()
                                 .min_h(px(28.))
                                 .text_color(h.text)
-                                .text_size(self.sp(18.))
-                                .font_weight(FontWeight::BOLD)
                                 .child(row.title.as_str().to_owned()),
                             )
                             .child(
@@ -596,6 +568,15 @@ impl Desktop {
             .flex_col()
             .flex_none()
             .child(header)
+            .children(
+                self.account_connection_failure(row.context.account)
+                    .and_then(|failure| self.connection_failure_footer(row.context, failure, cx))
+                    .map(|banner| div().px_4().py_1().child(banner)),
+            )
+            .children(
+                self.offline_footer(row.context, cx)
+                    .map(|banner| div().px_4().py_1().child(banner)),
+            )
             .children(self.pin_banner(row.context, cx))
             .child(self.conversation_search(cx).bg(chat_header::surface(h)));
         let timeline = self.conversation_timeline(header, constrained, cx);
@@ -727,7 +708,6 @@ impl Desktop {
             "emoji-picker"
         };
         let send_id = if thread { "thread-send" } else { "send" };
-        let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = if thread {
             self.thread_drafts.pending(row.context) || self.thread_edit_pending()
@@ -767,12 +747,27 @@ impl Desktop {
                     "Diese Dateioption ist derzeit nicht verfügbar."
                 } else if uncertain {
                     "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
+                } else if !attached && input.read(cx).content.trim().is_empty() {
+                    "Nachricht eingeben."
                 } else {
                     "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
                 },
             )
         }
         .above_composer();
+        let send_availability = if !thread
+            && self.snapshot.content == ContentState::Offline
+            && self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .is_some_and(|panel| panel.context == row.context && panel.queue_available)
+        {
+            send_availability
+                .help("Die Nachricht wird gesendet, sobald die Verbindung wieder da ist.")
+        } else {
+            send_availability
+        };
         let show_voice = !thread
             && input.read(cx).content.is_empty()
             && !attached
@@ -790,13 +785,8 @@ impl Desktop {
             .gap_2()
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
             .child(
-                div()
-                    .min_h(px(96.))
-                    .relative()
+                self.composer_frame()
                     .child(self.field_ring(input.focus_handle(cx), 10.))
-                    .rounded(px(10.))
-                    .bg(t.surface)
-                    .border_1()
                     .border_color(if input.read(cx).rejected {
                         t.danger
                     } else {
@@ -816,10 +806,6 @@ impl Desktop {
                             }
                         }),
                     )
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
                     .children(if thread { self.thread_composer_context(cx) } else { self.composer_context(cx) })
                     .when(!unloaded, |d| d.child(input.clone()))
                     .when(unloaded, |d| {
@@ -940,17 +926,6 @@ impl Desktop {
             )
             .when_some(self.content_ui.voice_error, |d, error| {
                 d.child(self.hint(self.l(error)))
-            })
-            .children(
-                (!thread)
-                    .then_some(connection_failure)
-                    .flatten()
-                    .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),
-            )
-            .children(if thread {
-                None
-            } else {
-                self.offline_footer(row.context, cx)
             })
             .when(input.read(cx).rejected, |d| {
                 d.child(

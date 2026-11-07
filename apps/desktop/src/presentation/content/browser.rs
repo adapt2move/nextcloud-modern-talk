@@ -610,7 +610,11 @@ impl Desktop {
                         generation: browser.generation,
                     })
                 });
-            let mut row = div()
+            let modified = entry.modified.as_ref().and_then(|value| {
+                crate::presentation::localization::file_date(self.locale, value.as_str())
+            });
+            let mut row = self
+                .style_list_row(div(), crate::presentation::controls::RowSize::Detailed)
                 .flex()
                 .items_center()
                 .gap_3()
@@ -621,6 +625,7 @@ impl Desktop {
                     "cloud-row-{}",
                     entry.path.as_str()
                 )))
+                .hover(|style| style.bg(self.theme.row_hover))
                 .border_b_1()
                 .border_color(self.theme.border)
                 .bg(self.selected_row_color(
@@ -699,10 +704,18 @@ impl Desktop {
                         .px_0()
                         .child(
                             div()
+                                .flex()
+                                .flex_col()
                                 .min_w_0()
-                                .truncate()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(entry.name.as_str().to_owned()),
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(entry.name.as_str().to_owned()),
+                                )
+                                .when_some(modified.clone(), |name, date| {
+                                    name.child(self.hint(&date))
+                                }),
                         ),
                     );
                 }
@@ -713,11 +726,15 @@ impl Desktop {
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .child(div().truncate().child(entry.name.as_str().to_owned())),
+                        .child(div().truncate().child(entry.name.as_str().to_owned()))
+                        .when_some(modified, |name, date| name.child(self.hint(&date))),
                 );
             }
             row = row.child(
                 div()
+                    .flex_none()
+                    .w(px(72.))
+                    .text_right()
                     .text_size(self.sp(12.))
                     .text_color(self.theme.muted)
                     .child(crate::presentation::localization::file_size(
@@ -725,16 +742,6 @@ impl Desktop {
                         entry.size,
                     )),
             );
-            if let Some(modified) = entry.modified.as_ref().and_then(|value| {
-                crate::presentation::localization::file_date(self.locale, value.as_str())
-            }) {
-                row = row.child(
-                    div()
-                        .text_size(self.sp(12.))
-                        .text_color(self.theme.muted)
-                        .child(modified),
-                );
-            }
             if entry
                 .file_id
                 .as_ref()
