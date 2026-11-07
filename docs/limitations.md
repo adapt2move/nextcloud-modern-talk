@@ -27,8 +27,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   unavailable before capture admission. A matching desktop portal backend and
   `gstreamer1.0-pipewire` are required; Xvfb alone supplies neither. The software
   compositor probe uses an explicitly patched portal backend for SHM-only
-  capture; unmodified compositor/picker and permission-revocation qualification
-  remains necessary.
+  capture. The headless Sway rerun did not deliver native source frames with
+  that older backend; fixed and maximum frame-rate constraints also failed
+  negotiation. Generated native 720p screen frames reaching the web client
+  establish media transport only. Linux desktop capture, the unmodified
+  compositor/picker and permission revocation remain unqualified.
 - macOS publication uses the bundled ScreenCaptureKit helper and the system
   content-sharing picker, with a three-buffer source queue, 1080p output and
   10 fps. It needs an Apple SDK build and native qualification, including picker
@@ -44,8 +47,14 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   supported profile.
 - HPB socket resume preserves mute/camera intent and requires fresh policy before
   publication resumes. ICE recovery has a finite retry budget and a 15-second
-  peer recovery deadline. A rejected HPB resume permits one fresh, scoped
-  admission after cleanup, retaining mute/camera intent and requiring the call
+  peer recovery deadline. The HPB socket retry budget covers consecutive failures;
+  an authenticated connection maintained for 30 seconds renews it. After transport
+  retries are exhausted, an explicit call retry can resume the old socket solely
+  to retire its session. A matched HPB bye or missing-session response and REST
+  call-participant absence are required before fresh admission; failed cleanup
+  remains blocked. Routine event polling does not restart a stopped owner.
+  A rejected HPB resume permits one fresh, scoped admission after cleanup,
+  retaining mute/camera intent and requiring the call
   to still exist. Subscriptions also wait for HPB in-call readiness; an explicitly
   rejected subscription can retry within the same bounded recovery window and
   requires renewed policy. Full
@@ -200,6 +209,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   fifteen minutes; negative results expire sooner. Only installation-owned
   reference-preview image routes are fetched, with bounded decoded image sizes.
   Provider selection and arbitrary embedded web content are not implemented.
+  Reference cards also depend on the server's providers and outbound access.
+  A resolver may return only the URL as its title, without a description or
+  thumbnail; this does not qualify rich public-site previews in an isolated lab.
 - Conversation creation supports local-directory invitations and the returned
   webinar, presentation and voice-room presets. Other special-purpose presets
   and non-user invitation sources are not offered in the creation flow.
@@ -220,7 +232,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   that share. These pending attachment intents are not durable across restart.
   Local raster previews use the same bounded decoder and stay out of disk caches.
   File-list and image paste and incoming file drops need native qualification on
-  each platform; file-list paste has been exercised on Linux X11. Caption and
+  each platform; file-list paste and incoming file drops with captions have
+  been exercised on Linux X11. Image paste still needs separate qualification. Caption and
   reply/thread/silent metadata require the corresponding server capabilities.
   Native outgoing file drags use AppKit file promises on macOS and still need
   Finder qualification; Linux and Windows use the Download action.
@@ -272,6 +285,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   a structured message identifier are suppressed. Notification activation is
   available on Linux notification daemons with action support and via the macOS
   helper; native delivery and click-through still need platform qualification.
+  Linux also depends on the distribution's `notify-send` confinement policy:
+  the tested AppArmor profile allowed banner submission but denied
+  `GetCapabilities` and action signals. That policy delivers reminders without
+  click-through until the administrator permits those notification operations.
 - Translated text uses a bounded session cache and does not survive a restart.
   Translation requires a provider with source-language detection and a target
   matching the interface locale; task-only translation providers are not used.

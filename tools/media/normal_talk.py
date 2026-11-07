@@ -71,7 +71,11 @@ async def run(args,report):
   with tempfile.TemporaryDirectory(prefix='nmt-normal-call-',dir=os.environ.get('XDG_RUNTIME_DIR','/run')) as directory:
    private=Path(directory);fixture=private/'credentials.json';output=private/'result.json'
    try:
-    report['stage']='create room';token=await room.open();report['signaling_mode']=(await asyncio.to_thread(fetch_settings,m['client_url'],c['users']['lab_alice'],token)).get('signalingMode','unknown');fixture.write_text(json.dumps({'origin':m['client_url'],'user':'lab_alice','password':c['users']['lab_alice'],'room':{'token':token}}));fixture.chmod(0o600)
+    report['stage']='create room';token=await room.open()
+    # A fresh direct room initially contains only its caller. The callee cannot
+    # read room-scoped settings until the browser's first call/message admits it.
+    report['stage']='caller signaling settings'
+    report['signaling_mode']=(await asyncio.to_thread(fetch_settings,m['client_url'],c['users'][caller],token,caller)).get('signalingMode','unknown');fixture.write_text(json.dumps({'origin':m['client_url'],'user':'lab_alice','password':c['users']['lab_alice'],'room':{'token':token}}));fixture.chmod(0o600)
     recovery_window=50 if report['signaling_mode']=='internal' and args.scenario in ('network-resume','web-screen-resume') else 32
     report['exchange_recovery_window_seconds']=recovery_window
     report['stage']='browser login';await page.goto(m['client_url']+'/login',wait_until='domcontentloaded',timeout=30000);await page.locator('#user').fill(caller);await page.locator('#password').fill(c['users'][caller]);await page.get_by_role('button',name='Log in',exact=True).click();await page.wait_for_url(lambda url:'/login' not in urlparse(url).path,timeout=30000)

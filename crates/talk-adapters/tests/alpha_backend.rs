@@ -408,8 +408,8 @@ async fn released_server_messaging_and_room_controls() {
             C::StartBreakouts,
         )
         .await;
-        // The private-reply checks already admitted this account. Reuse its
-        // sole network owner for breakout checks as production does.
+        // Private-reply checks already admitted this account. Reuse its sole
+        // network owner for breakout checks; installing the scope again conflicts.
         let bob_parent = bob_room;
         let CR::BreakoutRooms(assigned) = settings(
             &mut bob,

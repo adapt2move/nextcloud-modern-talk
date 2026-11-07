@@ -8,6 +8,27 @@ use tokio_tungstenite::{
     tungstenite::{self, Message, client::IntoClientRequest, protocol::WebSocketConfig},
 };
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+#[derive(Default)]
+struct RetryBudget {
+    failures: usize,
+}
+impl RetryBudget {
+    fn interrupted(&mut self) -> bool {
+        if self.failures >= 4 {
+            return false;
+        }
+        self.failures += 1;
+        true
+    }
+    fn connected_for(&mut self, duration: Duration) {
+        // The account socket can live for days. Bound one unstable episode,
+        // rather than exhausting rejoin forever after four unrelated outages.
+        // A handshake alone cannot renew the budget during a rapid flap.
+        if duration >= Duration::from_secs(30) {
+            self.failures = 0;
+        }
+    }
+}
 struct PendingJoin {
     id: String,
     generation: u64,
@@ -15,9 +36,10 @@ struct PendingJoin {
     cancel: Cancellation,
     reply: oneshot::Sender<Result<(), ErrorKind>>,
 }
-struct Resume {
-    session: PeerSession,
-    secret: Zeroizing<String>,
+#[derive(Clone)]
+pub(super) struct Resume {
+    pub(super) session: PeerSession,
+    pub(super) secret: Zeroizing<String>,
 }
 fn deadline(shared: &Shared, millis: u64) -> Moment {
     let now = shared.account.runtime.now();
@@ -258,6 +280,62 @@ async fn retire(socket: &mut Socket, counter: &mut u64) -> Result<(), ErrorKind>
     .await
     .map_err(|_| ErrorKind::Uncertain)?
 }
+pub(super) async fn retire_stopped(
+    shared: &Shared,
+    context: &OperationContext,
+) -> Result<(), ErrorKind> {
+    shared.validate(context)?;
+    let previous = shared
+        .retirement_resume
+        .lock()
+        .map_err(|_| ErrorKind::Uncertain)?
+        .clone()
+        .ok_or(ErrorKind::Uncertain)?;
+    until(shared, context.deadline, &context.cancellation, async {
+        let mut socket = connect(shared, 0).await?;
+        // This cleanup exchange cannot fall back to a fresh hello or process
+        // room events. A matched no_such_session or bye is required evidence.
+        match until(shared, deadline(shared, 3000), &context.cancellation, read(&mut socket)).await {
+            Ok(value) if value["type"].as_str() == Some("welcome") => {},
+            Err(ErrorKind::Deadline) => {},
+            Ok(_) => return Err(ErrorKind::Malformed),
+            Err(error) => return Err(error),
+        }
+        let mut counter = 0;
+        let id = next_id(&mut counter)?;
+        write(&mut socket, json!({"id":id,"type":"hello","hello":{"version":"1.0","resumeid":previous.secret.as_str()}})).await?;
+        let mut value = read(&mut socket).await?;
+        if value["type"].as_str() == Some("welcome") { value = read(&mut socket).await?; }
+        if value["id"].as_str() != Some(&id) { return Err(ErrorKind::WrongScope); }
+        if value["type"].as_str() == Some("error") {
+            if value["error"]["code"].as_str() != Some("no_such_session") {
+                return Err(wire::failure(&value["error"]));
+            }
+        } else {
+            let hello = &value["hello"];
+            if value["type"].as_str() != Some("hello")
+                || !matches!(hello["version"].as_str(), Some("1.0" | "2.0")) {
+                return Err(ErrorKind::Malformed);
+            }
+            if PeerSession::parse(wire::text(&hello["sessionid"], 512)?)? != previous.session
+                || hello.get("userid").is_some_and(|id| id.as_str() != Some(shared.account.user.as_str())) {
+                return Err(ErrorKind::WrongScope);
+            }
+            // A resumed hello may rotate its secret before bye fails. Retain
+            // that bounded secret for the next explicit reconciliation only.
+            if let Some(secret) = hello.get("resumeid") {
+                *shared.retirement_resume.lock().map_err(|_| ErrorKind::Uncertain)? = Some(Resume {
+                    session: previous.session,
+                    secret: Zeroizing::new(wire::text(secret, 2048)?.into()),
+                });
+            }
+            retire(&mut socket, &mut counter).await?;
+        }
+        shared.invalidate_room(false);
+        *shared.retirement_resume.lock().map_err(|_| ErrorKind::Uncertain)? = None;
+        Ok(())
+    }).await
+}
 enum End {
     Retired,
     Reconnect(ErrorKind),
@@ -408,7 +486,7 @@ async fn connected(
                                 if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
-                                if matches!(signal, Some(Signal::SendOffer)) && stream == StreamKind::Screen {
+                                if matches!(signal, Some(Signal::SendOffer)) && room.purpose == RoomPurpose::Call {
                                     let Some(member) = room.members.iter().find(|m| m.talk == peer && m.talk != room.own) else {
                                         let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
                                     };
@@ -510,21 +588,20 @@ async fn connected(
 pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Command>) {
     let mut resume = None;
     let mut counter = 0u64;
-    let mut failures = 0usize;
+    let mut retries = RetryBudget::default();
     let terminal = loop {
         if !shared.live() {
             break ErrorKind::Cancelled;
         }
-        let result = connect(&shared, failures).await;
+        let result = connect(&shared, retries.failures).await;
         let mut socket = match result {
             Ok(socket) => socket,
-            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if failures < 4 => {
+            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if retries.interrupted() => {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 let _ = shared.interrupt();
-                let wait = Duration::from_millis(250u64 << failures);
+                let wait = Duration::from_millis(250u64 << retries.failures);
                 if until(
                     &shared,
                     deadline(&shared, wait.as_millis() as u64 + 100),
@@ -546,11 +623,11 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
         if let Err(error) = authenticate(&shared, &mut socket, &mut resume, &mut counter).await {
             #[cfg(feature = "backend-test")]
             eprintln!("HPB authentication stopped: {error:?}");
-            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && failures < 4 {
+            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && retries.interrupted()
+            {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -562,7 +639,10 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             let _ = retire(&mut socket, &mut counter).await;
             break error;
         }
-        match connected(&shared, &mut socket, &mut commands, &mut counter).await {
+        let connected_at = Instant::now();
+        let outcome = connected(&shared, &mut socket, &mut commands, &mut counter).await;
+        retries.connected_for(connected_at.elapsed());
+        match outcome {
             End::Retired => {
                 match retire(&mut socket, &mut counter).await {
                     Ok(()) => {
@@ -579,13 +659,12 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
                     Err(_) => break ErrorKind::Uncertain,
                 }
             }
-            End::Reconnect(error) if failures < 4 => {
+            End::Reconnect(error) if retries.interrupted() => {
                 #[cfg(feature = "backend-test")]
                 eprintln!("HPB transport interrupted: {error:?}");
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -603,10 +682,45 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
     };
     #[cfg(feature = "backend-test")]
     eprintln!("HPB session stopped: {terminal:?}");
+    if matches!(
+        terminal,
+        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::Uncertain
+    ) && let Ok(mut retained) = shared.retirement_resume.lock()
+    {
+        *retained = resume;
+    }
     // Terminal policy/auth errors take precedence as the current state; the
     // session-scoped first transport failure remains a separate safe diagnostic.
     shared.status(LiveState::Stopped(terminal));
     while let Ok(command) = commands.try_recv() {
         command.reject(terminal);
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn separate_healthy_episodes_do_not_exhaust_a_long_lived_account() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..100 {
+            assert!(budget.interrupted());
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_secs(30));
+        }
+        assert!(budget.interrupted());
+    }
+
+    #[test]
+    fn handshakes_and_short_flaps_cannot_renew_the_bounded_retry_window() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..4 {
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_millis(29_999));
+        }
+        assert!(!budget.interrupted());
+        assert!(!budget.interrupted());
+        assert_eq!(budget.failures, 4);
     }
 }

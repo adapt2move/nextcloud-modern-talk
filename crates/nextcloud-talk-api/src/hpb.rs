@@ -41,6 +41,7 @@ struct Shared {
     account: AccountBinding,
     stop: Cancellation,
     settings: Mutex<ExternalSettings>,
+    retirement_resume: Mutex<Option<session::Resume>>,
     state: Mutex<State>,
 }
 struct State {
@@ -294,6 +295,7 @@ impl Owner {
             account,
             stop: Cancellation::default(),
             settings: Mutex::new(settings),
+            retirement_resume: Mutex::new(None),
             state: Mutex::new(State {
                 status: LiveState::Connecting,
                 first_transport_failure: None,
@@ -319,6 +321,14 @@ impl Owner {
             .state
             .lock()
             .map_or(true, |s| s.room.is_some())
+    }
+    fn transport_stopped(&self) -> bool {
+        self.handle.shared.state.lock().is_ok_and(|state| {
+            matches!(
+                state.status,
+                LiveState::Stopped(ErrorKind::Transport | ErrorKind::Deadline)
+            )
+        })
     }
     fn poll(&self, context: &OperationContext) -> Result<LiveEventBatch, Error> {
         let shared = &self.handle.shared;
@@ -859,6 +869,55 @@ async fn until<T>(
 }
 
 impl Client {
+    /// An explicit call retry may reconcile a stopped HPB session. This resumes
+    /// only to obtain definitive retirement; it never rejoins a room or media.
+    pub async fn retire_stopped_external_meeting(
+        &mut self,
+        context: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<(), Error> {
+        self.validate(context)?;
+        let Some(owner) = &self.hpb else {
+            return Ok(());
+        };
+        let shared = &owner.handle.shared;
+        let pending = {
+            let state = shared
+                .state
+                .lock()
+                .map_err(|_| self.error(ErrorKind::Uncertain))?;
+            state
+                .room
+                .as_ref()
+                .is_some_and(|old| old.purpose == RoomPurpose::Call && old.token == *room)
+                && matches!(
+                    state.status,
+                    LiveState::Stopped(
+                        ErrorKind::Transport | ErrorKind::Deadline | ErrorKind::Uncertain
+                    )
+                )
+        };
+        if pending {
+            let own = self.own_room_session(context, room)?;
+            if !shared
+                .state
+                .lock()
+                .map_err(|_| self.error(ErrorKind::Uncertain))?
+                .room
+                .as_ref()
+                .is_some_and(|old| old.own == own)
+            {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            session::retire_stopped(shared, context)
+                .await
+                .map_err(|kind| self.error(kind))?;
+            self.cancel_prepared_external_meeting();
+            self.hpb = None;
+        }
+        Ok(())
+    }
+
     pub fn cancel_prepared_external_meeting(&mut self) {
         if let Some(route) = self.hpb_route.take() {
             route.close();
@@ -944,8 +1003,18 @@ impl Client {
         if settings.mode != SignalingMode::External {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        self.configure_hpb(context, settings)?;
         let own = self.own_room_session(context, room)?;
+        if self.hpb.as_ref().is_some_and(Owner::transport_stopped) {
+            // Only fresh, validated room/call admission renews an exhausted
+            // transport owner. Routine event polling cannot restore a stopped
+            // session, and old route handles remain irreversibly closed.
+            if self.hpb.as_ref().is_some_and(Owner::retirement_pending) {
+                return Err(self.error(ErrorKind::Uncertain));
+            }
+            self.cancel_prepared_external_meeting();
+            self.hpb = None;
+        }
+        self.configure_hpb(context, settings)?;
         let handle = self
             .hpb
             .as_ref()

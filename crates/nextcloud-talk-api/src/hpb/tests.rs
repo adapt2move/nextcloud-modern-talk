@@ -10,6 +10,243 @@ use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
+#[tokio::test]
+async fn explicit_call_admission_replaces_exhausted_transport_without_reviving_old_routes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/signal/", listener.local_addr().unwrap());
+    let (done, wait) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut cleanup = accept(&listener).await;
+        hello(&mut cleanup, true).await;
+        let bye = receive(&mut cleanup).await;
+        assert_eq!(bye["type"], "bye");
+        send(&mut cleanup, json!({"id":bye["id"],"type":"bye","bye":{}})).await;
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, false).await;
+        join(&mut socket).await;
+        let _ = wait.await;
+    });
+    let (mut client, binding, runtime) = account();
+    let external = settings(&endpoint);
+    let old = Arc::new(state(binding));
+    *old.settings.lock().unwrap() = external.clone();
+    *old.retirement_resume.lock().unwrap() = Some(session::Resume {
+        session: peer("hpb-own"),
+        secret: Zeroizing::new("opaque-resume-secret".into()),
+    });
+    old.status(LiveState::Stopped(ErrorKind::Transport));
+    let (commands, receive) = mpsc::channel(1);
+    drop(receive); // The exhausted socket task has completed.
+    let handle = Handle {
+        shared: old.clone(),
+        commands,
+    };
+    let old_route = Route {
+        handle: handle.clone(),
+        generation: 1,
+        cancellation: old
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .cancellation
+            .clone(),
+        replaced: Arc::new(AtomicBool::new(false)),
+    };
+    client.hpb = Some(Owner { handle });
+    client.hpb_route = Some(old_route.clone());
+    client.active_room = Some(room());
+    client.room_session = Some(Zeroizing::new("talk-own".into()));
+    let model = SignalingSettings {
+        mode: SignalingMode::External,
+        external: Some(external),
+        ice_servers: Vec::new(),
+    };
+    let ctx = context(&runtime, &old);
+    client.configure_hpb(&ctx, &model).unwrap();
+    assert!(Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    let cancelled = context(&runtime, &old);
+    cancelled.cancellation.cancel();
+    assert_eq!(
+        client
+            .prepare_external_meeting(&cancelled, &room(), &model)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Cancelled
+    );
+    assert!(Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    assert_eq!(
+        client
+            .prepare_external_meeting(&ctx, &room(), &model)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Uncertain
+    );
+    assert_eq!(
+        client
+            .retire_stopped_external_meeting(&cancelled, &room())
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Cancelled
+    );
+    assert!(old.retirement_resume.lock().unwrap().is_some());
+    client
+        .retire_stopped_external_meeting(&ctx, &room())
+        .await
+        .unwrap();
+    assert!(client.hpb.is_none());
+    assert!(old.state.lock().unwrap().room.is_none());
+    assert!(old.retirement_resume.lock().unwrap().is_none());
+    client
+        .prepare_external_meeting(&ctx, &room(), &model)
+        .await
+        .unwrap();
+    assert!(!Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    assert!(old_route.is_closed());
+    assert!(old.stop.is_cancelled());
+    assert!(
+        client
+            .hpb_route
+            .as_ref()
+            .unwrap()
+            .matches(&room(), &peer("talk-own"))
+    );
+    done.send(()).unwrap();
+    server.await.unwrap();
+}
+
+#[test]
+fn fresh_call_transport_retry_does_not_reinterpret_auth_or_policy_rejection() {
+    let (_client, binding, _) = account();
+    let shared = Arc::new(state(binding));
+    let (commands, _receive) = mpsc::channel(1);
+    let owner = Owner {
+        handle: Handle {
+            shared: shared.clone(),
+            commands,
+        },
+    };
+    for error in [
+        ErrorKind::ReauthenticationRequired,
+        ErrorKind::PermissionDenied,
+        ErrorKind::WrongScope,
+        ErrorKind::Unsupported,
+        ErrorKind::Cancelled,
+    ] {
+        shared.status(LiveState::Stopped(error));
+        assert!(!owner.transport_stopped());
+    }
+    for error in [ErrorKind::Transport, ErrorKind::Deadline] {
+        shared.status(LiveState::Stopped(error));
+        assert!(owner.transport_stopped());
+    }
+}
+
+#[tokio::test]
+async fn retirement_requires_matched_absence_or_bye_and_retains_rotated_resume_on_failure() {
+    for outcome in [
+        "absent",
+        "wrong-correlation",
+        "wrong-session",
+        "unconfirmed-bye",
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/signal/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut socket = accept(&listener).await;
+            send(
+                &mut socket,
+                json!({"type":"welcome","welcome":{"features":[]}}),
+            )
+            .await;
+            let request = receive(&mut socket).await;
+            assert_eq!(request["type"], "hello");
+            assert_eq!(request["hello"]["resumeid"], "old-resume");
+            assert!(request["hello"].get("auth").is_none());
+            match outcome {
+                "absent" | "wrong-correlation" => {
+                    let id = if outcome == "absent" {
+                        request["id"].clone()
+                    } else {
+                        json!("wrong")
+                    };
+                    send(
+                        &mut socket,
+                        json!({"id":id,"type":"error","error":{"code":"no_such_session"}}),
+                    )
+                    .await;
+                }
+                _ => {
+                    let session = if outcome == "wrong-session" {
+                        "other-session"
+                    } else {
+                        "hpb-own"
+                    };
+                    send(&mut socket, json!({"id":request["id"],"type":"hello","hello":{"version":"1.0","sessionid":session,"resumeid":"rotated-resume"}})).await;
+                    if outcome == "unconfirmed-bye" {
+                        let bye = receive(&mut socket).await;
+                        assert_eq!(bye["type"], "bye");
+                        send(&mut socket, json!({"id":"wrong","type":"bye","bye":{}})).await;
+                        // Closing the socket is not definitive session retirement.
+                    }
+                }
+            }
+        });
+        let (_client, binding, runtime) = account();
+        let shared = state(binding);
+        *shared.settings.lock().unwrap() = settings(&endpoint);
+        *shared.retirement_resume.lock().unwrap() = Some(session::Resume {
+            session: peer("hpb-own"),
+            secret: Zeroizing::new("old-resume".into()),
+        });
+        shared.status(LiveState::Stopped(ErrorKind::Transport));
+        let result = session::retire_stopped(&shared, &context(&runtime, &shared)).await;
+        server.await.unwrap();
+        if outcome == "absent" {
+            assert_eq!(result, Ok(()));
+            assert!(shared.state.lock().unwrap().room.is_none());
+            assert!(shared.retirement_resume.lock().unwrap().is_none());
+        } else {
+            assert!(result.is_err());
+            assert!(shared.state.lock().unwrap().room.is_some());
+            assert!(
+                shared
+                    .state
+                    .lock()
+                    .unwrap()
+                    .room
+                    .as_ref()
+                    .unwrap()
+                    .cancellation
+                    .is_cancelled()
+            );
+            let retained = shared.retirement_resume.lock().unwrap();
+            assert_eq!(
+                retained.as_ref().unwrap().secret.as_str(),
+                if outcome == "unconfirmed-bye" {
+                    "rotated-resume"
+                } else {
+                    "old-resume"
+                }
+            );
+        }
+    }
+}
+
 type ServerSocket = WebSocketStream<TcpStream>;
 fn settings(server: &str) -> ExternalSettings {
     ExternalSettings::decode(&json!({
@@ -60,6 +297,7 @@ fn state(binding: AccountBinding) -> Shared {
         account: binding,
         stop: Cancellation::default(),
         settings: Mutex::new(settings("https://hpb.invalid")),
+        retirement_resume: Mutex::new(None),
         state: Mutex::new(State {
             status: LiveState::Connected,
             first_transport_failure: None,
@@ -509,6 +747,16 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
             force_mute["message"]["data"]["payload"]["peerId"],
             "hpb-other"
         );
+        for stream in ["video", "screen"] {
+            let publication = receive(&mut socket).await;
+            assert_eq!(
+                publication["message"]["recipient"]["sessionid"],
+                "hpb-other"
+            );
+            assert_eq!(publication["message"]["data"]["type"], "sendoffer");
+            assert_eq!(publication["message"]["data"]["roomType"], stream);
+            assert!(publication["message"]["data"].get("sid").is_none());
+        }
         let bye = receive(&mut socket).await;
         assert_eq!(bye["type"], "bye");
         send(&mut socket, json!({"id":bye["id"],"type":"bye","bye":{}})).await;
@@ -582,11 +830,49 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
         )
         .await
         .unwrap();
+    for stream in [StreamKind::Camera, StreamKind::Screen] {
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("talk-other"),
+                None,
+                Some(Signal::SendOffer),
+                stream,
+            )
+            .await
+            .unwrap();
+    }
+    // Rejected media mutations retire the route, so test membership rejection
+    // only after both valid publications have reached the socket.
+    assert_eq!(
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("unknown"),
+                None,
+                Some(Signal::SendOffer),
+                StreamKind::Camera,
+            )
+            .await,
+        Err(ErrorKind::WrongScope)
+    );
     route.close();
     assert!(route.is_closed());
     server.await.unwrap();
     wait_for(&handle.shared, |s| s.room.is_none()).await;
     assert!(!owner.retirement_pending());
+    assert_eq!(
+        route
+            .send_stream(
+                &context(&runtime, &handle.shared),
+                &peer("talk-other"),
+                None,
+                Some(Signal::SendOffer),
+                StreamKind::Camera,
+            )
+            .await,
+        Err(ErrorKind::Cancelled)
+    );
     assert!(matches!(
         route.poll(&context(&runtime, &handle.shared)).await,
         Err(ErrorKind::Cancelled)

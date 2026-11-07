@@ -2055,9 +2055,10 @@ impl Desktop {
                 {
                     self.overlay = None;
                     self.return_focus = None;
-                    self.highlighted_message = Some((context, id));
-                    self.highlight_started = Some(Instant::now());
-                    self.message_ui.list.scroll_to_reveal_item(index);
+                    // Search and shared-item jumps need the same measured header
+                    // clearance as pins and context loads. GPUI's generic reveal
+                    // only knows the full list viewport beneath the overlay.
+                    self.locate_message_smooth(context, id);
                     self.navigation.locate_message(index, window);
                 }
             }
@@ -2441,7 +2442,10 @@ impl Desktop {
                     self.release_unread_hold(context);
                     self.retire_emoji_picker();
                     self.navigation_open = false;
-                    if self.destination == SidebarDestination::Inbox {
+                    if matches!(
+                        self.destination,
+                        SidebarDestination::Inbox | SidebarDestination::Threads
+                    ) {
                         self.destination = SidebarDestination::Conversations;
                     }
                     if self.overlay == Some(Overlay::Search) {

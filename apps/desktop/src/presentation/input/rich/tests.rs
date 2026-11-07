@@ -23,6 +23,36 @@ fn type_text(doc: Document, text: &str) -> Document {
 }
 
 #[test]
+fn autocomplete_mentions_keep_intraword_underscores_on_the_wire() {
+    for token in ["@lab_bob ", "@lab__bob ", "@\"guest/lab_bob\" "] {
+        let next = replacement(
+            &state("@lab", 4..4),
+            None,
+            Some(0..4),
+            Insertion::Literal(token),
+            MAX_BYTES,
+            true,
+        )
+        .unwrap();
+        assert_eq!(next.state.value(), token);
+        let restored = load(next.state.value());
+        assert_eq!(restored.text.as_ref(), token);
+        assert!(restored.spans.iter().all(|span| !span.style.italic));
+    }
+    let literal = load("")
+        .replace(0..0, "_literal_", false, MAX_BYTES)
+        .unwrap()
+        .0;
+    assert_eq!(load(&literal.wire).text.as_ref(), "_literal_");
+    assert!(
+        load(&literal.wire)
+            .spans
+            .iter()
+            .all(|span| !span.style.italic)
+    );
+}
+
+#[test]
 fn imports_emphasis_blocks_links_and_keeps_unsupported_content_inert() {
     let doc = load(concat!(
         "# Heading\n- **Ä🧭** and *文*\n> ~~old~~ [site](https:",

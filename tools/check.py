@@ -39,6 +39,7 @@ def main(argv=None):
                 "tools/check_architecture_tests.py",
                 "tools/media/test_recovery_checks.py",
                 "tools/media/test_signaling_metadata.py",
+                "tools/media/test_ice_settings.py",
                 "tools/ci/workflow_policy_tests.py",
                 "tools/ci/test_prepare_gstreamer.py",
                 "tools/ci/test_macos_signing.py",

@@ -784,23 +784,18 @@ impl MeetingWriter {
             .retain(|p| &p.peer != peer || p.stream != stream);
         self.request_stream_offer(context, peer, stream).await
     }
-    pub async fn send_screen_offer(
+    pub async fn send_stream_offer(
         &mut self,
         context: &OperationContext,
         peer: &PeerSession,
+        stream: StreamKind,
     ) -> Result<(), Error> {
         let context = self.binding.context(context)?;
         self.binding
             .hpb
             .as_ref()
             .ok_or_else(|| self.binding.error(ErrorKind::Unsupported))?
-            .send_stream(
-                &context,
-                peer,
-                None,
-                Some(Signal::SendOffer),
-                StreamKind::Screen,
-            )
+            .send_stream(&context, peer, None, Some(Signal::SendOffer), stream)
             .await
             .map_err(|e| self.binding.error(e))
     }
