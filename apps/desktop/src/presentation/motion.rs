@@ -6,7 +6,7 @@ mod reveal;
 
 const REVEAL: Duration = Duration::from_millis(140);
 const CONTROL: Duration = Duration::from_millis(110);
-const DIALOG: Duration = Duration::from_millis(180);
+const DIALOG: Duration = REVEAL;
 const DIALOG_SURFACES: usize = 20;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
