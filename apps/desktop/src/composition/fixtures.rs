@@ -130,6 +130,7 @@ pub const SCENARIOS: &[&str] = &[
     "gate-mic",
     "gate-camera",
     "gate-recording",
+    "gate-recording-direct",
     "gate-lobby",
     "connecting",
     "reconnecting",
@@ -819,6 +820,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "gate-mic"
             | "gate-camera"
             | "gate-recording"
+            | "gate-recording-direct"
             | "gate-lobby"
             | "connecting"
             | "reconnecting"
@@ -842,7 +844,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-active"
             | "call-requested"
     ) {
-        let direct = matches!(scenario, "incoming" | "outgoing" | "direct-call");
+        let direct = matches!(
+            scenario,
+            "incoming" | "outgoing" | "direct-call" | "gate-recording-direct"
+        );
         let id = if direct {
             3
         } else if matches!(scenario, "voice" | "call-dock") {
@@ -866,7 +871,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
                 "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
                 "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
-                "gate-recording" => CallStage::Required(RequiredGate::RecordingConsent),
+                "gate-recording" | "gate-recording-direct" => {
+                    CallStage::Required(RequiredGate::RecordingConsent)
+                }
                 "gate-lobby" => CallStage::Required(RequiredGate::Lobby),
                 "connecting" => CallStage::Connecting,
                 "reconnecting" => CallStage::Reconnecting,
@@ -1292,6 +1299,7 @@ pub struct DevelopmentPort {
     intents: u8,
     chat_ux_send_diagnostics: u8,
     hand_diagnostics: u8,
+    consent_diagnostics: u8,
     busy_read_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
@@ -1363,6 +1371,7 @@ impl DevelopmentPort {
             intents: 0,
             chat_ux_send_diagnostics: 0,
             hand_diagnostics: 0,
+            consent_diagnostics: 0,
             busy_read_diagnostics: 0,
         }
     }
@@ -1438,6 +1447,18 @@ impl NativeDesktopPort for DevelopmentPort {
             self.hand_diagnostics += 1;
             println!(
                 "UI_INTENT hand room={} raised={raised}",
+                call.conversation.local
+            );
+        }
+        if self.consent_diagnostics < 4
+            && let UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } = &intent
+        {
+            self.consent_diagnostics += 1;
+            println!(
+                "UI_INTENT recording-consent room={}",
                 call.conversation.local
             );
         }
@@ -2077,6 +2098,22 @@ impl NativeDesktopPort for DevelopmentPort {
                     target,
                     outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
                 });
+            }
+            UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.stage == CallStage::Required(RequiredGate::RecordingConsent)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                // A fixture may advance to connecting; it never grants media.
+                view.stage = CallStage::Connecting;
             }
             UiIntent::SetCallHand { call, raised } => {
                 let view = self

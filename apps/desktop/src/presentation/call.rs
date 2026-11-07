@@ -1,3 +1,4 @@
+pub(super) mod consent;
 mod dock;
 use super::controls::Availability;
 use super::{ButtonStyle, Desktop, LocalAction, Overlay};
@@ -330,16 +331,20 @@ impl Desktop {
                     .child(self.button(
                         "required-gate",
                         if gate == RequiredGate::RecordingConsent {
-                            "Aufzeichnung zustimmen"
+                            "Zustimmung prüfen"
                         } else {
                             "Freigabe prüfen"
                         },
                         ButtonStyle::Secondary,
                         gate == RequiredGate::RecordingConsent,
-                        LocalAction::Intent(UiIntent::ResolveRequiredGate {
-                            call: call.scope,
-                            gate,
-                        }),
+                        if gate == RequiredGate::RecordingConsent {
+                            LocalAction::Open(Overlay::RecordingConsent)
+                        } else {
+                            LocalAction::Intent(UiIntent::ResolveRequiredGate {
+                                call: call.scope,
+                                gate,
+                            })
+                        },
                         cx,
                     )),
             );

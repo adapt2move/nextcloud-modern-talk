@@ -59,6 +59,7 @@ pub enum Overlay {
     CallChat,
     ConfirmEndCall,
     ConfirmRecording,
+    RecordingConsent,
     Search,
     Create,
     Discover,
@@ -106,6 +107,9 @@ pub enum LocalAction {
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
+    ToggleRecordingConsent(CallScope),
+    ConfirmRecordingConsent(CallScope),
+    DeclineRecordingConsent(CallScope),
     MinimizeCall(CallScope),
     ExpandCall(CallScope),
     ToggleCallFullscreen(CallScope),
@@ -313,6 +317,7 @@ pub struct Desktop {
     call_speaker: Option<CallScope>,
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
+    recording_consent: call::consent::State,
     fixture_call_reaction: Option<(CallScope, u64)>,
     recent_call_reaction: Option<(
         CallScope,
@@ -390,6 +395,10 @@ impl Desktop {
             valid_snapshot(&snapshot),
             "composition supplied inconsistent initial projection"
         );
+        let consent_scope = call::consent::scope(&snapshot);
+        let mut recording_consent = call::consent::State::default();
+        recording_consent.observe(consent_scope);
+        let initial_overlay = initial_overlay.or(consent_scope.map(|_| Overlay::RecordingConsent));
         let startup_account_dialog = initial_overlay.is_none()
             && snapshot.accounts.as_slice().is_empty()
             && !snapshot.saved_accounts.as_slice().is_empty();
@@ -594,6 +603,7 @@ impl Desktop {
             call_speaker,
             call_minimized,
             call_started,
+            recording_consent,
             recent_call_reaction,
             fixture_call_reaction,
             onboarding_open: onboarding,
@@ -806,6 +816,18 @@ impl Desktop {
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
+        let consent_scope = call::consent::scope(&next);
+        if self.recording_consent.observe(consent_scope) {
+            if let Some(scope) = consent_scope {
+                if self.overlay.is_none() && self.call_minimized != Some(scope) {
+                    self.overlay = Some(Overlay::RecordingConsent);
+                    self.pending_modal_focus = true;
+                }
+            } else if self.overlay == Some(Overlay::RecordingConsent) {
+                self.overlay = None;
+                self.pending_modal_focus = true;
+            }
+        }
         let live_scope = next
             .call
             .as_ref()
@@ -1226,6 +1248,12 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                if overlay == Overlay::RecordingConsent {
+                    if call::consent::scope(&self.snapshot).is_none() {
+                        return;
+                    }
+                    self.recording_consent.reset();
+                }
                 if overlay == Overlay::ConfirmEndCall
                     && self.snapshot.call.as_ref().is_none_or(|call| {
                         !call.can_end_everyone
@@ -1543,6 +1571,37 @@ impl Desktop {
                     }
                 }
             }
+            LocalAction::ToggleRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                {
+                    self.recording_consent.toggle(scope);
+                }
+            }
+            LocalAction::ConfirmRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.recording_consent.selected(scope)
+                    && self.submit(UiIntent::ResolveRequiredGate {
+                        call: scope,
+                        gate: talk_core::ui::presentation::RequiredGate::RecordingConsent,
+                    })
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DeclineRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.submit(UiIntent::Legacy(UserIntent::Leave(scope)))
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
             LocalAction::ToggleCallChat => {
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
@@ -1564,6 +1623,9 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.overlay == Some(Overlay::RecordingConsent) {
+                    self.recording_consent.reset();
+                }
                 if self.call_reactions_open.take().is_some() {
                     if let Some(focus) = self.control_focus.current(&"call-reactions".into()) {
                         focus.focus(window);

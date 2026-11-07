@@ -39,6 +39,7 @@ impl Desktop {
             Overlay::CallChat => ("Chat im Anruf", 440.),
             Overlay::ConfirmEndCall => ("Anruf für alle beenden?", 440.),
             Overlay::ConfirmRecording => ("Aufzeichnung starten?", 440.),
+            Overlay::RecordingConsent => ("Aufzeichnung im Anruf", 440.),
             Overlay::Search => ("Suchen", 700.),
             Overlay::Create => ("Neues Gespräch", 716.),
             Overlay::Discover => ("Offene Gespräche", 760.),
@@ -168,6 +169,20 @@ impl Desktop {
                 .child(div().flex().flex_wrap().gap_3()
                     .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Secondary, true, LocalAction::Close, cx))
                     .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
+            Overlay::RecordingConsent => {
+                let mut body = div().flex().flex_col().gap_4()
+                    .child(self.hint(self.l("In diesem Anruf können Audio und Video auf dem Server aufgezeichnet werden. Ohne Zustimmung kannst du nicht beitreten.")));
+                if let Some(call) = self.snapshot.call.as_ref().filter(|call| call.stage == talk_core::ui::presentation::CallStage::Required(talk_core::ui::presentation::RequiredGate::RecordingConsent)) {
+                    let selected = self.recording_consent.selected(call.scope);
+                    body = body.child(div().flex().items_center().gap_3()
+                        .child(self.switch("recording-consent-switch", "Ich stimme einer möglichen Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
+                        .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer möglichen Aufzeichnung zu."))))
+                        .child(div().flex().flex_wrap().gap_3()
+                            .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Secondary, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
+                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
+                }
+                body
+            }
             Overlay::ConfirmEndCall => div().flex().flex_col().gap_4()
                 .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
                 .child(div().flex().flex_wrap().gap_3()
@@ -214,6 +229,7 @@ impl Desktop {
                         // content can still scroll at larger text scales.
                         .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
                         .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
+                        .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(330.)))
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
@@ -254,7 +270,9 @@ impl Desktop {
                                         .when(
                                             matches!(
                                                 overlay,
-                                                Overlay::ConfirmRecording | Overlay::ConfirmEndCall
+                                                Overlay::ConfirmRecording
+                                                    | Overlay::ConfirmEndCall
+                                                    | Overlay::RecordingConsent
                                             ),
                                             |title| title.line_height(self.sp(30.)),
                                         )

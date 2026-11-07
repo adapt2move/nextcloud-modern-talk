@@ -28,6 +28,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "La grabación ha fallado. Pide a la persona moderadora que la compruebe.",
     ),
     (
+        "Aufzeichnung im Anruf",
+        "Recording in this call",
+        "Grabación de esta llamada",
+    ),
+    (
         "Aufzeichnung läuft",
         "Recording in progress",
         "Grabación en curso",
@@ -66,6 +71,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Aufzeichnungsstatus unbekannt",
         "Recording status unknown",
         "Estado de grabación desconocido",
+    ),
+    (
+        "Bestätige zuerst die Zustimmung.",
+        "Select your consent first.",
+        "Selecciona primero tu consentimiento.",
     ),
     (
         "Bis zur Annahme bleiben Mikrofon und Kamera aus. Die Geräte werden erst nach Freigabe aktiviert.",
@@ -109,6 +119,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("Hand senken", "Lower hand", "Bajar la mano"),
     ("Hand senken (H)", "Lower hand (H)", "Bajar la mano (H)"),
     (
+        "Ich stimme einer möglichen Aufzeichnung zu.",
+        "I agree that this call may be recorded.",
+        "Acepto que esta llamada pueda grabarse.",
+    ),
+    (
+        "In diesem Anruf können Audio und Video auf dem Server aufgezeichnet werden. Ohne Zustimmung kannst du nicht beitreten.",
+        "This call’s audio and video may be recorded on the server. You cannot join without consent.",
+        "El audio y el vídeo de esta llamada pueden grabarse en el servidor. No puedes unirte sin dar tu consentimiento.",
+    ),
+    (
         "Kamera ausschalten (V)",
         "Turn camera off (V)",
         "Apagar cámara (V)",
@@ -150,6 +170,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Start video call",
         "Iniciar videollamada",
     ),
+    ("Nicht beitreten", "Do not join", "No unirse"),
     ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),
     (
         "Person hervorheben",
@@ -201,6 +222,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Vollbild umschalten",
         "Toggle fullscreen",
         "Alternar pantalla completa",
+    ),
+    (
+        "Zustimmen und beitreten",
+        "Agree and join",
+        "Aceptar y unirse",
+    ),
+    (
+        "Zustimmung prüfen",
+        "Review consent",
+        "Revisar consentimiento",
     ),
     (
         "{name} teilt den Bildschirm",
