@@ -1207,6 +1207,23 @@ impl Desktop {
             LocalAction::AccountSearchRooms => self.account_search_room_picker(),
             LocalAction::AccountSearchRoom(room) => self.select_account_search_room(room),
             LocalAction::AccountSearchHit(context, message) => {
+                if Some(context) == self.snapshot.selected
+                    && self.snapshot.search_panel.as_ref().is_some_and(|p| {
+                        p.hits
+                            .as_slice()
+                            .iter()
+                            .any(|hit| hit.context == context && hit.message == message)
+                    })
+                    && self
+                        .snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .any(|row| row.local_id == message)
+                {
+                    self.handle(LocalAction::LocateMessage(context, message), window, cx);
+                    return;
+                }
                 if Some(context.account) == self.snapshot.active_account
                     && self.snapshot.search_panel.as_ref().is_some_and(|p| {
                         p.hits
@@ -2153,6 +2170,13 @@ impl Render for Desktop {
                 i.interactive = self.overlay.is_none() && !incoming;
                 i.text_scale = f32::from(self.scale) / 100.;
             });
+        }
+        for (input, key) in [
+            (&self.account_search_ui.person, "Person suchen …"),
+            (&self.account_search_ui.since, "JJJJ-MM-TT"),
+            (&self.account_search_ui.until, "JJJJ-MM-TT"),
+        ] {
+            input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
         for input in self.account_search_ui.inputs() {
             input.update(cx, |i, _| {

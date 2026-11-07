@@ -479,6 +479,14 @@ impl Desktop {
             body = body.child(self.hint(self.l("Nachrichtensuche benötigt eine Verbindung.")));
             let query = self.search.read(cx).content.trim().to_lowercase();
             if !query.is_empty()
+                && self.account_search_filters(cx).is_ok_and(|filters| {
+                    filters.person.is_none()
+                        && filters.since.is_none()
+                        && filters.until.is_none()
+                        && filters
+                            .conversation
+                            .is_none_or(|room| Some(room) == self.snapshot.selected)
+                })
                 && let Some(context) = self.snapshot.selected
             {
                 let local: Vec<_> = self
@@ -535,7 +543,7 @@ impl Desktop {
                     .is_ok_and(|filters| filters == p.filters)
         }) {
             if panel.state.pending() {
-                body = body.child(self.hint(self.l("Nachrichten werden gesucht …")));
+                body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
             }
             if matches!(panel.state, RemoteState::Failed(..)) {
                 body = body

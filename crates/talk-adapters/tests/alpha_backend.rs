@@ -531,7 +531,45 @@ async fn released_server_messaging_and_room_controls() {
         panic!("account search reply")
     };
     assert!(found.hits.as_slice().iter().any(|hit| hit.message == first));
-    println!("alpha-backend account message search and date/room filters: pass");
+    let ProtocolReply::People(people) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::FindPeople {
+                query: text("lab_bob"),
+            },
+        )
+        .await
+        .expect("directory for sender filter")
+    else {
+        panic!("people")
+    };
+    let bob = people.as_slice().first().expect("synthetic user").id;
+    let person_query = talk_core::protocol::search::Query {
+        term: text("Alpha edited"),
+        conversation: Some(id),
+        person: Some(bob),
+        since: None,
+        until: None,
+        cursor: None,
+    };
+    let ProtocolReply::SearchMessages(filtered) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SearchMessages(person_query),
+        )
+        .await
+        .expect("person-filtered search")
+    else {
+        panic!("search")
+    };
+    assert!(
+        !filtered
+            .hits
+            .as_slice()
+            .iter()
+            .any(|hit| hit.message == first)
+    );
+    println!("alpha-backend account message search and date/room/person filters: pass");
     m(
         &mut client,
         &runtime,

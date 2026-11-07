@@ -13,6 +13,8 @@ mod people_tests;
 mod read_tests;
 #[path = "reconcile_tests.rs"]
 mod reconcile_tests;
+#[path = "search_tests.rs"]
+mod search_tests;
 #[path = "tag_tests.rs"]
 mod tag_tests;
 use serde_json::json;

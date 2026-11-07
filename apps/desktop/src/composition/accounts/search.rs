@@ -169,6 +169,11 @@ impl Accounts {
                     _ => Completion::Failed(UnavailableReason::PolicyUnknown),
                 };
                 if let Some(panel) = &mut self.snapshot.search_panel {
+                    panel.more = append
+                        && self
+                            .account_search
+                            .as_ref()
+                            .is_some_and(|query| query.cursor.is_some());
                     panel.state = match completion {
                         Completion::Failed(reason) => RemoteState::Failed(request, reason),
                         _ => RemoteState::Failed(request, UnavailableReason::PolicyUnknown),
