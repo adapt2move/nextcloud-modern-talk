@@ -15,9 +15,11 @@ def seed(lab, rooms):
     listing=lab.request('lab_alice','GET','/ocs/v2.php/apps/spreed/api/v4/room',name='perf.list')
     keep={room['token'] for room in rooms}
     for room in listing:
-        if room['token'] not in keep:
+        if room['token'] not in keep and room.get('name','').startswith('Native performance room'):
             lab.request('lab_alice','DELETE',f"/ocs/v2.php/apps/spreed/api/v4/room/{room['token']}",expected=(200,404),name='perf.remove-extra')
-    for index in range(198):
+    listing=lab.request('lab_alice','GET','/ocs/v2.php/apps/spreed/api/v4/room',name='perf.count-base')
+    if len(listing)>200: raise RuntimeError('Owned fixture already exceeds the fixed 200-room workload')
+    for index in range(200-len(listing)):
         lab.request('lab_alice','POST','/ocs/v2.php/apps/spreed/api/v4/room',body={'roomType':2,'roomName':f'Native performance room {index:03}'},expected=(201,),name='perf.room')
     token=rooms[0]['token']
     chat=f'/ocs/v2.php/apps/spreed/api/v1/chat/{token}'

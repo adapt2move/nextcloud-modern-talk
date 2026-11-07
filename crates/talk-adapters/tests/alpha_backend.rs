@@ -408,17 +408,8 @@ async fn released_server_messaging_and_room_controls() {
             C::StartBreakouts,
         )
         .await;
-        let bob_scope = AccountScope {
-            account: AccountId::from_local(701),
-            runtime: RuntimeGeneration::from_local(1),
-        };
-        let mut bob = test_support::from_private_fixture(
-            &root.join("bob.json"),
-            bob_scope,
-            HostId::from_local(701),
-            runtime.clone(),
-        )
-        .expect("private synthetic participant fixture");
+        // Reuse the participant's existing runtime registration. A second
+        // client for the same live scope correctly fails with Conflict.
         bob.request(
             context_for(&runtime, bob_scope),
             ProtocolRequest::InspectAccount,

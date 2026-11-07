@@ -14,6 +14,8 @@ import platform
 from pathlib import Path
 import select
 import signal
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -35,6 +37,7 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
     metrics, lines, acknowledgements = [], [], {}
     input_requests={}
     first_frame_colors=None
+    stages=[]
     engine_lines = []
     perf, status, memory = [], [], []
     perf_done=set()
@@ -49,6 +52,7 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
             if text.startswith("DEV_"):
                 with (output/(mode+".trace")).open("a") as trace: trace.write(text+"\n")
                 lines.append(text)
+                if text.startswith("DEV_STAGE "): stages.append({"stage":text.split()[1],"elapsed_us":(time.monotonic_ns()-started)//1000})
                 if text.startswith("DEV_PERF_DONE "): perf_done.add(text.split()[1])
                 if text.startswith("DEV_PERF "):
                     _,work,interval,frame,messages,rooms=text.split()
@@ -65,7 +69,7 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
                     parts=text.split()
                     _, operation, micros, outcome = parts[:4]
                     request=int(parts[4]) if len(parts)>4 else None
-                    metrics.append({"operation": operation, "elapsed_us": int(micros), "request":request, "outcome":outcome,"phase":phase,"action":current_action,
+                    metrics.append({"operation": operation, "elapsed_us": int(micros), "request":request, "before_input":not bool(input_requests), "outcome":outcome,"phase":phase,"action":current_action,
                         "launch_to_observation_us":(time.monotonic_ns()-started)//1000})
     reader = asyncio.create_task(read())
     sequence = 0
@@ -97,18 +101,18 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
     try:
         deadline=time.monotonic()+90
         while time.monotonic()<deadline:
-            found=subprocess.run(["xdotool","search","--name","^Talk$"],text=True,capture_output=True,env=env)
+            found=await asyncio.to_thread(subprocess.run,["xdotool","search","--name","^Talk$"],text=True,capture_output=True,env=env)
             if found.returncode==0 and found.stdout.strip():
                 xid=found.stdout.strip().splitlines()[0]
                 if len(found.stdout.strip().splitlines()) != 1: raise RuntimeError("Ambiguous window on owned display")
-                subprocess.run(["xdotool","windowmap","--sync",xid],check=True,env=env)
-                subprocess.run(["xdotool","windowfocus","--sync",xid],check=True,env=env)
+                await asyncio.to_thread(subprocess.run,["xdotool","windowmap","--sync",xid],check=True,env=env)
+                await asyncio.to_thread(subprocess.run,["xdotool","windowfocus","--sync",xid],check=True,env=env)
                 break
             await asyncio.sleep(.1)
         else: raise RuntimeError("Native window did not map")
         initial_state=await ready()
-        subprocess.run(["import","-window",xid,str(output/(mode+"-initial-native.png"))],check=True,env=env,timeout=10)
-        first_frame_colors=int(subprocess.check_output(["identify","-format","%k",str(output/(mode+"-initial-native.png"))],env=env,text=True))
+        await asyncio.to_thread(subprocess.run,["import","-window",xid,str(output/(mode+"-initial-native.png"))],check=True,env=env,timeout=10)
+        first_frame_colors=int(await asyncio.to_thread(subprocess.check_output,["identify","-format","%k",str(output/(mode+"-initial-native.png"))],env=env,text=True))
         phase="prepare"
         await ready("open0")
         await asyncio.sleep(.5)
@@ -136,7 +140,10 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
                 await asyncio.sleep(.2)
             await asyncio.sleep(1)
         if performance:
-            if int(initial_state[0]) != 200: raise RuntimeError("Native room-list workload was truncated")
+            deadline=time.monotonic()+150
+            while int((await act("state"))[0]) != 200:
+                if time.monotonic()>deadline: raise RuntimeError("Native room-list workload was truncated")
+                await asyncio.sleep(.1)
             for work in ("scroll","switcher","sidebar"):
                 await act("perf-"+work)
                 end=time.monotonic()+600
@@ -173,7 +180,15 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
                 if status and status[-1]['sentinels']==2 and not status[-1]['visible'] and status[-1]['outgoing']==0:
                     recovered=status[-1];break
                 await asyncio.sleep(.1)
-            recovery_result={"offline":offline,"recovered":recovered,"suspend_seconds":61,"resume_to_catchup_us":(time.monotonic_ns()-resumed)//1000,"pass":bool(offline and offline['visible'] and recovered and recovered['canonical']==recovered['unique'])}
+            recovery_us=(time.monotonic_ns()-resumed)//1000
+            # Distinct duplicate server IDs would pass the native ID check.
+            # This independent read also proves the queued send was delivered,
+            # rather than disappearing because its optimistic row was removed.
+            delivered=0
+            for room in rooms:
+                latest=lab.request('lab_alice','GET',f"/ocs/v2.php/apps/spreed/api/v1/chat/{room['token']}",query={'lookIntoFuture':0,'limit':100,'setReadMarker':0},name='native.validate-delivery')
+                delivered+=sum(m.get('message')=='Native latency fixture message' for m in latest)
+            recovery_result={"offline":offline,"recovered":recovered,"server_deliveries":delivered,"suspend_seconds":61,"resume_to_catchup_us":recovery_us,"pass":bool(offline and offline['visible'] and offline['queued'] > 0 and offline['outgoing'] > 0 and recovered and recovered['queued']==0 and recovered['canonical']==recovered['unique'] and delivered==1)}
             subprocess.run(["import","-window",xid,str(output/(mode+"-recovered-native.png"))],check=True,env=env,timeout=10)
             save(output/(mode+"-recovery.json"),recovery_result)
             if not recovery_result['pass']: raise RuntimeError("Native recovery did not validate")
@@ -189,7 +204,7 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
             except ProcessLookupError: pass
             await process.wait()
         await reader
-        save(output / (mode + ".json"), {"mode":mode,"warmup":warm,"metrics":metrics,"trace":lines,"engine_log":engine_lines,"exit_code":process.returncode,"initial_state":initial_state,"first_frame_colors":first_frame_colors,"perf":perf,"memory_kib":memory,"status":status,"recovery":recovery_result})
+        save(output / (mode + ".json"), {"mode":mode,"warmup":warm,"stages":stages,"metrics":metrics,"trace":lines,"engine_log":engine_lines,"exit_code":process.returncode,"initial_state":initial_state,"first_frame_colors":first_frame_colors,"perf":perf,"memory_kib":memory,"status":status,"recovery":recovery_result})
     return metrics
 
 
@@ -219,6 +234,22 @@ async def exercise(args):
             from native_workload import seed
             workload=seed(lab,rooms)
             save(output/"workload.json",{key:value for key,value in workload.items() if key!='files'})
+        def reset_flags():
+            # Preparation is outside the timed child. Every case starts from
+            # known read/favorite state, rather than inheriting an earlier intent.
+            for room in rooms:
+                token=room['token']
+                latest=lab.request('lab_alice','GET',f'/ocs/v2.php/apps/spreed/api/v1/chat/{token}',query={'lookIntoFuture':0,'limit':1,'setReadMarker':0},name='native.prepare-latest')
+                lab.request('lab_alice','POST',f'/ocs/v2.php/apps/spreed/api/v1/chat/{token}/read',body={'lastReadMessage':max(int(m['id']) for m in latest)},name='native.prepare-read')
+                observed=lab.request('lab_alice','GET',f'/ocs/v2.php/apps/spreed/api/v4/room/{token}',name='native.prepare-room')
+                if observed.get('isFavorite'):
+                    lab.request('lab_alice','DELETE',f'/ocs/v2.php/apps/spreed/api/v4/room/{token}/favorite',name='native.prepare-favorite')
+        reset_flags()
+        def queued_records(cached_profile):
+            files=list(cached_profile.glob('data-*.sqlite'))
+            if len(files)!=1: raise RuntimeError('Expected one owned account cache')
+            with sqlite3.connect(files[0].as_uri()+'?mode=ro',uri=True) as db:
+                return db.execute('SELECT count(*) FROM outbox').fetchone()[0]
         fixture=root/"intake.json"
         save(fixture,{"origin":"http://127.0.0.1:47407/","user":"lab_alice","password":lab.passwords['lab_alice']})
         subprocess.run([str(binary),"--dev-seed",str(profile),str(fixture)],check=True,stdout=subprocess.DEVNULL)
@@ -237,21 +268,38 @@ async def exercise(args):
                 env["DISPLAY"]=":"+os.read(read_fd,32).decode().strip()
                 control=root/"fault.mode"
                 async with FaultRelay(urlsplit(lab.base).hostname,47407,control) as relay:
-                    await process_run(binary,profile,env,"warmup",output,warm=True)
-                    for mode in (("healthy",) if args.performance else args.modes):
+                    for mode in ([] if args.recovery_only else (("healthy",) if args.performance else args.modes)):
                         for sample in range(args.samples):
+                            control.write_text('healthy')
+                            reset_flags()
+                            case_profile=root/(mode+f'-{sample}-profile');case_profile.mkdir(mode=0o700)
+                            save(fixture,{"origin":"http://127.0.0.1:47407/","user":"lab_alice","password":lab.passwords['lab_alice']})
+                            subprocess.run([str(binary),"--dev-seed",str(case_profile),str(fixture)],check=True,stdout=subprocess.DEVNULL);fixture.unlink()
+                            for attempt in range(3):
+                                await process_run(binary,case_profile,env,mode+f'-{sample}-warmup-{attempt}',output,warm=True)
+                                await relay.disconnect()
+                                if queued_records(case_profile)==0: break
+                            else: raise RuntimeError('Warm cache still contains unresolved fixture intents')
+                            reset_flags()
                             control.write_text(mode)
-                            await process_run(binary,profile,env,mode+f"-{sample}",output,performance=args.performance)
-                    if args.recovery:
+                            await process_run(binary,case_profile,env,mode+f"-{sample}",output,performance=args.performance)
+                            await relay.disconnect()
+                            await asyncio.sleep(1)
+                    if args.recovery or args.recovery_only:
                         control.write_text("healthy")
                         # Keep the suspend test independent from deliberately
                         # killed latency samples with unresolved dispatch markers.
                         recovery_profile=root/"recovery-profile";recovery_profile.mkdir(mode=0o700)
                         save(fixture,{"origin":"http://127.0.0.1:47407/","user":"lab_alice","password":lab.passwords['lab_alice']})
                         subprocess.run([str(binary),"--dev-seed",str(recovery_profile),str(fixture)],check=True,stdout=subprocess.DEVNULL);fixture.unlink()
-                        await process_run(binary,recovery_profile,env,"recovery-warmup",output,warm=True)
+                        reset_flags()
+                        for attempt in range(3):
+                            await process_run(binary,recovery_profile,env,"recovery-warmup-"+str(attempt),output,warm=True)
+                            await relay.disconnect()
+                            if queued_records(recovery_profile)==0: break
+                        else: raise RuntimeError('Recovery warmup contains unresolved fixture intents')
                         await process_run(binary,recovery_profile,env,"recovery",output,recovery=(relay,control,lab,rooms))
-                    save(output/"manifest.json",{"binary_sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"samples_per_mode":args.samples,"harness_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),"environment":{"os":platform.platform(),"cpu":next((line.split(":",1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')),'unknown'),"toolchain":subprocess.check_output(['rustc','--version'],text=True).strip(),"build":"ordinary release, dev-probes, RUSTFLAGS=-C debug-assertions=yes; no GPUI test-support"},"room_messages":10,"rooms_seeded":2,"renderer":"GPUI X11 / Mesa lavapipe","boundary":"native after-frame callback; startup includes process launch as observed by parent; not physical display presentation","injected":relay.injected})
+                    save(output/"manifest.json",{"binary_sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"samples_per_mode":args.samples,"cache_policy":"each measured process uses its own warmed owner-private cache with zero outgoing records; server read/favorite flags reset before warmup and cold launch","harness_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),"environment":{"os":platform.platform(),"cpu":next((line.split(":",1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')),'unknown'),"toolchain":subprocess.check_output(['rustc','--version'],text=True).strip(),"build":"ordinary release, dev-probes, RUSTFLAGS=-C debug-assertions=yes; no GPUI test-support"},"room_messages":10,"rooms_seeded":2,"renderer":"GPUI X11 / Mesa lavapipe","boundary":"native after-frame callback; startup includes process launch as observed by parent; not physical display presentation","injected":relay.injected})
             finally:
                 os.close(read_fd);xvfb.terminate();xvfb.wait(timeout=5)
                 import shutil
@@ -266,5 +314,6 @@ if __name__=="__main__":
     parser.add_argument('--samples',type=int,choices=range(1,6),default=2)
     parser.add_argument('--performance',action='store_true')
     parser.add_argument('--recovery',action='store_true')
+    parser.add_argument('--recovery-only',action='store_true')
     parser.add_argument('--state',required=True);parser.add_argument('--binary',required=True);parser.add_argument('--output',required=True)
     asyncio.run(asyncio.wait_for(exercise(parser.parse_args()),3600))
