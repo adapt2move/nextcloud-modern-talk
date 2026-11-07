@@ -818,7 +818,7 @@ impl Desktop {
 }
 #[cfg(test)]
 mod tests {
-    use super::{date, search_failure_message, unsupported_search};
+    use super::{date, format_date, search_failure_message, unsupported_search};
     use talk_core::ui::{
         AccountId, AccountScope, Page, RuntimeGeneration, Text, UnavailableReason,
         conversation::RemoteState,
