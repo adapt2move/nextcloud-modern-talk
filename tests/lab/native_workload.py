@@ -8,22 +8,22 @@ import urllib.request
 
 def seed(lab, rooms):
     # NextCloud limits share creation to 20 per 600 seconds. This owned fixture
-    # needs 50 shares, all outside the timed workload. Preserve the full corpus
-    # and restore the exact server setting before any native measurement, also
-    # on preparation failure. Never change a production client or server here.
-    key = 'ratelimit.protection.enabled'
-    previous = lab.occ('config:system:get', key, '--default-value=unset').strip()
-    if previous not in ('unset', 'true', 'false'):
-        raise RuntimeError('Unexpected disposable fixture rate-limit configuration')
-    lab.occ('config:system:set', key, '--type=boolean', '--value=false')
+    # needs 50 shares, all outside the timed workload. The global protection
+    # switch only stops new accounting; existing attempts still cause 429s.
+    # Use the server's action-specific override during seeding, then remove it
+    # and verify restoration before timing, also on preparation failure.
+    key = 'ratelimit_overwrite'
+    previous = lab.occ('config:system:get', key, '--output=json', '--default-value=unset').strip()
+    if json.loads(previous) != 'unset':
+        raise RuntimeError('Disposable fixture already has rate overrides; refusing to replace them')
     try:
+        action = 'files_sharing.shareapi.createshare'
+        lab.occ('config:system:set', key, action, 'user', 'limit', '--type=integer', '--value=1000')
+        lab.occ('config:system:set', key, action, 'user', 'period', '--type=integer', '--value=600')
         workload = _seed(lab, rooms)
     finally:
-        if previous == 'unset':
-            lab.occ('config:system:delete', key)
-        else:
-            lab.occ('config:system:set', key, '--type=boolean', '--value=' + previous)
-        restored = lab.occ('config:system:get', key, '--default-value=unset').strip()
+        lab.occ('config:system:delete', key)
+        restored = lab.occ('config:system:get', key, '--output=json', '--default-value=unset').strip()
         if restored != previous:
             raise RuntimeError('Disposable fixture rate-limit setting was not restored')
     workload['preparation'] = 'Share rate limit suspended only for synthetic seeding; exact prior setting restored and verified before timing'
