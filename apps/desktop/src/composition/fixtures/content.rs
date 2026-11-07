@@ -354,6 +354,42 @@ pub(super) fn action(
             snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
             Ok(())
         }
+        ContentAction::Vote { poll, options } => {
+            let mut polls = snapshot.content_panel.polls.as_slice().to_vec();
+            let current = polls
+                .iter_mut()
+                .find(|entry| entry.id == poll && !entry.closed && entry.vote.enabled())
+                .ok_or(SubmitError::StaleScope)?;
+            current.options = page(
+                current
+                    .options
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut option| {
+                        option.own = options.as_slice().contains(&option.id);
+                        option
+                    }),
+            );
+            snapshot.content_panel.polls = page(polls);
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            println!("UI_POLL_FIXTURE vote poll={poll} no_backend=true");
+            Ok(())
+        }
+        ContentAction::ClosePoll(poll) => {
+            let mut polls = snapshot.content_panel.polls.as_slice().to_vec();
+            let current = polls
+                .iter_mut()
+                .find(|entry| entry.id == poll && !entry.closed && entry.close.enabled())
+                .ok_or(SubmitError::StaleScope)?;
+            current.closed = true;
+            current.vote.allowed = Decision::Denied;
+            current.close.allowed = Decision::Denied;
+            snapshot.content_panel.polls = page(polls);
+            snapshot.content_panel.result = Some((request, Completion::ServerAccepted));
+            println!("UI_POLL_FIXTURE close poll={poll} no_backend=true");
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel

@@ -140,6 +140,18 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+    elif scenario == 'chat-polls':
+        click('Abstimmen')
+        expect('accepted fictional vote stays visible', ['Deine Stimme'])
+        click('beenden')
+        expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])
+        click('Jetzt')
+        expect('confirmed fictional close keeps the poll and disables voting',
+               ['Umfrage beendet', 'Fiktive Umfrage'], ['Umfrage beenden'])
+        log = (out / f'{label}.log').read_text()
+        if log.count('UI_POLL_FIXTURE vote poll=9001 no_backend=true') != 1 or \
+                log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
+            raise AssertionError('Vote or confirmed close did not submit exactly once')
     elif scenario == 'chat-voice':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
