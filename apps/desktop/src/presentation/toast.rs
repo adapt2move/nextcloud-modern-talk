@@ -93,6 +93,9 @@ fn copy(error: MessageActionError) -> &'static str {
         return "Ergebnis unklar. Vor erneutem Ändern neu laden.";
     };
     match reason {
+        UnavailableReason::Connection(
+            talk_core::ui::presentation::ConnectionFailure::AccessDenied,
+        ) => "Server verweigert den Zugriff.",
         UnavailableReason::Connection(failure) => super::state::connection_failure_copy(failure).1,
         UnavailableReason::PermissionDenied => "Keine Berechtigung für diese Aktion.",
         UnavailableReason::ReauthenticationRequired => "Bitte erneut anmelden.",
@@ -289,6 +292,12 @@ mod tests {
                 UnavailableReason::PermissionDenied
             )),
             "Keine Berechtigung für diese Aktion."
+        );
+        assert_eq!(
+            copy(MessageActionError::Failed(UnavailableReason::Connection(
+                talk_core::ui::presentation::ConnectionFailure::AccessDenied,
+            ))),
+            "Server verweigert den Zugriff."
         );
     }
     fn context(room: u128, runtime: u128) -> ConversationRef {
