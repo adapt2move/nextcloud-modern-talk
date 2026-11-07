@@ -33,9 +33,19 @@
       "sha256": "d7f5c595e89d1c9fdee9128a2448f45925675bbcbf0793103d38ee047c279acc"
     },
     {
+      "path": "src/platform/linux/x11/client.rs",
+      "original_sha256": "1ea168b018e764fff2cc427ee12b8633db5a8ef061ce70d85bf1b9b2d598da2f",
+      "sha256": "6436a6ec6860f61365b14111972b7c5ea043b2bf373122d9d20b20d4eb5af323"
+    },
+    {
       "original_sha256": "bf6d02d8075dd24be413e65294dcca36410a6c17b01526c6f62b2cd59336c2ab",
       "path": "src/platform/linux/x11/clipboard.rs",
       "sha256": "fca4eb372ae9e3e43a51eae3bd39bf9b935aa02358789063ccccd516903dbe2a"
+    },
+    {
+      "path": "src/platform/linux/x11/window.rs",
+      "original_sha256": "5fc415607c7b06c004d044ed39c62a89ac3a5fb3a0516c38315f8ce5bd2911fb",
+      "sha256": "846c15a6559bf4cd69985eb2f4431babb637ab24c3923c6d4b60dc09bbd26c7c"
     },
     {
       "original_sha256": "cec6bf0c2fb32124f605a73d57bf11d5aa884c4c09904ee94d34b9ebfab9208b",
