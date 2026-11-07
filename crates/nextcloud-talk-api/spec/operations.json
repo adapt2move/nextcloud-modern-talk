@@ -1,10 +1,10 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
   "counts": {
-    "implemented": 92,
-    "missing": 59,
+    "implemented": 93,
+    "missing": 56,
     "not-client": 23,
-    "partial": 17
+    "partial": 19
   },
   "external_operations": [
     {

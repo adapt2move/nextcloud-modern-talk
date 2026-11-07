@@ -1210,6 +1210,10 @@ mod action_tests {
                 .participants
                 .try_push(talk_core::calls::Participant {
                     local: id,
+                    participant: id,
+                    kind: talk_core::calls::StreamKind::Camera,
+                    dimensions: None,
+                    flowing: false,
                     name: text("Other"),
                     microphone: false,
                     camera: false,
