@@ -282,7 +282,19 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return state;
     }
     if scenario == Some("thread-list") {
-        return snapshot(Some("thread"));
+        let mut state = snapshot(Some("thread"));
+        if let Some(context) = state.selected {
+            state.conversations = page(state.conversations.as_slice().iter().cloned().map(
+                |mut room| {
+                    if room.context == context {
+                        room.unread = 2;
+                        room.last_read_message = Some(1);
+                    }
+                    room
+                },
+            ));
+        }
+        return state;
     }
     if matches!(
         scenario,

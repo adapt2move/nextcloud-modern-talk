@@ -105,6 +105,12 @@ impl Desktop {
                     .top_3()
                     .bottom_3()
                     .w(px(8.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|handle| handle.bg(t.subtle))
+                    .focus(|handle| handle.bg(t.subtle))
+                    .child(div().w(px(2.)).h(px(36.)).rounded_full().bg(t.border))
                     .when_some(resize_focus, |handle, focus| handle.track_focus(&focus))
                     .cursor(gpui::CursorStyle::ResizeLeftRight)
                     .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
