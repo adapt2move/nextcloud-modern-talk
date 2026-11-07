@@ -319,7 +319,14 @@ impl Desktop {
                                 m.initials.as_str(), 36.,
                             ),
                             self.person_member(crate::presentation::people_card::Source::Message(context, m.local_id, false))
-                                .map_or(talk_core::ui::presentation::Presence::Unknown, |member| member.presence),
+                                .map(|member| member.presence)
+                                .or_else(|| m.own.then(|| self.own_presence()))
+                                .or_else(|| self.selected().filter(|row| {
+                                    !m.own && row.context == context
+                                        && row.kind == talk_core::ui::presentation::ConversationKind::Direct
+                                        && row.title == m.author
+                                }).map(|row| row.presence))
+                                .unwrap_or(talk_core::ui::presentation::Presence::Unknown),
                             10., t.surface,
                         ), cx,
                     ).into_any_element()
