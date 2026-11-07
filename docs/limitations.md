@@ -280,7 +280,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - A complete room listing and its eligible durable metadata are bounded to 256
   rooms per account, including order and unread observations. Larger complete
   server listings require a future paged-list contract; they are not silently
-  truncated. Sidebar customization placements remain separately bounded.
+  truncated. Inert call-action identities and avatar cleanup allowlists share
+  this bound; they do not increase active-call or media limits. Sidebar
+  customization placements remain separately bounded.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted

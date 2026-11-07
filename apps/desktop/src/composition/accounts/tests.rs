@@ -2,6 +2,41 @@ use super::*;
 use talk_core::preferences::account::{AccountPreferenceResult, AccountPreferences};
 use talk_core::ui::presentation::ScreenShareState;
 
+#[cfg(feature = "dev-probes")]
+#[test]
+#[ignore = "requires an owned 200-room server and private NMT_FIXTURE_DIR"]
+fn released_server_startup_exposes_two_hundred_rooms() {
+    let directory =
+        std::path::PathBuf::from(std::env::var_os("NMT_FIXTURE_DIR").expect("owned fixture"));
+    let profile = directory.join("composition-profile");
+    talk_adapters::identity::lab::seed_private_lab(&profile, &directory.join("alice.json"))
+        .expect("seed account");
+    let model = Accounts::start_with_config(
+        talk_adapters::media::MediaService::new(),
+        RuntimeConfig::isolated_fixture(profile),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let mut accounts = model.borrow_mut();
+        accounts.tick();
+        if accounts.snapshot.conversations.as_slice().len() == 200 {
+            assert_eq!(
+                accounts.snapshot.conversation_list.content,
+                ContentState::Ready
+            );
+            accounts.shutdown();
+            break;
+        }
+        if Instant::now() >= deadline {
+            let state = accounts.snapshot.conversation_list.content;
+            accounts.shutdown();
+            panic!("complete room list did not reach presentation: {state:?}");
+        }
+        drop(accounts);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn pending_login() -> (Accounts, RequestId, AccountId, LoginAttemptId) {
     let mut model = model();
     let request = RequestId(17);
