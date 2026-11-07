@@ -362,12 +362,19 @@ def exercise(scenario, env, xid, out, label, large=False):
         checks.append({'check': 'thread pane resizes by dragging its left edge', 'result': 'pass'})
         run(['xdotool', 'mousemove', '--window', xid, '802', '400', 'click', '1'], env)
         key('Right')
-        words = expect('thread resize handle accepts keyboard input', ['Design review', '2 Antworten'])
-        keyboard = next(int(word['left']) for word in words
-                        if normalized(word['text']).startswith('design')
-                        and int(word['top']) < 120 and int(word['left']) > 700)
-        if keyboard - after < 20:
-            raise AssertionError('The focused thread resize handle did not respond to Right')
+        # Native compositor delivery can trail the key event under concurrent
+        # software-rendered captures. Require the visible resize within a finite
+        # window, rather than accepting the first still-old framebuffer.
+        deadline = time.monotonic() + 6
+        while True:
+            words = expect('thread resize handle accepts keyboard input', ['Design review', '2 Antworten'])
+            keyboard = next(int(word['left']) for word in words
+                            if normalized(word['text']).startswith('design')
+                            and int(word['top']) < 120 and int(word['left']) > 700)
+            if keyboard - after >= 20:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError('The focused thread resize handle did not respond to Right')
         key('Left')
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
         type_text('THREADDRAFT')
