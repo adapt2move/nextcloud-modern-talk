@@ -233,9 +233,7 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
-        let thread = thread
-            .then_some(self.overlay == Some(Overlay::Thread))
-            .filter(|active| *active)
+        let thread = (thread && self.overlay == Some(Overlay::Thread))
             .then_some(self.thread_parent)
             .flatten()
             .filter(|(parent, _)| *parent == context)

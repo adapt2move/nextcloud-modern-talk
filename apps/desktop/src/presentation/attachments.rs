@@ -75,6 +75,11 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return;
         };
+        if self.drafts.target(context).new_thread
+            || self.drafts.target(context).private_reply.is_some()
+        {
+            return;
+        }
         let (extension, image) = match pasted {
             super::input::PastedContent::None => return,
             super::input::PastedContent::Unsupported => {

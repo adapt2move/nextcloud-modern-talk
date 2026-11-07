@@ -545,6 +545,7 @@ impl Desktop {
         let drop_enabled = self.composer_available()
             && self.overlay.is_none()
             && !self.drafts.target(row.context).new_thread
+            && self.drafts.target(row.context).private_reply.is_none()
             && !self.background_inert
             && self.snapshot.content == ContentState::Ready
             && row.send == Decision::Allowed
