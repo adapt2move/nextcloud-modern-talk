@@ -39,7 +39,8 @@ fn socket_error(error: tungstenite::Error) -> ErrorKind {
         // An abrupt TCP/TLS EOF is transport loss. Other protocol violations
         // still terminate the session and never enter the resume path.
         tungstenite::Error::Protocol(
-            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake
+            | tungstenite::error::ProtocolError::HandshakeIncomplete,
         ) => ErrorKind::Transport,
         tungstenite::Error::Protocol(_) | tungstenite::Error::Utf8(_) => ErrorKind::Malformed,
         _ => ErrorKind::Transport,
@@ -191,7 +192,7 @@ async fn authenticate(
         if value["type"].as_str() == Some("error") {
             if resumed && value["error"]["code"].as_str() == Some("no_such_session") {
                 *resume = None;
-                shared.invalidate_room();
+                shared.invalidate_room(true);
                 continue;
             }
             return Err(wire::failure(&value["error"]));
@@ -352,21 +353,40 @@ async fn connected(
                             let _ = reply.send(result);
                             if let Some(error @ (ErrorKind::Transport | ErrorKind::Deadline)) = failed { return Err(error); }
                         }
-                        Command::Send { generation, peer, sid, signal, deadline: end, cancel, reply } => {
+                        Command::Send { generation, stream, peer, sid, signal, deadline: end, cancel, reply } => {
+                            let stop_screen = matches!(&signal, Some(Signal::StopScreen));
+                            let request_offer = signal.is_none();
+                            let id = next_id(counter)?;
                             let value = {
-                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
-                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                let mut state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &mut state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
                                 if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() {
                                     let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
                                 }
-                                let Some(selected) = room.selected.iter().find(|p| p.talk == peer && p.sid == sid) else {
-                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
-                                };
-                                wire::message(&selected.sfu, sid.as_ref(), signal)
+                                if matches!(signal, Some(Signal::SendOffer)) && stream == StreamKind::Screen {
+                                    let Some(member) = room.members.iter().find(|m| m.talk == peer && m.talk != room.own) else {
+                                        let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                    };
+                                    wire::stream_message(&member.sfu, None, signal, stream)
+                                } else {
+                                    let Some(selected) = room.selected.iter_mut().find(|p| p.talk == peer && p.sid == sid && p.stream == stream) else {
+                                        let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                    };
+                                    if request_offer {
+                                        if room.subscription_requests.len() >= 64 { let _ = reply.send(Err(ErrorKind::Busy)); return Err(ErrorKind::Busy); }
+                                        room.subscription_requests.push(id.clone());
+                                        selected.request_id = Some(id.clone());
+                                    }
+                                    wire::stream_message(&selected.sfu, sid.as_ref(), signal, stream)
+                                }
                             };
                             let mut value = value;
-                            value["id"] = json!(next_id(counter)?);
-                            let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            value["id"] = json!(id);
+                            let mut sent = until(shared, end, &cancel, write(socket, value)).await;
+                            if stop_screen && sent.is_ok() {
+                                let broadcast = json!({"id":next_id(counter)?,"type":"message","message":{"recipient":{"type":"room"},"data":{"type":"unshareScreen","roomType":"screen"}}});
+                                sent = until(shared, end, &cancel, write(socket, broadcast)).await;
+                            }
                             let failed = sent.as_ref().err().copied();
                             let _ = reply.send(sent);
                             if let Some(error) = failed { return Err(error); }
@@ -414,7 +434,16 @@ async fn connected(
                             }
                             continue;
                     }
-                    shared.incoming(&value)?;
+                    if let Err(error) = shared.incoming(&value) {
+                        #[cfg(feature = "backend-test")]
+                        {
+                            let kind = match value["type"].as_str() { Some("event") => "event", Some("message") => "message", Some("error") => "error", Some("bye") => "bye", _ => "extension" };
+                            let target = match value["event"]["target"].as_str() { Some("room") => "room", Some("participants") => "participants", Some("roomlist") => "roomlist", _ => "other" };
+                            let event = match value["event"]["type"].as_str() { Some("join") => "join", Some("leave") => "leave", Some("update") => "update", Some("message") => "message", _ => "other" };
+                            eprintln!("HPB incoming stopped: {kind}/{target}/{event} {error:?}");
+                        }
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -470,6 +499,8 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             Err(error) => break error,
         };
         if let Err(error) = authenticate(&shared, &mut socket, &mut resume, &mut counter).await {
+            #[cfg(feature = "backend-test")]
+            eprintln!("HPB authentication stopped: {error:?}");
             if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && failures < 4 {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
@@ -490,7 +521,7 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             End::Retired => {
                 match retire(&mut socket, &mut counter).await {
                     Ok(()) => {
-                        shared.invalidate_room();
+                        shared.invalidate_room(false);
                         resume = None;
                         if let Ok(mut state) = shared.state.lock() {
                             state.session = None;
@@ -504,6 +535,8 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
                 }
             }
             End::Reconnect(error) if failures < 4 => {
+                #[cfg(feature = "backend-test")]
+                eprintln!("HPB transport interrupted: {error:?}");
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
@@ -523,6 +556,8 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             }
         }
     };
+    #[cfg(feature = "backend-test")]
+    eprintln!("HPB session stopped: {terminal:?}");
     // Terminal policy/auth errors take precedence as the current state; the
     // session-scoped first transport failure remains a separate safe diagnostic.
     shared.status(LiveState::Stopped(terminal));

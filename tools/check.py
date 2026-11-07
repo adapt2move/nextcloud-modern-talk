@@ -37,6 +37,7 @@ def main(argv=None):
             python("tools/release/check_workflows.py", "--actionlint")
             for script in (
                 "tools/check_architecture_tests.py",
+                "tools/media/test_recovery_checks.py",
                 "tools/ci/workflow_policy_tests.py",
                 "tools/ci/test_prepare_gstreamer.py",
                 "tools/ci/test_macos_signing.py",

@@ -18,6 +18,7 @@ use nextcloud_talk_api::{
     models::ParticipantFlags,
     signaling::{
         DescriptionKind, Event as SignalEvent, Negotiation, PeerSession, Signal, SignalBatch,
+        StreamKind,
     },
 };
 use status::StatusSnapshot;
@@ -46,22 +47,24 @@ const OBSERVATIONS: [Observation; 6] = [
 pub(crate) const SUPPORT: NativeSupport = NativeSupport {
     audio: true,
     video: true,
-    screen: false,
+    screen: cfg!(any(target_os = "linux", target_os = "macos")),
     external_signaling: true,
     end_to_end_encryption: false,
 };
 pub(crate) const DEVICES: DevicePermissions = DevicePermissions {
     microphone: true,
     camera: true,
-    screen_session: false,
+    screen_session: cfg!(any(target_os = "linux", target_os = "macos")),
 };
 
 enum Write {
-    Subscribe(PeerSession),
+    Subscribe(PeerSession, StreamKind),
+    SendScreenOffer(PeerSession),
+    RestartSubscription(PeerSession, StreamKind),
     Refresh(u64),
-    Select(PeerSession, Negotiation),
-    Remove(PeerSession),
-    Signal(PeerSession, Negotiation, Signal),
+    Select(PeerSession, Negotiation, StreamKind),
+    Remove(PeerSession, StreamKind),
+    Signal(PeerSession, Negotiation, Signal, StreamKind),
     Flags(MediaWishes),
 }
 struct PolicyUpdate {
@@ -69,6 +72,9 @@ struct PolicyUpdate {
     after: u64,
 }
 struct Peer {
+    stream: StreamKind,
+    dimensions: Option<(u32, u32)>,
+    last_frame: Option<Instant>,
     local: u128,
     status: StatusSnapshot,
     session: PeerSession,
@@ -79,6 +85,11 @@ struct Peer {
     connected: bool,
     role: Role,
     subscription_requested: bool,
+    recovery: Option<Instant>,
+    restart_pending: bool,
+    restarts: u8,
+    screen_announced: Vec<PeerSession>,
+    share_epoch: u64,
 }
 fn report_ice_support(engine: &NativePeer) {
     let omitted = &engine.ice_support().unsupported;
@@ -91,10 +102,13 @@ fn report_ice_support(engine: &NativePeer) {
 pub(crate) struct LiveCall {
     scope: CallScope,
     session: Arc<Session>,
-    control: mpsc::Sender<Command>,
+    control: mpsc::Sender<(Command, u64)>,
     stop: MeetingStop,
 }
 impl LiveCall {
+    pub(crate) fn session_replaced(&self) -> bool {
+        self.stop.session_replaced()
+    }
     pub(crate) fn closed(&self) -> bool {
         !self.session.live() || self.stop.is_closed()
     }
@@ -113,8 +127,14 @@ impl LiveCall {
         if command.scope() != self.scope {
             return Err(api::ErrorKind::WrongScope);
         }
+        if matches!(command, Command::StartScreenShare(_)) && !SUPPORT.screen {
+            return Err(api::ErrorKind::Unsupported);
+        }
         if matches!(command, Command::Observe(_)) {
             return Ok(());
+        }
+        if matches!(command, Command::StopScreenShare(_)) {
+            self.session.stop_screen();
         }
         if matches!(command, Command::Stop(_)) {
             self.session.close();
@@ -123,11 +143,22 @@ impl LiveCall {
         }
         // Close publication synchronously on any change; stale callbacks cannot
         // extend the old grant while the owner rechecks policy/user intent.
-        if !matches!(command, Command::Observe(_)) {
-            self.session.suspend();
+        match &command {
+            Command::Change { wishes, .. } => {
+                self.session.narrow(*wishes);
+                // A mute intent must survive even if continuity is lost before
+                // the media actor can drain this command. Never broaden here.
+                if let Ok(mut snapshot) = self.session.snapshot.lock() {
+                    snapshot.wishes.microphone &= wishes.microphone;
+                    snapshot.wishes.camera &= wishes.camera;
+                    snapshot.wishes.screen &= wishes.screen;
+                }
+            }
+            Command::Observe(_) | Command::StartScreenShare(_) | Command::StopScreenShare(_) => {}
+            _ => self.session.suspend(),
         }
         self.control
-            .try_send(command)
+            .try_send((command, self.session.screen_epoch()))
             .map_err(|_| api::ErrorKind::Busy)
     }
     #[allow(
@@ -157,6 +188,7 @@ impl LiveCall {
             .map_err(|_| api::ErrorKind::PermissionDenied)?;
         call.joined(scope).map_err(|_| api::ErrorKind::Conflict)?;
         let snapshot = Snapshot {
+            wishes: call.wishes(),
             call: scope,
             entry: call.entry(),
             participants: talk_core::bounded::Page::empty(),
@@ -164,6 +196,7 @@ impl LiveCall {
             microphone: DeviceState::Off,
             camera: DeviceState::Off,
             screen: DeviceState::Unavailable,
+            sharing: talk_core::calls::SharingState::Idle,
             peers: 0,
             recording: RecordingState::Unknown,
             counters: MediaCounters::default(),
@@ -334,6 +367,7 @@ async fn write_loop(
     let scope = session.scope;
     let mut refresh_at = Instant::now();
     let mut requested = 0;
+    let mut refresh_failures = 0u8;
     let mut tick = tokio::time::interval(Duration::from_millis(50));
     while session.live() {
         tick.tick().await;
@@ -347,22 +381,41 @@ async fn write_loop(
                     refresh_at = Instant::now();
                     Ok(())
                 }
-                Write::Subscribe(peer) => {
+                Write::RestartSubscription(peer, stream) => {
                     writer
-                        .request_offer(&context(scope, &network, &cancel, 3000), &peer)
+                        .restart_subscription(
+                            &context(scope, &network, &cancel, 3000),
+                            &peer,
+                            stream,
+                        )
                         .await
                 }
-                Write::Select(peer, sid) => writer.select(peer, sid),
-                Write::Remove(peer) => {
-                    writer.remove(&peer);
+                Write::SendScreenOffer(peer) => {
+                    writer
+                        .send_screen_offer(&context(scope, &network, &cancel, 3000), &peer)
+                        .await
+                }
+                Write::Subscribe(peer, stream) => {
+                    writer
+                        .request_stream_offer(
+                            &context(scope, &network, &cancel, 3000),
+                            &peer,
+                            stream,
+                        )
+                        .await
+                }
+                Write::Select(peer, sid, stream) => writer.select_stream(peer, sid, stream),
+                Write::Remove(peer, stream) => {
+                    writer.remove_stream(&peer, stream);
                     Ok(())
                 }
-                Write::Signal(peer, sid, signal) => writer
-                    .send(
+                Write::Signal(peer, sid, signal, stream) => writer
+                    .send_stream(
                         &context(scope, &network, &cancel, 3000),
                         &peer,
                         &sid,
                         signal,
+                        stream,
                     )
                     .await
                     .map(|_| ()),
@@ -393,6 +446,8 @@ async fn write_loop(
             .await
             {
                 Ok(bundle) => {
+                    refresh_failures = 0;
+                    session.set_control_degraded(false);
                     if policy
                         .try_send(PolicyUpdate {
                             bundle,
@@ -403,9 +458,24 @@ async fn write_loop(
                         break;
                     }
                 }
-                Err(_error) => {
+                Err(error) => {
                     #[cfg(feature = "backend-test")]
-                    eprintln!("normal refresh stopped: {:?}", _error);
+                    eprintln!("normal policy refresh stopped: {error:?}");
+                    session.set_control_degraded(true);
+                    if matches!(
+                        error,
+                        api::ErrorKind::Transport
+                            | api::ErrorKind::Deadline
+                            | api::ErrorKind::ServerUnavailable
+                            | api::ErrorKind::RateLimited
+                    ) && refresh_failures < 3
+                    {
+                        refresh_failures += 1;
+                        // No success or sliding grant is emitted on failure.
+                        // Existing publication still expires at its original lease.
+                        refresh_at = Instant::now() + Duration::from_secs(1);
+                        continue;
+                    }
                     break;
                 }
             }
@@ -439,47 +509,81 @@ fn sid() -> Result<Negotiation, ()> {
 fn send(tx: &mpsc::Sender<Write>, value: Write) -> Result<(), ()> {
     tx.try_send(value).map_err(|_| ())
 }
+fn camera_guards(engine: &mut NativePeer, session: &Arc<Session>) {
+    let source = Arc::downgrade(session);
+    engine.set_publish_guard(Arc::new(move || {
+        source.upgrade().is_some_and(|s| s.publication().camera)
+    }));
+    let source = Arc::downgrade(session);
+    engine.set_audio_guard(Arc::new(move || {
+        source.upgrade().is_some_and(|s| s.publication().microphone)
+    }));
+}
 async fn reconcile(
     peers: &mut Vec<Peer>,
     bundle: &Bundle,
     own: &PeerSession,
     tx: &mpsc::Sender<Write>,
-    local_media: bool,
+    session: &Arc<Session>,
     topology: Topology,
     sfu_members: &[PeerSession],
 ) -> Result<(), ()> {
+    let wishes = session.publication();
+    let local_media = wishes.microphone || wishes.camera;
     let mut i = 0;
     while i < peers.len() {
         if peers[i].role != Role::Publisher
             && (!bundle.peers.iter().any(|p| p.session == peers[i].session)
                 || (topology == Topology::Sfu
                     && (!sfu_members.contains(&peers[i].session)
-                        || !bundle
-                            .peers
-                            .iter()
-                            .any(|p| p.session == peers[i].session && p.publish_media))))
+                        || (peers[i].stream == StreamKind::Camera
+                            && !bundle
+                                .peers
+                                .iter()
+                                .any(|p| p.session == peers[i].session && p.publish_media)))))
         {
             let mut p = peers.remove(i);
             p.engine.close();
-            send(tx, Write::Remove(p.session))?;
+            send(tx, Write::Remove(p.session, p.stream))?;
         } else {
             i += 1;
         }
     }
-    if topology == Topology::Sfu && local_media && !peers.iter().any(|p| p.role == Role::Publisher)
+    if topology == Topology::Sfu
+        && local_media
+        && !peers
+            .iter()
+            .any(|p| p.role == Role::Publisher && p.stream == StreamKind::Camera)
     {
         let mut config = configuration(bundle);
         config.role = Role::Publisher;
         let mut engine = NativePeer::new(config).await.map_err(|_| ())?;
+        camera_guards(&mut engine, session);
         report_ice_support(&engine);
         let negotiation = sid()?;
-        send(tx, Write::Select(own.clone(), negotiation.clone()))?;
+        send(
+            tx,
+            Write::Select(own.clone(), negotiation.clone(), StreamKind::Camera),
+        )?;
         let offer = engine.offer().await.map_err(|_| ())?;
         send(
             tx,
-            Write::Signal(own.clone(), negotiation.clone(), Signal::Description(offer)),
+            Write::Signal(
+                own.clone(),
+                negotiation.clone(),
+                Signal::Description(offer),
+                StreamKind::Camera,
+            ),
         )?;
         peers.push(Peer {
+            screen_announced: Vec::with_capacity(16),
+            share_epoch: 0,
+            recovery: None,
+            restart_pending: false,
+            restarts: 0,
+            stream: StreamKind::Camera,
+            dimensions: None,
+            last_frame: None,
             local: 0,
             status: StatusSnapshot::default(),
             session: own.clone(),
@@ -493,13 +597,19 @@ async fn reconcile(
         });
     }
     for incoming in &bundle.peers {
-        if let Some(peer) = peers.iter_mut().find(|p| p.session == incoming.session) {
+        if let Some(peer) = peers
+            .iter_mut()
+            .find(|p| p.session == incoming.session && p.stream == StreamKind::Camera)
+        {
             if peer.role == Role::Subscriber
                 && !peer.subscription_requested
                 && incoming.publish_media
                 && (incoming.microphone || incoming.camera)
             {
-                send(tx, Write::Subscribe(incoming.session.clone()))?;
+                send(
+                    tx,
+                    Write::Subscribe(incoming.session.clone(), StreamKind::Camera),
+                )?;
                 peer.subscription_requested = true;
             }
             continue;
@@ -517,6 +627,7 @@ async fn reconcile(
         let mut config = configuration(bundle);
         config.role = role;
         let mut engine = NativePeer::new(config).await.map_err(|_| ())?;
+        camera_guards(&mut engine, session);
         report_ice_support(&engine);
         let offer = topology == Topology::Direct
             && local_media
@@ -525,7 +636,10 @@ async fn reconcile(
             topology == Topology::Sfu && (incoming.microphone || incoming.camera);
         let negotiation = if offer {
             let n = sid()?;
-            send(tx, Write::Select(incoming.session.clone(), n.clone()))?;
+            send(
+                tx,
+                Write::Select(incoming.session.clone(), n.clone(), StreamKind::Camera),
+            )?;
             let sdp = engine.offer().await.map_err(|_| ())?;
             send(
                 tx,
@@ -533,18 +647,30 @@ async fn reconcile(
                     incoming.session.clone(),
                     n.clone(),
                     Signal::Description(sdp),
+                    StreamKind::Camera,
                 ),
             )?;
             Some(n)
         } else {
             if subscription_requested {
-                send(tx, Write::Subscribe(incoming.session.clone()))?;
+                send(
+                    tx,
+                    Write::Subscribe(incoming.session.clone(), StreamKind::Camera),
+                )?;
             }
             None
         };
         let mut identity = [0; 16];
         getrandom::fill(&mut identity).map_err(|_| ())?;
         peers.push(Peer {
+            screen_announced: Vec::with_capacity(16),
+            share_epoch: 0,
+            recovery: None,
+            restart_pending: false,
+            restarts: 0,
+            stream: StreamKind::Camera,
+            dimensions: None,
+            last_frame: None,
             local: u128::from_le_bytes(identity),
             status: StatusSnapshot::default(),
             session: incoming.session.clone(),
@@ -564,7 +690,7 @@ async fn media_loop(
     mut call: CallSession,
     mut bundle: Bundle,
     own: PeerSession,
-    mut control: mpsc::Receiver<Command>,
+    mut control: mpsc::Receiver<(Command, u64)>,
     mut signals: mpsc::Receiver<SignalBatch>,
     writes: mpsc::Sender<Write>,
     mut policies: mpsc::Receiver<PolicyUpdate>,
@@ -579,6 +705,10 @@ async fn media_loop(
     let mut peers: Vec<Peer> = Vec::with_capacity(17);
     let mut sfu_members = Vec::with_capacity(100);
     let mut transport_ready = true;
+    let mut pending_screen_stops = Vec::with_capacity(4);
+    let mut retired_screens = Vec::with_capacity(32);
+    let mut latest_screen = None;
+    let mut next_screen_frame = Instant::now();
     let mut required_policy = 0u64;
     let mut received_policy = 0u64;
     let mut tick = tokio::time::interval(Duration::from_millis(10));
@@ -590,10 +720,21 @@ async fn media_loop(
         while session.live() && !stop.is_closed() && !cancel.is_cancelled() {
             tick.tick().await;
             let mut refresh_needed = false;
-            while let Ok(command) = control.try_recv() {
+            while let Ok((command, screen_epoch)) = control.try_recv() {
                 match command {
                     Command::Change { wishes, .. } => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
+                    }
+                    Command::StartScreenShare(_) => {
+                        if !SUPPORT.screen { continue; }
+                        if !session.start_screen(screen_epoch) { continue; }
+                        let mut wishes = call.wishes(); wishes.screen = true;
+                        call.set_wishes(scope, wishes).map_err(|_| ())?;
+                    }
+                    Command::StopScreenShare(_) => {
+                        let mut wishes = call.wishes(); wishes.screen = false;
+                        call.set_wishes(scope, wishes).map_err(|_| ())?;
+                        // Already retired synchronously by command admission.
                     }
                     Command::Consent(_) => { call.consent(scope).map_err(|_| ())?; }
                     Command::Reconnect(_) => {
@@ -610,18 +751,36 @@ async fn media_loop(
             while let Ok(batch) = signals.try_recv() {
                 for event in batch.into_events() {
                     match event {
-                        SignalEvent::Signal { from, negotiation, signal } => {
-                            let Some(peer) = peers.iter_mut().find(|p| p.session == from) else { continue; };
+                        SignalEvent::Signal { from, negotiation, signal, stream } => {
+                            if stream == StreamKind::Screen && (retired_screens.len() >= 32 || retired_screens.iter().any(|(peer, sid)| peer == &from && sid == &negotiation)) { continue; }
+                            if stream == StreamKind::Screen && !peers.iter().any(|p| p.session == from && p.stream == stream) {
+                                // REST membership admits the sender, never the offer itself.
+                                if !bundle.peers.iter().any(|p| p.session == from)
+                                    || peers.iter().any(|p| p.stream == StreamKind::Screen) { continue; }
+                                if !matches!(&signal, Signal::Description(s) if s.kind() == DescriptionKind::Offer) { continue; }
+                                let mut config = configuration(&bundle);
+                                config.role = Role::Subscriber;
+                                let Ok(mut engine) = NativePeer::new(config).await else { continue; };
+                                engine.screen_profile();
+                                let mut identity = [0; 16]; getrandom::fill(&mut identity).map_err(|_| ())?;
+                                peers.push(Peer { screen_announced: Vec::with_capacity(16), share_epoch: 0, recovery: None, restart_pending: false, restarts: 0, stream, dimensions: None, last_frame: None, local: u128::from_le_bytes(identity),
+                                    status: StatusSnapshot::default(), session: from.clone(), negotiation: None,
+                                    engine, remote: false, candidates: Vec::with_capacity(64), connected: false,
+                                    role: Role::Subscriber, subscription_requested: true });
+                            }
+                            let Some(peer) = peers.iter_mut().find(|p| p.session == from && p.stream == stream) else { continue; };
                             if peer.negotiation.as_ref().is_some_and(|n| *n != negotiation) { continue; }
                             if peer.negotiation.is_none() {
                                 if !matches!(&signal, Signal::Description(s) if s.kind() == DescriptionKind::Offer) { continue; }
                                 peer.negotiation = Some(negotiation.clone());
-                                send(&writes, Write::Select(from.clone(), negotiation.clone()))?;
+                                send(&writes, Write::Select(from.clone(), negotiation.clone(), stream))?;
                             }
+                            let applied: Result<(), ()> = async {
                             match signal {
+                                Signal::StopScreen | Signal::SendOffer => return Ok(()),
                                 Signal::Description(sdp) => {
                                     if let Some(answer) = peer.engine.remote(&sdp).await.map_err(|_| ())? {
-                                        send(&writes, Write::Signal(from, negotiation, Signal::Description(answer)))?;
+                                        send(&writes, Write::Signal(from, negotiation, Signal::Description(answer), stream))?;
                                     }
                                     peer.remote = true;
                                     for candidate in peer.candidates.drain(..) {
@@ -636,6 +795,22 @@ async fn media_loop(
                                     } else { return Err(()); }
                                 }
                             }
+                            Ok(()) }.await;
+                            if applied.is_err() {
+                                if stream == StreamKind::Screen { peer.engine.close(); }
+                                else { return Err(()); }
+                            }
+
+                        }
+                        SignalEvent::ScreenStopped { from, negotiation } => {
+                            if let Some(index) = peers.iter().position(|p| p.session == from && p.stream == StreamKind::Screen && negotiation.as_ref().is_none_or(|n| p.negotiation.as_ref() == Some(n))) {
+                                let mut peer = peers.remove(index);
+                                #[cfg(feature = "backend-test")]
+                                eprintln!("screen stop evidence connected={} rtp={} keyframes={} feedback={} decoded={}", peer.connected, peer.engine.video_packets(), peer.engine.video_keyframes(), peer.engine.video_feedback_requests(), peer.engine.counters().video_received);
+                                peer.engine.close();
+                                if let Some(sid) = peer.negotiation && retired_screens.len() < 32 { retired_screens.push((peer.session.clone(), sid)); }
+                                send(&writes, Write::Remove(peer.session, peer.stream))?;
+                            }
                         }
                         SignalEvent::Membership(members) => {
                             if topology != Topology::Direct { return Err(()); }
@@ -645,7 +820,7 @@ async fn media_loop(
                                 if !members.iter().any(|m| m.session == peers[index].session && m.in_call.is_some_and(|f| f & 1 != 0)) {
                                     let mut peer = peers.remove(index);
                                     peer.engine.close();
-                                    send(&writes, Write::Remove(peer.session))?;
+                                    send(&writes, Write::Remove(peer.session, peer.stream))?;
                                 } else { index += 1; }
                             }
                             refresh_needed = true;
@@ -659,12 +834,28 @@ async fn media_loop(
                         }
                         SignalEvent::TransportInterrupted => {
                             transport_ready = false;
+                            for peer in &mut peers {
+                                if !peer.connected && peer.recovery.is_none() {
+                                    peer.recovery = Some(Instant::now());
+                                    peer.restart_pending = peer.role != Role::Direct || peer.engine.is_offerer();
+                                }
+                            }
+                            session.stop_screen();
                             call.disconnected(scope).map_err(|_| ())?;
                             refresh_needed = true;
                         }
                         SignalEvent::TransportResumed => {
                             transport_ready = true;
                             refresh_needed = true;
+                        }
+                        SignalEvent::SubscriptionRejected { from, stream } => {
+                            if topology != Topology::Sfu { return Err(()); }
+                            if let Some(peer) = peers.iter_mut().find(|p| p.session == from && p.stream == stream && p.role == Role::Subscriber) {
+                                peer.connected = false;
+                                peer.recovery.get_or_insert_with(Instant::now);
+                                peer.restart_pending = true;
+                                refresh_needed = true;
+                            }
                         }
                         SignalEvent::ForceMute => {
                             let mut wishes = call.wishes();
@@ -697,8 +888,15 @@ async fn media_loop(
                 let grant = call.advance(&bundle.inputs, bundle.exists, SUPPORT, DEVICES, network.now()).map_err(|_| ())?;
                 let limit = usize::from(grant.remote_video_limit());
                 session.grant(grant, network.now());
+                // A receive-only HPB rejoin must advertise explicit unmute
+                // before a new publisher offer. The writer preserves FIFO.
+                let publication = session.publication();
+                if publication != last_flags {
+                    send(&writes, Write::Flags(publication))?;
+                    last_flags = publication;
+                }
                 reconcile(&mut peers, &bundle, &own, &writes,
-                    session.publication().microphone || session.publication().camera,
+                    &session,
                     topology, &sfu_members).await?;
                 limit
             } else {
@@ -713,7 +911,7 @@ async fn media_loop(
                     if peers[index].role == Role::Subscriber && !sfu_members.contains(&peers[index].session) {
                         let mut peer = peers.remove(index);
                         peer.engine.close();
-                        send(&writes, Write::Remove(peer.session))?;
+                        send(&writes, Write::Remove(peer.session, peer.stream))?;
                     } else { index += 1; }
                 }
             }
@@ -721,56 +919,173 @@ async fn media_loop(
             let wishes = session.publication();
             let audio = session.take_audio();
             let video = session.take_video();
+            if let Some(frame) = session.take_screen() { latest_screen = Some(frame); }
+            if !session.screen_capture_active() || latest_screen.as_ref().is_some_and(|(epoch, _)| *epoch != session.screen_epoch()) { latest_screen = None; }
+            // A compositor may deliver only one static frame, before ICE is
+            // connected. Retain one current-generation backing and encode it at
+            // most 10 fps, so late subscribers/keyframe recovery can see it too.
+            let screen = if wishes.screen && Instant::now() >= next_screen_frame {
+                next_screen_frame = Instant::now() + Duration::from_millis(100);
+                latest_screen.as_ref()
+            } else { None };
+            if let Some((share_epoch, _)) = screen && wishes.screen {
+                let share_epoch = *share_epoch;
+                let destinations: Vec<_> = if topology == Topology::Sfu { vec![own.clone()] }
+                    else { bundle.peers.iter().map(|p| p.session.clone()).collect() };
+                for destination in destinations {
+                    if peers.iter().any(|p| p.stream == StreamKind::Screen && p.session == destination && p.role != Role::Subscriber) { continue; }
+                    if peers.iter().filter(|p| p.stream == StreamKind::Screen && p.role != Role::Subscriber).count() >= 4 { break; }
+                    let mut config = configuration(&bundle);
+                    config.role = if topology == Topology::Sfu { Role::Publisher } else { Role::Direct };
+                    let role = config.role;
+                    let mut engine = NativePeer::new(config).await.map_err(|_| ())?; engine.screen_profile();
+                    let source = Arc::downgrade(&session);
+                    engine.set_publish_guard(Arc::new(move || source.upgrade().is_some_and(|s| s.screen_epoch() == share_epoch && s.publication().screen)));
+                    let negotiation = sid()?;
+                    send(&writes, Write::Select(destination.clone(), negotiation.clone(), StreamKind::Screen))?;
+                    let sdp = engine.offer().await.map_err(|_| ())?;
+                    send(&writes, Write::Signal(destination.clone(), negotiation.clone(), Signal::Description(sdp), StreamKind::Screen))?;
+                    peers.push(Peer { screen_announced: Vec::with_capacity(16), share_epoch, recovery: None, restart_pending: false, restarts: 0, stream: StreamKind::Screen, dimensions: None, last_frame: None, local: 0,
+                        status: StatusSnapshot::default(), session: destination, negotiation: Some(negotiation),
+                        engine, remote: false, candidates: Vec::with_capacity(64), connected: false, role, subscription_requested: false });
+                }
+            }
+            let mut index = 0;
+            while index < peers.len() {
+                if (!call.wishes().screen || !session.screen_capture_active() || peers[index].share_epoch != session.screen_epoch()) && peers[index].stream == StreamKind::Screen && peers[index].role != Role::Subscriber {
+                    let mut peer = peers.remove(index);
+                    if let Some(n) = peer.negotiation {
+                        if transport_ready {
+                            send(&writes, Write::Signal(peer.session.clone(), n, Signal::StopScreen, StreamKind::Screen))?;
+                            send(&writes, Write::Remove(peer.session.clone(), StreamKind::Screen))?;
+                        } else if pending_screen_stops.len() < 4 { pending_screen_stops.push((peer.session.clone(), n)); }
+                        else { return Err(()); }
+                    }
+                    peer.engine.close();
+                } else { index += 1; }
+            }
+            if transport_ready && policy_ready {
+                for (peer, negotiation) in pending_screen_stops.drain(..) {
+                    send(&writes, Write::Signal(peer.clone(), negotiation, Signal::StopScreen, StreamKind::Screen))?;
+                    send(&writes, Write::Remove(peer, StreamKind::Screen))?;
+                }
+            }
             let mut totals = MediaCounters::default();
             let mut any_connected = false;
             let mut mix = [0i32; 480];
             let mut mixed = false;
             let mut receive_index = 0;
+            let receiving_screen = peers.iter().any(|p| p.stream == StreamKind::Screen && p.role == Role::Subscriber);
+            let camera_limit = video_limit.saturating_sub(usize::from(receiving_screen)).min(4);
             for peer in &mut peers {
-                let receives = peer.role != Role::Publisher;
+                if !peer.engine.is_open() && peer.stream == StreamKind::Screen { continue; }
+                if let Some(since) = peer.recovery {
+                    if since.elapsed() > Duration::from_secs(15) {
+                        if peer.stream == StreamKind::Screen {
+                            if peer.role != Role::Subscriber { session.fail_screen(calls::ShareFailure::TimedOut); }
+                            peer.engine.close(); continue;
+                        }
+                        return Err(());
+                    }
+                    if peer.restart_pending && policy_ready && peer.restarts < 3
+                        && since.elapsed() >= Duration::from_millis(500u64 << (2 * peer.restarts)) {
+                        peer.restarts += 1; peer.restart_pending = false;
+                        if peer.role == Role::Subscriber {
+                            let mut config = configuration(&bundle); config.role = Role::Subscriber;
+                            peer.engine.close();
+                            peer.engine = NativePeer::new(config).await.map_err(|_| ())?;
+                            if peer.stream == StreamKind::Screen { peer.engine.screen_profile(); }
+                            peer.negotiation = None; peer.remote = false; peer.candidates.clear();
+                            send(&writes, Write::RestartSubscription(peer.session.clone(), peer.stream))?;
+                        } else if let Some(negotiation) = &peer.negotiation {
+                            let offer = peer.engine.restart().await.map_err(|_| ())?;
+                            send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(offer), peer.stream))?;
+                        }
+                    }
+                }
+                let receives = peer.role != Role::Publisher && !(peer.stream == StreamKind::Screen && peer.role == Role::Direct);
                 let publishes = peer.role != Role::Subscriber;
-                peer.engine.receive_video(receives && receive_index < video_limit);
-                if receives { receive_index += 1; }
-                if topology == Topology::Direct && policy_ready && peer.negotiation.is_none()
+                peer.engine.receive_video(receives && if peer.stream == StreamKind::Screen { video_limit > 0 } else { receive_index < camera_limit });
+                if receives && peer.stream == StreamKind::Camera { receive_index += 1; }
+                if peer.stream == StreamKind::Camera && topology == Topology::Direct && policy_ready && peer.negotiation.is_none()
                     && (wishes.microphone || wishes.camera)
                     && bundle.peers.iter().find(|p| p.session == peer.session)
                         .is_some_and(|p| own.local_should_offer(&p.session) || !p.publish_media)
                 {
                     let negotiation = sid()?;
-                    send(&writes, Write::Select(peer.session.clone(), negotiation.clone()))?;
+                    send(&writes, Write::Select(peer.session.clone(), negotiation.clone(), peer.stream))?;
                     let sdp = peer.engine.offer().await.map_err(|_| ())?;
-                    send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(sdp)))?;
+                    send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Description(sdp), peer.stream))?;
                     peer.negotiation = Some(negotiation);
                 }
-                peer.engine.publish(publishes && wishes.microphone, publishes && wishes.camera).map_err(|_| ())?;
-                while let Some(event) = peer.engine.event().await.map_err(|error| {
-                    #[cfg(feature = "backend-test")]
-                    eprintln!("normal media event stopped: {:?} {error:?}", peer.role);
-                    let _ = error;
-                })? {
+                peer.engine.publish(publishes && peer.stream == StreamKind::Camera && wishes.microphone,
+                    publishes && if peer.stream == StreamKind::Screen { wishes.screen } else { wishes.camera }).map_err(|_| ())?;
+                loop {
+                    let event = match peer.engine.event().await {
+                        Ok(Some(event)) => event,
+                        Ok(None) => break,
+                        Err(error) if peer.stream == StreamKind::Screen => {
+                            #[cfg(feature = "backend-test")]
+                            eprintln!("screen media stopped: {error:?}");
+                            let _ = error;
+                            if peer.role != Role::Subscriber { session.fail_screen(calls::ShareFailure::Unavailable); }
+                            peer.engine.close(); break;
+                        }
+                        Err(error) => {
+                            #[cfg(feature = "backend-test")]
+                            eprintln!("camera engine stopped: role={:?} error={error:?}", peer.role);
+                            let _ = error;
+                            return Err(());
+                        }
+                    };
                     match event {
                         EngineEvent::Candidate(candidate) => {
-                            // An incomplete exchange is never replayed across
-                            // a lost transport. Established media can resume.
-                            if !transport_ready { return Err(()); }
+                            // Drop late candidates; recover with fresh ICE/SDP
+                            // after renewed control/policy, never a stale replay.
+                            if !transport_ready {
+                                if !peer.connected {
+                                    peer.recovery.get_or_insert_with(Instant::now);
+                                    peer.restart_pending = peer.role != Role::Direct || peer.engine.is_offerer();
+                                }
+                                continue;
+                            }
                             if let Some(negotiation) = &peer.negotiation {
-                                send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Candidate(candidate)))?;
+                                send(&writes, Write::Signal(peer.session.clone(), negotiation.clone(), Signal::Candidate(candidate), peer.stream))?;
                             }
                         }
                         EngineEvent::Connection(state) => {
                             peer.connected = state == PeerConnectionState::Connected;
-                            if matches!(state, PeerConnectionState::Failed | PeerConnectionState::Disconnected | PeerConnectionState::Closed) {
-                                call.disconnected(scope).map_err(|_| ())?;
-                                session.suspend();
+                            if matches!(state, PeerConnectionState::Failed | PeerConnectionState::Disconnected) && peer.recovery.is_none() {
+                                    peer.recovery = Some(Instant::now());
+                                    peer.restart_pending = peer.role != Role::Direct || peer.engine.is_offerer();
+                            }
+                            if state == PeerConnectionState::Connected { peer.recovery = None; peer.restart_pending = false; }
+                            if state == PeerConnectionState::Closed {
+                                if peer.stream == StreamKind::Screen { peer.engine.close(); break; }
                                 return Err(());
                             }
                         }
                     }
                 }
+                if !peer.engine.is_open() && peer.stream == StreamKind::Screen { continue; }
                 if publishes && peer.connected {
-                    if let Some(samples) = &audio { peer.engine.audio(samples).await.map_err(|_| ())?; }
-                    if let Some(frame) = &video {
-                        peer.engine.video(frame.clone(), started.elapsed().as_micros() as i64).map_err(|_| ())?;
+                    if peer.stream == StreamKind::Screen && topology == Topology::Sfu {
+                        for target in &bundle.peers {
+                            if sfu_members.contains(&target.session) && !peer.screen_announced.contains(&target.session) && peer.screen_announced.len() < 16 {
+                                send(&writes, Write::SendScreenOffer(target.session.clone()))?;
+                                peer.screen_announced.push(target.session.clone());
+                            }
+                        }
+                    }
+                    if peer.stream == StreamKind::Camera && let Some(samples) = &audio { peer.engine.audio(samples).await.map_err(|_| ())?; }
+                    if let Some(frame) = if peer.stream == StreamKind::Screen { screen.map(|(_, frame)| frame) } else { video.as_ref() } {
+                        if peer.engine.video(frame.clone(), started.elapsed().as_micros() as i64).is_err() {
+                            if peer.stream == StreamKind::Screen { session.fail_screen(calls::ShareFailure::Unavailable); peer.engine.close(); continue; }
+                            return Err(());
+                        }
+                        if peer.stream == StreamKind::Screen && peer.engine.counters().video_transmitted > 0 {
+                            session.screen_flowing(peer.share_epoch);
+                        }
                     }
                     if peer.status.attempt(Instant::now(), wishes, peer.role == Role::Publisher && policy_ready) {
                         let audio: &[u8] = if wishes.microphone { br#"{"type":"audioOn"}"# } else { br#"{"type":"audioOff"}"# };
@@ -786,7 +1101,10 @@ async fn media_loop(
                         for (output, input) in mix.iter_mut().zip(frame.data.iter()) { *output += i32::from(*input); }
                         mixed = true;
                     }
-                    while let Some(frame) = peer.engine.take_video() { session.show_video(peer.local, frame); }
+                    while let Some(frame) = peer.engine.take_video() {
+                        peer.dimensions = Some((frame.width, frame.height)); peer.last_frame = Some(Instant::now());
+                        session.show_video(peer.local, frame);
+                    }
                 }
                 any_connected |= peer.connected;
                 let c = peer.engine.counters();
@@ -799,15 +1117,37 @@ async fn media_loop(
                 totals.answers_sent += c.answers_sent;
             }
             totals.policy_refreshes = refreshes;
+            let mut retired = 0;
+            while retired < peers.len() {
+                if peers[retired].stream == StreamKind::Screen && !peers[retired].engine.is_open() {
+                    let peer = peers.remove(retired);
+                    if peer.role != Role::Subscriber && session.screen_capture_active() { session.fail_screen(calls::ShareFailure::Unavailable); }
+                    if let Some(sid) = peer.negotiation {
+                        if peer.role == Role::Subscriber && retired_screens.len() < 32 { retired_screens.push((peer.session.clone(), sid)); }
+                        else if peer.role != Role::Subscriber {
+                            if transport_ready { send(&writes, Write::Signal(peer.session.clone(), sid, Signal::StopScreen, StreamKind::Screen))?; }
+                            else if pending_screen_stops.len() < 4 { pending_screen_stops.push((peer.session.clone(), sid)); continue; }
+                            else { return Err(()); }
+                        }
+                    }
+                    send(&writes, Write::Remove(peer.session, peer.stream))?;
+                } else { retired += 1; }
+            }
             let mut participants = talk_core::bounded::Page::empty();
-            for peer in peers.iter().filter(|p| p.role != Role::Publisher) {
+            for peer in peers.iter().filter(|p| p.stream == StreamKind::Camera && p.role != Role::Publisher).take(15)
+                .chain(peers.iter().filter(|p| p.stream == StreamKind::Screen && p.role == Role::Subscriber).take(1)) {
                 if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
                     participants.try_push(calls::Participant {
-                        local: peer.local, name: source.name.clone(), microphone: source.microphone, camera: source.camera,
+                        local: peer.local, participant: peers.iter().find(|p| p.session == peer.session && p.stream == StreamKind::Camera).map_or(peer.local, |p| p.local), name: source.name.clone(), microphone: source.microphone, camera: source.camera,
+                        kind: if peer.stream == StreamKind::Screen { calls::StreamKind::Screen } else { calls::StreamKind::Camera },
+                        dimensions: peer.dimensions,
+                        flowing: peer.last_frame.is_some_and(|last| last.elapsed() < Duration::from_secs(3)),
                     }).map_err(|_| ())?;
                 }
             }
-            session.retain_video(&peers.iter().filter(|p| p.role != Role::Publisher).take(video_limit).map(|p| p.local).collect::<Vec<_>>());
+            session.retain_video(&peers.iter().filter(|p| p.role != Role::Publisher && p.stream == StreamKind::Camera).take(camera_limit)
+                .chain(peers.iter().filter(|p| p.role == Role::Subscriber && p.stream == StreamKind::Screen).take(usize::from(video_limit > 0)))
+                .map(|p| p.local).collect::<Vec<_>>());
             if mixed {
                 let mut output = [0i16; 480];
                 for (out, input) in output.iter_mut().zip(mix) { *out = input.clamp(i16::MIN as i32, i16::MAX as i32) as i16; }
@@ -817,14 +1157,19 @@ async fn media_loop(
                 send(&writes, Write::Flags(wishes))?;
                 last_flags = wishes;
             }
-            if policy_ready && any_connected { call.connected(scope, network.now()).map_err(|_| ())?; }
+            let recovering = peers.iter().any(|p| p.stream == StreamKind::Camera && p.recovery.is_some());
+            if policy_ready && any_connected && !recovering { call.connected(scope, network.now()).map_err(|_| ())?; }
             if let Ok(mut snapshot) = session.snapshot.lock() {
                 let (mic, camera) = session.actual();
                 let (mic_failed, camera_failed) = session.failed();
-                snapshot.phase = call.phase();
+                if snapshot.sharing == calls::SharingState::Idle {
+                    snapshot.screen = if SUPPORT.screen && matches!(bundle.inputs.room, Observed::Known { value, .. } if value.permissions.publish_screen) { DeviceState::Off } else { DeviceState::Unavailable };
+                }
+                snapshot.phase = if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
+                snapshot.wishes = call.wishes();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
-                snapshot.peers = peers.iter().filter(|p| p.role != Role::Publisher).count() as u16;
+                snapshot.peers = peers.iter().filter(|p| p.role != Role::Publisher && !(p.stream == StreamKind::Screen && p.role == Role::Direct)).count() as u16;
                 snapshot.participants = participants;
                 snapshot.counters = totals;
                 snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
@@ -839,6 +1184,16 @@ async fn media_loop(
     }
     session.close();
     for mut peer in peers {
+        #[cfg(feature = "backend-test")]
+        if peer.stream == StreamKind::Screen {
+            eprintln!(
+                "screen evidence role={:?} connected={} rtp={} decoded={}",
+                peer.role,
+                peer.connected,
+                peer.engine.video_packets(),
+                peer.engine.counters().video_received
+            );
+        }
         peer.engine.close();
     }
     stop.close();

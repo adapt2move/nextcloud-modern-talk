@@ -6,7 +6,7 @@ use talk_core::ui::presentation::{
     AccountView, CallStage, CallView, Completion, ContentState, ConversationKind, ConversationRef,
     ConversationView, DeliveryState, FileView, LoginFailure, LoginPhase, LoginView, MediaState,
     NativeDesktopPort, NativeStoreState, ParticipantView, Presence, PresentationSnapshot,
-    RequestId, RequiredGate, StorageStatus, SubmissionResult, UiIntent,
+    RequestId, RequiredGate, ScreenShareState, StorageStatus, SubmissionResult, UiIntent,
 };
 use talk_core::ui::{
     AccountId, AccountScope, CallGeneration, CallScope, ConversationId, Decision, HostId, Page,
@@ -927,6 +927,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             1
         };
         s.call = Some(CallView {
+            sharing: ScreenShareState::Idle,
+            streams: Page::empty(),
             scope: call_scope(id),
             title: text(if direct {
                 "Mara Fischer"
@@ -2043,6 +2045,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     microphone: MediaState::Unavailable,
                     camera: MediaState::Unavailable,
                     share: MediaState::Unavailable,
+                    sharing: ScreenShareState::Idle,
+                    streams: Page::empty(),
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {

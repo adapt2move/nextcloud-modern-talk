@@ -33,8 +33,15 @@ pub(super) enum CallOwner {
     Ended {
         snapshot: Snapshot,
         cleanup: bool,
-        restart: bool,
+        restart: Option<Restart>,
     },
+}
+/// One fresh admission after cleanup, never a replay of a room/media command.
+#[derive(Clone, Copy)]
+pub(super) struct Restart {
+    wishes: MediaWishes,
+    entry: Entry,
+    continuity: bool,
 }
 impl NextcloudClient {
     pub(super) async fn poll_incoming_calls(
@@ -332,16 +339,20 @@ impl NextcloudClient {
             });
         }
         let bundle = self.policy_sources(context, scope).await?;
-        if call
-            .advance(
-                &bundle.inputs,
-                bundle.exists,
-                SUPPORT,
-                DEVICES,
-                self.transport.network().now(),
-            )
-            .is_err()
-        {
+        if let Err(gate) = call.advance(
+            &bundle.inputs,
+            bundle.exists,
+            SUPPORT,
+            DEVICES,
+            self.transport.network().now(),
+        ) {
+            if gate == Gate::CallEnded {
+                return Ok(CallOwner::Ended {
+                    snapshot: pending_snapshot(&call),
+                    cleanup: false,
+                    restart: None,
+                });
+            }
             return Ok(CallOwner::Pending {
                 call,
                 last: Instant::now(),
@@ -396,7 +407,7 @@ impl NextcloudClient {
                 self.meeting_owner = Some(CallOwner::Ended {
                     snapshot: fallback,
                     cleanup: self.active.is_some(),
-                    restart: false,
+                    restart: None,
                 });
                 Err(error)
             }
@@ -425,11 +436,25 @@ impl NextcloudClient {
             if matches!(snapshot.phase, Phase::Connecting | Phase::Active) {
                 snapshot.phase = Phase::Reconnecting;
             }
+            let restart = if live.session_replaced() {
+                let mut wishes = snapshot.wishes;
+                wishes.screen = false;
+                Some(Restart {
+                    wishes,
+                    entry: snapshot.entry,
+                    continuity: true,
+                })
+            } else {
+                None
+            };
+            if restart.is_some() {
+                snapshot.phase = Phase::Reconnecting;
+            }
             drop(live);
             self.meeting_owner = Some(CallOwner::Ended {
                 snapshot,
                 cleanup: true,
-                restart: false,
+                restart,
             });
         }
         let pending = match &self.meeting_owner {
@@ -596,7 +621,7 @@ impl NextcloudClient {
                         self.meeting_owner = Some(CallOwner::Ended {
                             snapshot: pending_snapshot(&call),
                             cleanup: false,
-                            restart: false,
+                            restart: None,
                         });
                     } else if prepare {
                         self.install_call(context, call).await?;
@@ -611,8 +636,13 @@ impl NextcloudClient {
                             .snapshot()
                             .map_err(|k| self.error(transport::kind(k)))?;
                         drop(live);
-                        let restart = matches!(command, Command::Reconnect(_));
-                        snapshot.phase = if restart {
+                        let restart = matches!(command, Command::Reconnect(_)).then_some(Restart {
+                            wishes: MediaWishes::default(),
+                            entry: Entry::PreparedConference,
+                            continuity: false,
+                        });
+                        snapshot.wishes = MediaWishes::default();
+                        snapshot.phase = if restart.is_some() {
                             Phase::Reconnecting
                         } else {
                             Phase::Ended
@@ -637,11 +667,16 @@ impl NextcloudClient {
                     mut restart,
                 } => {
                     if matches!(command, Command::Reconnect(_)) {
-                        restart = true;
+                        restart = Some(Restart {
+                            wishes: MediaWishes::default(),
+                            entry: Entry::PreparedConference,
+                            continuity: false,
+                        });
                         snapshot.phase = Phase::Reconnecting;
                     }
                     if matches!(command, Command::Stop(_)) {
-                        restart = false;
+                        restart = None;
+                        snapshot.wishes = MediaWishes::default();
                         snapshot.phase = Phase::Ended;
                     }
                     self.meeting_owner = Some(CallOwner::Ended {
@@ -657,7 +692,7 @@ impl NextcloudClient {
             self.meeting_owner,
             Some(CallOwner::Ended {
                 cleanup: false,
-                restart: true,
+                restart: Some(_),
                 ..
             })
         ) {
@@ -671,12 +706,27 @@ impl NextcloudClient {
                     .await?;
                 self.active = None;
             }
+            let restart = match &self.meeting_owner {
+                Some(CallOwner::Ended {
+                    restart: Some(restart),
+                    ..
+                }) => *restart,
+                _ => return Err(self.error(ErrorKind::Uncertain)),
+            };
             let scope = self.rotate_call(scope)?;
-            let mut call = CallSession::new(scope, Entry::PreparedConference)
-                .map_err(|_| self.error(ErrorKind::WrongScope))?;
-            call.accept(scope, MediaWishes::default())
-                .map_err(|_| self.error(ErrorKind::WrongScope))?;
-            self.install_call(context, call).await?;
+            let mut call = if restart.continuity {
+                CallSession::recover(scope, restart.entry, restart.wishes)
+            } else {
+                CallSession::new(scope, restart.entry)
+            }
+            .map_err(|_| self.error(ErrorKind::WrongScope))?;
+            if !restart.continuity {
+                call.accept(scope, restart.wishes)
+                    .map_err(|_| self.error(ErrorKind::WrongScope))?;
+            }
+            // install_call retains a scoped, blocked candidate on failure. Its
+            // new generation must reach the UI even when fresh admission fails.
+            let _ = self.install_call(context, call).await;
         }
         let snapshot = match self
             .meeting_owner
@@ -694,6 +744,7 @@ impl NextcloudClient {
 }
 fn pending_snapshot(call: &CallSession) -> Snapshot {
     Snapshot {
+        wishes: call.wishes(),
         call: call.scope(),
         entry: call.entry(),
         participants: talk_core::bounded::Page::empty(),
@@ -701,6 +752,7 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         microphone: DeviceState::Off,
         camera: DeviceState::Off,
         screen: DeviceState::Unavailable,
+        sharing: talk_core::calls::SharingState::Idle,
         peers: 0,
         recording: RecordingState::Unknown,
         counters: MediaCounters::default(),

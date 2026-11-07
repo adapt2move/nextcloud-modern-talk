@@ -38,15 +38,16 @@ def private_json(path):
 
 class LoopbackForward:
     """At most 32 connections, 64 KiB reads, 45 s idle / 180 s lifetime."""
-    def __init__(self, target, port):
+    def __init__(self, target, port, target_port=80, ssl_context=None, listen="127.0.0.1"):
         address = ipaddress.ip_address(target)
         if not address.is_private or address.is_loopback or not 1024 <= port <= 65535:
             raise RuntimeError("private lab target required")
-        self.target, self.port = str(address), port
+        self.target, self.port, self.target_port = str(address), port, target_port
+        self.ssl_context, self.listen = ssl_context, listen
         self.tasks = set()
 
     async def __aenter__(self):
-        self.server = await asyncio.start_server(self.accept, "127.0.0.1", self.port, limit=65536, backlog=16)
+        self.server = await asyncio.start_server(self.accept, self.listen, self.port, limit=65536, backlog=16, ssl=self.ssl_context)
         return self
 
     async def pipe(self, reader, writer):
@@ -66,7 +67,7 @@ class LoopbackForward:
         remote = None
         pipes = []
         try:
-            upstream, remote = await asyncio.wait_for(asyncio.open_connection(self.target, 80, limit=65536), 3)
+            upstream, remote = await asyncio.wait_for(asyncio.open_connection(self.target, self.target_port, limit=65536), 3)
             pipes = [asyncio.create_task(self.pipe(reader, remote)), asyncio.create_task(self.pipe(upstream, writer))]
             done, _ = await asyncio.wait(pipes, timeout=180, return_when=asyncio.FIRST_COMPLETED)
             for item in done:
@@ -79,16 +80,29 @@ class LoopbackForward:
             await asyncio.gather(*pipes, return_exceptions=True)
             for stream in (writer, remote):
                 if stream:
-                    stream.close()
+                    if task.cancelling():stream.transport.abort()
+                    else:stream.close()
             self.tasks.discard(task)
+
+    async def interrupt(self, seconds):
+        if not 0 < seconds <= 3: raise ValueError("bounded fault required")
+        self.server.close()
+        tasks = list(self.tasks)
+        for task in tasks: task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if hasattr(self.server, 'abort_clients'):self.server.abort_clients()
+        await self.server.wait_closed()
+        await asyncio.sleep(seconds)
+        self.server = await asyncio.start_server(self.accept, self.listen, self.port, limit=65536, backlog=16, ssl=self.ssl_context)
 
     async def __aexit__(self, *_):
         self.server.close()
-        await self.server.wait_closed()
         tasks = list(self.tasks)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if hasattr(self.server, 'abort_clients'):self.server.abort_clients()
+        await self.server.wait_closed()
 
 
 class FreshRoom:

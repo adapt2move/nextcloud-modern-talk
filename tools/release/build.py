@@ -281,7 +281,7 @@ def build(root, output, target, version):
             deps = run(["dpkg-shlibdeps", "-O", "-e" + str(executable)], tmp)
             # GPUI/provider loaders can open libraries not visible in ELF NEEDED.
             # Keep explicit runtime prerequisites alongside dpkg's symbol-derived set.
-            build_info["runtime_packages"] = ["libvulkan1", "libxkbcommon-x11-0", "libfontconfig1", "libfreetype6", "libx11-xcb1", "libxcb1", "libdbus-1-3", "libpulse0", "libgstreamer1.0-0", "gstreamer1.0-plugins-base", "gstreamer1.0-plugins-good", "gstreamer1.0-libav", "xdg-desktop-portal", "xdg-utils", "desktop-file-utils", "libnotify-bin", "libglib2.0-bin", "libxfixes3", "libxdamage1", "libxrandr2", "libxcomposite1", "libgbm1"]
+            build_info["runtime_packages"] = ["libvulkan1", "libxkbcommon-x11-0", "libfontconfig1", "libfreetype6", "libx11-xcb1", "libxcb1", "libdbus-1-3", "libpulse0", "libgstreamer1.0-0", "gstreamer1.0-plugins-base", "gstreamer1.0-plugins-good", "gstreamer1.0-libav", "gstreamer1.0-pipewire", "xdg-desktop-portal", "xdg-utils", "desktop-file-utils", "libnotify-bin", "libglib2.0-bin", "libxfixes3", "libxdamage1", "libxrandr2", "libxcomposite1", "libgbm1"]
             inferred = next(line.split("=", 1)[1] for line in deps.splitlines() if line.startswith("shlibs:Depends="))
             build_info["debian_depends"] = inferred + ", " + ", ".join(build_info["runtime_packages"])
             build_info["system_libraries"] = run(["objdump", "-p", str(executable)], root).splitlines()

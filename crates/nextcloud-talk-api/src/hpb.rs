@@ -13,12 +13,15 @@ use crate::{
     events::{LiveEvent, LiveEventBatch, LiveState, Mailbox},
     models::{RoomToken, SignalingMode, SignalingSettings},
     scope::{Cancellation, Moment, OperationContext, SessionScope},
-    signaling::{Event, Negotiation, PeerSession, Signal, SignalBatch},
+    signaling::{Event, Negotiation, PeerSession, Signal, SignalBatch, StreamKind},
 };
 use std::{
     collections::VecDeque,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -56,25 +59,71 @@ enum RoomPurpose {
 }
 struct Room {
     purpose: RoomPurpose,
+    replaced: Arc<AtomicBool>,
     token: RoomToken,
     own: PeerSession,
     generation: u64,
     cancellation: Cancellation,
     joined: bool,
     members: Vec<wire::Member>,
+    in_call: Vec<PeerSession>,
+    subscription_requests: Vec<String>,
     selected: Vec<Selection>,
-    retired: Vec<PeerSession>,
+    retired_screens: Vec<(PeerSession, Negotiation)>,
+    retired_subscriptions: Vec<(PeerSession, StreamKind, Negotiation)>,
     signals: VecDeque<(usize, Event)>,
     signal_bytes: usize,
     typing: Vec<(PeerSession, std::time::Instant)>,
 }
 struct Selection {
+    request_id: Option<String>,
+    stream: StreamKind,
     talk: PeerSession,
     sfu: PeerSession,
     sid: Option<Negotiation>,
     publisher: bool,
 }
 impl Room {
+    fn retire_subscription(
+        &mut self,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
+        for old in self
+            .selected
+            .iter()
+            .filter(|p| &p.talk == peer && p.stream == stream && !p.publisher)
+        {
+            if let Some(sid) = &old.sid {
+                if self.retired_subscriptions.len() >= 64 {
+                    return Err(ErrorKind::Busy);
+                }
+                self.retired_subscriptions
+                    .push((old.sfu.clone(), stream, sid.clone()));
+            }
+        }
+        self.selected
+            .retain(|p| &p.talk != peer || p.stream != stream || p.publisher);
+        Ok(())
+    }
+    fn membership(&mut self, own_sfu: &PeerSession) -> Result<(), ErrorKind> {
+        if self.purpose != RoomPurpose::Call {
+            return Ok(());
+        }
+        // A room join is only routing information. HPB rejects requestoffer
+        // until both SFU sessions are in its call (hub.go isInSameCall).
+        // This gate narrows the REST admission; it never grants media itself.
+        let members = if self.in_call.contains(own_sfu) {
+            self.members
+                .iter()
+                .filter(|m| self.in_call.contains(&m.sfu))
+                .map(|m| m.talk.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.push(Event::SfuMembership(members))
+    }
     fn push(&mut self, event: Event) -> Result<(), ErrorKind> {
         let bytes = match &event {
             Event::Signal {
@@ -120,6 +169,7 @@ enum Command {
     },
     Send {
         generation: u64,
+        stream: StreamKind,
         peer: PeerSession,
         sid: Option<Negotiation>,
         signal: Option<Signal>,
@@ -234,6 +284,7 @@ impl Drop for Owner {
 /// room/call generation. Only a successful HTTP room activation can create it.
 #[derive(Clone)]
 pub(crate) struct Route {
+    replaced: Arc<AtomicBool>,
     handle: Handle,
     generation: u64,
     cancellation: Cancellation,
@@ -277,6 +328,7 @@ impl Handle {
     ) -> Result<Route, ErrorKind> {
         self.shared.validate(context)?;
         let cancellation = Cancellation::default();
+        let replaced = Arc::new(AtomicBool::new(false));
         let generation = {
             let mut state = self.shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
             if let Some(room) = &state.room {
@@ -290,14 +342,18 @@ impl Handle {
             let generation = state.generation;
             state.room = Some(Room {
                 purpose,
+                replaced: replaced.clone(),
                 token,
                 own,
                 generation,
                 cancellation: cancellation.clone(),
                 joined: false,
                 members: Vec::with_capacity(100),
+                in_call: Vec::with_capacity(100),
+                subscription_requests: Vec::with_capacity(64),
                 selected: Vec::with_capacity(17),
-                retired: Vec::with_capacity(100),
+                retired_screens: Vec::with_capacity(32),
+                retired_subscriptions: Vec::with_capacity(64),
                 signals: VecDeque::new(),
                 signal_bytes: 0,
                 typing: Vec::with_capacity(100),
@@ -305,6 +361,7 @@ impl Handle {
             generation
         };
         let route = Route {
+            replaced,
             handle: self.clone(),
             generation,
             cancellation,
@@ -346,6 +403,9 @@ impl Drop for Abort {
     }
 }
 impl Route {
+    pub(crate) fn session_replaced(&self) -> bool {
+        self.replaced.load(Ordering::Acquire)
+    }
     pub(crate) fn update(&self, settings: &ExternalSettings) -> Result<(), ErrorKind> {
         self.handle.update(settings)
     }
@@ -379,12 +439,22 @@ impl Route {
         }
         f(room, &session)
     }
+    #[cfg(test)]
     pub(crate) fn select(&self, peer: PeerSession, sid: Negotiation) -> Result<(), ErrorKind> {
+        self.select_stream(peer, sid, StreamKind::Camera)
+    }
+    pub(crate) fn select_stream(
+        &self,
+        peer: PeerSession,
+        sid: Negotiation,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
         self.with_room(|room, own_sfu| {
-            if room.retired.contains(&peer) {
-                return Err(ErrorKind::WrongScope);
-            }
-            if let Some(selection) = room.selected.iter_mut().find(|p| p.talk == peer) {
+            if let Some(selection) = room
+                .selected
+                .iter_mut()
+                .find(|p| p.talk == peer && p.stream == stream)
+            {
                 return if selection.sid.as_ref() == Some(&sid) {
                     Ok(())
                 } else {
@@ -396,28 +466,45 @@ impl Route {
             if peer != room.own {
                 return Err(ErrorKind::WrongScope);
             }
-            if room.selected.len() == 17 {
+            if room.selected.len() >= 20 {
                 return Err(ErrorKind::Busy);
             }
             room.selected.push(Selection {
+                stream,
                 talk: peer,
                 sfu: own_sfu.clone(),
                 sid: Some(sid),
                 publisher: true,
+                request_id: None,
             });
             Ok(())
         })
     }
-    pub(crate) fn remove(&self, peer: &PeerSession) {
+    pub(crate) fn remove_stream(&self, peer: &PeerSession, stream: StreamKind) {
         let _ = self.with_room(|room, _| {
-            room.selected.retain(|p| &p.talk != peer);
-            if room.retired.len() == 100 {
+            if stream == StreamKind::Screen {
+                for selected in room
+                    .selected
+                    .iter()
+                    .filter(|p| &p.talk == peer && p.stream == stream)
+                {
+                    if let Some(sid) = &selected.sid
+                        && room.retired_screens.len() < 32
+                    {
+                        room.retired_screens
+                            .push((selected.sfu.clone(), sid.clone()));
+                    }
+                }
+            }
+            // Retire the negotiation, not the participant's routing identity.
+            // A fresh REST observation and current HPB call membership can
+            // admit a new subscription after that participant unmutes/rejoins.
+            if let Err(error) = room.retire_subscription(peer, stream) {
                 room.cancellation.cancel();
-                return Err(ErrorKind::Busy);
+                return Err(error);
             }
-            if !room.retired.contains(peer) {
-                room.retired.push(peer.clone());
-            }
+            room.selected
+                .retain(|p| &p.talk != peer || p.stream != stream);
             Ok(())
         });
     }
@@ -471,19 +558,40 @@ impl Route {
         )
         .await
     }
+    #[cfg(test)]
     pub(crate) async fn request_offer(
         &self,
         context: &OperationContext,
         peer: &PeerSession,
     ) -> Result<(), ErrorKind> {
+        self.request_stream_offer(context, peer, StreamKind::Camera)
+            .await
+    }
+    pub(crate) fn reset_subscription(
+        &self,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
+        self.with_room(|room, _| room.retire_subscription(peer, stream))
+    }
+    pub(crate) async fn request_stream_offer(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        stream: StreamKind,
+    ) -> Result<(), ErrorKind> {
         self.with_room(|room, _| {
-            if peer == &room.own || room.retired.contains(peer) {
+            if peer == &room.own {
                 return Err(ErrorKind::WrongScope);
             }
-            if room.selected.iter().any(|p| &p.talk == peer) {
+            if room
+                .selected
+                .iter()
+                .any(|p| &p.talk == peer && p.stream == stream)
+            {
                 return Err(ErrorKind::Conflict);
             }
-            if room.selected.len() == 17 {
+            if room.selected.len() >= 20 {
                 return Err(ErrorKind::Busy);
             }
             let member = room
@@ -492,21 +600,35 @@ impl Route {
                 .find(|m| &m.talk == peer)
                 .ok_or(ErrorKind::NotFound)?;
             room.selected.push(Selection {
+                stream,
                 talk: peer.clone(),
                 sfu: member.sfu.clone(),
                 sid: None,
                 publisher: false,
+                request_id: None,
             });
             Ok(())
         })?;
-        self.send(context, peer, None, None).await
+        self.send_stream(context, peer, None, None, stream).await
     }
+    #[cfg(test)]
     pub(crate) async fn send(
         &self,
         context: &OperationContext,
         peer: &PeerSession,
         sid: Option<&Negotiation>,
         signal: Option<Signal>,
+    ) -> Result<(), ErrorKind> {
+        self.send_stream(context, peer, sid, signal, StreamKind::Camera)
+            .await
+    }
+    pub(crate) async fn send_stream(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        sid: Option<&Negotiation>,
+        signal: Option<Signal>,
+        stream: StreamKind,
     ) -> Result<(), ErrorKind> {
         self.handle.shared.validate(context)?;
         if self.is_closed() {
@@ -520,6 +642,7 @@ impl Route {
             .commands
             .try_send(Command::Send {
                 generation: self.generation,
+                stream,
                 peer: peer.clone(),
                 sid: sid.cloned(),
                 signal,
