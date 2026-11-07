@@ -4,8 +4,8 @@
 use super::*;
 use talk_adapters::identity::{
     CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory,
-    CacheRoom, CacheRoomObservation, CacheThumbnail, CachedNotificationLevel, CachedRoomKind,
-    DataCommand, DataResult, DataSnapshot,
+    CacheRoom, CacheRoomObservation, CacheThumbnail, CacheUserStatus, CachedNotificationLevel,
+    CachedPresence, CachedRoomKind, DataCommand, DataResult, DataSnapshot,
 };
 use talk_core::{
     ids::{ConversationId, HostId, RuntimeGeneration},
@@ -85,6 +85,7 @@ pub(super) struct Cache {
     // At most one cooldown per retained account (eight). Cleanup itself stays
     // in the existing 24-write budget and collapses to a preview-only clear.
     cleanup_failures: Vec<CleanupFailure>,
+    last_presence_second: Option<u64>,
 }
 fn required_cleanup(command: &DataCommand) -> bool {
     matches!(
@@ -557,6 +558,13 @@ fn local_context(account: AccountScope, key: &NavigationRoomKey) -> Option<Conve
     })
 }
 fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
+    row_at(room, context, history::now_unix())
+}
+fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationView {
+    let status = room
+        .user_status
+        .as_ref()
+        .filter(|status| room.kind == CachedRoomKind::Direct && status.fresh(now));
     ConversationView {
         context,
         navigation_key: Some(room.key.clone()),
@@ -584,9 +592,15 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
         },
         archived: room.archived,
         archive: Decision::Unknown,
-        presence: Presence::Unknown,
-        status_icon: None,
-        status_message: None,
+        presence: status.map_or(Presence::Unknown, |status| match status.presence {
+            CachedPresence::Available => Presence::Available,
+            CachedPresence::Away => Presence::Away,
+            CachedPresence::DoNotDisturb => Presence::DoNotDisturb,
+            CachedPresence::Offline => Presence::Offline,
+            CachedPresence::Unknown => Presence::Unknown,
+        }),
+        status_icon: status.and_then(|status| status.icon.clone()),
+        status_message: status.and_then(|status| status.message.clone()),
         participants: room.participant_count.and_then(|n| u16::try_from(n).ok()),
         send: Decision::Unknown,
         attach: Decision::Unknown,
@@ -771,6 +785,94 @@ impl Accounts {
                 if cleanup && self.cache.cleanup_failed(account, generation, now) {
                     cleanup_diagnostic(DiagnosticOutcome::Failed);
                 }
+            }
+        }
+    }
+    pub(super) fn expire_cached_presence(&mut self) {
+        let now = history::now_unix();
+        if self.cache.last_presence_second == Some(now) {
+            return;
+        }
+        self.cache.last_presence_second = Some(now);
+        let expired: Vec<_> = self
+            .cache
+            .accounts
+            .iter()
+            .flat_map(|account| {
+                account.snapshot.iter().flat_map(move |snapshot| {
+                    snapshot.rooms.as_slice().iter().filter_map(move |room| {
+                        room.user_status
+                            .as_ref()
+                            .filter(|status| !status.fresh(now))
+                            .map(|_| (account.id, room.key.clone()))
+                    })
+                })
+            })
+            .collect();
+        if expired.is_empty() {
+            return;
+        }
+        for account in &mut self.cache.accounts {
+            if let Some(snapshot) = &mut account.snapshot {
+                snapshot.rooms = page(snapshot.rooms.as_slice().iter().cloned().map(|mut room| {
+                    if room
+                        .user_status
+                        .as_ref()
+                        .is_some_and(|status| !status.fresh(now))
+                    {
+                        room.user_status = None;
+                    }
+                    room
+                }));
+            }
+        }
+        let clear = |row: &mut ConversationView| {
+            if row.context.conversation.host.as_local() == 0
+                && row.navigation_key.as_ref().is_some_and(|key| {
+                    expired.iter().any(|(account, room)| {
+                        *account == row.context.account.account && room == key
+                    })
+                })
+                && (row.presence != Presence::Unknown
+                    || row.status_icon.is_some()
+                    || row.status_message.is_some())
+            {
+                row.presence = Presence::Unknown;
+                row.status_icon = None;
+                row.status_message = None;
+                true
+            } else {
+                false
+            }
+        };
+        let mut changed = false;
+        let updated = page(self.snapshot.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                changed |= clear(&mut row);
+                row
+            },
+        ));
+        if changed {
+            self.snapshot.conversations = updated;
+            self.touch();
+        }
+        let scopes: Vec<_> = self
+            .cache
+            .accounts
+            .iter()
+            .flat_map(|account| {
+                [account.scope, self.cache.local_scope(account.id)]
+                    .into_iter()
+                    .flatten()
+            })
+            .collect();
+        for scope in scopes {
+            if let Some(background) = self.background.account_mut(scope) {
+                background.rooms =
+                    page(background.rooms.as_slice().iter().cloned().map(|mut row| {
+                        clear(&mut row);
+                        row
+                    }));
             }
         }
     }
@@ -1267,12 +1369,31 @@ impl Accounts {
                 last_activity: room.last_activity,
                 saved_at: now,
                 observation: None,
+                user_status: None,
             };
             if let Some(observation) = old
                 .and_then(|r| r.observation.clone())
                 .filter(|o| fresh_metadata(o.observed_at, now))
             {
                 cached.retain_observation(observation);
+            }
+            if cached.kind == CachedRoomKind::Direct
+                && let Some(status) = &room.user_status
+            {
+                cached.retain_user_status(CacheUserStatus {
+                    presence: match status.presence {
+                        protocol::UserPresence::Online => CachedPresence::Available,
+                        protocol::UserPresence::Away => CachedPresence::Away,
+                        protocol::UserPresence::DoNotDisturb => CachedPresence::DoNotDisturb,
+                        protocol::UserPresence::Offline | protocol::UserPresence::Invisible => {
+                            CachedPresence::Offline
+                        }
+                        protocol::UserPresence::Unknown => CachedPresence::Unknown,
+                    },
+                    icon: status.icon.clone(),
+                    message: status.message.clone(),
+                    observed_at: now,
+                });
             }
             let _ = rooms.try_push(cached);
         }
@@ -1485,7 +1606,32 @@ mod tests {
             last_activity: Some(1),
             saved_at: history::now_unix(),
             observation: None,
+            user_status: None,
         }
+    }
+    #[test]
+    fn cached_direct_status_is_visible_only_during_its_short_display_lease() {
+        let mut cached = metadata();
+        cached.kind = CachedRoomKind::Direct;
+        cached.user_status = Some(CacheUserStatus {
+            presence: CachedPresence::Away,
+            icon: Some(text("☕")),
+            message: Some(text("Synthetic status")),
+            observed_at: 100,
+        });
+        let scope = super::super::super::fixtures::scope();
+        let context = local_context(scope, &cached.key).unwrap();
+        let fresh = row_at(&cached, context, 101);
+        assert_eq!(fresh.presence, Presence::Away);
+        assert_eq!(
+            fresh.status_message.as_ref().map(|s| s.as_str()),
+            Some("Synthetic status")
+        );
+        let expired = row_at(&cached, context, 400);
+        assert_eq!(expired.presence, Presence::Unknown);
+        assert!(expired.status_message.is_none() && expired.status_icon.is_none());
+        cached.kind = CachedRoomKind::Group;
+        assert_eq!(row_at(&cached, context, 101).presence, Presence::Unknown);
     }
     fn install(model: &mut Accounts, scope: AccountScope) {
         model.cache.next_generation = 1;
@@ -1505,6 +1651,55 @@ mod tests {
             hydrated: None,
             load_attempted: true,
         });
+    }
+    #[test]
+    fn expiry_clears_offline_projection_without_overwriting_live_observations() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        install(&mut model, scope);
+        model.background.sync(&[scope], Instant::now());
+        let now = history::now_unix();
+        let mut cached = metadata();
+        cached.kind = CachedRoomKind::Direct;
+        cached.user_status = Some(CacheUserStatus {
+            presence: CachedPresence::Away,
+            icon: None,
+            message: Some(text("Synthetic status")),
+            observed_at: now.saturating_sub(301),
+        });
+        let context = local_context(scope, &cached.key).unwrap();
+        let old = row_at(&cached, context, now.saturating_sub(300));
+        let mut live = old.clone();
+        live.context.conversation.host = HostId::from_local(9);
+        model.cache.accounts[0].snapshot.as_mut().unwrap().rooms = page([cached]);
+        model.snapshot.conversations = page([old.clone(), live.clone()]);
+        model.background.account_mut(scope).unwrap().rooms = page([old]);
+        model.expire_cached_presence();
+        let rows = model.snapshot.conversations.as_slice();
+        assert_eq!(rows[0].presence, Presence::Unknown);
+        assert!(rows[0].status_message.is_none());
+        assert_eq!(rows[1], live);
+        assert!(
+            model.cache.accounts[0]
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .rooms
+                .as_slice()[0]
+                .user_status
+                .is_none()
+        );
+        assert_eq!(
+            model
+                .background
+                .account_mut(scope)
+                .unwrap()
+                .rooms
+                .as_slice()[0]
+                .presence,
+            Presence::Unknown
+        );
     }
     fn observed(scope: AccountScope) -> protocol::Conversation {
         protocol::Conversation {

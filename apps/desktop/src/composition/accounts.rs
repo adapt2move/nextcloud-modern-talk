@@ -533,6 +533,7 @@ impl Accounts {
                 self.account_load_failed(error);
             }
         }
+        self.expire_cached_presence();
         if let Some((request, deadline, choice)) = self.login.as_ref().and_then(|login| {
             login
                 .automatic_save_pending

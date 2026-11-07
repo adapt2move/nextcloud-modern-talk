@@ -4,6 +4,8 @@ use talk_core::{identity::StorageBackend, ids::LoginAttemptId};
 
 #[path = "metadata_tests.rs"]
 mod metadata_tests;
+#[path = "presence_tests.rs"]
+mod presence_tests;
 #[path = "thumbnail_tests.rs"]
 mod thumbnail_tests;
 
@@ -89,6 +91,7 @@ fn room(key: &NavigationRoomKey, saved_at: u64) -> CacheRoom {
         last_activity: Some(saved_at),
         saved_at,
         observation: None,
+        user_status: None,
     }
 }
 fn page<T, const N: usize>(values: impl IntoIterator<Item = T>) -> Page<T, N> {
