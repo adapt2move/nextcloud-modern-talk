@@ -514,7 +514,7 @@ impl Desktop {
         } else {
             None
         };
-        if initial_overlay.is_some() {
+        if initial_overlay.is_some() || prejoin.is_some() {
             modal_focus.focus(window)
         } else {
             root_focus.focus(window)

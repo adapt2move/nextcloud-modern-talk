@@ -1648,9 +1648,8 @@ impl NativeDesktopPort for DevelopmentPort {
             );
         }
         // Content probes can exhaust the general quota before a user sends.
-        // Reserve four send diagnostics for the explicit chat interaction fixture.
-        if self.chat_ux
-            && self.chat_ux_send_diagnostics < 4
+        // Reserve four send diagnostics independently of automatic read probes.
+        if self.chat_ux_send_diagnostics < 4
             && let UiIntent::Message {
                 context,
                 action: talk_core::ui::messaging::MessageAction::Send { body, target, .. },

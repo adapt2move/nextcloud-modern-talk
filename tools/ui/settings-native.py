@@ -225,16 +225,16 @@ def notifications(n):
  n.synthetic_audio();n.app('notification-settings');notification_checks(n);n.close_app()
 
 def call_chat(n):
- n.a.width=720;n.a.height=580;n.app('call-chat',scenario='call-controls');n.click_text('Chat',dy=-36);n.frame('narrow-call-chat-open')
+ n.a.width=720;n.a.height=580;n.app('call-chat',scenario='call-controls');n.click(438,535);n.frame('narrow-call-chat-open')
  # Keyboard-only entry from the real modal close control into its history/editor.
- for _ in range(8):
+ for _ in range(32):
   n.key('Tab');d=n.diag()
   if 'editor_focused=true' in d['UI_LOCAL_STATE']:break
  n.expect('call-chat-editor-keyboard-reachable','editor_focused=true' in d['UI_LOCAL_STATE'] and 'overlay=Some(CallChat)' in d['UI_LOCAL_STATE'],d)
  n.type('ALPHA');n.key('shift+Return');n.type('BETA');f=n.frame('call-chat-native-multiline-input')
  n.expect('call-chat-native-input-retained','editor_chars=10 editor_focused=true' in f['diagnostics']['UI_LOCAL_STATE'],f['diagnostics'])
  n.key('Return');f=n.frame('call-chat-send-once-with-inline-result')
- intents=[line for line in n.app_log.read_text().splitlines() if 'UI_INTENT send ' in line]
+ intents=[line for line in n.app_log.read_text().splitlines() if 'UI_CHAT_UX send ' in line]
  n.expect('call-chat-enter-single-send',len(intents)==1,{'intents':intents,'ocr':f['ocr']})
  n.run('xdotool','windowsize','--sync',n.xid,'1120','716');time.sleep(.5);f=n.frame('wide-resize-retains-one-overlay-editor')
  n.expect('resize-keeps-overlay-draft','overlay=Some(CallChat)' in f['diagnostics']['UI_LOCAL_STATE'] and 'editor_chars=10' in f['diagnostics']['UI_LOCAL_STATE'],f['diagnostics'])

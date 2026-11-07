@@ -80,7 +80,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     def type_text(value):
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
 
-    def click(word, xmin=0, ymin=0, inspected_point=None, dy=0):
+    def click(word, xmin=0, ymin=0, inspected_point=None, dy=0, first=False):
         path, words, _ = observe()
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if not choices:
@@ -103,7 +103,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         if not choices and word in aliases:
             choices=[r for r in words if normalized(r['text']) in aliases[word] and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if choices:
-            hit = choices[-1]
+            hit = choices[0] if first else choices[-1]
             x = int(hit['left']) + int(hit['width']) // 2
             y = int(hit['top']) + int(hit['height']) // 2
         elif inspected_point is not None:
@@ -327,12 +327,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('ansehen')
         expect('dismiss keeps a discoverable incoming call', ['Eingehender Anruf ansehen'], ['Annehmen'])
         click('ansehen')
-        click('Annehmen', ymin=200, dy=-36)
-        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird angefragt'], ['Bereit'])
+        click('Annehmen', ymin=200, dy=-36, first=True)
+        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird aufgebaut'], ['Bereit'])
         key('Escape')
-        expect('escape never hangs up a call', ['Verbindung wird angefragt'])
+        expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
         click('Verlassen')
-        expect('explicit leave returns to conversation', ['Nachricht an Produktteam'])
+        expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
         # Fixture diagnostics contain only local identities and the hand state.
@@ -392,10 +392,11 @@ def exercise(scenario, env, xid, out, label, large=False):
             expect('Declining recording consent leaves the call', ['Nachricht an Produktteam'])
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
+        time.sleep(1)  # Allow the first frame to mount and focus the modal.
         key('Escape')
         expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
-        click('Beitreten')
+        click('Beitreten', inspected_point=(1280,800,1181,92))
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        click('teilnehmen',inspected_point=(1200,800,600,695))
-        expect('join reports connecting without synthetic media success', ['Verbindung wird angefragt'], ['Anruf aktiv'])
+        click('teilnehmen',inspected_point=(1280,800,1080,500))
+        expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks
