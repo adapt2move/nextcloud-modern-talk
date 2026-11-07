@@ -16,11 +16,10 @@ import sys
 import tempfile
 from urllib.parse import urlparse, urlencode
 import urllib.request
-from talk_browser import LoopbackForward, private_json
 
 
-def fetch_settings(origin, password, token):
-    auth=base64.b64encode(('lab_alice:'+password).encode()).decode()
+def fetch_settings(origin, password, token, user='lab_alice'):
+    auth=base64.b64encode((user+':'+password).encode()).decode()
     req=urllib.request.Request(origin+'/ocs/v2.php/apps/spreed/api/v3/signaling/settings?'+urlencode({'token':token}),headers={'Authorization':'Basic '+auth,'OCS-APIRequest':'true','Accept':'application/json'})
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self,*_):return None
@@ -33,6 +32,8 @@ def fetch_settings(origin, password, token):
 
 
 async def run(a):
+    from talk_browser import LoopbackForward, private_json
+
     m=private_json(a.manifest);c=private_json(m['credentials_file']);fixtures=private_json(m['fixtures_file']);origin=urlparse(m['client_url']);target=urlparse(m['vm_url'])
     tls=None
     if origin.scheme=='https':
