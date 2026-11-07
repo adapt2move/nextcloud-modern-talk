@@ -1128,7 +1128,18 @@ impl Desktop {
             }
             primary_controls = primary_controls.child(group);
         }
-        let narrow_controls = window.viewport_size().width < px(720.) || self.scale >= 150;
+        // Keep the controls on one line when the side panels become overlays.
+        let narrow_controls = window.viewport_size().width < px(900.) || self.scale >= 150;
+        let chat_unread = self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|row| {
+                row.context.account == call.scope.account
+                    && row.context.conversation == call.scope.conversation
+            })
+            .map_or(0, |row| row.unread);
         let mut interaction_controls = div().flex().items_center().gap_2();
         interaction_controls = interaction_controls.child(
             self.round_icon_button(
@@ -1259,17 +1270,7 @@ impl Desktop {
                 .when(
                     id == "call-chat" && !show_chat && self.overlay != Some(Overlay::CallChat),
                     |button| {
-                        let unread = self
-                            .snapshot
-                            .conversations
-                            .as_slice()
-                            .iter()
-                            .find(|row| {
-                                row.context.account == call.scope.account
-                                    && row.context.conversation == call.scope.conversation
-                            })
-                            .map_or(0, |row| row.unread);
-                        button.when(unread > 0, |d| {
+                        button.when(chat_unread > 0, |d| {
                             d.child(
                                 div()
                                     .absolute()
@@ -1284,7 +1285,7 @@ impl Desktop {
                                     .text_size(px(12.))
                                     .line_height(px(18.))
                                     .text_center()
-                                    .child(unread.min(99).to_string()),
+                                    .child(chat_unread.min(99).to_string()),
                             )
                         })
                     },
@@ -1306,7 +1307,32 @@ impl Desktop {
             )
             .size(px(44.))
             .min_h(px(44.))
-            .rounded_full(),
+            .rounded_full()
+            .relative()
+            .when(
+                narrow_controls
+                    && !show_chat
+                    && self.overlay != Some(Overlay::CallChat)
+                    && chat_unread > 0,
+                |button| {
+                    button.child(
+                        div()
+                            .absolute()
+                            .top(px(-2.))
+                            .right(px(-2.))
+                            .min_w(px(18.))
+                            .h(px(18.))
+                            .px_1()
+                            .rounded_full()
+                            .bg(t.accent)
+                            .text_color(t.on_accent)
+                            .text_size(px(12.))
+                            .line_height(px(18.))
+                            .text_center()
+                            .child(chat_unread.min(99).to_string()),
+                    )
+                },
+            ),
         );
         if narrow_controls {
             if self.call_secondary_open {
