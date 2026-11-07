@@ -705,7 +705,7 @@ impl Desktop {
         if let Some(tile) = feature {
             stage = stage.child(tile);
         }
-        if call.participants.as_slice().is_empty() {
+        if !lobby && call.participants.as_slice().is_empty() {
             tiles = tiles.child(
                 div()
                     .p_6()

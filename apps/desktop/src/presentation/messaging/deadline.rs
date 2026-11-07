@@ -59,7 +59,10 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.message_ui.time_target.is_none()
-            || self.overlay.is_some()
+            || (self.overlay.is_some()
+                && !(self.overlay == Some(Overlay::Thread)
+                    && self.message_ui.time_thread.is_some()
+                    && self.message_ui.time_thread == self.thread_parent.map(|(_, root)| root)))
             || self.message_ui.scheduled_input.read(cx).composing()
         {
             return false;
@@ -85,6 +88,14 @@ impl Desktop {
         self.content_ui.menu = false;
         self.message_ui.menu.clear();
         self.message_ui.time_target = Some(target);
+        self.message_ui.time_thread = target.and_then(|_| {
+            self.thread_parent
+                .filter(|(context, _)| {
+                    Some(*context) == self.snapshot.selected
+                        && self.overlay == Some(Overlay::Thread)
+                })
+                .map(|(_, root)| root)
+        });
         self.message_ui.time_error = None;
         let value = target
             .and_then(|message| {
@@ -106,9 +117,18 @@ impl Desktop {
                     .ok()
                     .map(|moment| moment.local)
             });
-        self.message_ui.picker = value.as_ref().and_then(|value| {
-            talk_core::preferences::time::calendar::Calendar::parse(value.as_str())
-        });
+        self.message_ui.picker = value
+            .as_ref()
+            .and_then(|value| {
+                talk_core::preferences::time::calendar::Calendar::parse(value.as_str())
+            })
+            .or_else(|| {
+                self.development
+                    .then(|| {
+                        talk_core::preferences::time::calendar::Calendar::parse("2027-01-16 09:00")
+                    })
+                    .flatten()
+            });
         if self.message_ui.scheduled_edit.is_none() {
             self.focus_date_picker(window, cx);
         }
@@ -186,6 +206,7 @@ impl Desktop {
             && self.submit_message(command).is_some()
         {
             self.message_ui.time_target = None;
+            self.message_ui.time_thread = None;
             self.message_ui.picker = None;
             self.message_ui.scheduled_edit = None;
             self.restore_deadline_focus(window, cx);
@@ -193,16 +214,28 @@ impl Desktop {
     }
 
     pub(super) fn restore_deadline_focus(&self, window: &mut Window, cx: &Context<Self>) {
-        if self.composer_available() {
+        if self.overlay == Some(Overlay::Thread) && self.thread_parent.is_some() {
+            self.thread_composer.focus_handle(cx).focus(window);
+        } else if self.composer_available() {
             self.composer.focus_handle(cx).focus(window);
         } else {
             self.navigation.history_focus().focus(window);
         }
     }
 
-    pub(super) fn message_deadline_card(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+    pub(in crate::presentation) fn message_deadline_card_on(
+        &self,
+        thread: bool,
+        cx: &Context<Self>,
+    ) -> Option<gpui::AnyElement> {
         let target = self.message_ui.time_target?;
         let context = self.snapshot.selected?;
+        let in_thread = self.overlay == Some(Overlay::Thread)
+            && self.message_ui.time_thread.is_some()
+            && self.message_ui.time_thread == self.thread_parent.map(|(_, root)| root);
+        if thread != in_thread {
+            return None;
+        }
         let reminder = target.is_some();
         let editing = !reminder && self.message_ui.scheduled_edit.is_some();
         let available = self.message_available(if reminder {

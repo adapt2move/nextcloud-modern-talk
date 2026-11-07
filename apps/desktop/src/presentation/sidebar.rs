@@ -292,13 +292,6 @@ impl Desktop {
                     ))
                 },
             )
-            .child(self.sidebar_destination(
-                "nav-archive",
-                "Archiv",
-                "file",
-                SidebarDestination::Archive,
-                cx,
-            ))
             .when(
                 self.snapshot
                     .account_reminders
@@ -322,6 +315,13 @@ impl Desktop {
                     )
                 },
             )
+            .child(self.sidebar_destination(
+                "nav-archive",
+                "Archiv",
+                "file",
+                SidebarDestination::Archive,
+                cx,
+            ))
             .when_some(
                 self.snapshot
                     .federation_invitations

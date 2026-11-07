@@ -3173,12 +3173,16 @@ impl Desktop {
             &self.search,
             &self.sidebar_filter,
             &self.composer,
+            &self.thread_composer,
+            &self.thread_title,
             &self.conversation_name,
             &self.group_name,
             &self.upload_folder,
+            &self.own_status_message_input,
+            &self.own_status_icon_input,
             &self.message_ui.search,
-            &self.message_ui.scheduled_input,
             &self.discovery_search,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -3200,9 +3204,11 @@ impl Desktop {
             &self.own_status_message_input,
             &self.own_status_icon_input,
             &self.message_ui.search,
+            &self.discovery_search,
             &self.message_ui.scheduled_input,
         ]
         .into_iter()
+        .chain(self.account_search_ui.inputs().iter())
         .chain(self.room_ui.inputs().iter())
         .chain(self.content_ui.inputs())
         .any(|input| {

@@ -232,11 +232,7 @@ impl History {
                 .as_slice()
                 .iter()
                 .filter(|translation| {
-                    self.messages.as_slice().iter().any(|message| {
-                        message.local_id == translation.message
-                            && !message.metadata.deleted
-                            && message.body == translation.source
-                    })
+                    self.translation_source_current(translation.message, &translation.source)
                 })
                 .cloned(),
         );
@@ -301,6 +297,30 @@ impl History {
                 }
             }
         }
+    }
+    fn translation_source_current(&self, id: u128, source: &Text<4096>) -> bool {
+        self.messages
+            .as_slice()
+            .iter()
+            .chain(
+                self.open_thread
+                    .iter()
+                    .flat_map(|thread| thread.root_message.iter().chain(thread.rows.as_slice())),
+            )
+            .chain(
+                self.threads
+                    .iter()
+                    .flat_map(|(_, rows, root)| root.iter().chain(rows.as_slice())),
+            )
+            .find(|message| message.local_id == id)
+            .is_some_and(|message| {
+                !message.metadata.deleted
+                    && message.body == *source
+                    && !message
+                        .metadata
+                        .expires_at
+                        .is_some_and(|at| at > 0 && at <= now_unix())
+            })
     }
     pub(super) fn project_open_thread(&self, panel: &mut MessagePanel) {
         if let Some(thread) = self
@@ -1299,12 +1319,7 @@ impl Cache {
                 text,
             }) if matches!(work, Work::Translate(id) if id == u128::from(message.sequence)) => {
                 let id = u128::from(message.sequence);
-                if room
-                    .messages
-                    .as_slice()
-                    .iter()
-                    .any(|row| row.local_id == id && !row.metadata.deleted && row.body == *source)
-                {
+                if room.translation_source_current(id, source) {
                     room.translations = page(
                         room.translations
                             .as_slice()

@@ -277,6 +277,7 @@ impl OutboxKind {
             Self::MarkUnread => 9,
             Self::RenameThread => 10,
             Self::ThreadNotifications => 11,
+            // 9–11 belong to unread/thread intents in existing integrated profiles.
             Self::EditScheduled => 12,
         }
     }

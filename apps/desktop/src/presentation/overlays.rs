@@ -92,7 +92,10 @@ impl Desktop {
                             self.scroll_area(super::navigation::Region::Overlay)
                                 .flex_1()
                                 .min_h_0()
-                                .child(self.thread_body(cx)),
+                                .child(
+                                    self.thread_body(cx)
+                                        .children(self.message_deadline_card_on(true, cx)),
+                                ),
                         )
                         .child(self.thread_composer_view(cx)),
                 ),

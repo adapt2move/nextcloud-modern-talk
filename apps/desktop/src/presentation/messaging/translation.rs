@@ -82,6 +82,19 @@ impl Desktop {
             .messages
             .as_slice()
             .iter()
+            .chain(
+                self.snapshot
+                    .message_panel
+                    .as_ref()
+                    .filter(|panel| panel.context == context)
+                    .into_iter()
+                    .flat_map(|panel| {
+                        panel
+                            .thread_root_message
+                            .iter()
+                            .chain(panel.thread_messages.as_slice())
+                    }),
+            )
             .find(|message| message.local_id == id)
         else {
             return;
@@ -117,6 +130,7 @@ impl Desktop {
         &self,
         context: ConversationRef,
         message: &MessageView,
+        thread: bool,
         cx: &Context<Self>,
     ) -> Option<Div> {
         if !self.translation_available(context, message) {
@@ -157,7 +171,7 @@ impl Desktop {
                         .child(translation.text.as_str().to_owned()),
                 )
                 .child(self.button(
-                    scoped_id("hide-translation", context, message.local_id, 0),
+                    row::surface_id("hide-translation", context, message.local_id, 0, thread),
                     "Original anzeigen",
                     ButtonStyle::Quiet,
                     true,

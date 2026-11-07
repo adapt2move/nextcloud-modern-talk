@@ -229,7 +229,12 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("files") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
         Some(
-            "thread" | "thread-options" | "thread-offline" | "thread-paged" | "thread-reference",
+            "thread"
+            | "thread-options"
+            | "thread-offline"
+            | "thread-paged"
+            | "thread-reference"
+            | "thread-message-tools",
         ) => Some(Overlay::Thread),
         Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
         Some("account-reminders" | "account-reminders-partial") => Some(Overlay::Reminders),

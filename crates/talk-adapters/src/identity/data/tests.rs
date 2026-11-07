@@ -942,3 +942,16 @@ fn replacement_insert_failure_rolls_back_the_retirement_of_the_failed_source() {
     assert_eq!(reopened.as_slice()[0].record.phase, OutboxPhase::Failed);
     assert_eq!(reopened.as_slice()[0].record.intent().unwrap(), intent);
 }
+
+#[test]
+fn scheduled_edit_encoding_does_not_alias_existing_unread_and_thread_intents() {
+    for (kind, code) in [
+        (OutboxKind::MarkUnread, 9),
+        (OutboxKind::RenameThread, 10),
+        (OutboxKind::ThreadNotifications, 11),
+        (OutboxKind::EditScheduled, 12),
+    ] {
+        assert_eq!(kind.code(), code);
+        assert_eq!(OutboxKind::parse(code).unwrap(), kind);
+    }
+}

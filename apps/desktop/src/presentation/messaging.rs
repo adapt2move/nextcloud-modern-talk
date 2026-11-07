@@ -115,6 +115,7 @@ pub(super) struct MessageUi {
     unread_jump: Option<(ConversationRef, RequestId)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
+    time_thread: Option<u128>,
     picker: Option<talk_core::preferences::time::calendar::Calendar>,
     scheduled_edit: Option<(u128, bool)>,
     show_scheduled: bool,
@@ -313,6 +314,7 @@ impl MessageUi {
             unread_jump: None,
             last_located: None,
             time_target: None,
+            time_thread: None,
             picker: None,
             scheduled_edit: None,
             show_scheduled: false,
@@ -415,6 +417,14 @@ impl Desktop {
             )
         {
             return false;
+        }
+        if self
+            .message_ui
+            .time_thread
+            .is_some_and(|scope| scope != root)
+        {
+            self.message_ui.time_target = None;
+            self.message_ui.time_thread = None;
         }
         let text = self
             .message_ui
@@ -833,6 +843,7 @@ impl Desktop {
                 self.message_ui.pending_edit = None;
             }
             self.message_ui.time_target = None;
+            self.message_ui.time_thread = None;
             self.message_ui.picker = None;
             self.message_ui.scheduled_edit = None;
             self.message_ui.show_scheduled = false;
@@ -1730,6 +1741,7 @@ impl Desktop {
                 }
                 self.message_ui.editing = None;
                 self.message_ui.time_target = None;
+                self.message_ui.time_thread = None;
                 self.message_ui.scheduled_edit = None;
             }
             Action::Command(command) => {
@@ -1831,6 +1843,7 @@ impl Desktop {
             }
             Action::CancelTime => {
                 self.message_ui.time_target = None;
+                self.message_ui.time_thread = None;
                 self.message_ui.picker = None;
                 self.message_ui.scheduled_edit = None;
                 self.message_ui.time_error = None;
@@ -3030,7 +3043,7 @@ impl Desktop {
                 rows.push(self.composer_card().children(reminders).into_any_element());
             }
         }
-        rows.extend(self.message_deadline_card(cx));
+        rows.extend(self.message_deadline_card_on(false, cx));
         rows.extend(self.failed_draft_card(cx));
         rows
     }

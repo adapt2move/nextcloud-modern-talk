@@ -11,13 +11,11 @@ pub(crate) struct Target {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Choice {
-    File,
-    CloudFile,
-    Poll,
-    Schedule,
-    Scheduled,
-    Silent,
-    Reminders,
+    File = 0,
+    CloudFile = 1,
+    Poll = 2,
+    Scheduled = 4,
+    Silent = 5,
 }
 impl Choice {
     fn id(self, target: Target) -> ElementId {
@@ -182,20 +180,6 @@ impl Desktop {
                     ),
                 ),
             },
-            Item {
-                choice: Choice::Schedule,
-                label: "Nachricht planen",
-                icon: "clock",
-                availability: if target.thread.is_some()
-                    || self.drafts.target(target.context).new_thread
-                {
-                    Availability::when(false, "Neue Threads können nicht geplant werden.")
-                } else if self.drafts.target(target.context).private_reply.is_some() {
-                    Availability::when(false, "Private Antworten können nicht geplant werden.")
-                } else {
-                    self.message_available(MessageFeature::Schedules)
-                },
-            },
             message(
                 Choice::Scheduled,
                 "Geplante Nachrichten",
@@ -207,12 +191,6 @@ impl Desktop {
                 "Leise senden",
                 "moon",
                 MessageFeature::Silent,
-            ),
-            message(
-                Choice::Reminders,
-                "Erinnerungen",
-                "bell",
-                MessageFeature::UpcomingReminders,
             ),
         ]
     }
@@ -316,10 +294,8 @@ impl Desktop {
                 LocalAction::Content(crate::presentation::content::Action::OpenCloudBrowser)
             }
             Choice::Poll => LocalAction::Content(crate::presentation::content::Action::CreatePoll),
-            Choice::Schedule => LocalAction::Message(Action::Schedule),
             Choice::Scheduled => LocalAction::Message(Action::Command(MessageAction::Scheduled)),
             Choice::Silent => LocalAction::Message(Action::Silent),
-            Choice::Reminders => LocalAction::Message(Action::Command(MessageAction::Reminders)),
         };
         self.handle(action, window, cx);
     }

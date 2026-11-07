@@ -21,6 +21,8 @@ pub(crate) enum Choice {
     Remind,
     RemoveReminder,
     Translate,
+    PollDetails,
+    VoiceDownload,
     Forward,
     PrivateReply,
     MarkUnread,
@@ -181,6 +183,8 @@ impl Choice {
             Self::Remind => "clock",
             Self::RemoveReminder => "trash-2",
             Self::Translate => "globe",
+            Self::PollDetails => "chat",
+            Self::VoiceDownload => "download",
             Self::Forward => "arrow-right",
             Self::PrivateReply => "reply",
             Self::MarkUnread => "inbox",
@@ -201,6 +205,8 @@ impl Choice {
             Self::Remind => 5,
             Self::RemoveReminder => 11,
             Self::Translate => 12,
+            Self::PollDetails => 16,
+            Self::VoiceDownload => 17,
             Self::Forward => 6,
             Self::PrivateReply => 13,
             Self::MarkUnread => 14,
@@ -209,6 +215,43 @@ impl Choice {
             Self::Back => 9,
         }
     }
+}
+
+fn menu_poll(message: &MessageView) -> Option<u64> {
+    message
+        .metadata
+        .rich
+        .as_slice()
+        .iter()
+        .filter(|object| matches!(object.kind.as_str(), "poll" | "talk-poll"))
+        .find_map(|object| {
+            object
+                .id
+                .as_ref()?
+                .as_str()
+                .parse::<u64>()
+                .ok()
+                .filter(|id| *id > 0)
+        })
+}
+fn menu_voice(
+    context: ConversationRef,
+    message: &MessageView,
+) -> Option<talk_core::ui::content::AttachmentRef> {
+    if !message.metadata.voice_message {
+        return None;
+    }
+    message
+        .metadata
+        .rich
+        .as_slice()
+        .iter()
+        .find(|object| object.kind.as_str() == "file")
+        .map(|object| talk_core::ui::content::AttachmentRef {
+            context,
+            message: message.local_id,
+            placeholder: object.placeholder.clone(),
+        })
 }
 
 impl Desktop {
@@ -334,9 +377,20 @@ impl Desktop {
                 ];
                 if thread {
                     items.truncate(3);
-                    return items;
+                    if feature(MessageFeature::Reminders) {
+                        items.push(Item::new(
+                            Choice::Remind,
+                            if reminded {
+                                "Erinnerung bearbeiten"
+                            } else {
+                                "Später erinnern"
+                            },
+                            true,
+                            "",
+                        ));
+                    }
                 }
-                if self.private_reply_available(message) {
+                if !thread && self.private_reply_available(message) {
                     items.push(Item::new(
                         Choice::PrivateReply,
                         "Privat antworten",
@@ -344,7 +398,7 @@ impl Desktop {
                         "",
                     ));
                 }
-                if self.message_feature_enabled(MessageFeature::MarkUnread) {
+                if !thread && self.message_feature_enabled(MessageFeature::MarkUnread) {
                     items.push(Item::new(
                         Choice::MarkUnread,
                         "Gespräch als ungelesen markieren",
@@ -352,7 +406,7 @@ impl Desktop {
                         "",
                     ));
                 }
-                if self.message_feature_enabled(MessageFeature::UnreadFrom) {
+                if !thread && self.message_feature_enabled(MessageFeature::UnreadFrom) {
                     items.push(Item::new(
                         Choice::MarkUnreadFrom,
                         "Ab hier ungelesen",
@@ -391,7 +445,7 @@ impl Desktop {
                         "Die Übersetzung wird bereits geladen.",
                     ));
                 }
-                if message.metadata.thread.is_some() || message.reply_count > 0 {
+                if !thread && (message.metadata.thread.is_some() || message.reply_count > 0) {
                     items.push(Item::new(
                         Choice::Thread,
                         "Thread öffnen",
@@ -400,6 +454,29 @@ impl Desktop {
                             message.metadata.thread.unwrap_or(message.local_id),
                         ),
                         "Threads sind derzeit nicht verfügbar.",
+                    ));
+                }
+                if let Some(poll) = menu_poll(message) {
+                    items.push(Item::new(
+                        Choice::PollDetails,
+                        "Umfragedetails",
+                        self.content_scope_current()
+                            && self
+                                .snapshot
+                                .content_panel
+                                .polls
+                                .as_slice()
+                                .iter()
+                                .any(|item| item.id == poll),
+                        "Umfrage wird geladen …",
+                    ));
+                }
+                if menu_voice(target.context, message).is_some() {
+                    items.push(Item::new(
+                        Choice::VoiceDownload,
+                        "Herunterladen",
+                        !self.media_offline() && self.download_available().is_enabled(),
+                        "Die Verbindung ist derzeit nicht bereit.",
                     ));
                 }
                 items
@@ -600,6 +677,10 @@ impl Desktop {
                     .current_menu_message(target)
                     .and_then(|row| row.metadata.thread)
                     .unwrap_or(target.message);
+                let poll = self.current_menu_message(target).and_then(menu_poll);
+                let voice = self
+                    .current_menu_message(target)
+                    .and_then(|message| menu_voice(target.context, message));
                 self.dismiss_message_menu(
                     !matches!(choice, Choice::Edit | Choice::Remind),
                     window,
@@ -636,6 +717,28 @@ impl Desktop {
                     }
                     Choice::Translate => {
                         self.message_action(Action::Translate(target.message), window, cx)
+                    }
+                    Choice::PollDetails => {
+                        if let Some(poll) = poll {
+                            self.handle(
+                                LocalAction::Content(
+                                    crate::presentation::content::Action::PollDetails(poll),
+                                ),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    Choice::VoiceDownload => {
+                        if let Some(attachment) = voice {
+                            self.handle(
+                                LocalAction::Content(
+                                    crate::presentation::content::Action::Download(attachment),
+                                ),
+                                window,
+                                cx,
+                            );
+                        }
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
@@ -1190,6 +1293,36 @@ mod tests {
                 host: HostId::from_local(1),
                 local,
             },
+        }
+    }
+    #[test]
+    fn message_actions_and_emoji_controls_keep_distinct_identity() {
+        let choices = [
+            Choice::React,
+            Choice::Edit,
+            Choice::Delete,
+            Choice::ConfirmDelete,
+            Choice::Pin,
+            Choice::Unpin,
+            Choice::Remind,
+            Choice::RemoveReminder,
+            Choice::Translate,
+            Choice::Forward,
+            Choice::PrivateReply,
+            Choice::MarkUnread,
+            Choice::MarkUnreadFrom,
+            Choice::Thread,
+            Choice::Back,
+            Choice::PollDetails,
+            Choice::VoiceDownload,
+        ];
+        let mut ordinals = std::collections::HashSet::new();
+        for choice in choices {
+            assert!(choice.ordinal() < 32);
+            assert!(ordinals.insert(choice.ordinal()));
+        }
+        for index in 0..reactions::EMOJI.len() {
+            assert!(ordinals.insert(Choice::Reaction(index as u8).ordinal()));
         }
     }
     #[test]

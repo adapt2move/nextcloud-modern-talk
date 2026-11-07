@@ -39,7 +39,10 @@ impl Accounts {
         source: Text<4096>,
         language: Text<64>,
     ) -> Result<(), SubmitError> {
-        if self.snapshot.selected != Some(context) || !context.is_consistent() {
+        if self.snapshot.selected != Some(context)
+            || !context.is_consistent()
+            || u64::try_from(message).ok().is_none_or(|id| id == 0)
+        {
             return Err(SubmitError::StaleScope);
         }
         if self.translation.job.is_some() {
@@ -58,14 +61,22 @@ impl Accounts {
                     .iter()
                     .any(|target| target.as_str().eq_ignore_ascii_case(language.as_str()))
             })
-            || !self.snapshot.messages.as_slice().iter().any(|row| {
-                row.local_id == message
-                    && row.body == source
-                    && !row.metadata.deleted
-                    && !row.metadata.system
-                    && !row.metadata.truncated
-                    && row.metadata.rich.as_slice().is_empty()
-            })
+            || !self
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .chain(panel.thread_root_message.iter())
+                .chain(panel.thread_messages.as_slice())
+                .find(|row| row.local_id == message)
+                .is_some_and(|row| {
+                    row.local_id == message
+                        && row.body == source
+                        && !row.metadata.deleted
+                        && !row.metadata.system
+                        && !row.metadata.truncated
+                        && row.metadata.rich.as_slice().is_empty()
+                })
         {
             return Err(SubmitError::StaleScope);
         }

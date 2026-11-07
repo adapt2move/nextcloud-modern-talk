@@ -730,6 +730,11 @@ impl Desktop {
             )
         }
         .above_composer();
+        let show_voice = !thread
+            && input.read(cx).content.is_empty()
+            && !attached
+            && !self.drafts.target(row.context).new_thread
+            && self.message_feature_enabled(MessageFeature::Voice);
         div()
             .when(!thread, |d| d.track_focus(&self.composer_focus))
             .when(thread, |d| d.track_focus(&self.thread_composer_focus))
@@ -855,10 +860,7 @@ impl Desktop {
                                     .items_center()
                                     .gap_3()
                                     .when(
-                                        input.read(cx).content.is_empty()
-                                            && !attached
-                                            && !self.drafts.target(row.context).new_thread
-                                            && self.message_feature_enabled(MessageFeature::Voice),
+                                        show_voice,
                                         |d| {
                                             d.child(self.icon_button(
                                                 if thread { "thread-voice-start" } else { "voice-start" },
@@ -872,7 +874,7 @@ impl Desktop {
                                             ))
                                         },
                                     )
-                                    .when(!thread && !self.drafts.target(row.context).new_thread && self.drafts.target(row.context).private_reply.is_none() && self.message_feature_enabled(MessageFeature::Schedules), |d| {
+                                    .when(!thread && !show_voice && !self.drafts.target(row.context).new_thread && self.drafts.target(row.context).private_reply.is_none() && self.message_feature_enabled(MessageFeature::Schedules), |d| {
                                         d.child(self.icon_button(
                                             "schedule-send", ("chevron-down", "Später senden"),
                                             ButtonStyle::Quiet,
@@ -881,7 +883,7 @@ impl Desktop {
                                             LocalAction::MessageIn(row.context, super::messaging::Action::Schedule), cx,
                                         ))
                                     })
-                                    .child(self.icon_button(
+                                    .when(!show_voice, |d| d.child(self.icon_button(
                                         send_id,
                                         ("arrow-up", "Senden"),
                                         ButtonStyle::Primary,
@@ -892,7 +894,7 @@ impl Desktop {
                                             LocalAction::Send
                                         },
                                         cx,
-                                    )),
+                                    ))),
                             ),
                     ),
             )

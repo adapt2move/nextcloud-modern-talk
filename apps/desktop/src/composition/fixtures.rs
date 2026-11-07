@@ -168,6 +168,7 @@ pub const SCENARIOS: &[&str] = &[
     "account-search",
     "reference-preview",
     "thread-reference",
+    "thread-message-tools",
     "search-filter",
     "sidebar-room-menu",
     "create34",
@@ -547,6 +548,34 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             joining: Some(context),
             uncertain: false,
         });
+        return state;
+    }
+    if scenario == Some("thread-message-tools") {
+        let mut state = snapshot(Some("thread"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            for feature in [
+                talk_core::ui::messaging::MessageFeature::Reminders,
+                talk_core::ui::messaging::MessageFeature::Translation,
+            ] {
+                let _ = panel.features.try_push((
+                    feature,
+                    talk_core::ui::conversation::Availability {
+                        implemented: true,
+                        server: FeatureSupport::Supported,
+                        allowed: Decision::Allowed,
+                    },
+                ));
+            }
+            panel.translation_targets = Some(page([text("de")]));
+            if let Some(reply) = panel.thread_messages.as_slice().first() {
+                panel.translations = page([talk_core::ui::messaging::Translation {
+                    message: reply.local_id,
+                    source: reply.body.clone(),
+                    language: text("de"),
+                    text: text("Das passt für mich."),
+                }]);
+            }
+        }
         return state;
     }
     if scenario == Some("thread-reference") {

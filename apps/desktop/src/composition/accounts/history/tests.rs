@@ -3702,3 +3702,34 @@ fn location_cache_round_trip_drops_deleted_objects() {
             .is_empty()
     );
 }
+
+#[test]
+fn translations_follow_the_live_older_thread_page_and_main_tombstones_win() {
+    let key = context(1, 1, 1, 1);
+    let mut room = History::new(key);
+    let row = message_view(&message(key, 40, "Original reply"));
+    room.open_thread = Some(OpenThread {
+        root: 7,
+        rows: page([row.clone()]),
+        root_message: None,
+    });
+    room.translations = page([talk_core::ui::messaging::Translation {
+        message: 40,
+        source: row.body.clone(),
+        language: text("de"),
+        text: text("Übersetzte Antwort"),
+    }]);
+    let mut panel = MessagePanel::new(key);
+    panel.thread_root = Some(7);
+    room.project(&mut panel);
+    assert_eq!(panel.translations.as_slice().len(), 1);
+    let mut deleted = row;
+    deleted.metadata.deleted = true;
+    room.messages = page([deleted]);
+    room.project(&mut panel);
+    assert!(panel.translations.as_slice().is_empty());
+    room.messages = Page::empty();
+    room.open_thread = None;
+    room.project(&mut panel);
+    assert!(panel.translations.as_slice().is_empty());
+}

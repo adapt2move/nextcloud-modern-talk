@@ -64,7 +64,7 @@ The ordinary internal-signaling path was exercised against original Talk24.0.6/N
 
 ## Protocol coverage and verification
 
-[Operation inventory](spec/operations.json) classifies all 187 operations in the full Talk 25.0.6 specification, including relevant federation/avatar routes absent from the ordinary specification. [Provenance](spec/provenance.json) pins both Talk 24.0.6 and 25.0.6 full specifications, the ordinary v25 document, checksums and upstream AGPL license. Only metadata is retained; no generated HTTP wrapper or upstream implementation source is compiled. Application account/capability probes and user-status operations belong to Nextcloud OCS and are additional to that Talk inventory; the latter have separate source provenance in `external_operations`.
+[Operation inventory](spec/operations.json) classifies all 187 operations in the full Talk 25.0.6 specification, including relevant federation/avatar routes absent from the ordinary specification. [Provenance](spec/provenance.json) pins both Talk 24.0.6 and 25.0.6 full specifications, the ordinary v25 document, checksums and upstream AGPL license. Only metadata is retained; no generated HTTP wrapper or upstream implementation source is compiled. Application account/capability probes, user status, account search, references, translation and task status use NextCloud OCS/core APIs outside that Talk inventory; their available entries carry separate source provenance in `external_operations`.
 
 ```sh
 cargo test --locked -p nextcloud-talk-api
