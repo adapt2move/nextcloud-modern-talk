@@ -1083,7 +1083,14 @@ async fn summary_requires_capability_threshold_and_correlated_task() {
 #[tokio::test]
 async fn federation_invitation_actions_are_capability_and_account_scoped() {
     for major in [34, 35] {
-        for case in ["disabled", "wrong-user", "accept", "decline"] {
+        for case in [
+            "disabled",
+            "wrong-user",
+            "accepted",
+            "unknown-state",
+            "accept",
+            "decline",
+        ] {
             let mut capabilities = caps(major);
             capabilities["capabilities"]["spreed"]["features"]
                 .as_array_mut()
@@ -1092,7 +1099,7 @@ async fn federation_invitation_actions_are_capability_and_account_scoped() {
             capabilities["capabilities"]["spreed"]["config"]["federation"] = json!({
                 "enabled": case != "disabled", "incoming-enabled": true,
             });
-            let invitation = json!({"id":9,"localToken":"testroom", "userId": if case == "wrong-user" {"someone_else"} else {"fixture_user"},
+            let invitation = json!({"id":9,"state":if case == "accepted" { 1 } else if case == "unknown-state" { 5 } else { 0 }, "localToken":"testroom", "userId": if case == "wrong-user" {"someone_else"} else {"fixture_user"},
                 "roomName":"Fictional room", "inviterDisplayName":"Fictional inviter"});
             let mut replies = vec![Reply::data(capabilities.clone())];
             if case != "disabled" {
@@ -1124,6 +1131,10 @@ async fn federation_invitation_actions_are_capability_and_account_scoped() {
             assert_eq!(view.supported, case != "disabled");
             if case == "disabled" {
                 assert_eq!(server.count(), 1);
+                continue;
+            }
+            if matches!(case, "accepted" | "unknown-state") {
+                assert!(view.items.as_slice().is_empty());
                 continue;
             }
             let item = &view.items.as_slice()[0];
@@ -1254,6 +1265,8 @@ async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
         parent["participantType"] = json!(1);
         parent["breakoutRoomMode"] = json!(2);
         parent["breakoutRoomStatus"] = json!(1);
+        let mut unconfigured = parent.clone();
+        unconfigured["breakoutRoomMode"] = json!(0);
         let mut child = room();
         child["id"] = json!(8);
         child["token"] = json!("childone");
@@ -1266,7 +1279,7 @@ async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
             Reply::data(parent.clone()),
             Reply::data(json!([participant.clone()])),
             Reply::data(capabilities.clone()),
-            Reply::data(parent.clone()),
+            Reply::data(unconfigured),
             Reply::data(json!([participant])),
             Reply::data(json!([child.clone(), parent.clone()])),
             Reply::data(capabilities),

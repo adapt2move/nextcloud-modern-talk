@@ -1092,6 +1092,11 @@ impl Accounts {
                     | talk_core::ui::presentation::CallStage::Failed
             )
         }) {
+            // The user explicitly chose the new room after the call owner
+            // confirmed it had ended. Retire its terminal screen so the
+            // navigation is actually visible.
+            self.snapshot.call = None;
+            self.call_ui = None;
             let _ = self.open(target);
         }
         self.load_rooms = Some(context.account);

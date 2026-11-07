@@ -54,6 +54,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reminder-menu",
     "account-reminders",
     "federation-invitations",
+    "federation-pending",
     "chat-schedule-time",
     "chat-schedule-edit",
     "chat-translation",
@@ -63,6 +64,7 @@ pub const SCENARIOS: &[&str] = &[
     "lobby-settings",
     "room-avatar",
     "breakout-configure",
+    "breakout-create",
     "breakout-free",
     "breakout-assigned",
     "breakout-help",
@@ -213,7 +215,10 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
-    if scenario == Some("federation-invitations") {
+    if matches!(
+        scenario,
+        Some("federation-invitations" | "federation-pending")
+    ) {
         use talk_core::ui::presentation::{
             FeatureSupport, FederationInvitationView, FederationInvitationsView,
         };
@@ -222,6 +227,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             state.federation_invitations = Some(FederationInvitationsView {
                 scope,
                 support: FeatureSupport::Supported,
+                pending: scenario == Some("federation-pending"),
                 failed: false,
                 invitations: page([
                     FederationInvitationView {
@@ -614,6 +620,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "room-avatar"
                 | "lobby-settings"
                 | "breakout-configure"
+                | "breakout-create"
                 | "breakout-free"
                 | "breakout-assigned"
                 | "breakout-help"
@@ -632,7 +639,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         if matches!(
             scenario,
-            Some("breakout-configure" | "breakout-free" | "breakout-assigned" | "breakout-help")
+            Some(
+                "breakout-configure"
+                    | "breakout-create"
+                    | "breakout-free"
+                    | "breakout-assigned"
+                    | "breakout-help"
+            )
         ) && let Some(panel) = state.conversation_panel.as_mut()
         {
             use talk_core::ui::conversation::{
@@ -641,14 +654,18 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             };
             let context = panel.context;
             if let Some(details) = panel.details.as_mut() {
-                details.breakout_mode = Some(if scenario == Some("breakout-free") {
-                    BreakoutMode::Free
+                details.breakout_mode = if scenario == Some("breakout-create") {
+                    None
                 } else {
-                    BreakoutMode::Manual
-                });
+                    Some(if scenario == Some("breakout-free") {
+                        BreakoutMode::Free
+                    } else {
+                        BreakoutMode::Manual
+                    })
+                };
                 details.breakout_started = Some(true);
                 details.breakout_child = scenario == Some("breakout-help");
-                if scenario != Some("breakout-configure") {
+                if !matches!(scenario, Some("breakout-configure" | "breakout-create")) {
                     details.controls = page(details.controls.as_slice().iter().copied().map(
                         |(key, mut availability)| {
                             if key == RoomSetting::Breakouts {
@@ -693,6 +710,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 );
             }
             panel.breakout_loaded = true;
+            if scenario == Some("breakout-create") {
+                panel.breakout_rooms = Page::empty();
+                panel.breakout_loaded = false;
+            }
         }
         return state;
     }

@@ -9,7 +9,57 @@ struct Entry {
     failures: u8,
     version: u64,
     pending: Option<(OperationId, u128)>,
+    // An ambiguous write is not offered again until a fresh observation has
+    // had time to settle. No accept/decline is replayed automatically.
+    uncertain: Option<(u128, Instant)>,
     failed: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambiguous_invitation_is_hidden_until_reconciliation_releases_it() {
+        let mut model = super::super::tests::model();
+        model.snapshot = crate::composition::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        let entry = model.federation.entry(scope).unwrap();
+        entry.observed = Some(protocol::federation::Invitations {
+            scope,
+            supported: true,
+            items: page([protocol::federation::Invitation {
+                id: 9,
+                room: text("Synthetic room"),
+                inviter: text("Synthetic inviter"),
+            }]),
+        });
+        entry.uncertain = Some((9, Instant::now() + Duration::from_secs(30)));
+        model.project_federation();
+        assert!(
+            model
+                .snapshot
+                .federation_invitations
+                .as_ref()
+                .unwrap()
+                .invitations
+                .as_slice()
+                .is_empty()
+        );
+        model.federation.entry(scope).unwrap().uncertain = None;
+        model.project_federation();
+        assert_eq!(
+            model
+                .snapshot
+                .federation_invitations
+                .as_ref()
+                .unwrap()
+                .invitations
+                .as_slice()
+                .len(),
+            1
+        );
+    }
 }
 #[derive(Default)]
 pub(super) struct Federation {
@@ -31,6 +81,7 @@ impl Federation {
                 failures: 0,
                 version: 0,
                 pending: None,
+                uncertain: None,
                 failed: false,
             });
         }
@@ -87,8 +138,17 @@ impl Accounts {
                 if value.scope == scope =>
             {
                 entry.failures = 0;
-                entry.due =
-                    Instant::now() + Duration::from_secs(if value.supported { 60 } else { 3600 });
+                let now = Instant::now();
+                if let Some((id, deadline)) = entry.uncertain
+                    && (!value.items.as_slice().iter().any(|item| item.id == id) || now >= deadline)
+                {
+                    entry.uncertain = None;
+                }
+                entry.due = if let Some((_, deadline)) = entry.uncertain {
+                    (now + Duration::from_secs(5)).min(deadline)
+                } else {
+                    now + Duration::from_secs(if value.supported { 60 } else { 3600 })
+                };
                 entry.observed = Some(value);
             }
             _ => {
@@ -109,7 +169,7 @@ impl Accounts {
             return Err(SubmitError::StaleScope);
         }
         let entry = self.federation.entry(scope).ok_or(SubmitError::Busy)?;
-        if entry.pending.is_some() {
+        if entry.pending.is_some() || entry.uncertain.is_some() {
             return Err(SubmitError::Busy);
         }
         if !entry.observed.as_ref().is_some_and(|value| {
@@ -176,18 +236,21 @@ impl Accounts {
                         .cloned(),
                 );
             }
-        } else if !matches!(
+        } else if matches!(
             result,
-            Err(IdentityError::Request(
-                ErrorKind::Transport
-                    | ErrorKind::Deadline
-                    | ErrorKind::RateLimited
-                    | ErrorKind::ServerUnavailable
-                    | ErrorKind::WrongScope
-                    | ErrorKind::Cancelled
-                    | ErrorKind::Uncertain
-            ))
+            Ok(_)
+                | Err(IdentityError::Request(
+                    ErrorKind::Transport
+                        | ErrorKind::Deadline
+                        | ErrorKind::RateLimited
+                        | ErrorKind::ServerUnavailable
+                        | ErrorKind::WrongScope
+                        | ErrorKind::Cancelled
+                        | ErrorKind::Uncertain
+                ))
         ) {
+            entry.uncertain = Some((invitation, Instant::now() + Duration::from_secs(30)));
+        } else {
             entry.failed = true;
         }
         self.project_federation();
@@ -216,12 +279,14 @@ impl Accounts {
                         .as_slice()
                         .iter()
                         .filter(|item| entry.pending.is_none_or(|(_, id)| id != item.id))
+                        .filter(|item| entry.uncertain.is_none_or(|(id, _)| id != item.id))
                         .map(|item| FederationInvitationView {
                             id: item.id,
                             room: item.room.clone(),
                             inviter: item.inviter.clone(),
                         }),
                 ),
+                pending: entry.pending.is_some() || entry.uncertain.is_some(),
                 failed: entry.failed,
             })
         });

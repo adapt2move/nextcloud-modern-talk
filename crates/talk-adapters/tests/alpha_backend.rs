@@ -24,9 +24,12 @@ fn scope() -> AccountScope {
     }
 }
 fn context(r: &NetworkRuntime) -> OperationContext {
+    context_for(r, scope())
+}
+fn context_for(r: &NetworkRuntime, scope: AccountScope) -> OperationContext {
     let now = r.now();
     OperationContext {
-        scope: scope(),
+        scope,
         cancellation: Cancellation::default(),
         deadline: Moment {
             epoch: now.epoch,
@@ -102,7 +105,13 @@ async fn settings(
 ) -> CR {
     match c
         .request(
-            context(r),
+            context_for(
+                r,
+                AccountScope {
+                    account: id.account,
+                    runtime: RuntimeGeneration::from_local(1),
+                },
+            ),
             ProtocolRequest::ConversationSettings {
                 conversation: id,
                 operation: OperationId::from_local(n),
@@ -165,6 +174,18 @@ async fn released_server_messaging_and_room_controls() {
     }
     assert!(message_caps.summary_offer.is_none());
     println!("alpha-backend provider-absent-gates: pass");
+    let ProtocolReply::FederationInvitations(invitations) = client
+        .request(context(&runtime), ProtocolRequest::FederationInvitations)
+        .await
+        .unwrap()
+    else {
+        panic!("federation invitations")
+    };
+    assert!(invitations.items.as_slice().is_empty());
+    println!(
+        "alpha-backend federation-empty: pass (supported={})",
+        invitations.supported
+    );
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {
@@ -238,16 +259,23 @@ async fn released_server_messaging_and_room_controls() {
             C::StartBreakouts,
         )
         .await;
+        let bob_scope = AccountScope {
+            account: AccountId::from_local(701),
+            runtime: RuntimeGeneration::from_local(1),
+        };
         let mut bob = test_support::from_private_fixture(
             &root.join("bob.json"),
-            scope(),
-            HostId::from_local(700),
+            bob_scope,
+            HostId::from_local(701),
             runtime.clone(),
         )
         .expect("private synthetic participant fixture");
-        bob.request(context(&runtime), ProtocolRequest::InspectAccount)
-            .await
-            .unwrap();
+        bob.request(
+            context_for(&runtime, bob_scope),
+            ProtocolRequest::InspectAccount,
+        )
+        .await
+        .unwrap();
         let bob_parent = bob.fixture_conversation().unwrap();
         let CR::BreakoutRooms(assigned) = settings(
             &mut bob,

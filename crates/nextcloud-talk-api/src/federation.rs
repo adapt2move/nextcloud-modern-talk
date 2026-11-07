@@ -40,6 +40,8 @@ impl RemoteCapabilities {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invitation {
     pub id: u64,
+    /// The endpoint also returns accepted shares. Unknown states grant no action.
+    pub pending: bool,
     pub local_token: RoomToken,
     pub user: String,
     pub room_name: String,
@@ -65,6 +67,7 @@ impl Invitation {
         let token = field("localToken", 30)?;
         Ok(Self {
             id,
+            pending: crate::models::integer(value.get("state")) == Some(0),
             local_token: RoomToken::parse(&token)?,
             user: field("userId", 512)?,
             room_name: field("roomName", 256)?,

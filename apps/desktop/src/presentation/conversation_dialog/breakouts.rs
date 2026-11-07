@@ -218,6 +218,15 @@ impl Desktop {
             return Some(section);
         }
         if moderator {
+            let configured = details.breakout_mode.is_some();
+            let configurable = if configured {
+                Availability::when(
+                    false,
+                    "Entferne die Gruppenräume, um Anzahl oder Modus zu ändern.",
+                )
+            } else {
+                available
+            };
             let mut mode = div()
                 .flex_none()
                 .w(self.sp(220.))
@@ -229,11 +238,11 @@ impl Desktop {
                     "breakout-mode",
                     self.l(mode_label(state.mode)).to_owned(),
                     state.mode_open,
-                    available,
+                    configurable,
                     LocalAction::Room(super::Action::Breakouts(Action::ToggleMode)),
                     cx,
                 ));
-            if state.mode_open {
+            if state.mode_open && !configured {
                 for item in [
                     BreakoutMode::Automatic,
                     BreakoutMode::Manual,
@@ -264,7 +273,7 @@ impl Desktop {
                                 ("minus", "Weniger Gruppenräume"),
                                 ButtonStyle::Quiet,
                                 Availability::when(
-                                    state.count > 1 && available.is_enabled(),
+                                    state.count > 1 && configurable.is_enabled(),
                                     "Weniger Gruppenräume",
                                 ),
                                 LocalAction::Room(super::Action::Breakouts(Action::Count(-1))),
@@ -276,7 +285,7 @@ impl Desktop {
                                 ("plus", "Mehr Gruppenräume"),
                                 ButtonStyle::Quiet,
                                 Availability::when(
-                                    state.count < 20 && available.is_enabled(),
+                                    state.count < 20 && configurable.is_enabled(),
                                     "Mehr Gruppenräume",
                                 ),
                                 LocalAction::Room(super::Action::Breakouts(Action::Count(1))),
@@ -353,15 +362,19 @@ impl Desktop {
                     }
                 }
             }
-            section = section.child(self.dialog_actions().child(self.button(
-                "breakout-configure",
-                "Gruppenräume vorbereiten",
-                ButtonStyle::Secondary,
-                available,
-                LocalAction::Room(super::Action::Breakouts(Action::Configure)),
-                cx,
-            )));
-            if details.breakout_mode.is_some() {
+            if !configured {
+                section = section.child(self.dialog_actions().child(self.button(
+                    "breakout-configure",
+                    "Gruppenräume vorbereiten",
+                    ButtonStyle::Secondary,
+                    available,
+                    LocalAction::Room(super::Action::Breakouts(Action::Configure)),
+                    cx,
+                )));
+            } else {
+                section = section.child(
+                    self.hint(self.l("Entferne die Gruppenräume, um Anzahl oder Modus zu ändern.")),
+                );
                 section = section.child(
                     self.dialog_actions()
                         .child(self.button(
@@ -372,7 +385,14 @@ impl Desktop {
                                 "Gruppenräume starten"
                             },
                             ButtonStyle::Secondary,
-                            available,
+                            if details.breakout_started.is_none() {
+                                Availability::when(
+                                    false,
+                                    "Status nicht verfügbar. Bitte neu laden.",
+                                )
+                            } else {
+                                available
+                            },
                             LocalAction::Room(super::Action::Breakouts(
                                 if details.breakout_started == Some(true) {
                                     Action::Stop
@@ -404,19 +424,34 @@ impl Desktop {
                         cx,
                     ));
                 }
-                section = section.child(self.room_field(
-                    "Nachricht an alle Gruppenräume",
-                    &self.room_ui.breakout_broadcast,
-                    Some(self.button(
-                        "breakout-broadcast",
-                        "An alle senden",
-                        ButtonStyle::Secondary,
-                        available,
-                        LocalAction::Room(super::Action::Breakouts(Action::Broadcast)),
+                section = section.child(
+                    self.room_field(
+                        "Nachricht an alle Gruppenräume",
+                        &self.room_ui.breakout_broadcast,
+                        Some(
+                            self.button(
+                                "breakout-broadcast",
+                                "An alle senden",
+                                ButtonStyle::Secondary,
+                                Availability::when(
+                                    available.is_enabled()
+                                        && self
+                                            .room_ui
+                                            .breakout_broadcast
+                                            .read(cx)
+                                            .submitted_value()
+                                            .is_some_and(|message| {
+                                                !message.trim().is_empty() && message.len() <= 4096
+                                            }),
+                                    "Nachricht eingeben.",
+                                ),
+                                LocalAction::Room(super::Action::Breakouts(Action::Broadcast)),
+                                cx,
+                            ),
+                        ),
                         cx,
-                    )),
-                    cx,
-                ));
+                    ),
+                );
             }
         }
         if details.breakout_mode.is_some() && (moderator || details.breakout_started == Some(true))

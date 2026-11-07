@@ -1,5 +1,5 @@
 //! Account-wide federated invitations, with actions on scoped opaque IDs.
-use super::{ButtonStyle, Desktop, LocalAction};
+use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
 use gpui::{Context, Div, ElementId, FontWeight, div, prelude::*};
 use talk_core::ui::presentation::UiIntent;
 
@@ -20,7 +20,9 @@ impl Desktop {
         if view.failed {
             body = body.child(self.hint(self.l("Die Einladung konnte nicht bearbeitet werden.")));
         }
-        if view.invitations.as_slice().is_empty() {
+        if view.pending {
+            body = body.child(self.hint(self.l("Einladung wird überprüft …")));
+        } else if view.invitations.as_slice().is_empty() {
             body = body.child(self.hint(self.l("Keine offenen Einladungen.")));
         }
         for item in view.invitations.as_slice() {
@@ -58,7 +60,11 @@ impl Desktop {
                         ElementId::Name(format!("federation-decline-{:032x}", item.id).into()),
                         "Ablehnen",
                         ButtonStyle::Quiet,
-                        true,
+                        if view.pending {
+                            Availability::pending()
+                        } else {
+                            Availability::available()
+                        },
                         action(false),
                         cx,
                     ))
@@ -66,7 +72,11 @@ impl Desktop {
                         ElementId::Name(format!("federation-accept-{:032x}", item.id).into()),
                         "Annehmen",
                         ButtonStyle::Secondary,
-                        true,
+                        if view.pending {
+                            Availability::pending()
+                        } else {
+                            Availability::available()
+                        },
                         action(true),
                         cx,
                     )),

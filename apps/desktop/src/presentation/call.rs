@@ -6,6 +6,12 @@ use talk_core::ui::UserIntent;
 use talk_core::ui::presentation::{CallStage, MediaState, RequiredGate, UiIntent};
 
 impl Desktop {
+    pub(super) fn waiting_in_lobby(&self) -> bool {
+        self.snapshot
+            .call
+            .as_ref()
+            .is_some_and(|call| call.stage == CallStage::Required(RequiredGate::Lobby))
+    }
     pub fn set_call_images(
         &mut self,
         scope: Option<talk_core::ui::CallScope>,
@@ -224,7 +230,10 @@ impl Desktop {
         if matches!(call.stage, CallStage::Ended | CallStage::Failed) {
             return self.call_outcome(call.stage == CallStage::Failed, cx);
         }
-        let show_chat = super::docked_call_chat(wide, self.call_chat_open, self.overlay);
+        // Lobby authority does not include the room's participants or chat.
+        // Even a stale call snapshot must not paint them while admission waits.
+        let lobby = self.waiting_in_lobby();
+        let show_chat = !lobby && super::docked_call_chat(wide, self.call_chat_open, self.overlay);
         let status = match call.stage {
             CallStage::Incoming => "Eingehender Anruf",
             CallStage::Outgoing => "Anruf wird angefragt …",
@@ -338,7 +347,7 @@ impl Desktop {
                     }),
             );
         }
-        if call.share == MediaState::Active {
+        if !lobby && call.share == MediaState::Active {
             stage = stage.child(
                 div()
                     .p_4()
@@ -452,7 +461,9 @@ impl Desktop {
                     .child(self.l("Teilnehmerdaten noch nicht verfügbar.")),
             );
         }
-        stage = stage.child(tiles);
+        if !lobby {
+            stage = stage.child(tiles);
+        }
         let body = div()
             .flex_1()
             .min_h_0()
@@ -522,7 +533,10 @@ impl Desktop {
                     UiIntent::ShareScreen(call.scope)
                 }),
             ),
-        ] {
+        ]
+        .into_iter()
+        .take(if lobby { 0 } else { 3 })
+        {
             controls = controls.child(
                 div()
                     .flex()
@@ -563,7 +577,10 @@ impl Desktop {
                 LocalAction::Open(Overlay::CallParticipants),
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
-        ] {
+        ]
+        .into_iter()
+        .take(if lobby { 0 } else { 2 })
+        {
             controls = controls.child(
                 div()
                     .flex()
@@ -654,14 +671,18 @@ impl Desktop {
                                         div()
                                             .text_size(self.sp(12.))
                                             .text_color(t.stage_muted)
-                                            .child(format!(
+                                            .child(if lobby {
+                                                self.l(status).to_owned()
+                                            } else {
+                                                format!(
                                                 "{} · {}",
                                                 self.l(status),
                                                 self.count(
                                                     super::localization::Count::VisibleParticipants,
                                                     call.participants.as_slice().len() as u64
                                                 )
-                                            )),
+                                            )
+                                            }),
                                     ),
                             ),
                     )

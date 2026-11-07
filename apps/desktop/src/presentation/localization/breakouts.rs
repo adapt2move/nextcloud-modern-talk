@@ -26,6 +26,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Wait for the action to finish.",
         "Espera a que termine la acción.",
     ),
+    (
+        "Entferne die Gruppenräume, um Anzahl oder Modus zu ändern.",
+        "Remove the breakout rooms to change their number or mode.",
+        "Elimina las salas para cambiar su número o modo.",
+    ),
     ("Freie Auswahl", "Free choice", "Elección libre"),
     ("Gruppe {n}", "Room {n}", "Sala {n}"),
     (
@@ -63,11 +68,21 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Message all breakout rooms",
         "Mensaje a todas las salas",
     ),
+    (
+        "Nachricht eingeben.",
+        "Enter a message.",
+        "Escribe un mensaje.",
+    ),
     ("Nicht zugewiesen", "Not assigned", "Sin asignar"),
     (
         "Personen für die Zuweisung laden",
         "Load people for assignment",
         "Cargar personas para asignar",
+    ),
+    (
+        "Status nicht verfügbar. Bitte neu laden.",
+        "Status unavailable. Reload and try again.",
+        "Estado no disponible. Vuelve a cargarlo.",
     ),
     (
         "Verlasse zuerst den aktiven Anruf.",

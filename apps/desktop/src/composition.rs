@@ -219,13 +219,13 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
         Some(
-            "details" | "room-avatar" | "lobby-settings" | "breakout-configure" | "breakout-free"
-            | "breakout-assigned" | "breakout-help",
+            "details" | "room-avatar" | "lobby-settings" | "breakout-configure" | "breakout-create"
+            | "breakout-free" | "breakout-assigned" | "breakout-help",
         ) => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
         Some("account-reminders") => Some(Overlay::Reminders),
-        Some("federation-invitations") => Some(Overlay::Federation),
+        Some("federation-invitations" | "federation-pending") => Some(Overlay::Federation),
         Some("thread") => Some(Overlay::Thread),
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
@@ -301,7 +301,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                     Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time" | "chat-schedule-edit")) => view.fixture_message_tools(name, window, cx),
                     Some("room-avatar") => view.fixture_room_avatar(cx),
                     Some("lobby-settings") => view.fixture_lobby_settings(cx),
-                    Some("breakout-configure" | "breakout-free" | "breakout-assigned" | "breakout-help") => view.fixture_breakouts(cx),
+                    Some("breakout-configure" | "breakout-create" | "breakout-free" | "breakout-assigned" | "breakout-help") => view.fixture_breakouts(cx),
                     _ => (),
                 }
                 view

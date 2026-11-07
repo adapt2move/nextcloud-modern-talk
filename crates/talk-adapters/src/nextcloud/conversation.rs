@@ -426,6 +426,9 @@ pub(super) fn control(
             Decision::Unknown
         }
     }
+    if setting == Setting::Breakouts && room.kind != RoomKind::Group {
+        allowed = Decision::Denied;
+    }
     ActionAvailability {
         implemented: true,
         server,
@@ -545,6 +548,8 @@ impl NextcloudClient {
         let breakout_supported = caps.has("breakout-rooms-v1")
             && caps.breakouts_enabled == Some(true)
             && !wire::is_federated(data)
+            && room.kind == RoomKind::Group
+            && wire::integer(data.get("breakoutRoomMode")).is_some_and(|mode| mode <= 3)
             && !room.unknown_restrictions
             && !room.classified
             && !room.channel;
@@ -854,6 +859,13 @@ impl NextcloudClient {
             command,
             C::BreakoutRooms | C::SwitchBreakout(_) | C::RequestBreakoutAssistance
         );
+        if matches!(command, C::ConfigureBreakouts { .. })
+            && (room.kind != RoomKind::Group
+                || data.get("objectType").and_then(Value::as_str) == Some("room")
+                || wire::integer(data.get("breakoutRoomMode")) != Some(0))
+        {
+            return Err(self.error(ErrorKind::Conflict));
+        }
         if participant_breakout {
             if caps.feature("breakout-rooms-v1") != FeatureSupport::Supported
                 || caps.breakouts_enabled != Some(true)

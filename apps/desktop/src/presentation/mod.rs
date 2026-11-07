@@ -733,6 +733,17 @@ impl Desktop {
         }
         self.refresh_account_removal(&next);
         self.snapshot = next;
+        if self.waiting_in_lobby() {
+            self.call_chat_open = false;
+            if self
+                .overlay
+                .is_some_and(|overlay| !lobby_allows_overlay(overlay))
+            {
+                self.overlay = None;
+                self.return_focus = None;
+                self.pending_modal_focus = false;
+            }
+        }
         let limit = self.composer_message_limit();
         self.composer
             .update(cx, |input, _| input.configure_message_limit(limit));
@@ -943,6 +954,7 @@ impl Desktop {
                 .message_ui
                 .composer_load_failed
                 .is_none_or(|context| Some(context) != self.snapshot.selected)
+            && !self.waiting_in_lobby()
             && composer_allowed(
                 self.overlay,
                 self.prejoin.is_some(),
@@ -1117,6 +1129,9 @@ impl Desktop {
                 }
             }
             LocalAction::Open(overlay) => {
+                if self.waiting_in_lobby() && !lobby_allows_overlay(overlay) {
+                    return;
+                }
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1266,6 +1281,9 @@ impl Desktop {
                 }
             }
             LocalAction::ToggleCallChat => {
+                if self.waiting_in_lobby() {
+                    return;
+                }
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
@@ -2520,6 +2538,9 @@ impl Render for Desktop {
 fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool) -> bool {
     !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat))
 }
+fn lobby_allows_overlay(overlay: Overlay) -> bool {
+    matches!(overlay, Overlay::Settings | Overlay::Accounts)
+}
 fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
 }
@@ -2618,5 +2639,19 @@ mod interaction_tests {
         }
         assert!(!composer_allowed(Some(Overlay::CallChat), false, true));
         assert!(!composer_allowed(None, true, false));
+    }
+    #[test]
+    fn waiting_lobby_keeps_conversation_overlays_closed() {
+        for overlay in [
+            Overlay::CallChat,
+            Overlay::CallParticipants,
+            Overlay::Thread,
+            Overlay::Files,
+            Overlay::RoomInfo,
+        ] {
+            assert!(!lobby_allows_overlay(overlay));
+        }
+        assert!(lobby_allows_overlay(Overlay::Settings));
+        assert!(lobby_allows_overlay(Overlay::Accounts));
     }
 }

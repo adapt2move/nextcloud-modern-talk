@@ -578,6 +578,7 @@ pub struct FederationInvitationsView {
     pub scope: AccountScope,
     pub support: FeatureSupport,
     pub invitations: Page<FederationInvitationView, 100>,
+    pub pending: bool,
     pub failed: bool,
 }
 

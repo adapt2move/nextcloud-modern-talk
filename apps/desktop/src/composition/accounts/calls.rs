@@ -272,10 +272,9 @@ impl Accounts {
             .breakout_leave
             .as_ref()
             .is_some_and(|pending| Instant::now() >= pending.deadline)
+            && let Some(pending) = self.breakout_leave.take()
         {
-            if let Some(pending) = self.breakout_leave.take() {
-                self.fail_breakout_leave(pending.request, pending.context);
-            }
+            self.fail_breakout_leave(pending.request, pending.context);
         }
     }
 

@@ -6,6 +6,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se pudo actualizar la invitación.",
     ),
     (
+        "Einladung wird überprüft …",
+        "Checking invitation …",
+        "Comprobando invitación …",
+    ),
+    (
         "Einladungen ({n})",
         "Invitations ({n})",
         "Invitaciones ({n})",

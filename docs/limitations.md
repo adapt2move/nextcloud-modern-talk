@@ -92,10 +92,13 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   interoperability needs qualification. Breakout switching closes an active call
   before moving; joining the target call uses the normal call flow. Clearing help
   requests and restoring existing assignment selections are not implemented.
+  Breakout v1 assigns logged-in users; changing the room count or mode requires
+  removing the existing breakout rooms first.
   Waiting calls recheck policy, but automatic lobby admission needs real-server
   qualification. The lobby start time is shown only when room details were loaded.
   Room-avatar uploads accept regular images up to 8 MiB and 16 million pixels,
-  crop to a centered square and send a bounded PNG.
+  crop to a centered square and send a bounded PNG. Avatar and federation
+  invitation changes require a connection; they are not queued across restarts.
 
 ## Platforms
 

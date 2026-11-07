@@ -113,7 +113,24 @@ def exercise(scenario, env, xid, out, label, large=False):
             click('Auflegen',inspected_point=(720,580,360,470));expect('200% explicit leave returns to room',['Produktteam'])
         return checks
 
-    if scenario == 'server':
+    if scenario == 'chat-reminder-time':
+        # The fixture fixes the calendar at 15 January 2027. Sample the empty
+        # corners of adjacent day cells so the assertion measures the actual
+        # selected background, independently of text recognition.
+        before, _, _ = observe()
+        pixels = lambda image: run(['convert', str(image), '-format',
+            '%[pixel:p{466,512}]|%[pixel:p{506,512}]', 'info:'], env).stdout.split('|')
+        first = pixels(before)
+        if len(first) != 2 or first[0] == first[1]:
+            raise AssertionError('Calendar fixture does not show the expected selected day')
+        key('Right')
+        after, _, _ = observe()
+        second = pixels(after)
+        if second[0] != first[1] or second[1] != first[0]:
+            raise AssertionError('Right arrow did not move the selected calendar day')
+        checks.append({'check': 'calendar arrow navigation moves selection', 'result': 'pass',
+                       'image': after.name, 'sha256': sha(after)})
+    elif scenario == 'server':
         click('cloud.example.test')
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')
         key('BackSpace'); key('ctrl+v')

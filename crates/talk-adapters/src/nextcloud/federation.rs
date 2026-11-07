@@ -10,6 +10,46 @@ pub(super) struct Binding {
     local_token: api::models::RoomToken,
 }
 
+/// Keep ambiguous mutations while allowing settled operation IDs to age out.
+#[derive(Default)]
+pub(super) struct Journal(Vec<(OperationId, u64, bool)>);
+impl Journal {
+    fn admit(&mut self, operation: OperationId, invitation: u64) -> Result<(), ErrorKind> {
+        if let Some((_, _, uncertain)) = self.0.iter().find(|(old, _, _)| *old == operation) {
+            return Err(if *uncertain {
+                ErrorKind::Uncertain
+            } else {
+                ErrorKind::Conflict
+            });
+        }
+        if self.0.len() == 100 {
+            let Some(index) = self.0.iter().position(|(_, _, uncertain)| !uncertain) else {
+                return Err(ErrorKind::Busy);
+            };
+            self.0.remove(index);
+        }
+        self.0.push((operation, invitation, true));
+        Ok(())
+    }
+    fn settle(&mut self, operation: OperationId, error: Option<&PortError>) {
+        if error.is_none_or(|error| error.kind != ErrorKind::Uncertain)
+            && let Some((_, _, uncertain)) = self.0.iter_mut().find(|(old, _, _)| *old == operation)
+        {
+            *uncertain = false;
+        }
+    }
+    fn observe(&mut self, pending: &[Binding]) {
+        for (_, invitation, uncertain) in &mut self.0 {
+            if !pending
+                .iter()
+                .any(|binding| binding.remote_id == *invitation)
+            {
+                *uncertain = false;
+            }
+        }
+    }
+}
+
 impl NextcloudClient {
     fn combine_federation_capabilities(
         local: &Capabilities,
@@ -127,10 +167,15 @@ impl NextcloudClient {
         let mut bindings = Vec::with_capacity(invitations.len());
         let mut items = Page::empty();
         for invite in invitations {
-            if invite.user != self.transport.user()
-                || bindings
-                    .iter()
-                    .any(|item: &Binding| item.remote_id == invite.id)
+            if invite.user != self.transport.user() {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            if !invite.pending {
+                continue;
+            }
+            if bindings
+                .iter()
+                .any(|item: &Binding| item.remote_id == invite.id)
             {
                 return Err(self.error(ErrorKind::WrongScope));
             }
@@ -164,6 +209,7 @@ impl NextcloudClient {
                 local_token: invite.local_token,
             });
         }
+        self.invitation_actions.observe(&bindings);
         self.invitations = bindings;
         Ok(ProtocolReply::FederationInvitations(Invitations {
             scope,
@@ -182,12 +228,6 @@ impl NextcloudClient {
         if !self.federation_enabled(context).await? {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        if self.invitation_actions.contains(&operation) {
-            return Err(self.error(ErrorKind::Conflict));
-        }
-        if self.invitation_actions.len() >= 100 {
-            return Err(self.error(ErrorKind::Busy));
-        }
         let binding = self
             .invitations
             .iter()
@@ -195,28 +235,69 @@ impl NextcloudClient {
             .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
         let id = binding.remote_id;
         let token = binding.local_token.clone();
-        self.invitation_actions.push(operation);
+        self.invitation_actions
+            .admit(operation, id)
+            .map_err(|kind| self.error(kind))?;
         let request = if accept {
             api::Request::AcceptFederationInvitation { id }
         } else {
             api::Request::DeclineFederationInvitation { id }
         };
-        let response = self.transport.api_request(context, request).await?;
-        match (accept, response) {
-            (true, api::Reply::Room(room))
-                if api::models::RoomToken::parse(&room.token).ok().as_ref() == Some(&token)
+        let response = self.transport.api_request(context, request).await;
+        let outcome = match response {
+            Ok(api::Reply::Room(room))
+                if accept
+                    && api::models::RoomToken::parse(&room.token).ok().as_ref() == Some(&token)
                     && room.remote =>
             {
-                self.bind_room(&room.project())?;
+                self.bind_room(&room.project())
+                    .map(|_| ())
+                    .map_err(|_| self.error(ErrorKind::Uncertain))
             }
-            (false, api::Reply::Acknowledged) => (),
-            _ => return Err(self.error(ErrorKind::Uncertain)),
-        }
+            Ok(api::Reply::Acknowledged) if !accept => Ok(()),
+            Ok(_) => Err(self.error(ErrorKind::Uncertain)),
+            Err(error) => Err(error),
+        };
+        self.invitation_actions
+            .settle(operation, outcome.as_ref().err());
+        outcome?;
         self.invitations
             .retain(|binding| binding.local != invitation);
         Ok(ProtocolReply::FederationInvitationChanged {
             operation,
             invitation,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invitation_journal_evicts_settled_work_but_preserves_uncertain_work() {
+        let mut journal = Journal::default();
+        for id in 1..=200 {
+            let operation = OperationId::from_local(id);
+            assert_eq!(journal.admit(operation, id as u64), Ok(()));
+            journal.settle(operation, None);
+        }
+        assert_eq!(journal.0.len(), 100);
+        let mut uncertain = Journal::default();
+        for id in 1..=100 {
+            uncertain
+                .admit(OperationId::from_local(id), id as u64)
+                .unwrap();
+        }
+        assert_eq!(
+            uncertain.admit(OperationId::from_local(1), 1),
+            Err(ErrorKind::Uncertain)
+        );
+        assert_eq!(
+            uncertain.admit(OperationId::from_local(101), 101),
+            Err(ErrorKind::Busy)
+        );
+        uncertain.observe(&[]);
+        assert_eq!(uncertain.admit(OperationId::from_local(101), 101), Ok(()));
     }
 }
