@@ -140,7 +140,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   current authorized session, one per account for at most five minutes. Ambiguous
   writes are read back before another change can be attempted. These ephemeral
   status intents are not restored after restart. Uncertainty checks never rewrite
-  an already applied status or renew its expiry.
+  an already applied status or renew its expiry. A lost acknowledgement for a
+  relative expiry remains uncertain: matching text cannot prove the timer was
+  installed, so the client does not automatically write it again.
 
 - Marking unread from a message requires a live-proven preceding message or an
   exhausted live history page proving the first message; cached-only gaps do not
@@ -302,11 +304,14 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   server listings require a future paged-list contract; they are not silently
   truncated. Inert call-action identities and avatar cleanup allowlists share
   this bound; they do not increase active-call or media limits. Sidebar
-  customization placements remain separately bounded.
+  customization placements remain separately bounded. HTTP JSON ingress is
+  bounded to 1 MiB, 131,072 structure nodes and 64 levels. Typed endpoint limits
+  reject oversized lists without granting reconciliation authority.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
   durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
-  counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
-  storage. Up to four recently opened 50-message thread windows per stored room
+  counts, read-only scalar room settings and deliberately staged outgoing intents
+  from private, unencrypted schema 4 storage. Schemas 1–3 upgrade in place; older
+  clients may reject schema 4. Credential storage is unchanged. Up to four recently opened 50-message thread windows per stored room
   share the existing cache size and eligibility limits; older windows are dropped
   first when the account cache is full. Restricted, unknown-policy and session-only
   content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted ordinary-room main/thread drafts persist separately,
@@ -384,7 +389,3 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 Report reproducible problems without credentials, private server details or
 message contents. Security issues follow [SECURITY.md](../SECURITY.md).
-
-HTTP JSON ingress also has a 131,072-node structure budget, a 64-level depth bound and a 1 MiB response byte bound (previously 256 KiB). This accommodates complete 256-room metadata responses; typed endpoint bounds still reject oversized lists without granting reconciliation authority.
-
-A status change with a relative expiry whose acknowledgement is lost remains uncertain: matching status text alone cannot prove that the requested timer was installed. It is not automatically written again.
