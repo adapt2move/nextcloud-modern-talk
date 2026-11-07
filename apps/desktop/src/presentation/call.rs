@@ -833,7 +833,9 @@ impl Desktop {
                             )),
                             (
                                 "pin",
-                                if focused == Some(participant.local_id) {
+                                if pinned == Some(participant.local_id) {
+                                    "Lösen"
+                                } else if focused == Some(participant.local_id) {
                                     "Raster"
                                 } else {
                                     "Person hervorheben"
