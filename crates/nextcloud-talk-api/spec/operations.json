@@ -1522,6 +1522,15 @@
       "api": "Request::SearchMessages",
       "source": "https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/lib/Search/MessageSearch.php",
       "scope": "Bounded account-wide message results and cursor, with provider-advertised filters and owner-scoped identities."
+    },
+    {
+      "operation_id": "nextcloud-reference-resolve",
+      "method": "GET",
+      "path": "/ocs/v2.php/references/resolve",
+      "status": "implemented",
+      "api": "Request::ResolveReference",
+      "source": "https://docs.nextcloud.com/server/35/developer_manual/digging_deeper/reference.html#api-to-resolve-links",
+      "scope": "Single bounded reference resolution; only installation-owned preview routes may supply image bytes."
     }
   ]
 }

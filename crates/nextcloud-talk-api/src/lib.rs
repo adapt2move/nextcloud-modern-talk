@@ -18,6 +18,7 @@ pub mod models;
 pub mod notifications;
 pub mod poll;
 pub mod presence;
+pub mod references;
 pub mod scope;
 pub mod search;
 pub mod signaling;
@@ -76,6 +77,7 @@ pub enum Request {
     },
     SearchProviders,
     SearchMessages(search::Query),
+    ResolveReference(String),
     Account,
     Capabilities,
     Rooms,
@@ -153,6 +155,7 @@ pub enum Request {
 }
 pub enum Reply {
     SearchProvider(Option<search::Provider>),
+    Reference(Option<references::Resolved>),
     Chat(chat::Response),
     Conversation(conversation::Response),
     Account(Account),
@@ -552,6 +555,9 @@ impl Client {
         })?;
         // Typed decoding alone does not correlate a server response to this request.
         match (&request, &decoded) {
+            (Request::ResolveReference(expected), Reply::Reference(Some(reference))) if &reference.reference != expected => {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
             (Request::Room(expected), Reply::Room(room)) if room.token != expected.as_str() => {
                 return Err(self.error(ErrorKind::WrongScope));
             }
@@ -712,6 +718,7 @@ impl Client {
 #[derive(Clone, Copy)]
 enum Kind {
     SearchProviders,
+    Reference,
     Chat(chat::ResponseKind),
     Conversation(conversation::ResponseKind),
     Account,
@@ -765,6 +772,7 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Kind::SearchProviders,
         ),
         Request::SearchMessages(query) => return search::plan(query),
+        Request::ResolveReference(reference) => return references::plan(reference),
         Request::Account => (
             Method::GET,
             "ocs/v2.php/cloud/user".into(),
@@ -1102,6 +1110,7 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
     let v = &r.data;
     Ok(match kind {
         Kind::SearchProviders => return search::providers(v),
+        Kind::Reference => return references::decode(v),
         Kind::Chat(kind) => return chat::decode(kind, v),
         Kind::Conversation(kind) => return conversation::decode(kind, v),
         Kind::Account => Reply::Account(Account::decode(v)?),

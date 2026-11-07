@@ -90,6 +90,7 @@ pub struct OperationContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolRequest {
     SearchMessages(crate::protocol::search::Query),
+    ResolveReference { message: MessageId, url: crate::protocol::reference::ReferenceUrl },
     Content {
         operation: OperationId,
         command: crate::protocol::content::ContentCommand,
@@ -209,6 +210,7 @@ pub enum ProtocolReply {
     TagCreated(ConversationTag),
     Conversations(ConversationList),
     OpenConversations(crate::protocol::OpenConversations),
+    Reference(Option<crate::protocol::reference::Resolved>),
     Conversation(Conversation),
     People(Page<crate::protocol::conversation::Recipient, 100>),
     Participants(Participants),

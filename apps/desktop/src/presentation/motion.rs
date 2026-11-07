@@ -163,6 +163,22 @@ impl Desktop {
         .into_any_element()
     }
 
+    pub(super) fn reveal_observation(
+        &self,
+        id: ElementId,
+        element: Div,
+        observed: Option<Instant>,
+    ) -> AnyElement {
+        reveal::ActionReveal::new(
+            id,
+            element,
+            observed,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .into_any_element()
+    }
+
     pub(super) fn reveal(&self, id: impl Into<ElementId>, element: Div) -> AnyElement {
         if self.reduced_motion {
             element.into_any_element()

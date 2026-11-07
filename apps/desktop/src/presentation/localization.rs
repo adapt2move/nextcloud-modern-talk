@@ -7,6 +7,7 @@ mod content;
 mod conversation;
 mod discovery;
 mod onboarding;
+mod reference;
 mod recovery;
 mod resources;
 mod search_navigation;
@@ -25,6 +26,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         content::MESSAGES,
         conversation::MESSAGES,
         discovery::MESSAGES,
+        reference::MESSAGES,
         search_navigation::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
@@ -89,6 +91,7 @@ mod tests {
             recovery::MESSAGES,
             conversation::MESSAGES,
             discovery::MESSAGES,
+            reference::MESSAGES,
             chat::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,

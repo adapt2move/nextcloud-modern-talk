@@ -429,6 +429,7 @@ impl Purpose {
     pub(super) fn room(self) -> Option<ConversationRef> {
         match self {
             Self::ParticipantIndex(c, _)
+            | Self::Reference(c, _, _, _)
             | Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
             | Self::Mutation(_, c)

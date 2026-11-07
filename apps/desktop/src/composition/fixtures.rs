@@ -72,6 +72,7 @@ pub const SCENARIOS: &[&str] = &[
     "search",
     "search-navigation",
     "account-search",
+    "reference-preview",
     "search-filter",
     "create34",
     "create35",
@@ -199,6 +200,27 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("reference-preview") {
+        let mut state = snapshot(Some("chat"));
+        let context = state.selected.expect("fictional room");
+        let mut first = state.messages.as_slice()[0].clone();
+        first.body = text("Hier ist der Entwurf: https://example.test/studio");
+        first.attachments = Page::empty();
+        first.metadata.rich = Page::empty();
+        state.messages = page(std::iter::once(first).chain(state.messages.as_slice().iter().skip(1).cloned()));
+        state.reference_previews = page([talk_core::ui::reference::Preview {
+            context, message: 1, ordinal: 0,
+            title: text("Ein ruhiger Ort für neue Ideen"),
+            description: Some(text("Ein fiktiver Einblick in das neue Studiokonzept.")),
+        }]);
+        state.content_panel.account = Some(context.account);
+        state.content_panel.context = Some(context);
+        state.content_panel.assets = page([talk_core::ui::content::AssetView {
+            target: talk_core::ui::content::AssetTarget::Reference { context, message: 1, ordinal: 0 },
+            state: talk_core::ui::content::AssetState::Ready { key: 42 }, emoji: None, color: None, document_pages: None,
+        }]);
+        return state;
+    }
     if matches!(
         scenario,
         Some("chat-reactions" | "chat-reactions-pending" | "chat-reactions-denied")
@@ -478,6 +500,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         create_panel: None,
         discover_panel: None,
         search_panel: None,
+        reference_previews: Page::empty(),
         revision: 1,
         login: LoginView {
             phase: LoginPhase::EnterServer,

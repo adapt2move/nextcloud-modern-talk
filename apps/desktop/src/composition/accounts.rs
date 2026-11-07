@@ -13,6 +13,7 @@ mod notifications;
 mod outbox;
 mod preview;
 mod reads;
+mod references;
 mod removal;
 mod search;
 mod startup;
@@ -63,6 +64,7 @@ enum Purpose {
     Discover(RequestId, AccountScope, Option<ConversationRef>),
     DiscoverProbe(AccountScope, u64),
     ParticipantIndex(ConversationRef, u64),
+    Reference(ConversationRef, u128, u16, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
@@ -153,6 +155,8 @@ pub struct Accounts {
     discover_probe: Option<discover::Probe>,
     discover_probe_generation: u64,
     discovery_retry: Option<discover::Retry>,
+    reference_owner: references::Owner,
+    reference_generation: u64,
     notices: notifications::Notices,
     background: background::Background,
     history: history::Cache,
@@ -204,6 +208,8 @@ impl Accounts {
             discover_probe: None,
             discover_probe_generation: 0,
             discovery_retry: None,
+            reference_owner: references::Owner::default(),
+            reference_generation: 0,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
@@ -315,6 +321,7 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
         self.queued_read.clear();
@@ -335,6 +342,8 @@ impl Accounts {
             return;
         }
         self.snapshot.active_account = scope;
+        self.retire_references();
+        self.reference_owner = references::Owner::default();
         self.account_search = None;
         self.account_search_retry = None;
         self.snapshot.search_panel = None;
@@ -572,6 +581,7 @@ impl Accounts {
         self.poll_messages();
         self.tick_prefetch();
         self.tick_participant_index();
+        self.tick_references();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -691,6 +701,7 @@ impl Accounts {
             Purpose::Discover(request,account,joining)=>self.complete_discovery(request,account,joining,result),
             Purpose::DiscoverProbe(account,generation)=>self.complete_discovery_probe(account,generation,result),
             Purpose::ParticipantIndex(context, generation)=>self.complete_participant_index(context,generation,result),
+            Purpose::Reference(context,message,ordinal,generation)=>self.complete_reference(context,message,ordinal,generation,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);

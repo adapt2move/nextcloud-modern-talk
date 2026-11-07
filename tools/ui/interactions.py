@@ -171,8 +171,6 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
     elif scenario == 'discover':
         expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
-        click('Gespräche', xmin=300, ymin=280)
-        time.sleep(.4)
         type_text('Design')
         expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
         key('Escape')

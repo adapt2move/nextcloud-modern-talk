@@ -386,6 +386,9 @@ impl Accounts {
         context: ConversationRef,
         reason: UnavailableReason,
     ) {
+        if self.snapshot.selected == Some(context) {
+            self.retire_references();
+        }
         if let Some(account) = self.background.account_mut(context.account) {
             account.metadata.revoke(context);
         }

@@ -106,9 +106,9 @@ impl Desktop {
                         .when(!side, |d| {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - 66.)
+                                - if overlay == Overlay::Search { 40. } else { 66. })
                                 .min(if overlay == Overlay::Search {
-                                    700.
+                                    720.
                                 } else {
                                     632.
                                 })))
@@ -497,7 +497,7 @@ impl Desktop {
         let mut body = div()
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_3()
             .child(
                 self.input_surface(&self.search, cx)
                     .min_h(px(48.))

@@ -1004,6 +1004,43 @@ async fn released_server_messaging_and_room_controls() {
         .iter()
         .find(|o| o.kind.as_str() == "file")
         .unwrap();
+    let ProtocolReply::Content {
+        result: talk_core::protocol::content::ContentResult::CloudLink(link),
+        ..
+    } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Content {
+                operation: OperationId::from_local(305),
+                command: talk_core::protocol::content::ContentCommand::OpenCloud {
+                    message: shared.message.id,
+                    placeholder: object.placeholder.clone(),
+                },
+            },
+        )
+        .await
+        .expect("server file link")
+    else {
+        panic!("cloud link")
+    };
+    let ProtocolReply::Reference(reference) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::ResolveReference {
+                message: shared.message.id,
+                url: talk_core::protocol::reference::ReferenceUrl::parse(link.as_str())
+                    .expect("safe file link"),
+            },
+        )
+        .await
+        .expect("reference resolver")
+    else {
+        panic!("reference")
+    };
+    if let Some(reference) = reference {
+        assert!(!reference.title.as_str().is_empty());
+    }
+    println!("alpha-backend server reference resolution: pass");
     let saved = root.join("download.txt");
     m(
         &mut client,

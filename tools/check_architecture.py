@@ -216,6 +216,7 @@ UI_MODULE_TYPES = {
     "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
     "search": {"Action", "Filters", "Hit", "Panel"},
     "discover": {"Action", "Panel", "Room"},
+    "reference": {"Preview", "Previews"},
 }
 UNBOUNDED = (
     r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"

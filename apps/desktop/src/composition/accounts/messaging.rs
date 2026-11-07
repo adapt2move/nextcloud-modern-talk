@@ -317,8 +317,12 @@ impl Accounts {
         self.project_queued_read(context);
         self.project_outbox(context);
         self.project_uploads();
+        self.prune_references();
     }
     pub(super) fn invalidate_history(&mut self, context: ConversationRef, state: ContentState) {
+        if self.snapshot.selected == Some(context) && state == ContentState::Denied {
+            self.retire_references();
+        }
         if self.snapshot.selected == Some(context) {
             self.queued_read.clear();
         }

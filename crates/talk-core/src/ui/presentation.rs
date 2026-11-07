@@ -520,6 +520,7 @@ pub struct PresentationSnapshot {
     pub create_panel: Option<super::conversation::CreatePanel>,
     pub discover_panel: Option<super::discover::Panel>,
     pub search_panel: Option<super::search::Panel>,
+    pub reference_previews: super::reference::Previews,
     pub revision: u64,
     pub login: LoginView,
     pub accounts: Page<AccountView, 8>,

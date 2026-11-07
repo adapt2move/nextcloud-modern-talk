@@ -352,6 +352,9 @@ impl Transport {
     ) -> Result<Vec<u8>, PortError> {
         self.api.image(&context(c), request).await.map_err(error)
     }
+    pub(super) async fn reference_thumbnail(&mut self, c: &OperationContext, url: &str) -> Result<Vec<u8>, PortError> {
+        self.api.reference_thumbnail(&context(c), url).await.map_err(error)
+    }
     pub(super) async fn video(
         &mut self,
         c: &OperationContext,
@@ -619,7 +622,7 @@ fn project(reply: api::Reply) -> Result<Response, ErrorKind> {
     let mut last_given = None;
     let mut common_read = None;
     let data = match reply {
-        R::Chat(_) | R::Conversation(_) | R::SearchProvider(_) => return Err(ErrorKind::Malformed),
+        R::Chat(_) | R::Conversation(_) | R::SearchProvider(_) | R::Reference(_) => return Err(ErrorKind::Malformed),
         R::Account(v) => v.project(),
         R::Capabilities(v) => v.project(),
         R::Room(v) => v.project(),

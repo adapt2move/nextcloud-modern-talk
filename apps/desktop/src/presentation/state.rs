@@ -592,6 +592,25 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot
+        .reference_previews
+        .as_slice()
+        .iter()
+        .any(|preview| {
+            Some(preview.context) != snapshot.selected
+                || Some(preview.context.account) != snapshot.active_account
+                || !preview.context.is_consistent()
+                || preview.message == 0
+                || preview.ordinal >= 32
+                || !snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .any(|message| message.local_id == preview.message && !message.metadata.deleted)
+        })
+    {
+        return false;
+    }
     if snapshot.discover_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -844,6 +863,7 @@ mod tests {
             create_panel: None,
             discover_panel: None,
             search_panel: None,
+            reference_previews: Page::empty(),
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::EnterServer,

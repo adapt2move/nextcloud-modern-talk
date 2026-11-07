@@ -163,6 +163,9 @@ impl Desktop {
         if let Some(upload) = upload {
             content = content.child(self.pending_upload_card(context, upload, cx));
         }
+        if !m.metadata.deleted {
+            content = content.children(self.reference_cards(m, cx));
+        }
         let media = self.media_attachments(m);
         if !m.metadata.deleted && !media.is_empty() {
             content = content.child(self.attachment_grid(&media, cx));

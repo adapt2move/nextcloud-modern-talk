@@ -13,6 +13,8 @@ mod notification_tests;
 mod people_tests;
 #[path = "read_tests.rs"]
 mod read_tests;
+#[path = "references_tests.rs"]
+mod references_tests;
 #[path = "reconcile_tests.rs"]
 mod reconcile_tests;
 #[path = "search_tests.rs"]

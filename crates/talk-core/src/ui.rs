@@ -7,6 +7,7 @@ pub mod discover;
 pub mod messaging;
 /// Additive native presentation contract; the bootstrap consumer remains source-compatible.
 pub mod presentation;
+pub mod reference;
 pub mod search;
 
 // Explicit data-only exports are the complete renderer vocabulary. Adding an export

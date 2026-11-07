@@ -91,7 +91,7 @@ fn local_context(target: &view::AssetTarget) -> Option<ConversationRef> {
 fn is_avatar(target: &view::AssetTarget) -> bool {
     !matches!(
         target,
-        view::AssetTarget::Thumbnail(_) | view::AssetTarget::Image(_)
+        view::AssetTarget::Thumbnail(_) | view::AssetTarget::Image(_) | view::AssetTarget::Reference { .. }
     )
 }
 impl Accounts {
@@ -896,7 +896,7 @@ impl Accounts {
     }
     // Called only after the protocol completion's account/room checks above.
     // Reuse is based on full byte equality, never author labels or a hash alone.
-    fn receive_image(
+    pub(super) fn receive_image(
         &mut self,
         account: AccountScope,
         target: view::AssetTarget,
@@ -1164,7 +1164,7 @@ impl Accounts {
             _ => false,
         }
     }
-    fn retire_content_keys(&mut self) {
+    pub(super) fn retire_content_keys(&mut self) {
         self.prune_avatars();
         let keys = page(self.content_owner.avatars.keys());
         if self.snapshot.content_panel.retained_avatar_keys != keys {
@@ -1368,6 +1368,11 @@ impl Accounts {
         (self.snapshot.active_account == Some(scope) && self.current(scope).is_ok()).then_some(link)
     }
     pub(super) fn asset_is_current(&self, target: &view::AssetTarget) -> bool {
+        if let view::AssetTarget::Reference { context, message, ordinal } = target {
+            return self.snapshot.selected == Some(*context)
+                && self.snapshot.content != ContentState::Denied
+                && self.snapshot.reference_previews.as_slice().iter().any(|preview| preview.context == *context && preview.message == *message && preview.ordinal == *ordinal);
+        }
         if matches!(target, view::AssetTarget::Thumbnail(reference) if talk_core::ui::messaging::UploadView::is_message_id(reference.message))
         {
             return self.upload_preview_current(target, None);
@@ -1750,6 +1755,7 @@ fn asset_request(target: &view::AssetTarget) -> Result<wire::AssetRequest, Submi
             scope: person.account,
             local: person.local,
         }),
+        V::Reference { .. } => return Err(SubmitError::Unavailable(UnavailableReason::Unsupported)),
         V::Thumbnail(a) | V::Image(a) => W::Attachment {
             message: mid(a)?,
             placeholder: a.placeholder.clone(),

@@ -16,6 +16,7 @@ mod notifications;
 mod pdf_preview;
 mod people;
 mod preferences;
+mod references;
 mod projection;
 mod search;
 mod tags;
@@ -702,6 +703,7 @@ impl NextcloudClient {
             | ProtocolRequest::Messaging { conversation, .. }
             | ProtocolRequest::ConversationSettings { conversation, .. } => Some(*conversation),
             ProtocolRequest::SetArchived { conversation, .. } => Some(*conversation),
+            ProtocolRequest::ResolveReference { message, .. } => Some(message.conversation),
             ProtocolRequest::Send(send) => Some(send.conversation),
             ProtocolRequest::MarkRead(id) => Some(id.conversation),
             ProtocolRequest::ObserveCall(call)
@@ -792,6 +794,9 @@ impl NextcloudClient {
         match request {
             ProtocolRequest::SearchMessages(query) => {
                 self.account_search(context, query, &caps).await
+            }
+            ProtocolRequest::ResolveReference { message, url } => {
+                self.resolve_reference(context, message, url, &caps).await
             }
             ProtocolRequest::ListOpenConversations { query } => {
                 self.list_open_conversations(context, query, &caps).await

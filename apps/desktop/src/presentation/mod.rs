@@ -24,6 +24,7 @@ mod overlays;
 mod permissions;
 pub mod preferences;
 pub(super) mod probes;
+mod references;
 mod selectable;
 mod settings;
 mod settings_pages;
@@ -171,6 +172,8 @@ pub enum LocalAction {
     AccountSearchHit(ConversationRef, u128),
     DiscoverSearch,
     DiscoverJoin(ConversationRef),
+    ToggleReference(ConversationRef, u128, u16),
+    OpenReference(ConversationRef, u128, u16),
     RetrySwitcherPeople,
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
@@ -230,6 +233,7 @@ pub struct Desktop {
     discovery_search: Entity<TextInput>,
     discovery_request: u64,
     discovery_join: Option<ConversationRef>,
+    reference_ui: references::ReferenceUi,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -475,6 +479,7 @@ impl Desktop {
             discovery_search,
             discovery_request: 0,
             discovery_join: None,
+            reference_ui: references::ReferenceUi::default(),
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -764,6 +769,7 @@ impl Desktop {
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
+        self.observe_reference_previews(&next);
         self.snapshot = next;
         let limit = self.composer_message_limit();
         self.composer
@@ -1264,6 +1270,8 @@ impl Desktop {
             }
             LocalAction::DiscoverSearch => self.search_discovery(cx),
             LocalAction::DiscoverJoin(context) => self.join_discovery(context),
+            LocalAction::ToggleReference(context, message, ordinal) => self.toggle_reference(context, message, ordinal),
+            LocalAction::OpenReference(context, message, ordinal) => self.open_reference(context, message, ordinal),
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -2623,6 +2631,10 @@ impl Render for Desktop {
                 Some(Overlay::Settings | Overlay::Accounts) => Some("close-settings".into()),
                 Some(Overlay::Search) => {
                     self.search.focus_handle(cx).focus(window);
+                    None
+                }
+                Some(Overlay::Discover) => {
+                    self.discovery_search.focus_handle(cx).focus(window);
                     None
                 }
                 Some(Overlay::CreatePoll) => {
