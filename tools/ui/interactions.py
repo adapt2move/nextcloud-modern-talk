@@ -489,8 +489,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Escape closes switcher', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
     elif scenario == 'account-search':
         expect('account search groups matching messages', ['Produktteam', 'Navigation', 'Mara Fischer'])
+        key('ctrl+k')
+        key('Down')
         key('Return')
-        expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
+        expect_settled('Enter reveals the selected message below the conversation header',
+                       ['Nachricht an Produktteam', 'Sieht gut aus', 'Suche noch mit einem'],
+                       ['Weitere Ergebnisse'])
     elif scenario == 'discover':
         expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
         click('discovery-search-input', inspected_point=(1280, 800, 340, 320))

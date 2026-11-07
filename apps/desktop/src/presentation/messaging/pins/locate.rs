@@ -109,7 +109,7 @@ impl Desktop {
         })
     }
 
-    pub(in crate::presentation::messaging) fn locate_message_smooth(
+    pub(in crate::presentation) fn locate_message_smooth(
         &mut self,
         context: ConversationRef,
         source: u128,
