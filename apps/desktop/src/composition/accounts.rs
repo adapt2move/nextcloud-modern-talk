@@ -1057,10 +1057,13 @@ impl Accounts {
         if self.snapshot.selected == Some(context) {
             return Ok(false);
         }
+        self.remember_poll_room();
         self.clear_content();
         self.snapshot.selected = Some(context);
         self.restore_room_metadata(context);
         self.restore_messages(context);
+        self.snapshot.content_panel.context = Some(context);
+        self.restore_poll_room(context);
         self.touch();
         Ok(true)
     }
@@ -1555,6 +1558,22 @@ impl NativeDesktopPort for Port {
         model.dirty = false;
         model.snapshot.revision = model.snapshot.revision.saturating_add(1);
         Some(model.snapshot.clone())
+    }
+}
+impl Accounts {
+    pub(super) fn voice_allowed(&self, context: ConversationRef) -> bool {
+        self.snapshot.selected == Some(context)
+            && self.snapshot.active_account == Some(context.account)
+            && self.snapshot.content == ContentState::Ready
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Voice)
+                        .enabled()
+                    && panel
+                        .availability(talk_core::ui::messaging::MessageFeature::Files)
+                        .enabled()
+            })
     }
 }
 fn page<T, const N: usize>(items: impl IntoIterator<Item = T>) -> Page<T, N> {

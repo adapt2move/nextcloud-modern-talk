@@ -42,6 +42,12 @@ impl Desktop {
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
+        let poll_message = m
+            .metadata
+            .rich
+            .as_slice()
+            .iter()
+            .any(|object| matches!(object.kind.as_str(), "poll" | "talk-poll"));
         let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
             .to_string()
             .into();
@@ -187,15 +193,16 @@ impl Desktop {
                 )
         }) {
             content = if object.kind.as_str() == "file" {
-                content.child(self.attachment_card(
-                    talk_core::ui::content::AttachmentRef {
-                        context,
-                        message: m.local_id,
-                        placeholder: object.placeholder.clone(),
-                    },
-                    object,
-                    cx,
-                ))
+                let reference = talk_core::ui::content::AttachmentRef {
+                    context,
+                    message: m.local_id,
+                    placeholder: object.placeholder.clone(),
+                };
+                if m.metadata.voice_message {
+                    content.child(self.voice_message_card(reference, object, cx))
+                } else {
+                    content.child(self.attachment_card(reference, object, cx))
+                }
             } else if matches!(object.kind.as_str(), "poll" | "talk-poll")
                 && let Some(id) = object.id.as_ref().and_then(|id| id.as_str().parse().ok())
             {
@@ -366,8 +373,8 @@ impl Desktop {
                         d.child(
                         div()
                             .absolute()
-                            .when(!m.own, |d| d.top(px(8.)))
-                            .when(m.own, |d| {
+                            .when(!m.own || poll_message, |d| d.top(px(8.)))
+                            .when(m.own && !poll_message, |d| {
                                 // Centre the 34 px action beside the 20 sp status.
                                 d.bottom(
                                     px(if continuation { 3. } else { 12. }) + self.sp(10.)

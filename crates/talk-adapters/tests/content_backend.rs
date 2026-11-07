@@ -126,7 +126,7 @@ fn draft(hidden: bool) -> PollDraft {
             "Public content fixture"
         }),
         options: page([text("One"), text("Two"), text("Three")]),
-        multiple: true,
+        max_votes: 0,
         hidden_results: hidden,
     }
 }
@@ -513,7 +513,11 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     };
     assert_eq!(emoji.as_str(), "🌿");
     println!("content-backend server-room-emoji: pass");
-    let R::PollCapabilities(create) = content(
+    let R::PollCapabilities {
+        create,
+        drafts,
+        edit_draft,
+    } = content(
         &mut alice,
         &runtime,
         a,
@@ -521,10 +525,100 @@ async fn released_server_polls_avatars_previews_and_downloads() {
         poll(room, P::Capabilities),
     )
     .await
-    .unwrap() else {
+    .unwrap()
+    else {
         panic!("capabilities");
     };
     assert_eq!(create.allowed, Decision::Allowed);
+    if drafts.server == talk_core::protocol::FeatureSupport::Supported
+        && drafts.allowed == Decision::Allowed
+    {
+        let R::PollDraftSaved(saved) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::SaveDraft(draft(false))),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft creation");
+        };
+        let id = saved.id;
+        let R::PollDrafts(values) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::ListDrafts),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft listing");
+        };
+        assert!(values.as_slice().iter().any(|value| value.id == id));
+        assert!(
+            content(
+                &mut bob,
+                &runtime,
+                b,
+                &mut sequence,
+                poll(bob_room, P::ListDrafts)
+            )
+            .await
+            .is_err()
+        );
+        if edit_draft.server == talk_core::protocol::FeatureSupport::Supported {
+            let mut updated = draft(true);
+            updated.question = text("Updated fictional draft");
+            updated.max_votes = 2;
+            let R::PollDraftSaved(saved) = content(
+                &mut alice,
+                &runtime,
+                a,
+                &mut sequence,
+                poll(
+                    room,
+                    P::UpdateDraft {
+                        poll: id,
+                        draft: updated,
+                    },
+                ),
+            )
+            .await
+            .unwrap() else {
+                panic!("draft update");
+            };
+            assert_eq!(saved.id, id);
+            assert_eq!(saved.draft.max_votes, 2);
+            assert_eq!(saved.draft.question.as_str(), "Updated fictional draft");
+        }
+        let R::PollDraftDeleted(deleted) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::DeleteDraft(id)),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft deletion");
+        };
+        assert_eq!(deleted, id);
+        let R::PollDrafts(values) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            poll(room, P::ListDrafts),
+        )
+        .await
+        .unwrap() else {
+            panic!("draft listing after delete");
+        };
+        assert!(!values.as_slice().iter().any(|value| value.id == id));
+        println!("content-backend poll-drafts: pass");
+    }
     let mut ids = Vec::new();
     for hidden in [true, false] {
         let R::Poll(created) = content(
@@ -645,6 +739,122 @@ async fn released_server_polls_avatars_previews_and_downloads() {
     )
     .unwrap();
 
+    let MR::Capabilities(capabilities) = message(
+        &mut alice,
+        &runtime,
+        a,
+        &mut sequence,
+        room,
+        M::Capabilities,
+    )
+    .await
+    .unwrap() else {
+        panic!("messaging capabilities");
+    };
+    if capabilities
+        .actions
+        .as_slice()
+        .iter()
+        .any(|(feature, availability)| {
+            *feature == talk_core::protocol::messaging::MessagingFeature::Voice
+                && availability.server == talk_core::protocol::FeatureSupport::Supported
+                && availability.allowed == Decision::Allowed
+        })
+    {
+        let mut wave = Vec::new();
+        wave.extend_from_slice(b"RIFF");
+        wave.extend_from_slice(&38u32.to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&16u32.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&1u16.to_le_bytes());
+        wave.extend_from_slice(&16_000u32.to_le_bytes());
+        wave.extend_from_slice(&32_000u32.to_le_bytes());
+        wave.extend_from_slice(&2u16.to_le_bytes());
+        wave.extend_from_slice(&16u16.to_le_bytes());
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&2u32.to_le_bytes());
+        wave.extend_from_slice(&0i16.to_le_bytes());
+        let MR::Uploaded { path, .. } = message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::UploadVoice {
+                bytes: talk_core::protocol::content::VoiceBytes::new(wave.clone()).unwrap(),
+                name: text("Voice message.wav"),
+                progress: TransferProgress::default(),
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice upload");
+        };
+        message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::ShareFile {
+                path,
+                caption: text(""),
+                voice_message: true,
+            },
+        )
+        .await
+        .unwrap();
+        let MR::Messages { messages, .. } = message(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            room,
+            M::History {
+                before: None,
+                thread: None,
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice history");
+        };
+        let row = messages
+            .as_slice()
+            .iter()
+            .find(|m| m.message.kind == talk_core::protocol::MessageKind::VoiceMessage)
+            .expect("voice-message classification");
+        let file = row
+            .rich
+            .as_slice()
+            .iter()
+            .find(|o| o.kind.as_str() == "file")
+            .expect("voice file");
+        let R::VoiceAudio(audio) = content(
+            &mut alice,
+            &runtime,
+            a,
+            &mut sequence,
+            C::VoiceAudio {
+                message: row.message.id,
+                placeholder: file.placeholder.clone(),
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("voice download");
+        };
+        assert_eq!(audio.as_slice(), wave);
+        println!("content-backend voice-upload-share-download: pass");
+    }
+
+    // The poll-specific lab run has no file fixtures and deliberately ends
+    // here; the complete content run still exercises attachments below.
+    if std::env::var_os("NMT_POLL_ONLY").is_some() {
+        return;
+    }
+
     for name in ["preview.png", "document.txt", "document.pdf", "cancel.bin"] {
         let local = root.join(name);
         let original = std::fs::read(&local).unwrap();
@@ -675,6 +885,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
                 path,
                 caption: text(""),
                 options: Default::default(),
+                voice_message: false,
             },
         )
         .await

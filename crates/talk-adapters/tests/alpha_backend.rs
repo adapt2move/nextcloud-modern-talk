@@ -797,6 +797,7 @@ async fn released_server_messaging_and_room_controls() {
             path,
             caption: text(""),
             options: Default::default(),
+            voice_message: false,
         },
     )
     .await;

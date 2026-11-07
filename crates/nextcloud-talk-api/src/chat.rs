@@ -105,6 +105,7 @@ pub enum Command {
         reference: String,
         caption: String,
         options: ComposeOptions,
+        voice_message: bool,
     },
 }
 #[derive(Clone, Debug)]
@@ -816,6 +817,7 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             reference,
             caption,
             options,
+            voice_message,
         } => {
             text(path, 16384)?;
             text(file_name, 255)?;
@@ -849,6 +851,9 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
             }
             if options.thread_title.is_some() {
                 return Err(ErrorKind::Unsupported);
+            }
+            if *voice_message {
+                metadata.insert("messageType".into(), "voice-message".into());
             }
             if !metadata.is_empty() {
                 f.push((

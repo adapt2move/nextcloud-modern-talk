@@ -256,6 +256,7 @@ pub struct MessageId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageKind {
     Comment,
+    VoiceMessage,
     Deleted,
     System,
     Unsupported,

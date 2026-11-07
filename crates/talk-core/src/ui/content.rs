@@ -69,6 +69,12 @@ pub struct AssetView {
     pub document_pages: Option<u32>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PollDraftEntry {
+    pub id: u64,
+    pub draft: PollDraft,
+    pub max_votes: u16,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {
     pub id: u16,
     pub label: Text<1000>,
@@ -99,7 +105,7 @@ pub struct PollView {
 pub struct PollDraft {
     pub question: Text<4000>,
     pub options: Page<Text<1000>, 100>,
-    pub multiple: bool,
+    pub max_votes: u16,
     pub hidden_results: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,6 +133,38 @@ pub enum PlaybackState {
     Ended,
     Stopping,
     Failed(UnavailableReason),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VoicePhase {
+    Starting,
+    Recording,
+    Stopping,
+    Review,
+    Failed(UnavailableReason),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceSnapshot {
+    pub context: ConversationRef,
+    pub phase: VoicePhase,
+    pub elapsed_ms: u64,
+    pub level: u16,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VoiceReviewPlayback {
+    pub context: ConversationRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoicePlaybackView {
+    pub attachment: AttachmentRef,
+    pub state: PlaybackState,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub speed_half_steps: u8,
+    pub stop_unconfirmed: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackView {
@@ -203,10 +241,14 @@ pub struct ContentPanel {
     /// These keys retain renderer resources; they authorize no visible target.
     pub retained_avatar_keys: Page<u64, 128>,
     pub polls: Page<PollView, 20>,
+    pub poll_drafts: Page<PollDraftEntry, 100>,
     pub poll_create: Availability,
+    pub poll_drafts_manage: Availability,
+    pub poll_drafts_edit: Availability,
     pub poll_state: RemoteState,
     pub preview: Option<AttachmentRef>,
     pub playback: Option<PlaybackView>,
+    pub voice_playback: Option<VoicePlaybackView>,
     pub transfer: Option<DownloadView>,
     pub result: Option<(RequestId, Completion)>,
 }
@@ -223,10 +265,14 @@ impl Default for ContentPanel {
             assets: Page::empty(),
             retained_avatar_keys: Page::empty(),
             polls: Page::empty(),
+            poll_drafts: Page::empty(),
             poll_create: Availability::UNKNOWN,
+            poll_drafts_manage: Availability::UNKNOWN,
+            poll_drafts_edit: Availability::UNKNOWN,
             poll_state: RemoteState::Idle,
             preview: None,
             playback: None,
+            voice_playback: None,
             transfer: None,
             result: None,
         }
@@ -268,14 +314,31 @@ pub enum ContentAction {
         attachment: AttachmentRef,
         generation: u64,
     },
+    PlayVoice(AttachmentRef),
+    PauseVoice(AttachmentRef),
+    SeekVoice {
+        attachment: AttachmentRef,
+        position_ms: u64,
+    },
+    SpeedVoice {
+        attachment: AttachmentRef,
+        speed_half_steps: u8,
+    },
     SeekPreview {
         attachment: AttachmentRef,
         generation: u64,
         position_ms: u64,
     },
     OpenCloud(AttachmentRef),
+    RefreshPollDrafts,
     RefreshPoll(u64),
     CreatePoll(PollDraft),
+    SavePollDraft(PollDraft),
+    UpdatePollDraft {
+        poll: u64,
+        draft: PollDraft,
+    },
+    DeletePollDraft(u64),
     Vote {
         poll: u64,
         options: Page<u16, 100>,

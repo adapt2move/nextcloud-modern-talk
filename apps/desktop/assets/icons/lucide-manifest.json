@@ -326,6 +326,13 @@
       "transformation": "none"
     },
     {
+      "asset": "pause.svg",
+      "upstream_path": "icons/pause.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pause.svg",
+      "sha256": "0f4280e6dcc1047551bbc6ef8a9f1a34959de13c7f077d9667d12ab90c8fbca7",
+      "transformation": "none"
+    },
+    {
       "asset": "phone-down.svg",
       "upstream_path": "icons/phone-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-off.svg",

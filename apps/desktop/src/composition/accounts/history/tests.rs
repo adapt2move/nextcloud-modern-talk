@@ -912,6 +912,13 @@ fn pin_notice_classification_never_matches_localized_message_bodies() {
         assert!(message_view(&value).metadata.pin_notice);
         value.system = Some(text("file_shared"));
         assert!(!message_view(&value).metadata.pin_notice);
+        for tag in ["poll_voted", "poll_closed"] {
+            value.system = Some(text(tag));
+            assert!(message_view(&value).metadata.pin_notice);
+            value.message.kind = MessageKind::Comment;
+            assert!(!message_view(&value).metadata.pin_notice);
+            value.message.kind = MessageKind::System;
+        }
     }
 }
 

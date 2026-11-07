@@ -3,6 +3,7 @@
 mod browser;
 pub(in crate::presentation) mod gallery;
 pub(in crate::presentation) mod groups;
+mod voice_scrub;
 mod window;
 
 use super::{
@@ -24,7 +25,7 @@ use talk_core::ui::presentation::{
 use talk_core::ui::{AccountScope, Page, Text, conversation::RemoteState};
 
 const MAX_IMAGES: usize = 128;
-const MAX_POLL_OPTIONS: usize = 8;
+const MAX_POLL_OPTIONS: usize = 100;
 
 #[derive(Clone)]
 pub(crate) enum Action {
@@ -43,12 +44,52 @@ pub(crate) enum Action {
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
     AddOption,
-    RemoveOption,
+    RemoveOption(usize),
+    MoveOption {
+        index: usize,
+        up: bool,
+    },
     Multiple,
+    VoteLimit {
+        increase: bool,
+    },
     HiddenResults,
     SubmitPoll,
+    SaveDraft,
+    ToggleDrafts,
+    LoadDraft {
+        id: u64,
+        edit: bool,
+    },
+    ConfirmDeleteDraft(u64),
+    DeleteDraft(u64),
+    SelectPollOption {
+        poll: u64,
+        option: u16,
+    },
+    SubmitVote(u64),
+    ConfirmClosePoll(u64),
+    CancelClosePoll,
+    ClosePoll(u64),
+    PollDetails(u64),
+    VoiceStart(ConversationRef),
+    VoiceStop(ConversationRef),
+    VoiceFinishAndSend(ConversationRef),
+    VoiceCancel(ConversationRef),
+    VoiceSend(ConversationRef),
+    VoiceReviewPlay {
+        context: ConversationRef,
+        play: bool,
+    },
+    VoiceReviewSpeed {
+        context: ConversationRef,
+        speed: u8,
+    },
     Preview(AttachmentRef),
-    GalleryMove { from: AttachmentRef, offset: i8 },
+    GalleryMove {
+        from: AttachmentRef,
+        offset: i8,
+    },
     Download(AttachmentRef),
     Command(ContentAction),
 }
@@ -82,10 +123,27 @@ pub(super) struct ContentUi {
     pub options: Vec<Entity<TextInput>>,
     option_count: usize,
     multiple: bool,
+    max_votes: u16,
     hidden_results: bool,
+    drafts_open: bool,
+    editing_draft: Option<u64>,
+    delete_draft: Option<u64>,
     pending_poll: Option<(ConversationRef, RequestId)>,
     acknowledged_result: Option<RequestId>,
     observed_polls: Vec<PollView>,
+    selections: Vec<(u64, Page<u16, 100>)>,
+    pending_vote: Option<(ConversationRef, RequestId, u64)>,
+    vote_error: Option<u64>,
+    pending_close: Option<(ConversationRef, RequestId, u64)>,
+    close_error: Option<(u64, bool)>,
+    confirm_close: Option<u64>,
+    details_poll: Option<u64>,
+    pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
+    pub(super) voice_levels: Vec<u16>,
+    pub(super) voice_error: Option<&'static str>,
+    voice_auto_send: Option<ConversationRef>,
+    voice_playback: Option<talk_core::ui::content::VoiceReviewPlayback>,
+    voice_scrub: Option<voice_scrub::Scrub>,
 }
 impl ContentUi {
     pub fn new(
@@ -121,15 +179,32 @@ impl ContentUi {
             swipe: gallery::Swipe::default(),
             return_overlay: None,
             question: cx.new(|cx| TextInput::new("Frage der Umfrage", 4000, theme, cx)),
-            options: (0..MAX_POLL_OPTIONS)
+            options: (0..2)
                 .map(|_| cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)))
                 .collect(),
             option_count: 2,
             multiple: false,
+            max_votes: 1,
             hidden_results: false,
+            drafts_open: false,
+            editing_draft: None,
+            delete_draft: None,
             pending_poll: None,
             acknowledged_result: None,
             observed_polls: Vec::new(),
+            selections: Vec::new(),
+            pending_vote: None,
+            vote_error: None,
+            pending_close: None,
+            close_error: None,
+            confirm_close: None,
+            details_poll: None,
+            voice: None,
+            voice_levels: Vec::new(),
+            voice_error: None,
+            voice_auto_send: None,
+            voice_playback: None,
+            voice_scrub: None,
         }
     }
     pub fn inputs(&self) -> impl Iterator<Item = &Entity<TextInput>> {
@@ -137,6 +212,32 @@ impl ContentUi {
     }
 }
 impl Desktop {
+    /// Only disconnected development scenarios call this after installing
+    /// their fictional snapshot; it never opens a server or a media device.
+    pub(crate) fn configure_content_scenario(
+        &mut self,
+        scenario: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        match scenario {
+            Some("chat-polls") => {
+                let mut selection = Page::empty();
+                let _ = selection.try_push(1);
+                self.content_ui.selections.push((9001, selection));
+            }
+            Some("poll-drafts") => self.content_ui.drafts_open = true,
+            Some("poll-details") => self.content_ui.details_poll = Some(9001),
+            Some("poll-settings") => self.open_room_dialog(Overlay::RoomInfo, cx),
+            Some("voice-recording") => {
+                self.content_ui.voice_levels = vec![
+                    90, 200, 360, 580, 370, 170, 220, 460, 710, 490, 240, 120, 280, 540, 680, 390,
+                    180, 130, 310, 620, 450, 200, 90, 150,
+                ];
+            }
+            _ => {}
+        }
+    }
+
     /// Composition supplies already decoded render images. Reject URI/path
     /// image sources; renderer caches cannot become an alternate HTTP owner.
     pub fn set_content_images(
@@ -295,6 +396,72 @@ impl Desktop {
                 }
             }
         }
+        let mut voice = self.settings_port.voice_snapshot();
+        if let Some(voice) = voice
+            && voice_session_retired(
+                Some(voice.context) == self.snapshot.selected,
+                self.snapshot.content,
+                !self.media_offline(),
+                self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice),
+            )
+        {
+            let _ = self.settings_port.stop_voice(voice.context, true);
+            self.content_ui.voice_auto_send = None;
+        }
+        if let Some(context) = self.content_ui.voice_auto_send
+            && let Some(current) = voice.filter(|voice| voice.context == context)
+        {
+            match current.phase {
+                talk_core::ui::content::VoicePhase::Review => {
+                    self.content_ui.voice_auto_send = None;
+                    if self.media_offline() || self.snapshot.content != ContentState::Ready {
+                        self.content_ui.voice_error =
+                            Some("Verbinde dich erneut, um die Aufnahme zu senden.");
+                    } else if let Err(error) = self.settings_port.send_voice(context) {
+                        self.content_ui.voice_error = Some(voice_error(error));
+                    } else {
+                        self.content_ui.voice_error = None;
+                        voice = None;
+                    }
+                }
+                talk_core::ui::content::VoicePhase::Failed(_) => {
+                    self.content_ui.voice_auto_send = None
+                }
+                _ => {}
+            }
+        }
+        if self
+            .content_ui
+            .voice_auto_send
+            .is_some_and(|context| !voice.is_some_and(|current| current.context == context))
+        {
+            self.content_ui.voice_auto_send = None;
+        }
+        let voice = voice.filter(|voice| Some(voice.context) == self.snapshot.selected);
+        if self.content_ui.voice != voice {
+            if let Some(voice) = voice
+                && voice.phase == talk_core::ui::content::VoicePhase::Recording
+            {
+                if self.content_ui.voice_levels.len() == 32 {
+                    self.content_ui.voice_levels.remove(0);
+                }
+                self.content_ui.voice_levels.push(voice.level);
+            }
+            if voice.is_none() {
+                self.content_ui.voice_levels.clear();
+            }
+            self.content_ui.voice = voice;
+            cx.notify();
+        }
+        let playback = self
+            .settings_port
+            .voice_review_playback()
+            .filter(|p| Some(p.context) == self.snapshot.selected);
+        if self.content_ui.voice_playback != playback {
+            self.content_ui.voice_playback = playback;
+            cx.notify();
+        }
+        self.retire_voice_scrub();
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
             self.content_ui.requested.clear();
@@ -306,14 +473,33 @@ impl Desktop {
             for input in &self.content_ui.options {
                 input.update(cx, |i, _| i.reset());
             }
+            self.content_ui.options.truncate(2);
             self.content_ui.option_count = 2;
             self.content_ui.multiple = false;
+            self.content_ui.max_votes = 1;
             self.content_ui.hidden_results = false;
+            self.content_ui.drafts_open = false;
+            self.content_ui.editing_draft = None;
+            self.content_ui.delete_draft = None;
+            self.content_ui.selections.clear();
+            self.content_ui.pending_vote = None;
+            self.content_ui.vote_error = None;
+            self.content_ui.pending_close = None;
+            self.content_ui.close_error = None;
+            self.content_ui.confirm_close = None;
+            self.content_ui.details_poll = None;
             self.content_ui.return_overlay = None;
             self.content_ui.browser_history.clear();
+            self.content_ui.voice_scrub = None;
+            self.content_ui.voice_auto_send = None;
             if matches!(
                 self.overlay,
-                Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
+                Some(
+                    Overlay::ContentPreview
+                        | Overlay::CreatePoll
+                        | Overlay::PollDetails
+                        | Overlay::CloudFiles
+                )
             ) {
                 self.overlay = None;
                 self.pending_modal_focus = false;
@@ -360,6 +546,37 @@ impl Desktop {
         }
         if self.content_ui.observed_polls.as_slice() != self.snapshot.content_panel.polls.as_slice()
         {
+            let newly_visible_results: Vec<_> = self
+                .snapshot
+                .content_panel
+                .polls
+                .as_slice()
+                .iter()
+                .filter(|poll| {
+                    poll.options
+                        .as_slice()
+                        .iter()
+                        .any(|option| option.votes.is_some())
+                })
+                .filter(|poll| {
+                    self.content_ui
+                        .observed_polls
+                        .iter()
+                        .find(|old| old.id == poll.id)
+                        .is_some_and(|old| {
+                            old.closed != poll.closed
+                                || !old
+                                    .options
+                                    .as_slice()
+                                    .iter()
+                                    .any(|option| option.votes.is_some())
+                        })
+                })
+                .map(|poll| poll.id)
+                .collect();
+            for poll in newly_visible_results {
+                self.begin_surface_reveal(("poll-results", poll as usize).into());
+            }
             let anchor = self.message_ui.list.logical_scroll_top();
             let count = self.message_ui.list.item_count();
             self.message_ui.list.splice(0..count, count);
@@ -367,6 +584,36 @@ impl Desktop {
             self.content_ui.observed_polls = self.snapshot.content_panel.polls.as_slice().to_vec();
         }
         if let Some((request, completion)) = self.snapshot.content_panel.result {
+            let vote = self
+                .content_ui
+                .pending_vote
+                .filter(|(context, pending, _)| {
+                    self.snapshot.selected == Some(*context) && *pending == request
+                });
+            if let Some((_, _, poll)) = vote {
+                self.content_ui.pending_vote = None;
+                if completion == Completion::ServerAccepted {
+                    self.content_ui.selections.retain(|(id, _)| *id != poll);
+                    self.content_ui.vote_error = None;
+                    self.begin_surface_reveal(("poll-results", poll as usize).into());
+                } else {
+                    self.content_ui.vote_error = Some(poll);
+                }
+            }
+            let close = self
+                .content_ui
+                .pending_close
+                .filter(|(context, pending, _)| {
+                    self.snapshot.selected == Some(*context) && *pending == request
+                });
+            if let Some((_, _, poll)) = close {
+                self.content_ui.pending_close = None;
+                self.content_ui.close_error = match completion {
+                    Completion::ServerAccepted => None,
+                    Completion::Uncertain => Some((poll, true)),
+                    _ => Some((poll, false)),
+                };
+            }
             if self
                 .content_ui
                 .pending_poll
@@ -376,17 +623,28 @@ impl Desktop {
                 && completion == Completion::ServerAccepted
             {
                 self.content_ui.pending_poll = None;
+                self.content_ui.editing_draft = None;
+                self.content_ui.drafts_open = false;
+                self.content_ui.option_count = 2;
+                self.content_ui.multiple = false;
+                self.content_ui.max_votes = 1;
+                self.content_ui.hidden_results = false;
                 self.content_ui.question.update(cx, |i, _| i.reset());
                 for input in &self.content_ui.options {
                     input.update(cx, |i, _| i.reset());
                 }
+                self.content_ui.options.truncate(2);
                 if self.overlay == Some(Overlay::CreatePoll) {
                     self.overlay = self.content_ui.return_overlay.take();
                     self.pending_modal_focus = self.overlay.is_some();
                 }
             }
             if self.content_ui.acknowledged_result != Some(request) {
-                if let Completion::Failed(_) = completion {
+                if let Completion::Failed(_) = completion
+                    && !matches!(self.overlay, Some(Overlay::CreatePoll))
+                    && vote.is_none()
+                    && close.is_none()
+                {
                     self.feedback = Some(super::feedback::Feedback::error(
                         "Die Inhaltsaktion ist fehlgeschlagen. Erneut versuchen.",
                     ));
@@ -394,6 +652,22 @@ impl Desktop {
                 if self.submit_content(ContentAction::Acknowledge).is_some() {
                     self.content_ui.acknowledged_result = Some(request);
                 }
+            }
+        }
+        if self.snapshot.content_panel.poll_state == RemoteState::Idle
+            && let Some((id, uncertain)) = self.content_ui.close_error
+            && let Some(poll) = self
+                .snapshot
+                .content_panel
+                .polls
+                .as_slice()
+                .iter()
+                .find(|poll| poll.id == id)
+        {
+            if poll.closed {
+                self.content_ui.close_error = None;
+            } else if uncertain {
+                self.content_ui.close_error = Some((id, false));
             }
         }
         let Some(account) = account else { return };
@@ -617,8 +891,350 @@ impl Desktop {
             && self.snapshot.selected.is_some()
             && self.snapshot.content_panel.context == self.snapshot.selected
     }
+    pub(super) fn voice_composer(
+        &self,
+        voice: talk_core::ui::content::VoiceSnapshot,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> Div {
+        use talk_core::ui::content::VoicePhase;
+        let context = voice.context;
+        let time = format!(
+            "{:02}:{:02}",
+            voice.elapsed_ms / 60_000,
+            (voice.elapsed_ms / 1_000) % 60
+        );
+        let mut body = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(self.icon_button(
+                "voice-cancel",
+                ("trash-2", "Aufnahme verwerfen"),
+                ButtonStyle::Quiet,
+                true.into(),
+                LocalAction::Content(Action::VoiceCancel(context)),
+                cx,
+            ))
+            .when(
+                matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording),
+                |d| d.child(self.recording_dot()),
+            )
+            .child(self.hint(&time))
+            .when(voice.phase == VoicePhase::Review, |d| {
+                d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(32.))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .children(self.content_ui.voice_levels.iter().map(|level| {
+                        div()
+                            .w(px(3.))
+                            .h(px(3. + f32::from(*level) / 1000. * 25.))
+                            .rounded(px(2.))
+                            .bg(self.theme.accent)
+                    })),
+            );
+        let can_send = Availability::when(
+            !self.media_offline()
+                && self.snapshot.content == ContentState::Ready
+                && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice),
+            "Verbinde dich erneut, um die Aufnahme zu senden.",
+        );
+        if matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording) {
+            body = body
+                .child(self.icon_button(
+                    "voice-stop",
+                    ("square", "Aufnahme prüfen"),
+                    ButtonStyle::Quiet,
+                    (self.content_ui.voice_auto_send.is_none()).into(),
+                    LocalAction::Content(Action::VoiceStop(context)),
+                    cx,
+                ))
+                .child(self.compact_round_icon_button(
+                    "voice-send-recording",
+                    ("arrow-up", "Sprachnachricht senden"),
+                    ButtonStyle::Primary,
+                    if self.content_ui.voice_auto_send.is_some() {
+                        Availability::pending()
+                    } else {
+                        can_send
+                    },
+                    LocalAction::Content(Action::VoiceFinishAndSend(context)),
+                    cx,
+                ));
+        } else if voice.phase == VoicePhase::Review {
+            body = body.child(self.compact_round_icon_button(
+                "voice-send",
+                ("arrow-up", "Sprachnachricht senden"),
+                ButtonStyle::Primary,
+                can_send,
+                LocalAction::Content(Action::VoiceSend(context)),
+                cx,
+            ));
+        } else if voice.phase == VoicePhase::Stopping {
+            body = body.child(self.hint(self.l("Aufnahme wird abgeschlossen …")));
+        }
+        let mut review = div().flex().items_center().gap_2();
+        if voice.phase == VoicePhase::Review {
+            let playback = self
+                .content_ui
+                .voice_playback
+                .filter(|p| p.context == context);
+            let playing =
+                playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
+            let controllable = playback.is_some_and(|p| {
+                matches!(
+                    p.state,
+                    talk_core::ui::content::PlaybackState::Paused
+                        | talk_core::ui::content::PlaybackState::Playing
+                        | talk_core::ui::content::PlaybackState::Ended
+                )
+            });
+            let speed = playback.map_or(2, |p| p.speed_half_steps);
+            review = review
+                .child(self.icon_button(
+                    "voice-review-play",
+                    (
+                        if playing { "pause" } else { "play" },
+                        if playing {
+                            "Pausieren"
+                        } else {
+                            "Aufnahme abspielen"
+                        },
+                    ),
+                    ButtonStyle::Quiet,
+                    true.into(),
+                    LocalAction::Content(Action::VoiceReviewPlay {
+                        context,
+                        play: !playing,
+                    }),
+                    cx,
+                ))
+                .child(self.button(
+                    "voice-review-speed",
+                    format!("{}×", f32::from(speed) / 2.0),
+                    ButtonStyle::Quiet,
+                    controllable,
+                    LocalAction::Content(Action::VoiceReviewSpeed {
+                        context,
+                        speed: if speed >= 4 { 2 } else { speed + 1 },
+                    }),
+                    cx,
+                ));
+            if let Some(playback) = playback
+                && playback.duration_ms.is_some()
+            {
+                review = review.child(self.hint(&format!(
+                    "{:02}:{:02} / {time}",
+                    playback.position_ms / 60_000,
+                    playback.position_ms / 1_000 % 60
+                )));
+            }
+            if playback.is_some_and(|p| {
+                matches!(p.state, talk_core::ui::content::PlaybackState::Failed(_))
+            }) {
+                review = review
+                    .child(self.hint(self.l("Die Aufnahme kann hier nicht abgespielt werden.")));
+            }
+        }
+        div()
+            .flex_none()
+            .px(if compact { px(12.) } else { px(24.) })
+            .pb_4()
+            .pt_2()
+            .child(
+                div()
+                    .p_3()
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(self.theme.input_border)
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(body)
+                    .child(review)
+                    .when(voice.phase == VoicePhase::Review && self.media_offline(), |d| {
+                        d.child(self.hint(self.l("Verbinde dich erneut, um die Aufnahme zu senden.")))
+                    })
+                    .when_some(
+                        match voice.phase {
+                        VoicePhase::Failed(talk_core::ui::UnavailableReason::PermissionDenied) => Some("Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen."),
+                        VoicePhase::Failed(_) => Some("Mikrofon nicht verfügbar. Prüfe die Geräteauswahl."),
+                            _ => self.content_ui.voice_error,
+                        },
+                        |d, error| d.child(self.hint(self.l(error))),
+                    ),
+            )
+    }
     fn poll_submission_blocked(&self) -> bool {
         self.snapshot.content_panel.poll_state.pending()
+    }
+    pub(super) fn voice_message_card(
+        &self,
+        reference: AttachmentRef,
+        object: &talk_core::ui::messaging::RichObject,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        use talk_core::ui::content::PlaybackState;
+        let playback = self
+            .snapshot
+            .content_panel
+            .voice_playback
+            .as_ref()
+            .filter(|p| p.attachment == reference);
+        let playing = playback.is_some_and(|p| p.state == PlaybackState::Playing);
+        let loading = playback
+            .is_some_and(|p| matches!(p.state, PlaybackState::Loading | PlaybackState::Stopping));
+        let controllable = playback.is_some_and(|p| {
+            matches!(
+                p.state,
+                PlaybackState::Paused | PlaybackState::Playing | PlaybackState::Ended
+            )
+        });
+        let speed = playback.map_or(2, |p| p.speed_half_steps);
+        let play = if playing {
+            ContentAction::PauseVoice(reference.clone())
+        } else {
+            ContentAction::PlayVoice(reference.clone())
+        };
+        let position = self
+            .content_ui
+            .voice_scrub
+            .as_ref()
+            .filter(|scrub| scrub.reference == reference)
+            .map_or_else(
+                || playback.map_or(0, |p| p.position_ms),
+                |scrub| scrub.position_ms,
+            );
+        let duration = playback.and_then(|p| p.duration_ms).unwrap_or(0);
+        let elapsed = if loading {
+            "…".to_owned()
+        } else {
+            format!("{:02}:{:02}", position / 60_000, position / 1_000 % 60)
+        };
+        let failed = playback.is_some_and(|p| matches!(p.state, PlaybackState::Failed(_)));
+        let fallback_id = format!("{}:{}", reference.message, reference.placeholder.as_str());
+        let source = object
+            .id
+            .as_ref()
+            .map_or(fallback_id.as_str(), |id| id.as_str());
+        let group: gpui::SharedString = scoped_id(
+            "voice-card",
+            reference.context,
+            reference.message,
+            placeholder_key(reference.placeholder.as_str()),
+        )
+        .to_string()
+        .into();
+        let row = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(self.compact_round_icon_button(
+                scoped_id(
+                    "voice-play",
+                    reference.context,
+                    reference.message,
+                    placeholder_key(reference.placeholder.as_str()),
+                ),
+                (
+                    if playing { "pause" } else { "play" },
+                    if playing {
+                        "Pausieren"
+                    } else {
+                        "Sprachnachricht abspielen"
+                    },
+                ),
+                ButtonStyle::Primary,
+                Availability::when(
+                    self.snapshot.content == ContentState::Ready
+                        && !self.media_offline()
+                        && !loading
+                        && self.snapshot.call.is_none(),
+                    "Die Verbindung ist derzeit nicht bereit.",
+                ),
+                LocalAction::Content(Action::Command(play)),
+                cx,
+            ))
+            .child(self.voice_scrub_bar(
+                reference.clone(),
+                position,
+                duration,
+                source,
+                controllable,
+                cx,
+            ))
+            .child(self.hint(&elapsed))
+            .child(
+                self.button(
+                    scoped_id(
+                        "voice-speed",
+                        reference.context,
+                        reference.message,
+                        placeholder_key(reference.placeholder.as_str()),
+                    ),
+                    format!("{}×", f32::from(speed) / 2.0),
+                    ButtonStyle::Quiet,
+                    controllable,
+                    LocalAction::Content(Action::Command(ContentAction::SpeedVoice {
+                        attachment: reference.clone(),
+                        speed_half_steps: if speed >= 4 { 2 } else { speed + 1 },
+                    })),
+                    cx,
+                )
+                .min_h(px(28.))
+                .h(px(28.))
+                .px_2()
+                .rounded(px(8.)),
+            )
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        "voice-download",
+                        reference.context,
+                        reference.message,
+                        placeholder_key(reference.placeholder.as_str()),
+                    ),
+                    ("download", "Herunterladen"),
+                    ButtonStyle::Quiet,
+                    if self.media_offline() {
+                        Availability::when(false, "Die Verbindung ist derzeit nicht bereit.")
+                    } else {
+                        self.download_available()
+                    },
+                    LocalAction::Content(Action::Download(reference.clone())),
+                    cx,
+                )
+                .opacity(if failed { 1. } else { 0. })
+                .group_hover(group.clone(), |s| s.opacity(1.))
+                .focus(|s| s.opacity(1.)),
+            );
+        div()
+            .id(scoped_id(
+                "voice-card",
+                reference.context,
+                reference.message,
+                placeholder_key(reference.placeholder.as_str()),
+            ))
+            .group(group)
+            .flex()
+            .flex_col()
+            .w_full()
+            .max_w(px(360.))
+            .gap_1()
+            .p_2()
+            .rounded(px(8.))
+            .bg(self.theme.subtle)
+            .child(row)
+            .when(failed, |d| {
+                d.child(self.hint(self.l("Wiedergabe nicht verfügbar. Lade die Datei herunter.")))
+            })
     }
     pub(in crate::presentation) fn asset_image(&self, target: &AssetTarget) -> Option<ImageSource> {
         let AssetState::Ready { key } = self.asset(target)?.state else {
@@ -920,31 +1536,317 @@ impl Desktop {
                 self.choose_composer_menu(target, choice, window, cx);
             }
             Action::CreatePoll => {
+                if !self.content_scope_current()
+                    || !self.snapshot.content_panel.poll_create.enabled()
+                {
+                    return;
+                }
                 self.content_ui.return_overlay = self.overlay;
                 self.content_ui.menu = false;
                 self.handle(LocalAction::Open(Overlay::CreatePoll), window, cx);
                 self.content_ui.question.focus_handle(cx).focus(window);
             }
             Action::AddOption => {
-                self.content_ui.option_count =
-                    (self.content_ui.option_count + 1).min(MAX_POLL_OPTIONS)
+                if self.content_ui.option_count < MAX_POLL_OPTIONS {
+                    if self.content_ui.options.len() == self.content_ui.option_count {
+                        let theme = self.theme;
+                        self.content_ui
+                            .options
+                            .push(cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)));
+                    }
+                    self.content_ui.option_count += 1;
+                }
             }
-            Action::RemoveOption => {
-                self.content_ui.option_count = self.content_ui.option_count.saturating_sub(1).max(2)
+            Action::RemoveOption(index) => {
+                if self.content_ui.option_count > 2 && index < self.content_ui.option_count {
+                    for i in index..self.content_ui.option_count - 1 {
+                        self.content_ui.options.swap(i, i + 1);
+                    }
+                    self.content_ui.option_count -= 1;
+                    self.content_ui.options[self.content_ui.option_count]
+                        .update(cx, |i, _| i.reset());
+                    if usize::from(self.content_ui.max_votes) > self.content_ui.option_count {
+                        self.content_ui.max_votes = self.content_ui.option_count as u16;
+                    }
+                }
             }
-            Action::Multiple => self.content_ui.multiple = !self.content_ui.multiple,
+            Action::MoveOption { index, up } => {
+                let other = if up {
+                    index.checked_sub(1)
+                } else {
+                    index.checked_add(1)
+                };
+                if let Some(other) = other.filter(|i| *i < self.content_ui.option_count)
+                    && index < self.content_ui.option_count
+                {
+                    self.content_ui.options.swap(index, other);
+                    self.content_ui.options[other]
+                        .focus_handle(cx)
+                        .focus(window);
+                }
+            }
+            Action::Multiple => {
+                self.content_ui.multiple = !self.content_ui.multiple;
+                self.content_ui.max_votes = if self.content_ui.multiple { 0 } else { 1 };
+            }
+            Action::VoteLimit { increase } => {
+                if self.content_ui.multiple {
+                    let max = self.content_ui.option_count as u16;
+                    self.content_ui.max_votes = if increase {
+                        if self.content_ui.max_votes == 0 {
+                            2.min(max)
+                        } else {
+                            (self.content_ui.max_votes + 1).min(max)
+                        }
+                    } else if self.content_ui.max_votes <= 2 {
+                        0
+                    } else {
+                        self.content_ui.max_votes - 1
+                    };
+                }
+            }
             Action::HiddenResults => {
                 self.content_ui.hidden_results = !self.content_ui.hidden_results
             }
             Action::SubmitPoll => {
                 if let Some(draft) = self.poll_draft(cx)
                     && self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
                     && self.snapshot.content_panel.poll_create.enabled()
                     && !self.poll_submission_blocked()
                     && let Some(context) = self.snapshot.selected
                     && let Some(request) = self.submit_content(ContentAction::CreatePoll(draft))
                 {
                     self.content_ui.pending_poll = Some((context, request));
+                }
+            }
+            Action::SaveDraft => {
+                if let Some(draft) = self.poll_draft(cx)
+                    && self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && self.snapshot.content_panel.poll_drafts_manage.enabled()
+                    && !self.poll_submission_blocked()
+                    && let Some(context) = self.snapshot.selected
+                {
+                    let action = match self.content_ui.editing_draft {
+                        Some(poll) if self.snapshot.content_panel.poll_drafts_edit.enabled() => {
+                            ContentAction::UpdatePollDraft { poll, draft }
+                        }
+                        Some(_) => return,
+                        None => ContentAction::SavePollDraft(draft),
+                    };
+                    if let Some(request) = self.submit_content(action) {
+                        self.content_ui.pending_poll = Some((context, request));
+                    }
+                }
+            }
+            Action::ToggleDrafts => {
+                self.content_ui.drafts_open = !self.content_ui.drafts_open;
+                if self.content_ui.drafts_open
+                    && self.snapshot.content_panel.poll_drafts_manage.enabled()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                {
+                    self.submit_content(ContentAction::RefreshPollDrafts);
+                }
+            }
+            Action::LoadDraft { id, edit } => {
+                if let Some(entry) = self
+                    .snapshot
+                    .content_panel
+                    .poll_drafts
+                    .as_slice()
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .cloned()
+                    && (!edit || self.snapshot.content_panel.poll_drafts_edit.enabled())
+                {
+                    while self.content_ui.options.len() < entry.draft.options.as_slice().len() {
+                        let theme = self.theme;
+                        self.content_ui
+                            .options
+                            .push(cx.new(|cx| TextInput::new("Antwortoption", 1000, theme, cx)));
+                    }
+                    self.content_ui.question.update(cx, |input, _| {
+                        input.set_context_value(entry.draft.question.as_str());
+                    });
+                    for (index, input) in self.content_ui.options.iter().enumerate() {
+                        let value = entry
+                            .draft
+                            .options
+                            .as_slice()
+                            .get(index)
+                            .map_or("", |value| value.as_str());
+                        input.update(cx, |input, _| {
+                            input.set_context_value(value);
+                        });
+                    }
+                    self.content_ui.option_count = entry.draft.options.as_slice().len();
+                    self.content_ui.max_votes = entry.draft.max_votes;
+                    self.content_ui.multiple = entry.draft.max_votes != 1;
+                    self.content_ui.hidden_results = entry.draft.hidden_results;
+                    self.content_ui.editing_draft = edit.then_some(id);
+                    self.content_ui.drafts_open = false;
+                    self.content_ui.question.focus_handle(cx).focus(window);
+                }
+            }
+            Action::ConfirmDeleteDraft(id) => self.content_ui.delete_draft = Some(id),
+            Action::DeleteDraft(id) => {
+                if self.content_ui.delete_draft == Some(id)
+                    && self.snapshot.content_panel.poll_drafts_manage.enabled()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                {
+                    self.submit_content(ContentAction::DeletePollDraft(id));
+                    self.content_ui.delete_draft = None;
+                }
+            }
+            Action::SelectPollOption { poll, option } => {
+                if let Some(current) = self
+                    .snapshot
+                    .content_panel
+                    .polls
+                    .as_slice()
+                    .iter()
+                    .find(|p| p.id == poll)
+                    && self.content_scope_current()
+                    && current.vote.enabled()
+                    && !current.closed
+                    && !self.poll_submission_blocked()
+                {
+                    let selected = self
+                        .content_ui
+                        .selections
+                        .iter()
+                        .find(|(id, _)| *id == poll)
+                        .map(|(_, values)| values.as_slice().to_vec())
+                        .unwrap_or_else(|| {
+                            current
+                                .options
+                                .as_slice()
+                                .iter()
+                                .filter(|o| o.own)
+                                .map(|o| o.id)
+                                .collect()
+                        });
+                    if let Some(next) = toggled_poll_votes(current.max_votes, selected, option) {
+                        self.content_ui.selections.retain(|(id, _)| *id != poll);
+                        if self.content_ui.selections.len() >= 20 {
+                            self.content_ui.selections.remove(0);
+                        }
+                        self.content_ui.selections.push((poll, next));
+                        self.content_ui.vote_error = None;
+                    }
+                }
+            }
+            Action::SubmitVote(poll) => {
+                if self.content_scope_current()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && !self.poll_submission_blocked()
+                    && let Some((_, options)) = self
+                        .content_ui
+                        .selections
+                        .iter()
+                        .find(|(id, _)| *id == poll)
+                    && let Some(context) = self.snapshot.selected
+                {
+                    let options = options.clone();
+                    if let Some(request) =
+                        self.submit_content(ContentAction::Vote { poll, options })
+                    {
+                        self.content_ui.pending_vote = Some((context, request, poll));
+                        self.content_ui.vote_error = None;
+                    }
+                }
+            }
+            Action::ConfirmClosePoll(poll) => self.content_ui.confirm_close = Some(poll),
+            Action::CancelClosePoll => self.content_ui.confirm_close = None,
+            Action::ClosePoll(poll) => {
+                if self.content_ui.confirm_close == Some(poll)
+                    && !self.poll_submission_blocked()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && let Some(context) = self.snapshot.selected
+                    && let Some(request) = self.submit_content(ContentAction::ClosePoll(poll))
+                {
+                    self.content_ui.pending_close = Some((context, request, poll));
+                    self.content_ui.close_error = None;
+                    self.content_ui.confirm_close = None;
+                }
+            }
+            Action::PollDetails(poll) => {
+                if self.content_scope_current()
+                    && self
+                        .snapshot
+                        .content_panel
+                        .polls
+                        .as_slice()
+                        .iter()
+                        .any(|p| p.id == poll)
+                {
+                    self.content_ui.details_poll = Some(poll);
+                    self.content_ui.return_overlay = self.overlay;
+                    self.handle(LocalAction::Open(Overlay::PollDetails), window, cx);
+                }
+            }
+            Action::VoiceStart(context) => {
+                self.content_ui.voice_error = None;
+                self.content_ui.voice_auto_send = None;
+                if Some(context) == self.snapshot.selected
+                    && self.composer.read(cx).content.is_empty()
+                    && !self.has_staged_attachments()
+                    && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice)
+                    && let Err(error) = self.settings_port.start_voice(context)
+                {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                }
+            }
+            Action::VoiceStop(context) => {
+                if let Err(error) = self.settings_port.stop_voice(context, false) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                }
+            }
+            Action::VoiceFinishAndSend(context) => {
+                if Some(context) == self.snapshot.selected
+                    && self.content_ui.voice_auto_send.is_none()
+                    && self.snapshot.content == ContentState::Ready
+                    && !self.media_offline()
+                    && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice)
+                {
+                    match self.settings_port.stop_voice(context, false) {
+                        Ok(()) => {
+                            self.content_ui.voice_auto_send = Some(context);
+                            self.content_ui.voice_error = None;
+                        }
+                        Err(error) => self.content_ui.voice_error = Some(voice_error(error)),
+                    }
+                }
+            }
+            Action::VoiceCancel(context) => {
+                self.content_ui.voice_auto_send = None;
+                let _ = self.settings_port.stop_voice(context, true);
+                self.content_ui.voice_error = None;
+            }
+            Action::VoiceSend(context) => {
+                if let Err(error) = self.settings_port.send_voice(context) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                } else {
+                    self.content_ui.voice_error = None;
+                }
+            }
+            Action::VoiceReviewPlay { context, play } => {
+                if let Err(error) = self.settings_port.voice_review_play(context, play) {
+                    self.content_ui.voice_error = Some(voice_error(error));
+                } else {
+                    self.content_ui.voice_error = None;
+                }
+            }
+            Action::VoiceReviewSpeed { context, speed } => {
+                if let Err(error) = self.settings_port.voice_review_speed(context, speed) {
+                    self.content_ui.voice_error = Some(voice_error(error));
                 }
             }
             Action::Preview(reference) => self.open_media_preview(reference, window, cx),
@@ -967,6 +1869,9 @@ impl Desktop {
                 }
             }
             Action::Command(command) => {
+                if matches!(command, ContentAction::PlayVoice(_)) {
+                    self.settings_port.stop_voice_review_playback();
+                }
                 let selected_file = matches!(&command, ContentAction::StageCloudFile { .. });
                 if self.submit_content(command).is_some()
                     && selected_file
@@ -983,7 +1888,12 @@ impl Desktop {
     pub(super) fn close_content_overlay(&mut self) -> bool {
         if !matches!(
             self.overlay,
-            Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
+            Some(
+                Overlay::ContentPreview
+                    | Overlay::CreatePoll
+                    | Overlay::CloudFiles
+                    | Overlay::PollDetails
+            )
         ) {
             return false;
         }
@@ -1000,6 +1910,7 @@ impl Desktop {
             self.content_ui.browser_history.clear();
             self.submit_content(ContentAction::CloseFileBrowser);
         }
+        self.content_ui.details_poll = None;
         self.overlay = self.content_ui.return_overlay.take();
         self.pending_modal_focus = self.overlay.is_some();
         true
@@ -1162,30 +2073,176 @@ impl Desktop {
     }
 
     fn poll_draft(&self, cx: &Context<Self>) -> Option<PollDraft> {
+        let question = self.content_ui.question.read(cx).submitted_value()?;
+        let options = self
+            .content_ui
+            .options
+            .iter()
+            .take(self.content_ui.option_count)
+            .map(|input| input.read(cx).submitted_value())
+            .collect::<Option<Vec<_>>>()?;
         poll_draft_values(
-            self.content_ui.question.read(cx).content.as_ref(),
-            self.content_ui
-                .options
-                .iter()
-                .take(self.content_ui.option_count)
-                .map(|input| input.read(cx).content.as_ref()),
-            self.content_ui.multiple,
+            question,
+            options,
+            self.content_ui.max_votes,
             self.content_ui.hidden_results,
         )
     }
+    pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
+        (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
+            .then(|| {
+                let label = if self.content_ui.drafts_open {
+                    self.lf(
+                        "Entwürfe · {n}",
+                        &[(
+                            "n",
+                            &self
+                                .snapshot
+                                .content_panel
+                                .poll_drafts
+                                .as_slice()
+                                .len()
+                                .to_string(),
+                        )],
+                    )
+                } else {
+                    self.l("Entwürfe").to_owned()
+                };
+                self.button(
+                    "poll-drafts-toggle",
+                    label,
+                    ButtonStyle::Quiet,
+                    !self.poll_submission_blocked(),
+                    LocalAction::Content(Action::ToggleDrafts),
+                    cx,
+                )
+            })
+    }
+
     pub(super) fn poll_creation_body(&self, cx: &Context<Self>) -> Div {
         let busy = self.poll_submission_blocked();
-        let available =
-            self.content_scope_current() && self.snapshot.content_panel.poll_create.enabled();
+        let online = self.snapshot.content == ContentState::Ready && !self.media_offline();
+        let available = self.content_scope_current()
+            && online
+            && self.snapshot.content_panel.poll_create.enabled();
+        let options: Vec<_> = self
+            .content_ui
+            .options
+            .iter()
+            .take(self.content_ui.option_count)
+            .map(|input| input.read(cx).content.clone())
+            .collect();
+        let options_interacted = options.iter().any(|value| !value.trim().is_empty());
         let mut body = div()
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.title(self.l("Frage der Umfrage")))
+            .child(self.hint(self.l("Frage")))
             .child(
                 self.input_surface(&self.content_ui.question, cx)
                     .child(self.content_ui.question.clone()),
             );
+        if options_interacted && self.content_ui.question.read(cx).content.trim().is_empty() {
+            body = body.child(self.hint(self.l("Gib eine Frage ein.")));
+        }
+        if self.content_scope_current()
+            && self.snapshot.content_panel.poll_drafts_manage.enabled()
+            && self.content_ui.drafts_open
+        {
+            if self
+                .snapshot
+                .content_panel
+                .poll_drafts
+                .as_slice()
+                .is_empty()
+            {
+                let label = match self.snapshot.content_panel.poll_state {
+                    RemoteState::Loading(_) | RemoteState::Saving(_) => {
+                        "Umfrageentwürfe werden geladen …"
+                    }
+                    RemoteState::Failed(_, _) | RemoteState::Uncertain(_) => {
+                        "Umfrageentwürfe konnten nicht geladen werden."
+                    }
+                    RemoteState::Idle => "Keine Umfrageentwürfe vorhanden.",
+                };
+                body = body.child(self.hint(self.l(label)));
+                if matches!(
+                    self.snapshot.content_panel.poll_state,
+                    RemoteState::Failed(_, _)
+                ) {
+                    body = body.child(self.button(
+                        "poll-drafts-retry",
+                        "Erneut laden",
+                        ButtonStyle::Quiet,
+                        online,
+                        LocalAction::Content(Action::Command(ContentAction::RefreshPollDrafts)),
+                        cx,
+                    ));
+                }
+            }
+            for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
+                let id = entry.id;
+                let mut actions =
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_1()
+                        .child(self.button(
+                            ("poll-draft-use", id as usize),
+                            "Für neue Umfrage verwenden",
+                            ButtonStyle::Quiet,
+                            !busy,
+                            LocalAction::Content(Action::LoadDraft { id, edit: false }),
+                            cx,
+                        ));
+                if self.snapshot.content_panel.poll_drafts_edit.enabled() {
+                    actions = actions.child(self.button(
+                        ("poll-draft-edit", id as usize),
+                        "Entwurf bearbeiten",
+                        ButtonStyle::Quiet,
+                        !busy,
+                        LocalAction::Content(Action::LoadDraft { id, edit: true }),
+                        cx,
+                    ));
+                }
+                actions = if self.content_ui.delete_draft == Some(id) {
+                    actions
+                        .child(self.hint(self.l("Diesen Entwurf löschen?")))
+                        .child(self.button(
+                            ("poll-draft-delete-confirm", id as usize),
+                            "Entwurf endgültig löschen",
+                            ButtonStyle::Quiet,
+                            !busy && online,
+                            LocalAction::Content(Action::DeleteDraft(id)),
+                            cx,
+                        ))
+                } else {
+                    actions.child(self.button(
+                        ("poll-draft-delete", id as usize),
+                        "Entwurf löschen",
+                        ButtonStyle::Quiet,
+                        !busy,
+                        LocalAction::Content(Action::ConfirmDeleteDraft(id)),
+                        cx,
+                    ))
+                };
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .bg(self.theme.subtle)
+                        .rounded(px(8.))
+                        .child(entry.draft.question.as_str().to_owned())
+                        .child(actions),
+                );
+            }
+        }
+        if self.content_ui.editing_draft.is_some() {
+            body = body.child(self.hint(self.l("Entwurf bearbeiten")));
+        }
         for (index, input) in self
             .content_ui
             .options
@@ -1204,98 +2261,188 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .child(input.clone()),
-                    ),
+                    )
+                    .child(self.icon_button(
+                        ("poll-option-up", index),
+                        ("chevron-up", "Nach oben"),
+                        ButtonStyle::Quiet,
+                        (!busy && index > 0).into(),
+                        LocalAction::Content(Action::MoveOption { index, up: true }),
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        ("poll-option-down", index),
+                        ("chevron-down", "Nach unten"),
+                        ButtonStyle::Quiet,
+                        (!busy && index + 1 < self.content_ui.option_count).into(),
+                        LocalAction::Content(Action::MoveOption { index, up: false }),
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        ("poll-option-remove", index),
+                        ("trash-2", "Entfernen"),
+                        ButtonStyle::Quiet,
+                        (!busy && self.content_ui.option_count > 2).into(),
+                        LocalAction::Content(Action::RemoveOption(index)),
+                        cx,
+                    )),
+            );
+        }
+        if options_interacted
+            && (options.iter().any(|value| value.trim().is_empty())
+                || options.iter().enumerate().any(|(index, value)| {
+                    options[..index]
+                        .iter()
+                        .any(|previous| previous.trim() == value.trim())
+                }))
+        {
+            body = body.child(
+                self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")),
             );
         }
         body = body
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(self.button(
-                        "poll-add-option",
-                        "Option hinzufügen",
-                        ButtonStyle::Quiet,
-                        !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
-                        LocalAction::Content(Action::AddOption),
-                        cx,
-                    ))
-                    .child(self.button(
-                        "poll-remove-option",
-                        "Letzte Option entfernen",
-                        ButtonStyle::Quiet,
-                        !busy && self.content_ui.option_count > 2,
-                        LocalAction::Content(Action::RemoveOption),
-                        cx,
-                    )),
-            )
-            .child(self.button_with_icon(
-                "poll-multiple",
-                (
+            .child(div().flex().flex_wrap().gap_2().child(self.button(
+                "poll-add-option",
+                "Option hinzufügen",
+                ButtonStyle::Quiet,
+                !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                LocalAction::Content(Action::AddOption),
+                cx,
+            )))
+            .child(self.dialog_row(
+                "Mehrere Antworten erlauben",
+                None,
+                self.switch(
+                    "poll-multiple",
                     "Mehrere Antworten erlauben",
-                    if self.content_ui.multiple {
-                        "check"
-                    } else {
-                        "plus"
-                    },
+                    Some(self.content_ui.multiple),
+                    (!busy).into(),
+                    LocalAction::Content(Action::Multiple),
+                    cx,
                 ),
-                ButtonStyle::Quiet,
-                !busy,
-                LocalAction::Content(Action::Multiple),
-                cx,
             ))
-            .child(self.button_with_icon(
-                "poll-hidden",
-                (
-                    "Ergebnisse bis zum Abschluss verbergen",
-                    if self.content_ui.hidden_results {
-                        "check"
-                    } else {
-                        "plus"
-                    },
+            .when(self.content_ui.multiple, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(self.button(
+                            "poll-vote-limit-down",
+                            "Weniger Stimmen",
+                            ButtonStyle::Quiet,
+                            !busy,
+                            LocalAction::Content(Action::VoteLimit { increase: false }),
+                            cx,
+                        ))
+                        .child(if self.content_ui.max_votes == 0 {
+                            self.hint(self.l("Unbegrenzte Stimmen"))
+                        } else {
+                            self.hint(&self.lf(
+                                "Höchstens {n} Stimmen",
+                                &[("n", &self.content_ui.max_votes.to_string())],
+                            ))
+                        })
+                        .child(self.button(
+                            "poll-vote-limit-up",
+                            "Mehr Stimmen",
+                            ButtonStyle::Quiet,
+                            !busy
+                                && usize::from(self.content_ui.max_votes)
+                                    < self.content_ui.option_count,
+                            LocalAction::Content(Action::VoteLimit { increase: true }),
+                            cx,
+                        )),
+                )
+            })
+            .child(self.dialog_row(
+                "Anonym abstimmen",
+                Some("Ergebnisse erscheinen nach dem Ende; Stimmen bleiben anonym."),
+                self.switch(
+                    "poll-hidden",
+                    "Anonym abstimmen",
+                    Some(self.content_ui.hidden_results),
+                    (!busy).into(),
+                    LocalAction::Content(Action::HiddenResults),
+                    cx,
                 ),
-                ButtonStyle::Quiet,
-                !busy,
-                LocalAction::Content(Action::HiddenResults),
-                cx,
-            ))
-            .child(self.hint(self.l("Mindestens zwei unterschiedliche Antwortoptionen eingeben.")));
+            ));
         if !available {
-            body = body.child(self.hint(self.l(super::conversation_dialog::unavailable(
-                self.snapshot.content_panel.poll_create,
-            ))));
+            body = body.child(self.hint(self.l(if !online {
+                "Die Verbindung ist derzeit nicht bereit."
+            } else {
+                super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create)
+            })));
         }
-        body = body.child(
-            self.button(
-                "poll-submit",
-                "Umfrage veröffentlichen",
-                ButtonStyle::Primary,
-                if poll_creation_pending(
-                    self.content_ui.pending_poll,
-                    self.snapshot
-                        .selected
-                        .filter(|_| self.content_scope_current()),
-                    self.snapshot.content_panel.poll_state,
-                ) {
-                    Availability::pending()
-                } else {
-                    (available && !busy && self.poll_draft(cx).is_some()).into()
-                },
-                LocalAction::Content(Action::SubmitPoll),
-                cx,
-            ),
-        );
         let status = match self.snapshot.content_panel.poll_state {
-            RemoteState::Failed(_, _) => {
+            RemoteState::Failed(request, _) if request != RequestId(0) => {
                 Some("Die Umfrage konnte nicht gespeichert werden. Dein Entwurf bleibt erhalten.")
             }
             RemoteState::Uncertain(_) => {
                 Some("Ergebnis unklar. Prüfe das Gespräch vor erneutem Veröffentlichen.")
             }
-            RemoteState::Idle | RemoteState::Loading(_) | RemoteState::Saving(_) => None,
+            RemoteState::Idle
+            | RemoteState::Loading(_)
+            | RemoteState::Saving(_)
+            | RemoteState::Failed(_, _) => None,
         };
         body.when_some(status, |d, s| d.child(self.hint(self.l(s))))
+    }
+
+    pub(super) fn poll_creation_footer(&self, cx: &Context<Self>) -> Div {
+        let busy = self.poll_submission_blocked();
+        let online = self.snapshot.content == ContentState::Ready && !self.media_offline();
+        let valid = self.poll_draft(cx).is_some();
+        let available = self.content_scope_current()
+            && online
+            && self.snapshot.content_panel.poll_create.enabled();
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_6()
+            .py_3()
+            .border_t_1()
+            .border_color(self.theme.border)
+            .child(div().when(
+                self.snapshot.content_panel.poll_drafts_manage.enabled(),
+                |d| {
+                    d.child(self.button(
+                        "poll-save-draft",
+                        "Als Entwurf speichern",
+                        ButtonStyle::Quiet,
+                        !busy
+                            && online
+                            && valid
+                            && (self.content_ui.editing_draft.is_none()
+                                || self.snapshot.content_panel.poll_drafts_edit.enabled()),
+                        LocalAction::Content(Action::SaveDraft),
+                        cx,
+                    ))
+                },
+            ))
+            .child(
+                self.button(
+                    "poll-submit",
+                    "Veröffentlichen",
+                    ButtonStyle::Primary,
+                    if poll_creation_pending(
+                        self.content_ui.pending_poll,
+                        self.snapshot
+                            .selected
+                            .filter(|_| self.content_scope_current()),
+                        self.snapshot.content_panel.poll_state,
+                    ) {
+                        Availability::pending()
+                    } else {
+                        (available && !busy && valid).into()
+                    },
+                    LocalAction::Content(Action::SubmitPoll),
+                    cx,
+                ),
+            )
     }
     pub(super) fn poll_card(&self, id: u64, cx: &Context<Self>) -> Div {
         let Some(poll) = self
@@ -1306,41 +2453,126 @@ impl Desktop {
             .iter()
             .find(|p| self.content_scope_current() && p.id == id)
         else {
-            return div().child(self.button(
-                ("load-poll", id as usize),
-                "Umfrage öffnen",
-                ButtonStyle::Secondary,
-                true,
-                LocalAction::Content(Action::Command(ContentAction::RefreshPoll(id))),
-                cx,
-            ));
+            if self.snapshot.content_panel.poll_create.server
+                == talk_core::ui::presentation::FeatureSupport::Unsupported
+            {
+                return div().child(
+                    self.hint(self.l("Umfragen werden von diesem Server nicht unterstützt.")),
+                );
+            }
+            return div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_3()
+                .rounded(px(8.))
+                .bg(self.theme.subtle)
+                .child(self.hint(self.l(if self.media_offline() {
+                    "Die Verbindung ist derzeit nicht bereit."
+                } else {
+                    "Umfrage wird geladen …"
+                })))
+                .when(!self.snapshot.content_panel.poll_state.pending(), |body| {
+                    body.child(self.button(
+                        ("load-poll", id as usize),
+                        "Umfrage öffnen",
+                        ButtonStyle::Secondary,
+                        self.content_scope_current()
+                            && self.snapshot.content == ContentState::Ready
+                            && !self.media_offline(),
+                        LocalAction::Content(Action::Command(ContentAction::RefreshPoll(id))),
+                        cx,
+                    ))
+                });
         };
         self.loaded_poll(poll, cx)
     }
     fn loaded_poll(&self, poll: &PollView, cx: &Context<Self>) -> Div {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .bg(self.theme.subtle)
-            .rounded(px(8.))
-            .child(self.title(poll.question.as_str()));
-        for option in poll.options.as_slice() {
-            let choices = toggled_poll_votes(
-                poll.max_votes,
+        self.poll_card_contents(poll, false, cx)
+    }
+
+    pub(super) fn poll_details_body(&self, cx: &Context<Self>) -> Div {
+        self.content_ui
+            .details_poll
+            .and_then(|id| {
+                self.snapshot
+                    .content_panel
+                    .polls
+                    .as_slice()
+                    .iter()
+                    .find(|poll| poll.id == id)
+            })
+            .filter(|_| self.content_scope_current())
+            .map_or_else(div, |poll| self.poll_card_contents(poll, true, cx))
+    }
+
+    fn poll_card_contents(&self, poll: &PollView, full: bool, cx: &Context<Self>) -> Div {
+        let selection = self
+            .content_ui
+            .selections
+            .iter()
+            .find(|(id, _)| *id == poll.id)
+            .map(|(_, selection)| selection.as_slice().to_vec())
+            .unwrap_or_else(|| {
                 poll.options
                     .as_slice()
                     .iter()
                     .filter(|o| o.own)
-                    .map(|o| o.id),
-                option.id,
+                    .map(|o| o.id)
+                    .collect()
+            });
+        let pending = self
+            .content_ui
+            .pending_vote
+            .is_some_and(|(_, _, id)| id == poll.id);
+        let meta = if poll.max_votes == 1 {
+            "Eine Antwort"
+        } else {
+            "Mehrere Antworten"
+        };
+        let privacy = if poll.hidden_results {
+            "Anonym"
+        } else {
+            "Öffentlich"
+        };
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .w_full()
+            .max_w(px(560.))
+            .gap_2()
+            .p_3()
+            .bg(self.theme.subtle)
+            .rounded(px(8.))
+            .child(
+                div()
+                    .text_size(self.sp(16.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(poll.question.as_str().to_owned()),
+            )
+            .child(self.hint(&format!("{} · {}", self.l(meta), self.l(privacy))));
+        if self.media_offline() {
+            body = body.child(self.hint(self.l("Gespeicherter Stand")));
+        }
+        if let Some(count) = poll.voters {
+            body = body.child(
+                self.hint(&self.lf("{n} Teilnehmende abgestimmt", &[("n", &count.to_string())])),
             );
+        }
+        let count = if full {
+            poll.options.as_slice().len()
+        } else {
+            5
+        };
+        for option in poll.options.as_slice().iter().take(count) {
+            let selected = selection.contains(&option.id);
             let enabled = poll.vote.enabled()
                 && !poll.closed
                 && !self.poll_submission_blocked()
-                && choices.is_some();
-            body = body.child(
+                && toggled_poll_votes(poll.max_votes, selection.iter().copied(), option.id)
+                    .is_some();
+            let mut row = div().flex().flex_col().w_full().gap_1().child(
                 self.button(
                     (
                         "poll-option",
@@ -1349,56 +2581,252 @@ impl Desktop {
                     "",
                     ButtonStyle::Quiet,
                     enabled,
-                    LocalAction::Content(Action::Command(ContentAction::Vote {
+                    LocalAction::Content(Action::SelectPollOption {
                         poll: poll.id,
-                        options: choices.unwrap_or_else(Page::empty),
-                    })),
+                        option: option.id,
+                    }),
                     cx,
                 )
                 .w_full()
                 .justify_start()
-                .child(self.scaled_icon(
-                    if option.own { "check-circle" } else { "plus" },
-                    16.,
-                    self.theme.accent,
-                ))
-                .child(div().flex_1().child(option.label.as_str().to_owned()))
-                .when_some(option.votes, |d, votes| {
-                    d.child(self.hint(&votes.to_string()))
+                .child(if poll.max_votes != 1 {
+                    div()
+                        .size(px(16.))
+                        .rounded(px(3.))
+                        .border_1()
+                        .border_color(if selected {
+                            self.theme.accent
+                        } else {
+                            self.theme.muted
+                        })
+                        .when(selected, |d| {
+                            d.bg(self.theme.accent).child(self.scaled_icon(
+                                "check",
+                                14.,
+                                self.theme.surface,
+                            ))
+                        })
+                        .into_any_element()
+                } else if selected {
+                    self.scaled_icon("check-circle", 16., self.theme.accent)
+                        .into_any_element()
+                } else {
+                    div()
+                        .size(px(16.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(self.theme.muted)
+                        .into_any_element()
+                })
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(self.theme.text)
+                        .child(option.label.as_str().to_owned()),
+                )
+                .when(option.own, |d| d.child(self.hint(self.l("Deine Stimme"))))
+                .when(pending && selected, |d| {
+                    d.child(self.hint(self.l("Wird gesendet …")))
                 }),
             );
+            if let Some(votes) = option.votes {
+                let percent = poll.voters.filter(|n| *n > 0).map_or(0, |n| {
+                    ((u64::from(votes) * 100) / u64::from(n)).min(100) as u32
+                });
+                let bar = div()
+                    .w_full()
+                    .h(px(5.))
+                    .rounded(px(3.))
+                    .bg(self.theme.border)
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded(px(3.))
+                            .bg(self.theme.accent)
+                            .w(gpui::relative(percent as f32 / 100.)),
+                    );
+                row = row
+                    .child(self.poll_result_reveal(poll.id, option.id, bar))
+                    .child(self.hint(&format!("{percent}% · {votes}")));
+            }
+            body = body.child(row);
+        }
+        let changed_vote = self
+            .content_ui
+            .selections
+            .iter()
+            .find(|(id, _)| *id == poll.id);
+        if !poll.closed && poll.vote.enabled() && changed_vote.is_some() {
+            body = body.child(
+                self.button(
+                    ("poll-vote-submit", poll.id as usize),
+                    if self.content_ui.vote_error == Some(poll.id) {
+                        "Erneut abstimmen"
+                    } else if changed_vote.is_some_and(|(_, choices)| choices.as_slice().is_empty())
+                    {
+                        "Stimme zurückziehen"
+                    } else {
+                        "Abstimmen"
+                    },
+                    ButtonStyle::Primary,
+                    !self.poll_submission_blocked()
+                        && self.snapshot.content == ContentState::Ready
+                        && !self.media_offline()
+                        && self
+                            .content_ui
+                            .selections
+                            .iter()
+                            .any(|(id, _)| *id == poll.id),
+                    LocalAction::Content(Action::SubmitVote(poll.id)),
+                    cx,
+                ),
+            );
+        }
+        if self.content_ui.vote_error == Some(poll.id) {
+            body = body
+                .child(self.hint(self.l("Deine Auswahl bleibt erhalten. Bitte erneut versuchen.")));
+        }
+        if !poll.closed && self.media_offline() {
+            body = body.child(self.hint(self.l("Verbinde dich erneut, um abzustimmen.")));
+        }
+        if let Some((id, uncertain)) = self.content_ui.close_error
+            && id == poll.id
+        {
+            body = body.child(self.hint(self.l(if uncertain {
+                "Der Status ist unklar. Die Umfrage wird erneut geprüft."
+            } else {
+                "Die Umfrage konnte nicht beendet werden. Bitte erneut versuchen."
+            })));
+        }
+        if matches!(
+            self.snapshot.content_panel.poll_state,
+            RemoteState::Uncertain(_)
+        ) && (self.content_ui.vote_error == Some(poll.id)
+            || self
+                .content_ui
+                .close_error
+                .is_some_and(|(id, uncertain)| id == poll.id && uncertain))
+        {
+            body = body.child(self.button(
+                ("poll-recheck", poll.id as usize),
+                "Umfrage erneut prüfen",
+                ButtonStyle::Quiet,
+                !self.media_offline(),
+                LocalAction::Content(Action::Command(ContentAction::RefreshPoll(poll.id))),
+                cx,
+            ));
         }
         if poll.closed {
             body = body.child(self.hint(self.l("Umfrage beendet.")));
         } else if poll.hidden_results {
             body = body.child(self.hint(self.l("Ergebnisse werden nach Abschluss angezeigt.")));
         }
-        if poll.closed && !poll.hidden_results {
-            for voter in poll.details.as_slice() {
+        if !poll.hidden_results {
+            for voter in poll
+                .details
+                .as_slice()
+                .iter()
+                .take(if full { 100 } else { 4 })
+            {
                 if let Some(option) = poll
                     .options
                     .as_slice()
                     .iter()
                     .find(|o| o.id == voter.option)
                 {
-                    body = body.child(self.hint(&format!(
-                        "{} · {}",
-                        voter.name.as_str(),
-                        option.label.as_str()
-                    )));
+                    let initials: String = voter
+                        .name
+                        .as_str()
+                        .split_whitespace()
+                        .take(2)
+                        .filter_map(|part| part.chars().next())
+                        .flat_map(char::to_uppercase)
+                        .collect();
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(self.person_avatar(&initials, 22.))
+                            .child(self.hint(&format!(
+                                "{} · {}",
+                                voter.name.as_str(),
+                                option.label.as_str()
+                            ))),
+                    );
                 }
             }
         }
-        body.when(!poll.closed && poll.close.enabled(), |d| {
-            d.child(self.button(
-                ("close-poll", poll.id as usize),
-                "Umfrage beenden",
+        let mut secondary = div().flex().flex_wrap().items_center().gap_1();
+        if !full {
+            secondary = secondary.child(self.button(
+                ("poll-details", poll.id as usize),
+                "Details und Ergebnisse",
                 ButtonStyle::Quiet,
-                !self.poll_submission_blocked(),
-                LocalAction::Content(Action::Command(ContentAction::ClosePoll(poll.id))),
+                true,
+                LocalAction::Content(Action::PollDetails(poll.id)),
                 cx,
-            ))
-        })
+            ));
+        }
+        if !poll.closed && poll.close.enabled() {
+            if self.content_ui.confirm_close == Some(poll.id) {
+                secondary = secondary
+                    .child(self.hint(self.l("Umfrage wirklich beenden?")))
+                    .child(self.hint(self.l(
+                        "Danach kann nicht mehr abgestimmt werden; die Ergebnisse sind sichtbar.",
+                    )))
+                    .child(self.button(
+                        ("poll-close-confirm", poll.id as usize),
+                        "Jetzt beenden",
+                        ButtonStyle::Secondary,
+                        !self.poll_submission_blocked() && !self.media_offline(),
+                        LocalAction::Content(Action::ClosePoll(poll.id)),
+                        cx,
+                    ))
+                    .child(self.button(
+                        ("poll-close-cancel", poll.id as usize),
+                        "Abbrechen",
+                        ButtonStyle::Quiet,
+                        true,
+                        LocalAction::Content(Action::CancelClosePoll),
+                        cx,
+                    ));
+            } else {
+                secondary = secondary.child(self.button(
+                    ("close-poll", poll.id as usize),
+                    "Umfrage beenden",
+                    ButtonStyle::Quiet,
+                    !self.poll_submission_blocked() && !self.media_offline(),
+                    LocalAction::Content(Action::ConfirmClosePoll(poll.id)),
+                    cx,
+                ));
+            }
+        }
+        body.child(secondary)
+    }
+}
+
+fn voice_session_retired(
+    same_scope: bool,
+    content: ContentState,
+    online: bool,
+    feature_enabled: bool,
+) -> bool {
+    !same_scope
+        || matches!(content, ContentState::Denied | ContentState::Unconfigured)
+        || (content == ContentState::Ready && online && !feature_enabled)
+}
+
+fn voice_error(error: talk_core::preferences::devices::DeviceError) -> &'static str {
+    use talk_core::preferences::devices::DeviceError;
+    match error {
+        DeviceError::PermissionDenied => {
+            "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen."
+        }
+        DeviceError::Removed | DeviceError::InvalidSelection | DeviceError::Unavailable => {
+            "Mikrofon nicht verfügbar. Prüfe die Geräteauswahl."
+        }
+        _ => "Sprachnachricht konnte nicht verarbeitet werden. Bitte erneut versuchen.",
     }
 }
 
@@ -1512,7 +2940,7 @@ fn toggled_poll_votes(
 fn poll_draft_values<'a>(
     question: &str,
     values: impl IntoIterator<Item = &'a str>,
-    multiple: bool,
+    max_votes: u16,
     hidden_results: bool,
 ) -> Option<PollDraft> {
     let question = question.trim();
@@ -1533,13 +2961,13 @@ fn poll_draft_values<'a>(
         }
         options.try_push(Text::new(value).ok()?).ok()?;
     }
-    if options.as_slice().len() < 2 {
+    if options.as_slice().len() < 2 || usize::from(max_votes) > options.as_slice().len() {
         return None;
     }
     Some(PollDraft {
         question: Text::new(question).ok()?,
         options,
-        multiple,
+        max_votes,
         hidden_results,
     })
 }
@@ -1548,13 +2976,50 @@ fn poll_draft_values<'a>(
 mod tests {
     use super::{
         message_avatar_alias, poll_creation_pending, poll_draft_values, toggled_poll_votes,
+        voice_session_retired,
     };
     use talk_core::ui::content::{AssetState, AssetTarget, AssetView};
     use talk_core::ui::conversation::RemoteState;
-    use talk_core::ui::presentation::{ConversationRef, DeliveryState, MessageView, RequestId};
+    use talk_core::ui::presentation::{
+        ContentState, ConversationRef, DeliveryState, MessageView, RequestId,
+    };
     use talk_core::ui::{
         AccountId, AccountScope, ConversationId, HostId, Page, RuntimeGeneration, Text,
     };
+
+    #[test]
+    fn voice_draft_survives_connection_loss_but_not_scope_or_permission_loss() {
+        assert!(!voice_session_retired(
+            true,
+            ContentState::Offline,
+            false,
+            false
+        ));
+        assert!(!voice_session_retired(
+            true,
+            ContentState::Ready,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            false,
+            ContentState::Offline,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            true,
+            ContentState::Denied,
+            false,
+            false
+        ));
+        assert!(voice_session_retired(
+            true,
+            ContentState::Ready,
+            true,
+            false
+        ));
+    }
 
     fn avatar_message(id: u128, key: Option<&str>) -> MessageView {
         let metadata = talk_core::ui::messaging::MessageMetadata {
@@ -1659,26 +3124,19 @@ mod tests {
 
     #[test]
     fn poll_draft_requires_distinct_bounded_options_and_preserves_modes() {
-        let draft = poll_draft_values("  ¿Cuándo?  ", ["  Hoy", "Mañana  "], true, true).unwrap();
+        let draft = poll_draft_values("  ¿Cuándo?  ", ["  Hoy", "Mañana  "], 0, true).unwrap();
         assert_eq!(draft.question.as_str(), "¿Cuándo?");
         assert_eq!(draft.options.as_slice()[0].as_str(), "Hoy");
         assert_eq!(draft.options.as_slice()[1].as_str(), "Mañana");
-        assert!(draft.multiple && draft.hidden_results);
-        assert!(poll_draft_values("Q", ["Same", " Same "], false, false).is_none());
-        assert!(poll_draft_values("Q", ["One"], false, false).is_none());
-        assert!(poll_draft_values(" ", ["One", "Two"], false, false).is_none());
-        assert!(poll_draft_values("Q", ["One", "  "], false, false).is_none());
+        assert_eq!(draft.max_votes, 0);
+        assert!(draft.hidden_results);
+        assert!(poll_draft_values("Q", ["Same", " Same "], 1, false).is_none());
+        assert!(poll_draft_values("Q", ["One"], 1, false).is_none());
+        assert!(poll_draft_values(" ", ["One", "Two"], 1, false).is_none());
+        assert!(poll_draft_values("Q", ["One", "  "], 1, false).is_none());
         let oversized = "a".repeat(1001);
-        assert!(poll_draft_values("Q", [oversized.as_str(), "Two"], false, false).is_none());
-        assert!(
-            poll_draft_values(
-                "Q",
-                ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
-                false,
-                false
-            )
-            .is_none()
-        );
+        assert!(poll_draft_values("Q", [oversized.as_str(), "Two"], 1, false).is_none());
+        assert!(poll_draft_values("Q", ["One", "Two"], 3, false).is_none());
     }
 
     #[test]

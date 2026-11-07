@@ -60,6 +60,14 @@ pub const SCENARIOS: &[&str] = &[
     "chat-content",
     "chat-cloud-files",
     "chat-cloud-files-offline",
+    "chat-polls",
+    "poll-dialog",
+    "poll-drafts",
+    "poll-details",
+    "poll-settings",
+    "chat-voice",
+    "voice-recording",
+    "voice-review",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
@@ -473,6 +481,14 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             "chat-content"
                 | "chat-cloud-files"
                 | "chat-cloud-files-offline"
+                | "chat-polls"
+                | "poll-dialog"
+                | "poll-drafts"
+                | "poll-details"
+                | "poll-settings"
+                | "chat-voice"
+                | "voice-recording"
+                | "voice-review"
                 | "chat-attachments"
                 | "chat-upload"
                 | "chat-upload-preview"
@@ -495,6 +511,31 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     browser.offline = true;
                 }
             }
+        }
+        if matches!(
+            scenario,
+            Some("chat-polls" | "poll-dialog" | "poll-drafts" | "poll-details" | "poll-settings")
+        ) {
+            content::polls(&mut state);
+        }
+        if scenario == Some("poll-settings") {
+            dialog::configure(&mut state);
+            if let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|panel| panel.details.as_mut())
+            {
+                details.name = text("Designteam");
+            }
+        }
+        if scenario == Some("poll-details") {
+            content::poll_details(&mut state);
+        }
+        if matches!(
+            scenario,
+            Some("chat-voice" | "voice-recording" | "voice-review")
+        ) {
+            content::voice(&mut state);
         }
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
@@ -1284,6 +1325,14 @@ impl DevelopmentPort {
                     "chat-content"
                         | "chat-cloud-files"
                         | "chat-cloud-files-offline"
+                        | "chat-polls"
+                        | "poll-dialog"
+                        | "poll-drafts"
+                        | "poll-details"
+                        | "poll-settings"
+                        | "chat-voice"
+                        | "voice-recording"
+                        | "voice-review"
                         | "chat-attachments"
                         | "chat-upload"
                         | "chat-upload-preview"
@@ -1489,12 +1538,14 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
             }
             UiIntent::Content {
-                account, action, ..
+                request,
+                account,
+                action,
             } if self.chat_content => {
                 if self.snapshot.active_account != Some(account) {
                     return Err(SubmitError::StaleScope);
                 }
-                content::action(&mut self.snapshot, action)?;
+                content::action(&mut self.snapshot, request, action)?;
             }
             UiIntent::Refresh(_) if self.chat_motion => {
                 self.probe_step = (self.probe_step + 1).min(14);

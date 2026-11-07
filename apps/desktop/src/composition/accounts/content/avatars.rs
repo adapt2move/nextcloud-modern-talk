@@ -752,6 +752,7 @@ impl Accounts {
             cloud: false,
             attachment: None,
             preview_generation: None,
+            voice: None,
             avatar_actor: self.avatar_actor(&binding.target),
         };
         if self

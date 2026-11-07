@@ -68,6 +68,7 @@ pub enum Overlay {
     Organize,
     ContentPreview,
     CreatePoll,
+    PollDetails,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {

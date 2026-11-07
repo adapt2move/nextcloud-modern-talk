@@ -179,6 +179,8 @@ pub struct CachedMessage {
     pub edited: bool,
     pub deleted: bool,
     pub system: bool,
+    #[serde(default)]
+    pub voice_message: bool,
     /// Stable application classification, independent of protocol tags.
     #[serde(default, with = "codec::optional_text")]
     pub system_event: Option<Text<32>>,

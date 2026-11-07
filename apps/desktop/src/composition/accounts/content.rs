@@ -4,7 +4,10 @@
 mod avatars;
 mod browser;
 mod links;
+mod poll_cache;
+mod poll_discovery;
 mod thumbnails;
+mod voice;
 use super::*;
 use talk_core::protocol::content as wire;
 use talk_core::ui::content as view;
@@ -23,6 +26,7 @@ struct Job {
     attachment: Option<talk_adapters::identity::CachedAttachment>,
     preview_generation: Option<u64>,
     avatar_actor: Option<Text<256>>,
+    voice: Option<(view::AttachmentRef, u64)>,
 }
 struct AssetRetry {
     request: RequestId,
@@ -47,6 +51,7 @@ impl ThumbnailRetry {
 pub(super) struct ContentOwner {
     browser: browser::Owner,
     pub(super) video: super::preview::Video,
+    voice: voice::Owner,
     pub(super) preview_generation: u64,
     descriptors: Vec<(view::AssetTarget, talk_adapters::identity::CachedAttachment)>,
     jobs: Vec<Job>,
@@ -64,6 +69,9 @@ pub(super) struct ContentOwner {
     link: Option<(AccountScope, Option<view::AssetTarget>, Text<2048>)>,
     message_link: Option<links::Pending>,
     refresh_poll: Option<(ConversationRef, u64)>,
+    refresh_uncertain: Option<RequestId>,
+    refresh_attempts: u8,
+    refresh_next: Option<Instant>,
     // One deliberate preview may wait behind the two admitted content jobs.
     preview_request: Option<(RequestId, view::AttachmentRef)>,
     profile: Option<AccountScope>,
@@ -71,6 +79,8 @@ pub(super) struct ContentOwner {
     poll_at: Option<Instant>,
     capabilities_at: Option<Instant>,
     poll_index: usize,
+    poll_discovery: poll_discovery::Discovery,
+    poll_cache: poll_cache::Cache,
 }
 #[derive(Clone)]
 pub(crate) struct ImageJob {
@@ -140,6 +150,7 @@ impl Accounts {
         self.retire_content_keys();
     }
     pub(super) fn clear_content_assets(&mut self) {
+        self.stop_voice_player();
         self.content_owner.preview_generation =
             self.content_owner.preview_generation.saturating_add(1);
         self.stop_video();
@@ -179,6 +190,14 @@ impl Accounts {
         self.content_owner.link = None;
         self.content_owner.message_link = None;
         self.content_owner.refresh_poll = None;
+        self.content_owner.refresh_uncertain = None;
+        self.content_owner.refresh_attempts = 0;
+        self.content_owner.refresh_next = None;
+        self.content_owner.poll_discovery.clear();
+        self.content_owner.poll_at = None;
+        self.content_owner
+            .poll_cache
+            .retain_account(self.snapshot.active_account);
         self.content_owner.capabilities_at = None;
         let account = self.snapshot.active_account;
         self.content_owner.browser.retain_account(account);
@@ -403,6 +422,7 @@ impl Accounts {
                         cloud: true,
                         attachment: None,
                         preview_generation: None,
+                        voice: None,
                         avatar_actor: None,
                     },
                     wire::ContentCommand::OpenCloud {
@@ -411,16 +431,51 @@ impl Accounts {
                     },
                 )
             }
+            A::RefreshPollDrafts => self.start_poll(request, wire::PollCommand::ListDrafts),
+            A::PlayVoice(attachment) => self.play_voice(request, attachment),
+            A::PauseVoice(attachment) => self.voice_control(attachment, voice::Control::Pause),
+            A::SeekVoice {
+                attachment,
+                position_ms,
+            } => self.voice_control(attachment, voice::Control::Seek(position_ms)),
+            A::SpeedVoice {
+                attachment,
+                speed_half_steps,
+            } => self.voice_control(attachment, voice::Control::Speed(speed_half_steps)),
             A::RefreshPoll(poll) => self.start_poll(request, wire::PollCommand::Read(poll)),
             A::CreatePoll(draft) => self.start_poll(
                 request,
                 wire::PollCommand::Create(wire::PollDraft {
                     question: draft.question,
                     options: draft.options,
-                    multiple: draft.multiple,
+                    max_votes: draft.max_votes,
                     hidden_results: draft.hidden_results,
                 }),
             ),
+            A::SavePollDraft(draft) => self.start_poll(
+                request,
+                wire::PollCommand::SaveDraft(wire::PollDraft {
+                    question: draft.question,
+                    options: draft.options,
+                    max_votes: draft.max_votes,
+                    hidden_results: draft.hidden_results,
+                }),
+            ),
+            A::UpdatePollDraft { poll, draft } => self.start_poll(
+                request,
+                wire::PollCommand::UpdateDraft {
+                    poll,
+                    draft: wire::PollDraft {
+                        question: draft.question,
+                        options: draft.options,
+                        max_votes: draft.max_votes,
+                        hidden_results: draft.hidden_results,
+                    },
+                },
+            ),
+            A::DeletePollDraft(poll) => {
+                self.start_poll(request, wire::PollCommand::DeleteDraft(poll))
+            }
             A::Vote { poll, options } => {
                 self.start_poll(request, wire::PollCommand::Vote { poll, options })
             }
@@ -620,6 +675,7 @@ impl Accounts {
                 attachment,
                 preview_generation: matches!(target, view::AssetTarget::Image(_))
                     .then_some(self.content_owner.preview_generation),
+                voice: None,
                 avatar_actor: self.avatar_actor(&target),
             },
             command,
@@ -784,6 +840,9 @@ impl Accounts {
         }
         let context = self.snapshot.selected.ok_or(SubmitError::StaleScope)?;
         let poll = match command {
+            // Zero is not a valid poll ID; distinguish this read from a
+            // capability refresh when applying scoped failure handling.
+            wire::PollCommand::ListDrafts => Some(0),
             wire::PollCommand::Read(id)
             | wire::PollCommand::Close(id)
             | wire::PollCommand::Vote { poll: id, .. } => Some(id),
@@ -792,6 +851,9 @@ impl Accounts {
         let mutation = matches!(
             command,
             wire::PollCommand::Create(_)
+                | wire::PollCommand::SaveDraft(_)
+                | wire::PollCommand::UpdateDraft { .. }
+                | wire::PollCommand::DeleteDraft(_)
                 | wire::PollCommand::Vote { .. }
                 | wire::PollCommand::Close(_)
         );
@@ -815,6 +877,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             },
             wire::ContentCommand::Poll {
@@ -904,6 +967,26 @@ impl Accounts {
         {
             return;
         }
+        if let Some((reference, generation)) = &job.voice {
+            if !self.voice_job_current(reference, *generation, job.attachment.as_ref()) {
+                return;
+            }
+            let result = match result {
+                Ok(RuntimeReply::Protocol(ProtocolReply::Content {
+                    operation: actual,
+                    result: wire::ContentResult::VoiceAudio(bytes),
+                })) if actual == operation => Ok(bytes),
+                Ok(_) => Err(IdentityError::Request(ErrorKind::Malformed)),
+                Err(error) => Err(error),
+            };
+            self.finish_voice_download(
+                reference.clone(),
+                *generation,
+                job.attachment.clone(),
+                result,
+            );
+            return;
+        }
         if matches!(job.target, Some(view::AssetTarget::Image(_)))
             && job.preview_generation != Some(self.content_owner.preview_generation)
         {
@@ -984,12 +1067,84 @@ impl Accounts {
                 self.snapshot.content_panel.result =
                     Some((job.request, Completion::ServerAccepted));
             }
-            Ok(wire::ContentResult::PollCapabilities(availability)) => {
-                self.snapshot.content_panel.poll_create = availability_view(availability);
+            Ok(wire::ContentResult::PollDrafts(drafts)) => {
+                let entries = drafts
+                    .as_slice()
+                    .iter()
+                    .map(|entry| view::PollDraftEntry {
+                        id: entry.id,
+                        draft: view::PollDraft {
+                            question: entry.draft.question.clone(),
+                            options: entry.draft.options.clone(),
+                            max_votes: entry.draft.max_votes,
+                            hidden_results: entry.draft.hidden_results,
+                        },
+                        max_votes: entry.max_votes,
+                    })
+                    .collect::<Vec<_>>();
+                self.snapshot.content_panel.poll_drafts = page(entries);
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
+            }
+            Ok(wire::ContentResult::PollCapabilities {
+                create,
+                drafts,
+                edit_draft,
+            }) => {
+                self.snapshot.content_panel.poll_create = availability_view(create);
+                self.snapshot.content_panel.poll_drafts_manage = availability_view(drafts);
+                self.snapshot.content_panel.poll_drafts_edit = availability_view(edit_draft);
+                if !self.snapshot.content_panel.poll_drafts_manage.enabled() {
+                    self.snapshot.content_panel.poll_drafts = Page::empty();
+                }
                 self.snapshot.content_panel.poll_state = RemoteState::Idle;
                 self.content_owner.capabilities_at = Some(Instant::now() + Duration::from_secs(30));
             }
+            Ok(wire::ContentResult::PollDraftSaved(draft)) => {
+                let mut entries = self.snapshot.content_panel.poll_drafts.as_slice().to_vec();
+                entries.retain(|entry| entry.id != draft.id);
+                if entries.len() == 100 {
+                    entries.remove(0);
+                }
+                entries.push(view::PollDraftEntry {
+                    id: draft.id,
+                    draft: view::PollDraft {
+                        question: draft.draft.question,
+                        options: draft.draft.options,
+                        max_votes: draft.draft.max_votes,
+                        hidden_results: draft.draft.hidden_results,
+                    },
+                    max_votes: draft.max_votes,
+                });
+                self.snapshot.content_panel.poll_drafts = page(entries);
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
+                self.snapshot.content_panel.result =
+                    Some((job.request, Completion::ServerAccepted));
+            }
+            Ok(wire::ContentResult::PollDraftDeleted(id)) => {
+                self.snapshot.content_panel.poll_drafts = page(
+                    self.snapshot
+                        .content_panel
+                        .poll_drafts
+                        .as_slice()
+                        .iter()
+                        .filter(|d| d.id != id)
+                        .cloned(),
+                );
+                self.snapshot.content_panel.poll_state = RemoteState::Idle;
+                self.snapshot.content_panel.result =
+                    Some((job.request, Completion::ServerAccepted));
+            }
             Ok(wire::ContentResult::Poll(poll)) => {
+                if self
+                    .content_owner
+                    .refresh_poll
+                    .is_some_and(|(context, id)| job.context == Some(context) && poll.id == id)
+                {
+                    self.content_owner.refresh_poll = None;
+                    self.content_owner.refresh_uncertain = None;
+                    self.content_owner.refresh_next = None;
+                    self.content_owner.refresh_attempts = 0;
+                }
                 let mut values = self.snapshot.content_panel.polls.as_slice().to_vec();
                 values.retain(|p| p.id != poll.id);
                 if values.len() >= 20 {
@@ -1222,6 +1377,8 @@ impl Accounts {
             }
             if job.poll.is_none() && !job.mutation {
                 self.snapshot.content_panel.poll_create = Availability::UNKNOWN;
+                self.snapshot.content_panel.poll_drafts_manage = Availability::UNKNOWN;
+                self.snapshot.content_panel.poll_drafts_edit = Availability::UNKNOWN;
                 self.content_owner.capabilities_at = Some(Instant::now() + Duration::from_secs(30));
             }
             self.snapshot.content_panel.poll_state = if completion == Completion::Uncertain {
@@ -1233,6 +1390,26 @@ impl Accounts {
                 && let (Some(context), Some(poll)) = (job.context, job.poll)
             {
                 self.content_owner.refresh_poll = Some((context, poll));
+                self.content_owner.refresh_uncertain =
+                    (completion == Completion::Uncertain).then_some(job.request);
+                self.content_owner.refresh_attempts = 0;
+                self.content_owner.refresh_next = Some(Instant::now());
+            } else if !job.mutation
+                && self
+                    .content_owner
+                    .refresh_poll
+                    .is_some_and(|(context, poll)| {
+                        job.context == Some(context) && job.poll == Some(poll)
+                    })
+            {
+                // A failed read cannot turn an uncertain mutation into a safe
+                // retry. Keep the last confirmed poll until a read succeeds.
+                if let Some(request) = self.content_owner.refresh_uncertain {
+                    self.snapshot.content_panel.poll_state = RemoteState::Uncertain(request);
+                } else if self.content_owner.refresh_attempts >= 3 {
+                    self.content_owner.refresh_poll = None;
+                    self.content_owner.refresh_next = None;
+                }
             }
         }
     }
@@ -1762,12 +1939,26 @@ impl Accounts {
             self.touch();
         }
         if self.snapshot.content == ContentState::Denied {
+            if let Some(context) = self.snapshot.selected {
+                self.content_owner.poll_cache.forget(context);
+            }
             self.snapshot.content_panel.polls = Page::empty();
+            self.snapshot.content_panel.poll_drafts = Page::empty();
             self.snapshot.content_panel.poll_create = Availability::UNKNOWN;
+            self.snapshot.content_panel.poll_drafts_manage = Availability::UNKNOWN;
+            self.snapshot.content_panel.poll_drafts_edit = Availability::UNKNOWN;
         }
     }
     pub(super) fn tick_content(&mut self) {
         self.retry_cloud_files();
+        self.content_owner.poll_cache.prune(Instant::now());
+        self.content_owner
+            .poll_cache
+            .retain_rooms(self.snapshot.conversations.as_slice());
+        if let Some(context) = self.snapshot.selected {
+            self.restore_poll_room(context);
+        }
+        self.tick_voice_player();
         self.hydrate_thumbnails();
         self.tick_video();
         self.reconcile_content_assets();
@@ -1818,6 +2009,7 @@ impl Accounts {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             };
             let command = if self.content_owner.profile == Some(account) {
@@ -1833,6 +2025,8 @@ impl Accounts {
         self.retry_thumbnail_assets(Instant::now());
         self.revalidate_avatar();
         if self.snapshot.selected.is_some()
+            && self.snapshot.content == ContentState::Ready
+            && self.content_owner.refresh_poll.is_none()
             && self
                 .content_owner
                 .capabilities_at
@@ -1844,10 +2038,58 @@ impl Accounts {
         {
             let _ = self.start_poll(RequestId(0), wire::PollCommand::Capabilities);
         }
-        if self
-            .content_owner
-            .poll_at
-            .is_none_or(|at| at <= Instant::now())
+        if let Some((context, poll)) = self.content_owner.refresh_poll {
+            if self.snapshot.selected != Some(context) {
+                self.content_owner.refresh_poll = None;
+                self.content_owner.refresh_uncertain = None;
+                self.content_owner.refresh_next = None;
+            } else if self.snapshot.content == ContentState::Ready
+                && self
+                    .content_owner
+                    .refresh_next
+                    .is_some_and(|at| at <= Instant::now())
+                && self
+                    .start_poll(RequestId(0), wire::PollCommand::Read(poll))
+                    .is_ok()
+            {
+                self.content_owner.refresh_attempts =
+                    self.content_owner.refresh_attempts.saturating_add(1);
+                self.content_owner.refresh_next =
+                    (self.content_owner.refresh_attempts < 3).then(|| {
+                        Instant::now()
+                            + Duration::from_secs(1 << self.content_owner.refresh_attempts)
+                    });
+            }
+        }
+        // Discover polls already present in bounded history without requiring a
+        // click on each placeholder. Failures retry quietly and finitely; a
+        // deliberate retry remains available on the card after exhaustion.
+        let candidates = poll_discovery::candidates(&self.snapshot);
+        self.content_owner.poll_discovery.retain(&candidates);
+        if self.snapshot.content == ContentState::Ready
+            && self.content_owner.refresh_poll.is_none()
+            && !self.snapshot.content_panel.poll_state.pending()
+            && self.snapshot.content_panel.poll_create.server == FeatureSupport::Supported
+            && let Some(id) = self.content_owner.poll_discovery.next(
+                &candidates,
+                self.snapshot.content_panel.polls.as_slice(),
+                Instant::now(),
+            )
+            && self
+                .start_poll(RequestId(0), wire::PollCommand::Read(id))
+                .is_ok()
+        {
+            self.content_owner
+                .poll_discovery
+                .started(id, Instant::now());
+        }
+        if self.snapshot.content == ContentState::Ready
+            && self.content_owner.refresh_poll.is_none()
+            && !self.snapshot.content_panel.poll_state.pending()
+            && self
+                .content_owner
+                .poll_at
+                .is_none_or(|at| at <= Instant::now())
         {
             self.content_owner.poll_at = Some(Instant::now() + Duration::from_secs(5));
             let polls = self.snapshot.content_panel.polls.as_slice();
@@ -1896,14 +2138,6 @@ impl Accounts {
                     self.touch();
                 }
             }
-        }
-        if let Some((context, poll)) = self.content_owner.refresh_poll
-            && (self.snapshot.selected != Some(context)
-                || self
-                    .start_poll(RequestId(0), wire::PollCommand::Read(poll))
-                    .is_ok())
-        {
-            self.content_owner.refresh_poll = None;
         }
     }
 }
@@ -2123,6 +2357,7 @@ mod tests {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             };
             model.content_failure(&job, IdentityError::Request(error));
@@ -2220,6 +2455,7 @@ mod tests {
                     cloud: false,
                     attachment: None,
                     preview_generation: None,
+                    voice: None,
                     avatar_actor: None,
                 };
                 model.snapshot.content_panel.result = None;
@@ -2272,6 +2508,7 @@ mod tests {
                     cloud,
                     attachment: None,
                     preview_generation: None,
+                    voice: None,
                     avatar_actor: None,
                 };
                 model.content_failure(&job, IdentityError::Request(kind));
@@ -2291,6 +2528,19 @@ mod tests {
                             RemoteState::Failed(RequestId(88), UnavailableReason::Unsupported)
                         }
                     );
+                    if kind == ErrorKind::Uncertain {
+                        let mut read = job.clone();
+                        read.request = RequestId(0);
+                        read.mutation = false;
+                        model.content_owner.refresh_attempts = 3;
+                        model.content_failure(&read, IdentityError::Request(ErrorKind::Transport));
+                        assert_eq!(model.content_owner.refresh_poll, Some((context, 7)));
+                        assert_eq!(
+                            model.snapshot.content_panel.poll_state,
+                            RemoteState::Uncertain(RequestId(88)),
+                            "a failed reconciliation cannot authorize a duplicate mutation"
+                        );
+                    }
                 }
             }
         }
@@ -2660,6 +2910,7 @@ mod tests {
                 cloud: false,
                 attachment: None,
                 preview_generation: None,
+                voice: None,
                 avatar_actor: None,
             });
         }

@@ -323,6 +323,7 @@ impl Accounts {
             self.queued_read.clear();
         }
         if state == ContentState::Denied {
+            self.forget_poll_room(context);
             self.revoke_room_metadata(context, UnavailableReason::PermissionDenied);
             self.invalidate_cached_room(context);
         }
@@ -725,6 +726,7 @@ impl Accounts {
                     .clone(),
                 caption,
                 options: Default::default(),
+                voice_message: false,
             },
             V::Thread(root) => W::History {
                 before: None,
@@ -832,6 +834,7 @@ impl Accounts {
                 path,
                 caption,
                 options: Default::default(),
+                voice_message: false,
             },
         };
         self.start_message(request, context, command, work)?;
@@ -1775,10 +1778,14 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
             edited: m.message.edited_at.is_some(),
             deleted,
             system: m.message.kind == protocol::MessageKind::System,
+            voice_message: m.message.kind == protocol::MessageKind::VoiceMessage,
             system_event: system_event(m),
             pin_notice: m.message.kind == protocol::MessageKind::System
                 && m.system.as_ref().is_some_and(|kind| {
-                    matches!(kind.as_str(), "message_pinned" | "message_unpinned")
+                    matches!(
+                        kind.as_str(),
+                        "message_pinned" | "message_unpinned" | "poll_voted" | "poll_closed"
+                    )
                 }),
             read_through: None,
             replyable: m.replyable == Some(true) && !deleted,
@@ -1913,6 +1920,7 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Schedule => V::Schedules,
         W::Forward => V::Forward,
         W::Files => V::Files,
+        W::Voice => V::Voice,
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
         _ => return None,

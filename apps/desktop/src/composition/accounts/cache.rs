@@ -1793,6 +1793,7 @@ mod tests {
                 edited: false,
                 deleted: false,
                 system: false,
+                voice_message: false,
                 system_event: None,
                 pin_notice: false,
                 truncated: false,

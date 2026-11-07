@@ -1,5 +1,5 @@
 //! Published polls from the pinned Talk 24.0.6 / 25.0.6 v1 contract.
-//! Draft deletion is deliberately a separate, unsupported operation here.
+//! Draft mutations and published poll mutations have distinct response shapes.
 use crate::{
     Client, Error, ErrorKind,
     models::{RoomToken, integer, string},
@@ -13,6 +13,19 @@ pub const MAX_OPTIONS: usize = 100;
 pub enum Command {
     Read(u64),
     Create {
+        question: String,
+        options: Vec<String>,
+        hidden_results: bool,
+        max_votes: u16,
+    },
+    CreateDraft {
+        question: String,
+        options: Vec<String>,
+        hidden_results: bool,
+        max_votes: u16,
+    },
+    UpdateDraft {
+        poll: u64,
         question: String,
         options: Vec<String>,
         hidden_results: bool,
@@ -44,6 +57,52 @@ pub struct Poll {
     pub actor_id: String,
     pub details: Vec<Voter>,
     pub details_complete: bool,
+}
+/// A moderator-visible draft. Draft responses omit votes and voter data.
+#[derive(Clone, Debug)]
+pub struct Draft {
+    pub id: u64,
+    pub question: String,
+    pub options: Vec<String>,
+    pub hidden_results: bool,
+    pub max_votes: u16,
+    pub actor_type: String,
+    pub actor_id: String,
+}
+
+impl Draft {
+    fn decode(v: &Value) -> Result<Self, ErrorKind> {
+        if integer(v.get("status")) != Some(2) {
+            return Err(ErrorKind::Malformed);
+        }
+        let raw = v["options"].as_array().ok_or(ErrorKind::Malformed)?;
+        if !(2..=MAX_OPTIONS).contains(&raw.len()) {
+            return Err(ErrorKind::TooLarge);
+        }
+        let options = raw
+            .iter()
+            .map(|v| string(Some(v), 1000)?.ok_or(ErrorKind::Malformed))
+            .collect::<Result<Vec<_>, _>>()?;
+        let hidden_results = match integer(v.get("resultMode")) {
+            Some(0) => false,
+            Some(1) => true,
+            _ => return Err(ErrorKind::Unsupported),
+        };
+        let max_votes = u16::try_from(integer(v.get("maxVotes")).ok_or(ErrorKind::Malformed)?)
+            .map_err(|_| ErrorKind::TooLarge)?;
+        if usize::from(max_votes) > options.len() {
+            return Err(ErrorKind::Malformed);
+        }
+        Ok(Self {
+            id: id(integer(v.get("id")).ok_or(ErrorKind::Malformed)?)?,
+            question: string(v.get("question"), 4000)?.ok_or(ErrorKind::Malformed)?,
+            options,
+            hidden_results,
+            max_votes,
+            actor_type: string(v.get("actorType"), 64)?.ok_or(ErrorKind::Malformed)?,
+            actor_id: string(v.get("actorId"), 512)?.ok_or(ErrorKind::Malformed)?,
+        })
+    }
 }
 fn id(id: u64) -> Result<u64, ErrorKind> {
     if id == 0 {
@@ -83,6 +142,19 @@ fn plan(room: &RoomToken, command: &Command) -> Result<PollPlan, ErrorKind> {
             options,
             hidden_results,
             max_votes,
+        }
+        | Command::CreateDraft {
+            question,
+            options,
+            hidden_results,
+            max_votes,
+        }
+        | Command::UpdateDraft {
+            question,
+            options,
+            hidden_results,
+            max_votes,
+            ..
         } => {
             if question.trim().is_empty()
                 || question.len() > 4000
@@ -102,9 +174,16 @@ fn plan(room: &RoomToken, command: &Command) -> Result<PollPlan, ErrorKind> {
                 ("question", question.clone()),
                 ("resultMode", u8::from(*hidden_results).to_string()),
                 ("maxVotes", max_votes.to_string()),
-                ("draft", "false".into()),
+                (
+                    "draft",
+                    matches!(command, Command::CreateDraft { .. }).to_string(),
+                ),
             ];
             form.extend(options.iter().map(|s| ("options[]", s.clone())));
+            let route = match command {
+                Command::UpdateDraft { poll, .. } => format!("{route}/draft/{}", id(*poll)?),
+                _ => route,
+            };
             (Method::POST, route, form)
         }
     })
@@ -204,6 +283,114 @@ impl Poll {
     }
 }
 impl Client {
+    /// Create or edit a draft; callers must enforce the relevant capability and authority.
+    pub async fn poll_draft_mutation(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        command: Command,
+    ) -> Result<Draft, Error> {
+        let create = matches!(command, Command::CreateDraft { .. });
+        let expected = match &command {
+            Command::CreateDraft { .. } => None,
+            Command::UpdateDraft { poll, .. } => Some(*poll),
+            _ => return Err(self.error(ErrorKind::Malformed)),
+        };
+        self.validate(c)?;
+        let (method, route, form) = plan(room, &command).map_err(|kind| self.error(kind))?;
+        if create {
+            if self.poll_creation_uncertain.contains(room) {
+                return Err(self.error(ErrorKind::Uncertain));
+            }
+            if self.poll_creation_uncertain.len() >= 100 {
+                return Err(self.error(ErrorKind::Busy));
+            }
+            self.poll_creation_uncertain.push(room.clone());
+        }
+        let result = async {
+            let response = self
+                .transport
+                .ocs(c, method, &route, &[], &form, false)
+                .await?;
+            let draft = Draft::decode(&response.data).map_err(|kind| self.error(kind))?;
+            if expected.is_some_and(|id| id != draft.id) {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
+            self.validate(c)?;
+            Ok(draft)
+        }
+        .await
+        .map_err(|error| self.mutation_error(error));
+        if create
+            && result
+                .as_ref()
+                .err()
+                .is_none_or(|e| e.kind != ErrorKind::Uncertain)
+        {
+            self.poll_creation_uncertain.retain(|r| r != room);
+        }
+        result
+    }
+    /// Delete a draft. The caller must establish moderator authority and draft status.
+    pub async fn delete_poll_draft(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        poll: u64,
+    ) -> Result<(), Error> {
+        self.validate(c)?;
+        let poll = id(poll).map_err(|kind| self.error(kind))?;
+        // DELETE closes published polls as well as deleting drafts. Recheck the
+        // moderator-only draft list before issuing this destructive request.
+        if !self
+            .poll_drafts(c, room)
+            .await?
+            .iter()
+            .any(|draft| draft.id == poll)
+        {
+            return Err(self.error(ErrorKind::WrongScope));
+        }
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v1/poll/{}/{poll}",
+            room.as_str()
+        );
+        self.transport
+            .ocs(c, Method::DELETE, &route, &[], &[], false)
+            .await
+            .map_err(|error| self.mutation_error(error))?;
+        self.validate(c)?;
+        Ok(())
+    }
+    /// Fetch a bounded moderator draft list for this room.
+    pub async fn poll_drafts(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<Vec<Draft>, Error> {
+        self.validate(c)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v1/poll/{}/drafts",
+            room.as_str()
+        );
+        let response = self
+            .transport
+            .ocs(c, Method::GET, &route, &[], &[], false)
+            .await?;
+        let values = response
+            .data
+            .as_array()
+            .ok_or_else(|| self.error(ErrorKind::Malformed))?;
+        if values.len() > 100 {
+            return Err(self.error(ErrorKind::TooLarge));
+        }
+        let drafts = values
+            .iter()
+            .map(Draft::decode)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|kind| self.error(kind))?;
+        self.validate(c)?;
+        Ok(drafts)
+    }
     pub async fn poll(
         &mut self,
         c: &OperationContext,
@@ -211,6 +398,12 @@ impl Client {
         command: Command,
     ) -> Result<Poll, Error> {
         self.validate(c)?;
+        if matches!(
+            command,
+            Command::CreateDraft { .. } | Command::UpdateDraft { .. }
+        ) {
+            return Err(self.error(ErrorKind::Malformed));
+        }
         let (method, route, form) = plan(room, &command).map_err(|k| self.error(k))?;
         let mutation = method != Method::GET;
         let create = matches!(command, Command::Create { .. });
@@ -258,6 +451,42 @@ mod tests {
     use serde_json::json;
     fn value() -> Value {
         json!({"id":3,"question":"Where?","options":["A","B"],"votes":[],"votedSelf":[],"status":0,"resultMode":1,"maxVotes":0,"numVoters":0,"actorType":"users","actorId":"author"})
+    }
+    #[test]
+    fn draft_response_has_no_vote_fields() {
+        let draft = json!({"id": 3, "question": "Where?", "options": ["A", "B"],
+            "status": 2, "resultMode": 0, "maxVotes": 1,
+            "actorType": "users", "actorId": "author"});
+        let decoded = Draft::decode(&draft).unwrap();
+        assert_eq!(decoded.id, 3);
+        assert_eq!(decoded.options, vec!["A", "B"]);
+        let mut invalid = draft;
+        invalid["status"] = json!(0);
+        assert!(Draft::decode(&invalid).is_err());
+    }
+    #[test]
+    fn draft_mutations_use_distinct_routes() {
+        let room = RoomToken::parse("abcd").unwrap();
+        let create = Command::CreateDraft {
+            question: "Where?".into(),
+            options: vec!["A".into(), "B".into()],
+            hidden_results: false,
+            max_votes: 1,
+        };
+        let (_, route, form) = plan(&room, &create).unwrap();
+        assert_eq!(route, "ocs/v2.php/apps/spreed/api/v1/poll/abcd");
+        assert!(form.contains(&("draft", "true".into())));
+        let edit = Command::UpdateDraft {
+            poll: 3,
+            question: "Where?".into(),
+            options: vec!["A".into(), "B".into()],
+            hidden_results: false,
+            max_votes: 1,
+        };
+        assert_eq!(
+            plan(&room, &edit).unwrap().1,
+            "ocs/v2.php/apps/spreed/api/v1/poll/abcd/draft/3"
+        );
     }
     #[test]
     fn hidden_summary_is_absent_until_closed() {

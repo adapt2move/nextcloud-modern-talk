@@ -63,6 +63,46 @@ pub(super) fn update_error_label(
 }
 
 pub trait ComputerSettingsPort {
+    fn stop_voice_review_playback(&self) {}
+    fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
+        None
+    }
+    fn voice_review_play(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _play: bool,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_review_speed(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _speed: u8,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
+        None
+    }
+    fn start_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn stop_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+        _cancel: bool,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
+    fn send_voice(
+        &self,
+        _context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        Err(DeviceError::Unavailable)
+    }
     /// Resolve against the platform owner's cached system timezone. These calls
     /// perform no timezone discovery, storage or network work on the UI thread.
     fn resolve_deadline(

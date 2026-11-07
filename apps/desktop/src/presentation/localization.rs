@@ -8,6 +8,7 @@ mod files;
 mod onboarding;
 mod own_status;
 mod people;
+mod polls;
 mod recovery;
 mod resources;
 mod typing;
@@ -24,6 +25,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         connection::MESSAGES,
         content::MESSAGES,
         files::MESSAGES,
+        polls::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
@@ -92,6 +94,7 @@ mod tests {
             connection::MESSAGES,
             content::MESSAGES,
             files::MESSAGES,
+            polls::MESSAGES,
             updates::MESSAGES,
             onboarding::MESSAGES,
             own_status::MESSAGES,

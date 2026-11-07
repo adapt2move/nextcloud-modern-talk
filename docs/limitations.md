@@ -24,9 +24,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- Voice messages, complete document viewers, account-wide
-  content search and parts of moderation remain incomplete. Documents can open
-  in the Cloud web view; poll drafts remain server-managed.
+- Complete document viewers, account-wide content search and parts of moderation
+  remain incomplete. Documents can open in the Cloud web view.
 - Typing uses the active ordinary local room's internal or HPB signaling session
   only when typing privacy and current room policy permit it. Classified,
   channel, federated and unknown-policy rooms are excluded. Indicators are
@@ -40,6 +39,24 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   provides a matching identity. People cards use current room observations; calling
   a group member first resolves the direct room and checks its call permission. Native
   accessibility qualification remains separate from UI fixtures.
+- Poll drafts are server-managed and require moderator rights and the advertised
+  capabilities. Using a draft to create a poll keeps the draft. Voter details
+  are shown only when the server supplies them; avatar initials are local fallbacks.
+  Recently viewed poll results are retained in memory for up to five minutes
+  across four rooms, subject to room policy; they do not survive restart and
+  cannot authorize voting or closure. Poll publication and draft changes require
+  a connection and await server confirmation; they are not queued across restart.
+  Native semantic accessibility and full platform behavior remain unqualified.
+- Voice recording is explicitly started, limited to two minutes, and encoded as
+  16 kHz mono PCM WAV in memory. An unsent recording remains available during
+  a temporary disconnection, but retires on scope or permission loss and does
+  not survive restart. Incoming originals are retained only for their player and
+  are not available offline. Playback accepts WAV PCM, Ogg Opus/Vorbis and supported
+  MP4/WebM audio codecs up to 32 MiB. AAC playback uses a native decoder on
+  Linux and macOS; other platforms and unavailable codecs offer download. The
+  deterministic waveform placeholder supports pointer scrubbing and five-second
+  arrow-key seeking; it is not derived from the audio. Native microphone, speaker,
+  permission and mobile interoperability have not yet been qualified.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms

@@ -946,17 +946,31 @@ impl Desktop {
                     );
                 page = page
                     .child(about)
-                    .child(self.dialog_section(Some("Nachrichten")).gap_0().child(
-                        self.room_toggle(
-                            "room-read-only",
-                            "Schreibgeschützt",
-                            "Nachrichten bleiben lesbar. Schreiben folgt der Serverberechtigung.",
-                            d.read_only,
-                            RoomSetting::ReadOnly,
-                            ConversationAction::SetReadOnly(d.read_only != Some(true)),
-                            cx,
-                        ),
-                    ))
+                    .child(
+                        self.dialog_section(Some("Nachrichten"))
+                            .gap_0()
+                            .child(self.room_toggle(
+                                "room-read-only",
+                                "Schreibgeschützt",
+                                "Nachrichten bleiben lesbar. Schreiben folgt der Serverberechtigung.",
+                                d.read_only,
+                                RoomSetting::ReadOnly,
+                                ConversationAction::SetReadOnly(d.read_only != Some(true)),
+                                cx,
+                            ))
+                            .child(self.button_with_leading_icon(
+                                "room-create-poll",
+                                ("Umfrage erstellen", "plus"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    self.content_scope_current()
+                                        && self.snapshot.content_panel.poll_create.enabled(),
+                                    unavailable(self.snapshot.content_panel.poll_create),
+                                ),
+                                LocalAction::Content(super::content::Action::CreatePoll),
+                                cx,
+                            )),
+                    )
                     .child(personal)
                     .child(
                         danger()

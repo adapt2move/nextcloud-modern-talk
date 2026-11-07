@@ -105,6 +105,7 @@ pub enum MessagingFeature {
     Threads,
     Forward,
     Files,
+    Voice,
     Typing,
     ReadReceipts,
     Translation,
@@ -226,6 +227,11 @@ pub enum MessagingCommand {
         image: super::content::ImageBytes,
         progress: super::content::TransferProgress,
     },
+    UploadVoice {
+        bytes: super::content::VoiceBytes,
+        name: Text<255>,
+        progress: super::content::TransferProgress,
+    },
     DownloadFile {
         message: MessageId,
         placeholder: Text<128>,
@@ -236,6 +242,7 @@ pub enum MessagingCommand {
         path: Text<16384>,
         caption: Text<4096>,
         options: ComposeOptions,
+        voice_message: bool,
     },
     /// Share an already existing account file; result reconciles by reference.
     ShareExistingFile {

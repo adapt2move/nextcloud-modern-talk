@@ -44,6 +44,7 @@ impl Desktop {
             Overlay::Organize => ("Eigene Gruppen", 520.),
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
+            Overlay::PollDetails => ("Umfragedetails", 620.),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
@@ -69,6 +70,7 @@ impl Desktop {
             Overlay::Organize => self.organization_body(cx),
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
+            Overlay::PollDetails => self.poll_details_body(cx),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
         };
@@ -135,10 +137,14 @@ impl Desktop {
                                 .child(
                                     div()
                                         .min_w_0()
+                                        .flex_1()
                                         .text_size(self.sp(if side { 18. } else { 24. }))
                                         .font_weight(FontWeight::BOLD)
                                         .child(self.l(title)),
                                 )
+                                .when(overlay == Overlay::CreatePoll, |d| {
+                                    d.children(self.poll_drafts_header(cx))
+                                })
                                 .child(self.icon_button(
                                     "close-overlay",
                                     ("x", "Schließen"),
@@ -151,6 +157,9 @@ impl Desktop {
                         .child(content)
                         .when(overlay == Overlay::Create, |d| {
                             d.child(self.creation_footer(cx))
+                        })
+                        .when(overlay == Overlay::CreatePoll, |d| {
+                            d.child(self.poll_creation_footer(cx))
                         })
                         .when(
                             self.feedback_visible() && overlay != Overlay::CallChat,

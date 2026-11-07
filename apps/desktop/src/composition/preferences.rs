@@ -18,6 +18,14 @@ pub struct Services {
     shutdown_unconfirmed_reported: std::cell::Cell<bool>,
     pub(super) install: std::cell::RefCell<super::updates::Install>,
     notification_sequence: std::cell::Cell<u64>,
+    voice_sequence: std::cell::Cell<u64>,
+    voice_player: std::cell::RefCell<
+        Option<(
+            talk_core::ui::presentation::ConversationRef,
+            super::content_video::Player,
+            u8,
+        )>,
+    >,
     notification_sources:
         std::cell::RefCell<Vec<talk_core::preferences::notifications::NotificationSources>>,
     pub updates:
@@ -54,6 +62,8 @@ impl Services {
             shutdown_unconfirmed_reported: std::cell::Cell::new(false),
             install: std::cell::RefCell::default(),
             notification_sequence: std::cell::Cell::new(0),
+            voice_sequence: std::cell::Cell::new(0),
+            voice_player: std::cell::RefCell::new(None),
             notification_sources: std::cell::RefCell::new(Vec::new()),
             updates: if connect_accounts {
                 talk_adapters::updates::UpdateRuntime::start(env!("CARGO_PKG_VERSION"))
@@ -176,6 +186,9 @@ impl Services {
     }
     pub(super) fn request_application_shutdown(&self) {
         self.preferences.request_shutdown();
+        if let Some((_, player, _)) = self.voice_player.borrow().as_ref() {
+            player.stop();
+        }
         if let Some(accounts) = &self.accounts {
             accounts.borrow_mut().shutdown();
         }
@@ -235,11 +248,225 @@ pub struct Bridge {
     pub services: Rc<Services>,
     pub cursor: u64,
     pub device_cursor: u64,
+    pub fixture_voice: std::cell::RefCell<Option<talk_core::ui::content::VoiceSnapshot>>,
     pub permission_cursor: u64,
     pub notification_request: Option<RequestId>,
     pub notification_result: NotificationState,
 }
 impl ComputerSettingsPort for Bridge {
+    fn stop_voice_review_playback(&self) {
+        if let Some((_, player, _)) = self.services.voice_player.borrow().as_ref() {
+            player.stop();
+        }
+    }
+    fn voice_review_playback(&self) -> Option<talk_core::ui::content::VoiceReviewPlayback> {
+        use super::content_video::Phase;
+        use talk_core::ui::content::{PlaybackState, VoiceReviewPlayback};
+        let slot = self.services.voice_player.borrow();
+        let (context, player, speed) = slot.as_ref()?;
+        if self.services.media.capture().is_some() {
+            player.stop();
+            return None;
+        }
+        if !self
+            .services
+            .devices
+            .as_ref()
+            .ok()
+            .and_then(|d| d.voice_snapshot())
+            .is_some_and(|v| {
+                v.context == *context && v.phase == talk_core::ui::content::VoicePhase::Review
+            })
+        {
+            player.stop();
+            return None;
+        }
+        let snapshot = player.snapshot();
+        Some(VoiceReviewPlayback {
+            context: *context,
+            speed_half_steps: *speed,
+            state: match snapshot.phase {
+                Phase::Starting => PlaybackState::Loading,
+                Phase::Playing => PlaybackState::Playing,
+                Phase::Paused => PlaybackState::Paused,
+                Phase::Ended => PlaybackState::Ended,
+                Phase::Stopping | Phase::Stopped => PlaybackState::Stopping,
+                Phase::Failed(_) => {
+                    PlaybackState::Failed(talk_core::ui::UnavailableReason::Unsupported)
+                }
+            },
+            position_ms: snapshot.position_ms,
+            duration_ms: snapshot.duration_ms,
+        })
+    }
+    fn voice_review_play(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        play: bool,
+    ) -> Result<(), DeviceError> {
+        if self.services.media.capture().is_some() {
+            return Err(DeviceError::Busy);
+        }
+        let devices = self.services.devices.as_ref().map_err(|e| *e)?;
+        let bytes = devices.voice_audio(context).ok_or(DeviceError::Stale)?;
+        let mut slot = self.services.voice_player.borrow_mut();
+        if let Some((old, player, _)) = slot.as_mut() {
+            if *old == context && !player.reap() {
+                return player
+                    .set_playing(play)
+                    .map_err(|_| DeviceError::Unavailable);
+            }
+            player.stop();
+            if !player.reap() {
+                return Err(DeviceError::Busy);
+            }
+            *slot = None;
+        }
+        if !play {
+            return Ok(());
+        }
+        if let Some(accounts) = &self.services.accounts {
+            let mut accounts = accounts.borrow_mut();
+            accounts.stop_video();
+            accounts.stop_voice_player();
+        }
+        let bytes = talk_core::protocol::content::VideoBytes::from_shared(bytes.shared())
+            .map_err(|_| DeviceError::CaptureFailed)?;
+        let player = super::content_video::Player::start_audio(bytes)
+            .map_err(|_| DeviceError::Unavailable)?;
+        player
+            .set_playing(true)
+            .map_err(|_| DeviceError::Unavailable)?;
+        *slot = Some((context, player, 2));
+        Ok(())
+    }
+    fn voice_review_speed(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        speed: u8,
+    ) -> Result<(), DeviceError> {
+        let mut slot = self.services.voice_player.borrow_mut();
+        let (_, player, current) = slot
+            .as_mut()
+            .filter(|(scope, _, _)| *scope == context)
+            .ok_or(DeviceError::Stale)?;
+        player
+            .set_rate(speed)
+            .map_err(|_| DeviceError::Unavailable)?;
+        *current = speed;
+        Ok(())
+    }
+    fn voice_snapshot(&self) -> Option<talk_core::ui::content::VoiceSnapshot> {
+        if self.fixture_voice.borrow().is_some() {
+            return *self.fixture_voice.borrow();
+        }
+        self.services.devices.as_ref().ok()?.voice_snapshot()
+    }
+    fn start_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        let accounts = self
+            .services
+            .accounts
+            .as_ref()
+            .ok_or(DeviceError::Unavailable)?;
+        if !accounts.borrow().voice_allowed(context) || !self.device_preferences_applied() {
+            return Err(DeviceError::Unavailable);
+        }
+        self.services
+            .devices
+            .as_ref()
+            .map_err(|e| *e)?
+            .start_voice(context)
+    }
+    fn stop_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+        cancel: bool,
+    ) -> Result<(), DeviceError> {
+        {
+            let mut fixture = self.fixture_voice.borrow_mut();
+            if let Some(voice) = fixture.as_mut() {
+                if voice.context != context {
+                    return Err(DeviceError::Stale);
+                }
+                if cancel {
+                    *fixture = None;
+                } else {
+                    voice.phase = talk_core::ui::content::VoicePhase::Review;
+                }
+                return Ok(());
+            }
+        }
+        if cancel
+            && let Some((_, player, _)) = self
+                .services
+                .voice_player
+                .borrow()
+                .as_ref()
+                .filter(|(scope, _, _)| *scope == context)
+        {
+            player.stop();
+        }
+        self.services
+            .devices
+            .as_ref()
+            .map_err(|e| *e)?
+            .stop_voice(context, cancel)
+    }
+    fn send_voice(
+        &self,
+        context: talk_core::ui::presentation::ConversationRef,
+    ) -> Result<(), DeviceError> {
+        let fixture_voice = *self.fixture_voice.borrow();
+        if let Some(voice) = fixture_voice {
+            if voice.context != context || voice.phase != talk_core::ui::content::VoicePhase::Review
+            {
+                return Err(DeviceError::Stale);
+            }
+            *self.fixture_voice.borrow_mut() = None;
+            println!("UI_VOICE_FIXTURE send no_backend=true");
+            return Ok(());
+        }
+        let accounts = self
+            .services
+            .accounts
+            .as_ref()
+            .ok_or(DeviceError::Unavailable)?;
+        if !accounts.borrow().voice_allowed(context) {
+            return Err(DeviceError::Unavailable);
+        }
+        let devices = self.services.devices.as_ref().map_err(|e| *e)?;
+        let bytes = devices.voice_audio(context).ok_or(DeviceError::Stale)?;
+        let sequence = self
+            .services
+            .voice_sequence
+            .get()
+            .checked_add(1)
+            .filter(|n| *n < (1u64 << 63))
+            .ok_or(DeviceError::Unavailable)?;
+        let request = talk_core::ui::presentation::RequestId((1u64 << 63) | sequence);
+        accounts
+            .borrow_mut()
+            .send_voice_bytes(request, context, bytes)
+            .map_err(|_| DeviceError::Unavailable)?;
+        if let Some((_, player, _)) = self
+            .services
+            .voice_player
+            .borrow()
+            .as_ref()
+            .filter(|(scope, _, _)| *scope == context)
+        {
+            player.stop();
+        }
+        self.services.voice_sequence.set(sequence);
+        // The upload owner has already accepted this intent. A concurrent
+        // device teardown may have retired the local review; it must not turn
+        // an accepted send into a retry that could duplicate the message.
+        let _ = devices.stop_voice(context, true);
+        Ok(())
+    }
     fn resolve_deadline(
         &self,
         choice: talk_core::preferences::time::DeadlineChoice,

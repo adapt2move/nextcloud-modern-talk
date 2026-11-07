@@ -105,7 +105,7 @@ async fn unavailable_poll_capability_and_direct_create_cannot_dispatch_mutation(
             .await
             .unwrap();
         let ProtocolReply::Content {
-            result: R::PollCapabilities(a),
+            result: R::PollCapabilities { create: a, .. },
             ..
         } = result
         else {

@@ -113,6 +113,7 @@ fn message(id: u64) -> CachedMessage {
         edited: true,
         deleted: false,
         system: false,
+        voice_message: false,
         system_event: None,
         pin_notice: false,
         truncated: false,
@@ -171,6 +172,17 @@ fn pin_notice_metadata_roundtrips_and_legacy_history_defaults_to_visible() {
     assert!(!legacy.pin_notice);
     assert!(legacy.system);
     assert_eq!(legacy.text, row.text);
+}
+#[test]
+fn voice_marker_roundtrips_and_old_history_remains_non_voice() {
+    let mut row = message(7);
+    row.voice_message = true;
+    let mut encoded = serde_json::to_value(&row).unwrap();
+    let decoded: CachedMessage = serde_json::from_value(encoded.clone()).unwrap();
+    assert!(decoded.voice_message);
+    encoded.as_object_mut().unwrap().remove("voice_message");
+    let legacy: CachedMessage = serde_json::from_value(encoded).unwrap();
+    assert!(!legacy.voice_message);
 }
 fn history(key: &NavigationRoomKey, saved_at: u64) -> CacheHistory {
     CacheHistory {

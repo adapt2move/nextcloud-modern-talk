@@ -413,6 +413,13 @@ impl Transport {
             .await
             .map_err(error)
     }
+    pub(super) async fn voice_audio(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+    ) -> Result<Vec<u8>, PortError> {
+        self.api.voice_audio(&context(c), path).await.map_err(error)
+    }
     #[cfg(any(test, target_os = "macos"))]
     pub(super) async fn preview_pdf(
         &mut self,
@@ -429,6 +436,37 @@ impl Transport {
     ) -> Result<api::poll::Poll, PortError> {
         self.api
             .poll(&context(c), room, command)
+            .await
+            .map_err(error)
+    }
+    // Draft operations stay behind this transport owner; the content owner applies
+    // room capability and moderator checks before exposing them to presentation.
+    pub(super) async fn poll_drafts(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+    ) -> Result<Vec<api::poll::Draft>, PortError> {
+        self.api.poll_drafts(&context(c), room).await.map_err(error)
+    }
+    pub(super) async fn poll_draft_mutation(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+        command: api::poll::Command,
+    ) -> Result<api::poll::Draft, PortError> {
+        self.api
+            .poll_draft_mutation(&context(c), room, command)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn delete_poll_draft(
+        &mut self,
+        c: &OperationContext,
+        room: &api::models::RoomToken,
+        poll: u64,
+    ) -> Result<(), PortError> {
+        self.api
+            .delete_poll_draft(&context(c), room, poll)
             .await
             .map_err(error)
     }
