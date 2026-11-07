@@ -43,6 +43,15 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(["convert",str(path),"-crop",f"{width}x120+0+{height-120}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
         ocr_path.unlink()
+        if any(normalized(term).replace(' ', '') not in text.replace(' ', '') for term in required):
+            # Selected rows in dark overlays can be missed by whole-window OCR.
+            # Inspect the actual centered content at higher contrast before failing.
+            ocr_path=out/f'{label}-ocr-center.png'
+            crop=f'{width//2}x{height//2}+{width//4}+{height//4}'
+            run(['convert',str(path),'-crop',crop,'+repage','-resize','300%',
+                 '-colorspace','gray','-auto-level','-negate',str(ocr_path)],env)
+            text += ' ' + normalized(run(['tesseract',str(ocr_path),'stdout','--psm','6'],env).stdout)
+            ocr_path.unlink()
         for term in required:
             if normalized(term).replace(' ', '') not in text.replace(' ', ''):
                 raise AssertionError(f'{name}: missing {term!r}; evidence {path.name}; OCR {text}')
@@ -171,7 +180,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
         type_text('Jonas')
-        expect_eventually('switcher matches a group participant as well as a direct room', ['Weber', 'Produktteam'])
+        expect_eventually('switcher matches a group participant as well as a direct room', ['Jonas Weber', 'Produktteam'])
         key('Escape')
         expect('Escape closes switcher', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
     elif scenario == 'account-search':
