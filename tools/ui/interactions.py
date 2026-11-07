@@ -140,8 +140,14 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+    elif scenario == 'poll-settings':
+        expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
+        click('erstellen', inspected_point=(1280, 800, 540, 548))
+        expect('settings opens the scoped poll dialog', ['Frage', 'Option hinzufügen'])
+        key('Escape')
+        expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Schreibgeschützt'])
     elif scenario == 'chat-polls':
-        click('Abstimmen')
+        click('Abstimmen', inspected_point=(1280, 800, 390, 578))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
         click('beenden')
         expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])

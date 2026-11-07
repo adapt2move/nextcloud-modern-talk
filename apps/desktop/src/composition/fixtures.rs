@@ -422,6 +422,13 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         }
         if scenario == Some("poll-settings") {
             dialog::configure(&mut state);
+            if let Some(details) = state
+                .conversation_panel
+                .as_mut()
+                .and_then(|panel| panel.details.as_mut())
+            {
+                details.name = text("Designteam");
+            }
         }
         if scenario == Some("poll-details") {
             content::poll_details(&mut state);
