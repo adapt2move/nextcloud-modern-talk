@@ -148,6 +148,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('status message editor is visible', ['Statusnachricht', 'Vorschläge'])
         click('Statusnachricht')
         type_text('LUNCHBREAK')
+        click('Nie')
         click('30')
         click('Speichern', inspected_point=(1280,800,67,632))
         expect('saved fictional status is shown immediately', ['LUNCHBREAK'])
@@ -225,11 +226,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
         expect('keyboard selection returns both cloud files to the composer',
-               ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
+               ['Projektübersicht.pdf', 'Workshop.png'], ['NextCloud-Dateien'])
     elif scenario == 'chat-cloud-files-offline':
         expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
     elif scenario == 'chat-upload-preview':
-        expect('staged image has a composer chip', ['Zwischenablage.png', 'Bereit zum Senden'])
+        expect('staged image has a composer chip', ['Zwischenablage.png'])
     elif scenario == 'poll-dialog':
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
@@ -247,12 +248,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
-        expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
-        click('erstellen', inspected_point=(1280, 800, 540, 548))
-        expect('settings opens the scoped poll dialog', ['Frage', 'Mehrere Antworten erlauben'])
+        expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
         key('Escape')
-        time.sleep(1.)  # Let the retained parent dialog regain focus and paint.
-        expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Nachrichten'])
+        expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
     elif scenario == 'chat-polls':
         click('Abstimmen', inspected_point=(1280, 800, 390, 552))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])

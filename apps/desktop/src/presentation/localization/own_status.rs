@@ -14,6 +14,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No status message is set.",
         "No hay ningún mensaje de estado.",
     ),
+    (
+        "Löschen nach: {time}",
+        "Clear after: {time}",
+        "Borrar después de: {time}",
+    ),
     ("Nie", "Never", "Nunca"),
     ("Speichern", "Save", "Guardar"),
     ("Status festlegen", "Set status", "Establecer estado"),

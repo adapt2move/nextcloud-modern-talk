@@ -152,7 +152,9 @@ impl Desktop {
                 .filter(|file| !file.submitted)
                 .map(|file| {
                     let preview = self.asset_image(&Self::local_upload_target(panel.context, file));
+                    let group: gpui::SharedString = format!("staged-file-{}", file.id).into();
                     div()
+                        .group(group.clone())
                         .w(px(280.))
                         .max_w_full()
                         .rounded(px(8.))
@@ -186,7 +188,16 @@ impl Desktop {
                                         .text_size(self.sp(13.))
                                         .child(file.name.as_str().to_owned()),
                                 )
-                                .child(self.hint(&if matches!(file.state, UploadState::Selected) { crate::presentation::localization::file_size(self.locale, file.bytes) } else { self.l(upload_label(file.state)).to_owned() })),
+                                .child(self.hint(
+                                    &if matches!(file.state, UploadState::Selected) {
+                                        crate::presentation::localization::file_size(
+                                            self.locale,
+                                            file.bytes,
+                                        )
+                                    } else {
+                                        self.l(upload_label(file.state)).to_owned()
+                                    },
+                                )),
                         )
                         .when(
                             matches!(file.state, UploadState::Uploading | UploadState::Sharing),
@@ -207,16 +218,24 @@ impl Desktop {
                                 cx,
                             ))
                         })
-                        .child(self.icon_button(
-                            scoped_id("remove-file", panel.context, u128::from(file.id), 0),
-                            ("x", "Anhang entfernen"),
-                            ButtonStyle::Quiet,
-                            Availability::when(!panel.uploads_running, "Dateien werden gesendet …"),
-                            LocalAction::Message(messaging::Action::Command(
-                                MessageAction::RemoveFile(file.id),
-                            )),
-                            cx,
-                        ))
+                        .child(
+                            self.icon_button(
+                                scoped_id("remove-file", panel.context, u128::from(file.id), 0),
+                                ("x", "Anhang entfernen"),
+                                ButtonStyle::Quiet,
+                                Availability::when(
+                                    !panel.uploads_running,
+                                    "Dateien werden gesendet …",
+                                ),
+                                LocalAction::Message(messaging::Action::Command(
+                                    MessageAction::RemoveFile(file.id),
+                                )),
+                                cx,
+                            )
+                            .opacity(0.)
+                            .group_hover(group, |style| style.opacity(1.))
+                            .focus(|style| style.opacity(1.)),
+                        )
                 }),
         )
     }
@@ -324,7 +343,11 @@ impl Desktop {
                                 .text_size(self.sp(13.))
                                 .child(file.name.as_str().to_owned()),
                         )
-                        .child(self.hint(&file_detail(self.locale, file.name.as_str(), file.bytes))),
+                        .child(self.hint(&file_detail(
+                            self.locale,
+                            file.name.as_str(),
+                            file.bytes,
+                        ))),
                 )
         });
         if file.state == UploadState::Uploading {

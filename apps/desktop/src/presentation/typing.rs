@@ -123,6 +123,8 @@ impl Desktop {
         div()
             .flex_none()
             .h(px(18.))
+            .pl(px(48.))
+            .line_height(self.sp(18.))
             .flex()
             .items_center()
             .gap_2()

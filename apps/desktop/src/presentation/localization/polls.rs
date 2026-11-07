@@ -71,7 +71,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "The poll could not be closed. Please try again.",
         "No se pudo finalizar la encuesta. Inténtalo de nuevo.",
     ),
-    ("Die maximale Anzahl an Optionen ist erreicht.", "The maximum number of options has been reached.", "Se ha alcanzado el número máximo de opciones."),
+    (
+        "Die maximale Anzahl an Optionen ist erreicht.",
+        "The maximum number of options has been reached.",
+        "Se ha alcanzado el número máximo de opciones.",
+    ),
     (
         "Diesen Entwurf löschen?",
         "Delete this draft?",
@@ -106,7 +110,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Enter a question.",
         "Introduce una pregunta.",
     ),
-    ("Gib eine Frage und mindestens zwei unterschiedliche Optionen ein.", "Enter a question and at least two distinct options.", "Introduce una pregunta y al menos dos opciones distintas."),
+    (
+        "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein.",
+        "Enter a question and at least two distinct options.",
+        "Introduce una pregunta y al menos dos opciones distintas.",
+    ),
     (
         "Höchstens {n} Stimmen",
         "At most {n} votes",
@@ -180,7 +188,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Close this poll?",
         "¿Finalizar esta encuesta?",
     ),
-    ("Teilnehmende können mehr als eine Antwort wählen.", "Participants can choose more than one answer.", "Los participantes pueden elegir más de una respuesta."),
+    (
+        "Teilnehmende können mehr als eine Antwort wählen.",
+        "Participants can choose more than one answer.",
+        "Los participantes pueden elegir más de una respuesta.",
+    ),
     ("Umfragedetails", "Poll details", "Detalles de la encuesta"),
     ("Umfrageentwürfe", "Poll drafts", "Borradores de encuestas"),
     (

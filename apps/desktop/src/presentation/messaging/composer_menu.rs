@@ -189,7 +189,10 @@ impl Desktop {
                 "bell",
                 MessageFeature::Reminders,
             ),
-        ].into_iter().filter(|item| item.availability.is_enabled()).collect()
+        ]
+        .into_iter()
+        .filter(|item| item.availability.is_enabled())
+        .collect()
     }
 
     pub(in crate::presentation) fn toggle_composer_menu(
@@ -381,40 +384,59 @@ impl Desktop {
             ))
             .children(items.into_iter().map(|item| {
                 let id = item.choice.id(target);
-                div().flex().flex_col()
-                .when(matches!(item.choice, Choice::File | Choice::Poll), |d| d
-                    .when(item.choice == Choice::Poll, |d| d.mt_1().border_t_1().border_color(self.theme.border))
-                    .child(div().px_3().pt_2().text_size(self.sp(12.)).text_color(self.theme.muted)
-                        .child(self.l(if item.choice == Choice::File { "Hochladen" } else { "Erstellen" }))))
-                .child(self.control(
-                    id.clone(),
-                    if item.choice == Choice::Silent && silent {
-                        ButtonStyle::Secondary
-                    } else {
-                        ButtonStyle::Quiet
-                    },
-                    item.availability.hinted(),
-                    LocalAction::Content(crate::presentation::content::Action::ComposerChoice(
-                        target,
-                        item.choice,
-                    )),
-                    cx,
-                )
-                .w_full()
-                .min_w_0()
-                .justify_start()
-                .gap_2()
-                .child(self.scaled_icon(item.icon, 15., self.theme.muted))
-                .child(div().min_w_0().truncate().child(self.l(item.label)))
-                .when(item.choice == Choice::Silent && silent, |d| {
-                    d.child(self.scaled_icon("check", 14., self.theme.accent))
-                })
-                .child(self.reason_tip(
-                    id,
-                    item.availability,
-                    Some(item.label),
-                    cx,
-                )))
+                div()
+                    .flex()
+                    .flex_col()
+                    .when(matches!(item.choice, Choice::File | Choice::Poll), |d| {
+                        d.when(item.choice == Choice::Poll, |d| {
+                            d.mt_1().border_t_1().border_color(self.theme.border)
+                        })
+                        .child(
+                            div()
+                                .px_3()
+                                .pt_2()
+                                .text_size(self.sp(12.))
+                                .text_color(self.theme.muted)
+                                .child(self.l(if item.choice == Choice::File {
+                                    "Hochladen"
+                                } else {
+                                    "Erstellen"
+                                })),
+                        )
+                    })
+                    .child(
+                        self.control(
+                            id.clone(),
+                            if item.choice == Choice::Silent && silent {
+                                ButtonStyle::Secondary
+                            } else {
+                                ButtonStyle::Quiet
+                            },
+                            item.availability.hinted(),
+                            LocalAction::Content(
+                                crate::presentation::content::Action::ComposerChoice(
+                                    target,
+                                    item.choice,
+                                ),
+                            ),
+                            cx,
+                        )
+                        .w_full()
+                        .min_w_0()
+                        .justify_start()
+                        .gap_2()
+                        .child(self.scaled_icon(item.icon, 15., self.theme.muted))
+                        .child(div().min_w_0().truncate().child(self.l(item.label)))
+                        .when(item.choice == Choice::Silent && silent, |d| {
+                            d.child(self.scaled_icon("check", 14., self.theme.accent))
+                        })
+                        .child(self.reason_tip(
+                            id,
+                            item.availability,
+                            Some(item.label),
+                            cx,
+                        )),
+                    )
             }));
         Some(
             Popup {

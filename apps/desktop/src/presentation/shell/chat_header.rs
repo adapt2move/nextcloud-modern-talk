@@ -1,8 +1,4 @@
 //! Same-frame header measurement with a live timeline underneath.
-#[cfg(not(target_os = "windows"))]
-use crate::presentation::controls::CONTENT_RADIUS;
-#[cfg(not(target_os = "windows"))]
-use gpui::Corners;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Div, Element, ElementId, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, div, prelude::*, px, size,
@@ -19,8 +15,7 @@ pub(in crate::presentation) fn theme(
     }
 }
 
-/// Keep enough tint for labels while letting the current-frame backdrop remain
-/// visible. The former 92% tint looked opaque even with a correct GPU blur pass.
+/// An opaque header prevents timeline content from leaking through the chrome.
 pub(in crate::presentation) fn surface(theme: crate::presentation::Theme) -> gpui::Background {
     theme.chat_header_surface()
 }
@@ -142,21 +137,6 @@ impl Element for ScrollUnderHeader {
         // retain header -> history -> composer navigation despite paint order.
         // The live list uses the enclosing panel's clip, including the header.
         window.with_tab_group(Some(1), |window| history.paint(window, cx));
-        // Sample the live history already painted in this frame. The toolkit
-        // clips the blur to this header; tint and controls are painted after it.
-        // Windows paints the explicit opaque white header fallback. It does
-        // not request a blur that its renderer cannot provide.
-        #[cfg(not(target_os = "windows"))]
-        let _ = window.paint_backdrop(
-            Bounds::new(_bounds.origin, size(_bounds.size.width, *_header_height)),
-            Corners {
-                top_left: px(CONTENT_RADIUS),
-                top_right: px(CONTENT_RADIUS),
-                bottom_left: px(0.),
-                bottom_right: px(0.),
-            },
-            px(16.),
-        );
         window.with_tab_group(Some(0), |window| self.header.paint(window, cx));
     }
 }

@@ -117,12 +117,26 @@ impl Desktop {
     /// Visual marker shared by selection rows and poll choices. The parent owns
     /// keyboard and pointer activation, so the marker never creates a nested target.
     pub(in crate::presentation) fn choice_marker(&self, selected: bool, radio: bool) -> Div {
-        div().flex_none().size(px(20.))
+        div()
+            .flex_none()
+            .size(px(20.))
             .when(radio, |d| d.rounded_full())
             .when(!radio, |d| d.rounded(px(4.)))
-            .border_1().border_color(if selected { self.theme.accent } else { self.theme.muted })
-            .flex().items_center().justify_center()
-            .when(selected && !radio, |d| d.bg(self.theme.accent).child(self.scaled_icon("check", 15., self.theme.on_accent)))
-            .when(selected && radio, |d| d.child(div().size(px(10.)).rounded_full().bg(self.theme.accent)))
+            .border_1()
+            .border_color(if selected {
+                self.theme.accent
+            } else {
+                self.theme.muted
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(selected && !radio, |d| {
+                d.bg(self.theme.accent)
+                    .child(self.scaled_icon("check", 15., self.theme.on_accent))
+            })
+            .when(selected && radio, |d| {
+                d.child(div().size(px(10.)).rounded_full().bg(self.theme.accent))
+            })
     }
 }

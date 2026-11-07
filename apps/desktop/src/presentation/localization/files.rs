@@ -96,7 +96,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Upload from computer",
         "Subir desde el ordenador",
     ),
-    ("Wähle mindestens eine Datei aus.", "Select at least one file.", "Selecciona al menos un archivo."),
+    (
+        "Wähle mindestens eine Datei aus.",
+        "Select at least one file.",
+        "Selecciona al menos un archivo.",
+    ),
     ("Zuletzt", "Recent", "Recientes"),
     (
         "Zur Auswahl hinzufügen",

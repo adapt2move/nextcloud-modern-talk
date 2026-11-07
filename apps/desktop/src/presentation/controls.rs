@@ -1,6 +1,6 @@
 //! Private native control vocabulary; all icons are fixed embedded SVG assets.
-mod forms;
 mod feedback;
+mod forms;
 mod skeletons;
 mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
@@ -258,7 +258,14 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
 fn switch_colors(t: super::Theme, enabled: bool, value: Option<bool>) -> (Hsla, Hsla) {
     match (enabled, value) {
         (true, Some(true)) => (t.accent, t.on_accent),
-        (true, _) => (if t.dark { gpui::rgb(0x3a4a63).into() } else { gpui::rgb(0x8493a8).into() }, gpui::white()),
+        (true, _) => (
+            if t.dark {
+                gpui::rgb(0x3a4a63).into()
+            } else {
+                gpui::rgb(0x8493a8).into()
+            },
+            gpui::white(),
+        ),
         (false, _) => (t.subtle, t.disabled_fg),
     }
 }

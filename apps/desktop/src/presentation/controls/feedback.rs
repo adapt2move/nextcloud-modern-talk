@@ -17,9 +17,18 @@ impl Desktop {
             BannerRole::Error => (0x9e3e32, 0xfff0ec, "info"),
         };
         let foreground = rgb(foreground);
-        div().min_h(px(36.)).px_3().py_1().rounded(px(8.))
-            .flex().items_center().gap_2().bg(rgb(background)).text_color(foreground)
-            .text_size(self.sp(12.)).line_height(self.sp(18.))
+        div()
+            .min_h(px(36.))
+            .px_3()
+            .py_1()
+            .rounded(px(8.))
+            .flex()
+            .items_center()
+            .gap_2()
+            .bg(rgb(background))
+            .text_color(foreground)
+            .text_size(self.sp(12.))
+            .line_height(self.sp(18.))
             .child(self.scaled_icon(symbol, 16., foreground.into()))
             .child(div().flex_1().min_w_0().child(label.to_owned()))
     }

@@ -745,14 +745,21 @@ impl Desktop {
                                             ))
                                         },
                                     )
-                                    .when(!self.composer.read(cx).content.is_empty() || attached || !self.message_feature_enabled(MessageFeature::Voice), |d| d.child(self.icon_button(
-                                        "send",
-                                        ("arrow-up", "Senden"),
-                                        ButtonStyle::Primary,
-                                        send_availability,
-                                        LocalAction::Send,
-                                        cx,
-                                    ))),
+                                    .when(
+                                        !self.composer.read(cx).content.is_empty()
+                                            || attached
+                                            || !self.message_feature_enabled(MessageFeature::Voice),
+                                        |d| {
+                                            d.child(self.icon_button(
+                                                "send",
+                                                ("arrow-up", "Senden"),
+                                                ButtonStyle::Primary,
+                                                send_availability,
+                                                LocalAction::Send,
+                                                cx,
+                                            ))
+                                        },
+                                    ),
                             ),
                     ),
             )

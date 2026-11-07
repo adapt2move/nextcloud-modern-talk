@@ -70,6 +70,7 @@ pub(crate) enum Action {
         option: u16,
     },
     SubmitVote(u64),
+    TogglePollMenu(u64),
     ConfirmClosePoll(u64),
     CancelClosePoll,
     ClosePoll(u64),
@@ -140,6 +141,7 @@ pub(super) struct ContentUi {
     pending_close: Option<(ConversationRef, RequestId, u64)>,
     close_error: Option<(u64, bool)>,
     confirm_close: Option<u64>,
+    poll_menu: Option<u64>,
     details_poll: Option<u64>,
     pub(super) voice: Option<talk_core::ui::content::VoiceSnapshot>,
     pub(super) voice_levels: Vec<u16>,
@@ -202,6 +204,7 @@ impl ContentUi {
             pending_close: None,
             close_error: None,
             confirm_close: None,
+            poll_menu: None,
             details_poll: None,
             voice: None,
             voice_levels: Vec::new(),
@@ -491,6 +494,7 @@ impl Desktop {
             self.content_ui.pending_close = None;
             self.content_ui.close_error = None;
             self.content_ui.confirm_close = None;
+            self.content_ui.poll_menu = None;
             self.content_ui.details_poll = None;
             self.content_ui.return_overlay = None;
             self.content_ui.browser_history.clear();
@@ -908,27 +912,98 @@ impl Desktop {
             voice.elapsed_ms / 60_000,
             (voice.elapsed_ms / 1_000) % 60
         );
-        let playback = self.content_ui.voice_playback.filter(|p| p.context == context);
-        let playing = playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
-        let controllable = playback.is_some_and(|p| matches!(p.state, talk_core::ui::content::PlaybackState::Paused | talk_core::ui::content::PlaybackState::Playing | talk_core::ui::content::PlaybackState::Ended));
+        let playback = self
+            .content_ui
+            .voice_playback
+            .filter(|p| p.context == context);
+        let playing =
+            playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
+        let controllable = playback.is_some_and(|p| {
+            matches!(
+                p.state,
+                talk_core::ui::content::PlaybackState::Paused
+                    | talk_core::ui::content::PlaybackState::Playing
+                    | talk_core::ui::content::PlaybackState::Ended
+            )
+        });
         let speed = playback.map_or(2, |p| p.speed_half_steps);
-        let mut body = div().flex().items_center().gap_2()
-            .child(self.icon_button("voice-cancel", ("trash-2", "Aufnahme verwerfen"), ButtonStyle::Quiet, true.into(), LocalAction::Content(Action::VoiceCancel(context)), cx))
-            .when(matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording), |d| d
-                .child(self.recording_dot())
-                .child(self.hint(self.l("Aufnahme läuft")))
-                .child(self.hint(&time)))
-            .when(voice.phase == VoicePhase::Review, |d| d.child(self.icon_button(
-                "voice-review-play", (if playing { "pause" } else { "play" }, if playing { "Pausieren" } else { "Aufnahme abspielen" }),
-                ButtonStyle::Quiet, true.into(), LocalAction::Content(Action::VoiceReviewPlay { context, play: !playing }), cx)))
-            .child(div().flex_1().min_w_0().h(px(32.)).flex().items_center().gap(px(2.))
-                .children(self.content_ui.voice_levels.iter().map(|level| div().w(px(3.))
-                    .h(px(3. + f32::from(*level) / 1000. * 25.)).rounded(px(2.)).bg(self.theme.accent))))
-            .when(voice.phase == VoicePhase::Review, |d| d.child(self.hint(&time)).child(self.button(
-                "voice-review-speed", format!("{}×", f32::from(speed) / 2.0), ButtonStyle::Secondary,
-                Availability::when(controllable, "Die Aufnahme kann hier nicht abgespielt werden."),
-                LocalAction::Content(Action::VoiceReviewSpeed { context, speed: if speed >= 4 { 2 } else { speed + 1 } }), cx,
-            ).min_h(px(28.)).h(px(28.)).px_2()));
+        let mut body = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(self.icon_button(
+                "voice-cancel",
+                ("trash-2", "Aufnahme verwerfen"),
+                ButtonStyle::Quiet,
+                true.into(),
+                LocalAction::Content(Action::VoiceCancel(context)),
+                cx,
+            ))
+            .when(
+                matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording),
+                |d| {
+                    d.child(self.recording_dot())
+                        .child(self.hint(self.l("Aufnahme läuft")))
+                        .child(self.hint(&time))
+                },
+            )
+            .when(voice.phase == VoicePhase::Review, |d| {
+                d.child(self.icon_button(
+                    "voice-review-play",
+                    (
+                        if playing { "pause" } else { "play" },
+                        if playing {
+                            "Pausieren"
+                        } else {
+                            "Aufnahme abspielen"
+                        },
+                    ),
+                    ButtonStyle::Quiet,
+                    true.into(),
+                    LocalAction::Content(Action::VoiceReviewPlay {
+                        context,
+                        play: !playing,
+                    }),
+                    cx,
+                ))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(32.))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .children(self.content_ui.voice_levels.iter().map(|level| {
+                        div()
+                            .w(px(3.))
+                            .h(px(3. + f32::from(*level) / 1000. * 25.))
+                            .rounded(px(2.))
+                            .bg(self.theme.accent)
+                    })),
+            )
+            .when(voice.phase == VoicePhase::Review, |d| {
+                d.child(self.hint(&time)).child(
+                    self.button(
+                        "voice-review-speed",
+                        format!("{}×", f32::from(speed) / 2.0),
+                        ButtonStyle::Secondary,
+                        Availability::when(
+                            controllable,
+                            "Die Aufnahme kann hier nicht abgespielt werden.",
+                        ),
+                        LocalAction::Content(Action::VoiceReviewSpeed {
+                            context,
+                            speed: if speed >= 4 { 2 } else { speed + 1 },
+                        }),
+                        cx,
+                    )
+                    .min_h(px(28.))
+                    .h(px(28.))
+                    .px_2(),
+                )
+            });
         let can_send = Availability::when(
             !self.media_offline()
                 && self.snapshot.content == ContentState::Ready
@@ -1121,7 +1196,8 @@ impl Desktop {
                 .h(px(28.))
                 .px_2()
                 .rounded(px(8.))
-                .border_1().border_color(self.theme.border),
+                .border_1()
+                .border_color(self.theme.border),
             )
             .child(
                 self.icon_button(
@@ -1332,7 +1408,9 @@ impl Desktop {
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(path));
             }
-            Action::ToggleBrowserSort => self.content_ui.browser_sort_open = !self.content_ui.browser_sort_open,
+            Action::ToggleBrowserSort => {
+                self.content_ui.browser_sort_open = !self.content_ui.browser_sort_open
+            }
             Action::BrowserClearSearch => {
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
@@ -1698,7 +1776,14 @@ impl Desktop {
                     }
                 }
             }
-            Action::ConfirmClosePoll(poll) => self.content_ui.confirm_close = Some(poll),
+            Action::TogglePollMenu(poll) => {
+                self.content_ui.poll_menu =
+                    (self.content_ui.poll_menu != Some(poll)).then_some(poll);
+            }
+            Action::ConfirmClosePoll(poll) => {
+                self.content_ui.poll_menu = None;
+                self.content_ui.confirm_close = Some(poll);
+            }
             Action::CancelClosePoll => self.content_ui.confirm_close = None,
             Action::ClosePoll(poll) => {
                 if self.content_ui.confirm_close == Some(poll)
@@ -2031,7 +2116,19 @@ impl Desktop {
     pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
         (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
             .then(|| {
-                let label = self.lf("Entwürfe · {n}", &[("n", &self.snapshot.content_panel.poll_drafts.as_slice().len().to_string())]);
+                let label = self.lf(
+                    "Entwürfe · {n}",
+                    &[(
+                        "n",
+                        &self
+                            .snapshot
+                            .content_panel
+                            .poll_drafts
+                            .as_slice()
+                            .len()
+                            .to_string(),
+                    )],
+                );
                 self.button(
                     "poll-drafts-toggle",
                     label,
@@ -2174,42 +2271,59 @@ impl Desktop {
             .take(self.content_ui.option_count)
             .enumerate()
         {
+            let group: gpui::SharedString = format!("poll-option-row-{index}").into();
             body = body.child(
                 div()
+                    .group(group.clone())
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(self.hint(&(index + 1).to_string()))
+                    .child(self.hint(&(index + 1).to_string()).w(px(24.)))
                     .child(
                         self.input_surface(input, cx)
                             .flex_1()
                             .min_w_0()
                             .child(input.clone()),
                     )
-                    .child(self.icon_button(
-                        ("poll-option-up", index),
-                        ("chevron-up", "Nach oben"),
-                        ButtonStyle::Quiet,
-                        (!busy && index > 0).into(),
-                        LocalAction::Content(Action::MoveOption { index, up: true }),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        ("poll-option-down", index),
-                        ("chevron-down", "Nach unten"),
-                        ButtonStyle::Quiet,
-                        (!busy && index + 1 < self.content_ui.option_count).into(),
-                        LocalAction::Content(Action::MoveOption { index, up: false }),
-                        cx,
-                    ))
-                    .child(self.icon_button(
-                        ("poll-option-remove", index),
-                        ("trash-2", "Entfernen"),
-                        ButtonStyle::Quiet,
-                        (!busy && self.content_ui.option_count > 2).into(),
-                        LocalAction::Content(Action::RemoveOption(index)),
-                        cx,
-                    )),
+                    .child(
+                        self.icon_button(
+                            ("poll-option-up", index),
+                            ("chevron-up", "Nach oben"),
+                            ButtonStyle::Quiet,
+                            (!busy && index > 0).into(),
+                            LocalAction::Content(Action::MoveOption { index, up: true }),
+                            cx,
+                        )
+                        .opacity(0.)
+                        .group_hover(group.clone(), |style| style.opacity(1.))
+                        .focus(|style| style.opacity(1.)),
+                    )
+                    .child(
+                        self.icon_button(
+                            ("poll-option-down", index),
+                            ("chevron-down", "Nach unten"),
+                            ButtonStyle::Quiet,
+                            (!busy && index + 1 < self.content_ui.option_count).into(),
+                            LocalAction::Content(Action::MoveOption { index, up: false }),
+                            cx,
+                        )
+                        .opacity(0.)
+                        .group_hover(group.clone(), |style| style.opacity(1.))
+                        .focus(|style| style.opacity(1.)),
+                    )
+                    .child(
+                        self.icon_button(
+                            ("poll-option-remove", index),
+                            ("trash-2", "Entfernen"),
+                            ButtonStyle::Quiet,
+                            (!busy && self.content_ui.option_count > 2).into(),
+                            LocalAction::Content(Action::RemoveOption(index)),
+                            cx,
+                        )
+                        .opacity(0.)
+                        .group_hover(group.clone(), |style| style.opacity(1.))
+                        .focus(|style| style.opacity(1.)),
+                    ),
             );
         }
         if options_interacted
@@ -2229,7 +2343,10 @@ impl Desktop {
                 "poll-add-option",
                 "Option hinzufügen",
                 ButtonStyle::Secondary,
-                Availability::when(!busy && self.content_ui.option_count < MAX_POLL_OPTIONS, "Die maximale Anzahl an Optionen ist erreicht."),
+                Availability::when(
+                    !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                    "Die maximale Anzahl an Optionen ist erreicht.",
+                ),
                 LocalAction::Content(Action::AddOption),
                 cx,
             )))
@@ -2475,14 +2592,47 @@ impl Desktop {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(poll.question.as_str().to_owned()),
             )
-            .child(self.hint(&format!("{} · {}", self.l(meta), self.l(privacy))));
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        self.hint(&format!(
+                            "{} · {}{}",
+                            self.l(meta),
+                            self.l(privacy),
+                            poll.voters
+                                .map(|count| format!(
+                                    " · {}",
+                                    self.lf(
+                                        "{n} Teilnehmende abgestimmt",
+                                        &[("n", &count.to_string())]
+                                    )
+                                ))
+                                .unwrap_or_default()
+                        )),
+                    )
+                    .when(!full, |d| {
+                        d.child(
+                            self.button(
+                                ("poll-details", poll.id as usize),
+                                "Details und Ergebnisse",
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::Content(Action::PollDetails(poll.id)),
+                                cx,
+                            )
+                            .min_h(px(28.))
+                            .h(px(28.))
+                            .px_1()
+                            .text_size(self.sp(12.)),
+                        )
+                    }),
+            );
         if self.media_offline() {
             body = body.child(self.hint(self.l("Gespeicherter Stand")));
-        }
-        if let Some(count) = poll.voters {
-            body = body.child(
-                self.hint(&self.lf("{n} Teilnehmende abgestimmt", &[("n", &count.to_string())])),
-            );
         }
         let count = if full {
             poll.options.as_slice().len()
@@ -2520,7 +2670,9 @@ impl Desktop {
                         .text_color(self.theme.text)
                         .child(option.label.as_str().to_owned()),
                 )
-                .when(option.own && selected, |d| d.child(self.hint(self.l("Deine Stimme"))))
+                .when(option.own && selected, |d| {
+                    d.child(self.hint(self.l("Deine Stimme")))
+                })
                 .when(pending && selected, |d| {
                     d.child(self.hint(self.l("Wird gesendet …")))
                 }),
@@ -2533,7 +2685,10 @@ impl Desktop {
                     .w_full()
                     .h(px(6.))
                     .rounded(px(3.))
-                    .bg(self.theme.muted.opacity(if self.theme.dark { 0.65 } else { 0.35 }))
+                    .bg(self
+                        .theme
+                        .muted
+                        .opacity(if self.theme.dark { 0.65 } else { 0.35 }))
                     .child(
                         div()
                             .h_full()
@@ -2654,16 +2809,6 @@ impl Desktop {
             }
         }
         let mut secondary = div().flex().flex_wrap().items_center().gap_1();
-        if !full {
-            secondary = secondary.child(self.button(
-                ("poll-details", poll.id as usize),
-                "Details und Ergebnisse",
-                ButtonStyle::Quiet,
-                true,
-                LocalAction::Content(Action::PollDetails(poll.id)),
-                cx,
-            ));
-        }
         if !poll.closed && poll.close.enabled() {
             if self.content_ui.confirm_close == Some(poll.id) {
                 secondary = secondary
@@ -2688,13 +2833,34 @@ impl Desktop {
                         cx,
                     ));
             } else {
-                secondary = secondary.child(self.icon_button(
-                    ("close-poll", poll.id as usize),
-                    ("more", "Umfrage beenden"),
-                    ButtonStyle::Quiet,
-                    Availability::when(!self.poll_submission_blocked() && !self.media_offline(), "Die Verbindung ist derzeit nicht bereit."),
-                    LocalAction::Content(Action::ConfirmClosePoll(poll.id)), cx,
-                ).size(px(32.)).min_h(px(32.)));
+                secondary = secondary.child(
+                    self.icon_button(
+                        ("close-poll", poll.id as usize),
+                        ("more", "Umfrage beenden"),
+                        ButtonStyle::Quiet,
+                        Availability::when(
+                            !self.poll_submission_blocked() && !self.media_offline(),
+                            "Die Verbindung ist derzeit nicht bereit.",
+                        ),
+                        LocalAction::Content(Action::TogglePollMenu(poll.id)),
+                        cx,
+                    )
+                    .size(px(32.))
+                    .min_h(px(32.)),
+                );
+                if self.content_ui.poll_menu == Some(poll.id) {
+                    secondary = secondary.child(self.button(
+                        ("poll-close-menu", poll.id as usize),
+                        "Umfrage beenden",
+                        ButtonStyle::Secondary,
+                        Availability::when(
+                            !self.poll_submission_blocked() && !self.media_offline(),
+                            "Die Verbindung ist derzeit nicht bereit.",
+                        ),
+                        LocalAction::Content(Action::ConfirmClosePoll(poll.id)),
+                        cx,
+                    ));
+                }
             }
         }
         body.child(secondary)
