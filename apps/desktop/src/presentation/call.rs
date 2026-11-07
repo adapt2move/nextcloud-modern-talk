@@ -588,6 +588,10 @@ impl Desktop {
                     .max(160. * f32::from(self.scale) / 100.)
             };
             let tile_height = tile_width * 9. / 16.;
+            // Leave enough space for enlarged text in the self-view without
+            // letting it grow beyond the remote tile at narrow widths.
+            let pip_width =
+                (200. * (f32::from(self.scale) / 100.).sqrt()).min((tile_width - 24.).max(160.));
             let mut feature = None;
             let mut self_pip = None;
             let mut tiles = div()
@@ -626,8 +630,14 @@ impl Desktop {
                             .object_fit(gpui::ObjectFit::Contain),
                     )
                 } else {
-                    div().flex_1().flex().items_center().justify_center().child(
-                        self.call_stage_avatar(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .pb(self.sp(18.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self.call_stage_avatar(
                             participant.initials.as_str(),
                             if focused == Some(participant.local_id) {
                                 104.
@@ -638,8 +648,7 @@ impl Desktop {
                             } else {
                                 (tile_height * 0.4).clamp(56., 128.)
                             },
-                        ),
-                    )
+                        ))
                 };
                 let tile = div()
                     .relative()
@@ -647,7 +656,7 @@ impl Desktop {
                     .when(focused == Some(participant.local_id), |tile| tile.w_full())
                     .when(focused != Some(participant.local_id), |tile| {
                         tile.w(px(if pip && participant.self_user {
-                            200.
+                            pip_width
                         } else {
                             tile_width
                         }))
@@ -655,7 +664,7 @@ impl Desktop {
                     .h(px(if focused == Some(participant.local_id) {
                         feature_height
                     } else if pip && participant.self_user {
-                        112.
+                        pip_width * 9. / 16.
                     } else {
                         tile_height
                     }))
@@ -718,7 +727,14 @@ impl Desktop {
                             .absolute()
                             .bottom(px(8.))
                             .left(px(8.))
-                            .max_w_full()
+                            .max_w(px((if focused == Some(participant.local_id) {
+                                stage_width
+                            } else if pip && participant.self_user {
+                                pip_width
+                            } else {
+                                tile_width
+                            } - 16.)
+                                .max(0.)))
                             .px_2()
                             .py_1()
                             .rounded(px(8.))
@@ -1113,44 +1129,53 @@ impl Desktop {
             primary_controls = primary_controls.child(group);
         }
         let narrow_controls = window.viewport_size().width < px(720.) || self.scale >= 150;
-        let mut secondary_controls = div().flex().items_center().gap_2().ml_3();
-        if call.hand_supported {
-            secondary_controls = secondary_controls.child(
-                self.round_icon_button(
-                    "call-hand",
-                    (
-                        "hand",
-                        if call.hand_raised {
-                            "Hand senken (H)"
-                        } else {
-                            "Hand heben (H)"
-                        },
-                    ),
-                    ButtonStyle::Stage,
-                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet.")
-                        .hinted(),
-                    LocalAction::Intent(UiIntent::SetCallHand {
-                        call: call.scope,
-                        raised: !call.hand_raised,
-                    }),
-                    cx,
+        let mut interaction_controls = div().flex().items_center().gap_2();
+        interaction_controls = interaction_controls.child(
+            self.round_icon_button(
+                "call-hand",
+                (
+                    "hand",
+                    if call.hand_raised {
+                        "Hand senken (H)"
+                    } else {
+                        "Hand heben (H)"
+                    },
+                ),
+                ButtonStyle::Stage,
+                Availability::when(
+                    call.hand_supported && !call.end_pending,
+                    if call.end_pending {
+                        "Eine Anfrage wird bereits bearbeitet."
+                    } else {
+                        "Diese Funktion ist noch nicht verfügbar."
+                    },
                 )
-                .size(px(44.))
-                .min_h(px(44.))
-                .rounded_full(),
-            );
-        }
-        if !call.hand_supported {
-            secondary_controls = secondary_controls.child(div().size(px(44.)));
-        }
-        if !call.reactions.as_slice().is_empty() {
+                .hinted(),
+                LocalAction::Intent(UiIntent::SetCallHand {
+                    call: call.scope,
+                    raised: !call.hand_raised,
+                }),
+                cx,
+            )
+            .size(px(44.))
+            .min_h(px(44.))
+            .rounded_full(),
+        );
+        {
             let mut reaction_control = div().relative().child(
                 self.round_icon_button(
                     "call-reactions",
                     ("smile", "Reaktion senden"),
                     ButtonStyle::Stage,
-                    Availability::when(!call.end_pending, "Eine Anfrage wird bereits bearbeitet.")
-                        .hinted(),
+                    Availability::when(
+                        !call.reactions.as_slice().is_empty() && !call.end_pending,
+                        if call.end_pending {
+                            "Eine Anfrage wird bereits bearbeitet."
+                        } else {
+                            "Diese Funktion ist noch nicht verfügbar."
+                        },
+                    )
+                    .hinted(),
                     LocalAction::ToggleCallReactions(call.scope),
                     cx,
                 )
@@ -1158,7 +1183,8 @@ impl Desktop {
                 .min_h(px(44.))
                 .rounded_full(),
             );
-            if self.call_reactions_open == Some(call.scope) {
+            if !call.reactions.as_slice().is_empty() && self.call_reactions_open == Some(call.scope)
+            {
                 let mut menu = div()
                     .id("call-reaction-menu")
                     .absolute()
@@ -1205,11 +1231,9 @@ impl Desktop {
             {
                 reaction_control = reaction_control.children(self.call_reaction(call.scope, None));
             }
-            secondary_controls = secondary_controls.child(reaction_control);
+            interaction_controls = interaction_controls.child(reaction_control);
         }
-        if call.reactions.as_slice().is_empty() {
-            secondary_controls = secondary_controls.child(div().size(px(44.)));
-        }
+        let mut navigation_controls = div().flex().items_center().gap_2().ml_3();
         for (id, symbol, label, action) in [
             (
                 "call-participants",
@@ -1219,7 +1243,7 @@ impl Desktop {
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
         ] {
-            secondary_controls = secondary_controls.child(
+            navigation_controls = navigation_controls.child(
                 self.round_icon_button(
                     id,
                     (symbol, label),
@@ -1271,20 +1295,20 @@ impl Desktop {
                 ),
             );
         }
+        let mut more = div().relative().child(
+            self.round_icon_button(
+                "call-more",
+                ("more", "Weitere Anrufaktionen"),
+                ButtonStyle::Stage,
+                Availability::available().hinted(),
+                LocalAction::ToggleCallSecondary,
+                cx,
+            )
+            .size(px(44.))
+            .min_h(px(44.))
+            .rounded_full(),
+        );
         if narrow_controls {
-            let mut more = div().relative().child(
-                self.round_icon_button(
-                    "call-more",
-                    ("more", "Weitere Anrufaktionen"),
-                    ButtonStyle::Stage,
-                    Availability::available().hinted(),
-                    LocalAction::ToggleCallSecondary,
-                    cx,
-                )
-                .size(px(44.))
-                .min_h(px(44.))
-                .rounded_full(),
-            );
             if self.call_secondary_open {
                 more = more.child(
                     div()
@@ -1296,12 +1320,46 @@ impl Desktop {
                         .bg(t.stage_panel)
                         .shadow_lg()
                         .occlude()
-                        .child(secondary_controls),
+                        .child(interaction_controls.child(navigation_controls)),
                 );
             }
             primary_controls = primary_controls.child(more);
         } else {
-            primary_controls = primary_controls.child(secondary_controls);
+            if self.call_secondary_open {
+                more = more.child(
+                    div()
+                        .absolute()
+                        .bottom(px(54.))
+                        .right(px(0.))
+                        .w(px(240.))
+                        .p_2()
+                        .rounded(px(12.))
+                        .bg(t.stage_panel)
+                        .shadow_lg()
+                        .occlude()
+                        .flex()
+                        .flex_col()
+                        .child(self.button_with_leading_icon(
+                            "call-more-minimize",
+                            ("Anruf minimieren", "chevron-down"),
+                            ButtonStyle::Stage,
+                            Availability::available(),
+                            LocalAction::MinimizeCall(call.scope),
+                            cx,
+                        ))
+                        .child(self.button_with_leading_icon(
+                            "call-more-fullscreen",
+                            ("Vollbild umschalten", "maximize-2"),
+                            ButtonStyle::Stage,
+                            Availability::available(),
+                            LocalAction::ToggleCallFullscreen(call.scope),
+                            cx,
+                        )),
+                );
+            }
+            primary_controls = primary_controls
+                .child(interaction_controls.ml_3())
+                .child(navigation_controls.child(more));
         }
         let controls = div()
             .flex_none()

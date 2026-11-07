@@ -1667,6 +1667,7 @@ impl Desktop {
                 }) {
                     self.call_minimized = Some(scope);
                     self.call_reactions_open = None;
+                    self.call_secondary_open = false;
                     self.call_device_picker = None;
                     self.device_picker = None;
                     self.root_focus.focus(window);
@@ -1692,6 +1693,7 @@ impl Desktop {
                     .as_ref()
                     .is_some_and(|call| call.scope == scope)
                 {
+                    self.call_secondary_open = false;
                     window.toggle_fullscreen();
                 }
             }
@@ -1850,6 +1852,7 @@ impl Desktop {
                 self.call_moderation_open = !self.call_moderation_open
             }
             LocalAction::ToggleCallParticipants => {
+                self.call_secondary_open = false;
                 if window.viewport_size().width < px(900.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallParticipants), window, cx);
                 } else {
@@ -1859,6 +1862,7 @@ impl Desktop {
                 }
             }
             LocalAction::ToggleCallChat => {
+                self.call_secondary_open = false;
                 if window.viewport_size().width < px(900.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
                 } else {
