@@ -2881,6 +2881,7 @@ mod tests {
             MessageFeature::Search,
             MessageFeature::Threads,
             MessageFeature::Files,
+            MessageFeature::UpcomingReminders,
         ] {
             assert!(!feature_allows_intent(
                 ContentState::Offline,
