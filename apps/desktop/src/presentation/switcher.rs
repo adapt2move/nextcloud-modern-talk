@@ -308,7 +308,7 @@ impl Desktop {
                                         .rounded_full()
                                         .bg(self.theme.accent)
                                         .px_2()
-                                        .text_color(self.theme.selected_text)
+                                        .text_color(self.theme.on_accent)
                                         .child("@"),
                                 )
                             })
@@ -320,8 +320,12 @@ impl Desktop {
                                             .rounded_full()
                                             .bg(self.theme.accent)
                                             .px_2()
-                                            .text_color(self.theme.selected_text)
-                                            .child(room.unread.to_string()),
+                                            .text_color(self.theme.on_accent)
+                                            .child(if room.unread > 99 {
+                                                "99+".to_owned()
+                                            } else {
+                                                room.unread.to_string()
+                                            }),
                                     )
                                 },
                             ),
