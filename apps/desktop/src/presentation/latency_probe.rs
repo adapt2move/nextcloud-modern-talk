@@ -7,8 +7,17 @@ pub(super) struct PerfRun {
     remaining: u16,
     last: std::time::Instant,
     started: std::time::Instant,
+    build_samples: u8,
 }
 impl Desktop {
+    pub(super) fn observe_perf_build(&mut self, started: std::time::Instant) {
+        if let Some(run) = self.perf_probe.as_mut()
+            && run.build_samples < 64
+        {
+            run.build_samples += 1;
+            println!("DEV_BUILD {} {}", run.mode, started.elapsed().as_micros());
+        }
+    }
     pub(super) fn observe_perf_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.perf_probe.is_none() {
             return;
@@ -104,6 +113,7 @@ impl Desktop {
                 remaining: 18_000,
                 last: std::time::Instant::now(),
                 started: std::time::Instant::now(),
+                build_samples: 0,
             });
             cx.notify();
         }

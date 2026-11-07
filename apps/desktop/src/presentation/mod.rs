@@ -3301,6 +3301,8 @@ impl Desktop {
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "dev-probes")]
+        let build_started = std::time::Instant::now();
+        #[cfg(feature = "dev-probes")]
         self.observe_perf_frame(window, cx);
         #[cfg(debug_assertions)]
         if self.latency_probe {
@@ -3966,6 +3968,8 @@ impl Render for Desktop {
         }
         self.finish_onboarding_focus(window, cx);
         self.finish_search_focus(window, cx);
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_build(build_started);
         view
     }
 }
