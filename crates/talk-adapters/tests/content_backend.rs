@@ -801,6 +801,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
                 path,
                 caption: text(""),
                 voice_message: true,
+                options: Default::default(),
             },
         )
         .await

@@ -978,6 +978,7 @@ impl Desktop {
                 self.overlay,
                 self.prejoin.is_some(),
                 self.incoming_visible(),
+                self.content_ui.voice.is_some(),
             )
     }
     fn account_connection_failure(
@@ -2615,8 +2616,8 @@ impl Render for Desktop {
 
 // The call-chat dialog owns the same editor as the docked call chat. Other
 // dialogs and incoming-call priority always exclude editor input and dispatch.
-fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool) -> bool {
-    !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat))
+fn composer_allowed(overlay: Option<Overlay>, prejoin: bool, incoming: bool, voice: bool) -> bool {
+    !voice && !prejoin && !incoming && matches!(overlay, None | Some(Overlay::CallChat))
 }
 fn docked_call_chat(wide: bool, open: bool, overlay: Option<Overlay>) -> bool {
     wide && open && overlay != Some(Overlay::CallChat)
@@ -2704,17 +2705,35 @@ mod interaction_tests {
         }
     }
     #[test]
+    fn voice_owns_the_composer_until_recording_or_review_retires() {
+        for overlay in [None, Some(Overlay::CallChat)] {
+            assert!(composer_allowed(overlay, false, false, false));
+            assert!(!composer_allowed(overlay, false, false, true));
+            assert!(composer_allowed(overlay, false, false, false));
+        }
+    }
+    #[test]
     fn call_chat_retains_one_editor_owner_through_resize_and_modal_exclusion() {
         for wide in [false, true] {
             assert!(!docked_call_chat(wide, true, Some(Overlay::CallChat)));
-            assert!(composer_allowed(Some(Overlay::CallChat), false, false));
+            assert!(composer_allowed(
+                Some(Overlay::CallChat),
+                false,
+                false,
+                false
+            ));
         }
         assert!(docked_call_chat(true, true, None));
         assert!(!docked_call_chat(false, true, None));
         for modal in [Overlay::Settings, Overlay::Search, Overlay::Accounts] {
-            assert!(!composer_allowed(Some(modal), false, false));
+            assert!(!composer_allowed(Some(modal), false, false, false));
         }
-        assert!(!composer_allowed(Some(Overlay::CallChat), false, true));
-        assert!(!composer_allowed(None, true, false));
+        assert!(!composer_allowed(
+            Some(Overlay::CallChat),
+            false,
+            true,
+            false
+        ));
+        assert!(!composer_allowed(None, true, false, false));
     }
 }

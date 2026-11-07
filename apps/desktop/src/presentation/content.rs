@@ -1795,13 +1795,17 @@ impl Desktop {
             Action::VoiceStart(context) => {
                 self.content_ui.voice_error = None;
                 self.content_ui.voice_auto_send = None;
-                if Some(context) == self.snapshot.selected
+                if self.composer_available()
+                    && Some(context) == self.snapshot.selected
                     && self.composer.read(cx).content.is_empty()
                     && !self.has_staged_attachments()
                     && self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::Voice)
-                    && let Err(error) = self.settings_port.start_voice(context)
                 {
-                    self.content_ui.voice_error = Some(voice_error(error));
+                    self.stop_local_typing();
+                    match self.settings_port.start_voice(context) {
+                        Ok(()) => self.content_ui.voice = self.settings_port.voice_snapshot(),
+                        Err(error) => self.content_ui.voice_error = Some(voice_error(error)),
+                    }
                 }
             }
             Action::VoiceStop(context) => {

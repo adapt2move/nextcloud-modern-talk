@@ -123,7 +123,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.snapshot.selected != Some(context)
+        if !self.composer_available()
+            || self.snapshot.content != talk_core::ui::presentation::ContentState::Ready
+            || self.snapshot.selected != Some(context)
             || self.overlay.is_some()
             || self.background_inert
             || !self.message_feature_enabled(MessageFeature::Files)

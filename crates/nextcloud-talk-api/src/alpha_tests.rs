@@ -336,6 +336,7 @@ fn voice_share_uses_talk_metadata_without_changing_regular_attachments() {
                 reference: "fixture-reference".into(),
                 caption: String::new(),
                 voice_message,
+                options: Default::default(),
             },
         })
         .unwrap();
