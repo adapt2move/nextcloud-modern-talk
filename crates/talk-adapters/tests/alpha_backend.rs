@@ -408,23 +408,8 @@ async fn released_server_messaging_and_room_controls() {
             C::StartBreakouts,
         )
         .await;
-        let bob_scope = AccountScope {
-            account: AccountId::from_local(701),
-            runtime: RuntimeGeneration::from_local(1),
-        };
-        let mut bob = test_support::from_private_fixture(
-            &root.join("bob.json"),
-            bob_scope,
-            HostId::from_local(701),
-            runtime.clone(),
-        )
-        .expect("private synthetic participant fixture");
-        bob.request(
-            context_for(&runtime, bob_scope),
-            ProtocolRequest::InspectAccount,
-        )
-        .await
-        .unwrap();
+        // Reuse the participant's existing account owner. Reinstalling the same
+        // scope/host while its first client is live correctly fails with Conflict.
         let bob_parent = bob.fixture_conversation().unwrap();
         let CR::BreakoutRooms(assigned) = settings(
             &mut bob,
