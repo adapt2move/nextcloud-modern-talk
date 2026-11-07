@@ -577,10 +577,6 @@ impl Desktop {
                     .and_then(|failure| self.connection_failure_footer(row.context, failure, cx))
                     .map(|banner| div().px_4().py_1().child(banner)),
             )
-            .children(
-                self.offline_footer(row.context, cx)
-                    .map(|banner| div().px_4().py_1().child(banner)),
-            )
             .children(self.pin_banner(row.context, cx))
             .child(self.conversation_search(cx).bg(chat_header::surface(h)));
         let timeline = self.conversation_timeline(header, constrained, cx);
@@ -932,12 +928,6 @@ impl Desktop {
             .when_some(self.content_ui.voice_error, |d, error| {
                 d.child(self.hint(self.l(error)))
             })
-            .children(
-                (!thread)
-                    .then_some(connection_failure)
-                    .flatten()
-                    .and_then(|failure| self.connection_failure_footer(row.context, failure, cx)),
-            )
             .when(self.draft_storage_unavailable == Some(row.context), |d| {
                 d.child(self.hint(self.l("Dieser Entwurf bleibt nur für diese Sitzung erhalten.")))
             })

@@ -85,7 +85,7 @@ impl Desktop {
             return if state.retained {
                 div()
             } else {
-                self.collection_skeleton(Skeleton::Rows)
+                self.collection_skeleton(Skeleton::Rows, "collection-connecting")
             };
         }
         if state.initial_loading() {
