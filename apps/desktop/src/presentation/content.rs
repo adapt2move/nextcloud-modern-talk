@@ -1135,6 +1135,9 @@ impl Desktop {
         let id = scoped_id("voice-review-wave", context, 0, 0);
         let focus = self.control_focus(id.clone(), cx);
         let pointer_focus = focus.clone();
+        // Each retained peak spans three thin bars so a long scrubber stays
+        // readable without inventing additional audio samples.
+        let bars = self.content_ui.voice_levels.len().saturating_mul(3);
         let owner = cx.entity().downgrade();
         let surface = gpui::canvas(
             |bounds, window, _| {
@@ -1192,6 +1195,7 @@ impl Desktop {
             .h(px(32.))
             .flex()
             .items_center()
+            .justify_between()
             .gap(px(2.))
             .when_some(focus, |d, focus| {
                 d.track_focus(&focus.clone().tab_stop(enabled))
@@ -1200,27 +1204,22 @@ impl Desktop {
             .when(review && self.content_ui.voice_levels.is_empty(), |d| {
                 d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
             })
-            .children(
-                self.content_ui
-                    .voice_levels
-                    .iter()
-                    .enumerate()
-                    .map(|(index, level)| {
-                        let played = duration > 0
-                            && (index as f32 / self.content_ui.voice_levels.len().max(1) as f32)
-                                <= position as f32 / duration as f32;
-                        div()
-                            .flex_1()
-                            .min_w(px(1.))
-                            .h(px(3. + f32::from(*level) / 1000. * 25.))
-                            .rounded(px(2.))
-                            .bg(if !review || played {
-                                self.theme.accent
-                            } else {
-                                self.theme.muted
-                            })
-                    }),
-            )
+            .children((0..bars).map(|index| {
+                let level = self.content_ui.voice_levels[index / 3];
+                let played = duration > 0
+                    && (index as f32 / bars.max(1) as f32) <= position as f32 / duration as f32;
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .max_w(px(3.))
+                    .h(px(3. + f32::from(level) / 1000. * 25.))
+                    .rounded(px(2.))
+                    .bg(if !review || played {
+                        self.theme.accent
+                    } else {
+                        self.theme.muted
+                    })
+            }))
             .child(surface)
             .when(enabled, |d| {
                 d.on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
