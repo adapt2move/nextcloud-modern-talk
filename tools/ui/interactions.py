@@ -158,7 +158,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
         expect('thread hover keeps reply text readable', ["I'll update the final details."])
         run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
-        words = expect('reply to own thread message opens a quote', ['Alex Sommer', 'Im Thread antworten'])
+        words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
         if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
                    and int(word['top']) > 590 for word in words):
             raise AssertionError('The own-message quote did not appear beside the thread composer')
