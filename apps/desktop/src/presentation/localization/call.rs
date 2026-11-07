@@ -280,6 +280,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Solicitando silencio…",
     ),
     (
+        "Systemeinstellungen sind auf diesem System nicht verfügbar.",
+        "System settings are unavailable on this system.",
+        "Los ajustes del sistema no están disponibles en este sistema.",
+    ),
+    (
         "Talk braucht Zugriff auf dein Mikrofon, um dich hörbar zu machen.",
         "Talk needs access to your microphone so others can hear you.",
         "Talk necesita acceso al micrófono para que puedan oírte.",

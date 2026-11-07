@@ -1471,10 +1471,16 @@ impl Desktop {
             .as_ref()
             .expect("terminal call projection");
         let duration = self
-            .call_started
+            .call_ended_duration
             .filter(|(scope, _)| *scope == call.scope)
-            .map(|(_, started)| {
-                let seconds = started.elapsed().as_secs();
+            .map(|(_, duration)| duration)
+            .or_else(|| {
+                self.call_started
+                    .filter(|(scope, _)| *scope == call.scope)
+                    .map(|(_, started)| started.elapsed())
+            })
+            .map(|duration| {
+                let seconds = duration.as_secs();
                 self.lf(
                     "Dauer {duration}",
                     &[("duration", &format!("{}:{:02}", seconds / 60, seconds % 60))],

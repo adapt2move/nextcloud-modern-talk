@@ -344,6 +344,7 @@ pub struct Desktop {
     call_started: Option<(CallScope, std::time::Instant)>,
     call_reconnecting_since: Option<(CallScope, Instant)>,
     call_ended_since: Option<(CallScope, Instant)>,
+    call_ended_duration: Option<(CallScope, std::time::Duration)>,
     call_ended_frame_pending: Option<CallScope>,
     dismissed_recording_failure: Option<CallScope>,
     call_recovery: call::recovery::Recovery,
@@ -678,6 +679,7 @@ impl Desktop {
             call_started,
             call_reconnecting_since,
             call_ended_since: None,
+            call_ended_duration: None,
             call_ended_frame_pending: None,
             dismissed_recording_failure: None,
             call_recovery: call::recovery::Recovery::default(),
@@ -991,11 +993,35 @@ impl Desktop {
         {
             self.call_minimized = None;
         }
-        if self
-            .call_started
-            .is_some_and(|(scope, _)| next.call.as_ref().is_none_or(|call| call.scope != scope))
+        if let Some((scope, started)) = self.call_started
+            && next.call.as_ref().is_none_or(|call| call.scope != scope)
         {
-            self.call_started = None;
+            self.call_started = next
+                .call
+                .as_ref()
+                .filter(|call| {
+                    call.replacement_generation
+                        && call.scope.account == scope.account
+                        && call.scope.conversation == scope.conversation
+                })
+                .map(|call| (call.scope, started));
+        }
+        if let Some(call) = next
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Ended)
+        {
+            if self
+                .call_ended_duration
+                .is_none_or(|(scope, _)| scope != call.scope)
+            {
+                self.call_ended_duration = self
+                    .call_started
+                    .filter(|(scope, _)| *scope == call.scope)
+                    .map(|(scope, started)| (scope, started.elapsed()));
+            }
+        } else {
+            self.call_ended_duration = None;
         }
         if self
             .call_reactions_open

@@ -333,9 +333,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
         click('Verlassen')
         expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
+    elif scenario == 'call-ended':
+        expect('ended call surface is shown first', ['Anruf beendet'])
+        time.sleep(4)
+        expect('ended call returns to conversation after a short delay', ['Nachricht an Produktteam'], ['Anruf beendet'])
     elif scenario == 'call-recovery':
-        expect('missing media recovery appears after the waiting period', ['Ton oder Bild fehlen', 'Neu beitreten'])
-        click('beitreten')
+        expect('missing media recovery offers rejoin after the waiting period', ['beitreten'])
+        click('beitreten', inspected_point=(1280,800,220,155))
         time.sleep(.5)
         log = (out / f'{label}.log').read_text()
         if log.count('UI_INTENT recover-call-media room=') != 1:
