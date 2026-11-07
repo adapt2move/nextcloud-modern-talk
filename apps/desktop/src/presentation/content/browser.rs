@@ -623,11 +623,11 @@ impl Desktop {
                 )))
                 .border_b_1()
                 .border_color(self.theme.border)
-                .when(
+                .bg(self.selected_row_color(
                     self.content_ui.browser_cursor.as_ref() == Some(&entry.path)
                         || self.content_ui.browser_selection.contains(&entry.path),
-                    |row| row.bg(self.theme.selected),
-                )
+                    gpui::transparent_black(),
+                ))
                 .child(
                     if !entry.directory && !self.content_ui.browser_folder_picker {
                         let path = entry.path.clone();

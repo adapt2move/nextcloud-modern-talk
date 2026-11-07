@@ -43,6 +43,8 @@ impl Desktop {
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
+        let time_label =
+            crate::presentation::localization::display_time(self.locale, m.time_label.as_str());
         let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
             .to_string()
             .into();
@@ -68,7 +70,7 @@ impl Desktop {
                         row.child(self.scaled_icon(symbol, 14., color))
                     })
                     .child(self.message_text(m, cx))
-                    .child(self.hint(m.time_label.as_str())),
+                    .child(self.hint(&time_label)),
             );
         }
         let upload = self
@@ -130,7 +132,7 @@ impl Desktop {
                             ),
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
-                        .child(metadata(m.time_label.as_str()))
+                        .child(metadata(&time_label))
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
                         }),
@@ -307,8 +309,7 @@ impl Desktop {
                         .line_height(self.sp(20.))
                         .text_color(t.muted)
                         .child(
-                            m.time_label
-                                .as_str()
+                            time_label
                                 .split_whitespace()
                                 .next()
                                 .unwrap_or("")

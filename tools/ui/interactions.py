@@ -77,6 +77,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                 if selection_count.group(1) == '1' and not fuzzy_count:
                     fuzzy_count = re.search(r'^l\s*ausge\w{4,8}', count_text)
             aliases = {
+                'Konzept.pdf': ('konzeptpdt', 'konzeptpat'),
                 'Projektübersicht.pdf': ('projektibersichtpdf', 'projektiibersichtpdf'),
                 'Zwischenablage.png': ('wischenablagepng',),
             }
@@ -218,9 +219,9 @@ def exercise(scenario, env, xid, out, label, large=False):
                        input=image, env=env, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=True, timeout=10)
         key('ctrl+v')
-        expect('native image paste stages an image chip', ['Beispiel.txt', 'clipboard.png'])
+        expect('native image paste stages an image chip', ['Beispiel.txt', 'Zwischenablage.png'])
     elif scenario == 'chat-cloud-files':
-        click('Team', xmin=285, ymin=400)
+        click('Team', xmin=285, ymin=300)
         expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
         key('BackSpace')
         expect('backspace navigates to the parent folder', ['Projektübersicht.pdf', 'Workshop.png'])
@@ -233,12 +234,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
-        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 408))
         key('w'); key('ctrl+space')
         expect('type-ahead and control-space select the matching file', ['2 ausgewählt'])
         key('ctrl+space')
         expect('control-space toggles the focused file', ['1 ausgewählt'])
-        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 555))
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 408))
         key('shift+Down')
         expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
@@ -266,8 +267,18 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
         expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
+        click('auswählen', xmin=400, ymin=150)
+        # The first emoji in the bounded picker is a native button in the fixed fixture.
+        run(['xdotool', 'mousemove', '--window', xid, '475', '270', 'click', '1'], env)
+        expect('selecting an emoji enables the room avatar action', ['Emoji als Avatar setzen'])
         key('Escape')
         expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
+    elif scenario == 'poll-drafts':
+        expect('draft list is separate from the poll form', ['Fiktiver Entwurf'], ['Antwortoption'])
+        click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
+        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Fiktiver Entwurf'])
+        click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
+        expect('draft toggle reopens the saved list', ['Fiktiver Entwurf'], ['Antwortoption'])
     elif scenario == 'poll-details':
         expect('public poll offers voter expansion', ['Umfragedetails', 'Stimmen anzeigen'])
         # The first result's voter list in the fixed 1280x800 fixture.
@@ -279,7 +290,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Abstimmen', inspected_point=(1280, 800, 390, 584))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
         # The poll's secondary action is behind its inspected ellipsis control.
-        run(['xdotool', 'mousemove', '--window', xid, '364', '594', 'click', '1'], env)
+        run(['xdotool', 'mousemove', '--window', xid, '780', '397', 'click', '1'], env)
         click('beenden')
         expect('closing asks for confirmation', ['Umfrage wirklich beenden'])
         click('Jetzt', inspected_point=(1280, 800, 405, 638))
@@ -289,6 +300,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         if log.count('UI_POLL_FIXTURE vote poll=9001 no_backend=true') != 1 or \
                 log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
             raise AssertionError('Vote or confirmed close did not submit exactly once')
+        run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        expect('pinned strip collapses its message', ['Angeheftet'], ['Perfekt. Dann nehmen wir das so mit.'])
+        run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        expect('pinned strip expands its message again', ['Angeheftet', 'Perfekt. Dann nehmen wir das so mit.'])
     elif scenario == 'chat-voice':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
@@ -379,11 +394,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('ansehen')
         # The blue accept icon is distinct from the two adjacent call actions.
         run(['xdotool', 'mousemove', '--window', xid, '605', '502', 'click', '1'], env)
-        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird angefragt'], ['Bereit'])
+        expect('direct accept bypasses optional conference prejoin', ['Verbindung wird aufgebaut'], ['Bereit'])
         key('Escape')
-        expect('escape never hangs up a call', ['Verbindung wird angefragt'])
-        click('Auflegen',inspected_point=(1200,800,862,682))
-        expect('explicit leave returns to conversation', ['Nachricht an Produktteam'])
+        expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
+        click('Auflegen',inspected_point=(1280,800,1225,754))
+        expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
         # Fixture diagnostics contain only local identities and the hand state.
@@ -445,8 +460,9 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'prejoin':
         key('Escape')
         expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])
-        click('Beitreten')
+        # The conversation header exposes conference entry as an icon.
+        run(['xdotool', 'mousemove', '--window', xid, '1181', '92', 'click', '1'], env)
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        click('teilnehmen',inspected_point=(1200,800,600,695))
-        expect('join reports connecting without synthetic media success', ['Verbindung wird angefragt'], ['Anruf aktiv'])
+        click('teilnehmen',inspected_point=(1280,800,640,695))
+        expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks

@@ -1232,22 +1232,18 @@ impl Desktop {
                     if !event.keystroke.modifiers.modified()
                         && this.content_ui.voice_epoch == epoch
                         && this.snapshot.selected == Some(context)
-                    {
-                        if let Some(p) = this
+                        && let Some(p) = this
                             .content_ui
                             .voice_playback
                             .filter(|p| p.context == context)
-                        {
-                            let target =
-                                voice_scrub::keyboard_position(p.position_ms, duration, direction);
-                            if let Err(error) =
-                                this.settings_port.voice_review_seek(context, target)
-                            {
-                                this.content_ui.voice_error = Some(voice_error(error));
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
+                    {
+                        let target =
+                            voice_scrub::keyboard_position(p.position_ms, duration, direction);
+                        if let Err(error) = this.settings_port.voice_review_seek(context, target) {
+                            this.content_ui.voice_error = Some(voice_error(error));
                         }
+                        cx.notify();
+                        cx.stop_propagation();
                     }
                 }))
             })
@@ -2367,7 +2363,10 @@ impl Desktop {
                     "poll-drafts-toggle",
                     label,
                     ButtonStyle::Quiet,
-                    !self.poll_submission_blocked(),
+                    Availability::when(
+                        !self.poll_submission_blocked(),
+                        "Eine Anfrage wird bereits bearbeitet.",
+                    ),
                     LocalAction::Content(Action::ToggleDrafts),
                     cx,
                 )
@@ -2541,7 +2540,14 @@ impl Desktop {
                             ("poll-option-up", index),
                             ("chevron-up", "Nach oben"),
                             ButtonStyle::Quiet,
-                            (!busy && index > 0).into(),
+                            Availability::when(
+                                !busy && index > 0,
+                                if busy {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                } else {
+                                    "Die Option ist bereits an erster Stelle."
+                                },
+                            ),
                             LocalAction::Content(Action::MoveOption { index, up: true }),
                             cx,
                         )
@@ -2554,7 +2560,14 @@ impl Desktop {
                             ("poll-option-down", index),
                             ("chevron-down", "Nach unten"),
                             ButtonStyle::Quiet,
-                            (!busy && index + 1 < self.content_ui.option_count).into(),
+                            Availability::when(
+                                !busy && index + 1 < self.content_ui.option_count,
+                                if busy {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                } else {
+                                    "Die Option ist bereits an letzter Stelle."
+                                },
+                            ),
                             LocalAction::Content(Action::MoveOption { index, up: false }),
                             cx,
                         )
@@ -2567,7 +2580,14 @@ impl Desktop {
                             ("poll-option-remove", index),
                             ("trash-2", "Entfernen"),
                             ButtonStyle::Quiet,
-                            (!busy && self.content_ui.option_count > 2).into(),
+                            Availability::when(
+                                !busy && self.content_ui.option_count > 2,
+                                if busy {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                } else {
+                                    "Mindestens zwei Antwortoptionen sind erforderlich."
+                                },
+                            ),
                             LocalAction::Content(Action::RemoveOption(index)),
                             cx,
                         )
@@ -2598,7 +2618,11 @@ impl Desktop {
                         ButtonStyle::Secondary,
                         Availability::when(
                             !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
-                            "Die maximale Anzahl an Optionen ist erreicht.",
+                            if busy {
+                                "Eine Anfrage wird bereits bearbeitet."
+                            } else {
+                                "Die maximale Anzahl an Optionen ist erreicht."
+                            },
                         ),
                         LocalAction::Content(Action::AddOption),
                         cx,
@@ -2614,7 +2638,7 @@ impl Desktop {
                     "poll-multiple",
                     "Mehrere Antworten erlauben",
                     Some(self.content_ui.multiple),
-                    (!busy).into(),
+                    Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
                     LocalAction::Content(Action::Multiple),
                     cx,
                 ),
@@ -2629,7 +2653,7 @@ impl Desktop {
                             "poll-vote-limit-down",
                             "Weniger Stimmen",
                             ButtonStyle::Quiet,
-                            !busy,
+                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
                             LocalAction::Content(Action::VoteLimit { increase: false }),
                             cx,
                         ))
@@ -2645,9 +2669,16 @@ impl Desktop {
                             "poll-vote-limit-up",
                             "Mehr Stimmen",
                             ButtonStyle::Quiet,
-                            !busy
-                                && usize::from(self.content_ui.max_votes)
-                                    < self.content_ui.option_count,
+                            Availability::when(
+                                !busy
+                                    && usize::from(self.content_ui.max_votes)
+                                        < self.content_ui.option_count,
+                                if busy {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                } else {
+                                    "Die Stimmenzahl entspricht bereits der Anzahl der Optionen."
+                                },
+                            ),
                             LocalAction::Content(Action::VoteLimit { increase: true }),
                             cx,
                         )),
@@ -2660,7 +2691,7 @@ impl Desktop {
                     "poll-hidden",
                     "Anonym abstimmen",
                     Some(self.content_ui.hidden_results),
-                    (!busy).into(),
+                    Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
                     LocalAction::Content(Action::HiddenResults),
                     cx,
                 ),
@@ -2709,11 +2740,12 @@ impl Desktop {
                         "poll-save-draft",
                         "Als Entwurf speichern",
                         ButtonStyle::Quiet,
-                        !busy
+                        Availability::when(!busy
                             && online
                             && valid
                             && (self.content_ui.editing_draft.is_none()
                                 || self.snapshot.content_panel.poll_drafts_edit.enabled()),
+                            if busy { "Eine Anfrage wird bereits bearbeitet." } else if !online { "Die Verbindung ist derzeit nicht bereit." } else if !valid { "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein." } else { "Die Berechtigung ist derzeit nicht verfügbar." }),
                         LocalAction::Content(Action::SaveDraft),
                         cx,
                     ))
@@ -2734,7 +2766,7 @@ impl Desktop {
                     ) {
                         Availability::pending()
                     } else {
-                        Availability::when(available && !busy && valid, if !valid { "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein." } else { "Die Verbindung ist derzeit nicht bereit." })
+                        Availability::when(available && !busy && valid, if busy { "Eine Anfrage wird bereits bearbeitet." } else if !valid { "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein." } else if !online { "Die Verbindung ist derzeit nicht bereit." } else { super::conversation_dialog::unavailable(self.snapshot.content_panel.poll_create) })
                     },
                     LocalAction::Content(Action::SubmitPoll),
                     cx,

@@ -103,6 +103,37 @@ pub(super) fn file_size(locale: Locale, size: Option<u64>) -> String {
     )
 }
 
+/// Interpret the local 24-hour projection as a time, then present it for the UI locale.
+pub(super) fn local_time(locale: Locale, value: &str) -> Option<String> {
+    let (hours, minutes) = value.split_once(':')?;
+    if hours.len() != 2
+        || minutes.len() != 2
+        || !hours
+            .chars()
+            .chain(minutes.chars())
+            .all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let hours = hours.parse::<u8>().ok()?;
+    let minutes = minutes.parse::<u8>().ok()?;
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(match locale {
+        Locale::English => format!(
+            "{}:{minutes:02} {}",
+            (hours + 11) % 12 + 1,
+            if hours < 12 { "AM" } else { "PM" }
+        ),
+        Locale::German | Locale::Spanish => format!("{hours:02}:{minutes:02}"),
+    })
+}
+
+pub(super) fn display_time(locale: Locale, value: &str) -> String {
+    local_time(locale, value).unwrap_or_else(|| value.to_owned())
+}
+
 /// Format the cached local wall time for display; editing retains its fixed input grammar.
 pub(super) fn local_datetime(locale: Locale, value: &str) -> Option<String> {
     let (date, time) = value.split_once(' ')?;
@@ -113,14 +144,10 @@ pub(super) fn local_datetime(locale: Locale, value: &str) -> Option<String> {
         || month.len() != 2
         || day.len() != 2
         || !date.chars().all(|c| c.is_ascii_digit() || c == '-')
-        || time.len() != 5
-        || !time
-            .chars()
-            .enumerate()
-            .all(|(i, c)| if i == 2 { c == ':' } else { c.is_ascii_digit() })
     {
         return None;
     }
+    let time = local_time(locale, time)?;
     Some(match locale {
         Locale::German => format!("{day}.{month}.{year} {time}"),
         Locale::Spanish => format!("{day}/{month}/{year} {time}"),
@@ -202,8 +229,21 @@ mod tests {
         );
         assert_eq!(
             local_datetime(Locale::English, "2026-11-04 09:41").as_deref(),
-            Some("11/04/2026 09:41")
+            Some("11/04/2026 9:41 AM")
         );
+        assert_eq!(
+            local_time(Locale::English, "00:00").as_deref(),
+            Some("12:00 AM")
+        );
+        assert_eq!(
+            local_time(Locale::English, "12:05").as_deref(),
+            Some("12:05 PM")
+        );
+        assert_eq!(
+            local_time(Locale::German, "23:59").as_deref(),
+            Some("23:59")
+        );
+        assert!(local_time(Locale::English, "24:00").is_none());
         assert!(local_datetime(Locale::English, "bad input").is_none());
     }
     #[test]

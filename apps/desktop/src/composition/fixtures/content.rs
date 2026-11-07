@@ -232,7 +232,7 @@ pub(super) fn voice(snapshot: &mut PresentationSnapshot) {
         size: Some(240_000),
         placeholder: text("file"),
         kind: text("file"),
-        name: text("Voice message.ogg"),
+        name: text("Sprachnachricht.ogg"),
         link: None,
     }]);
     snapshot.messages = page([recording]);

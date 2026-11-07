@@ -559,7 +559,7 @@ impl Desktop {
                 .justify_start()
                 .min_h(self.sp(44.))
                 .gap_3()
-                .bg(if selected { t.selected } else { t.surface })
+                .bg(self.selected_row_color(selected, t.surface))
                 .child(self.scaled_icon("chat", 18., t.muted))
                 .child(
                     div()
@@ -663,12 +663,7 @@ impl Desktop {
                 denied.filter(|denial| *denial != Denial::Selection),
                 |body, denial| body.child(self.hint(self.l(denial_label(denial)))),
             );
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
+        self.dialog_scrim()
             .items_center()
             .justify_center()
             .p_5()

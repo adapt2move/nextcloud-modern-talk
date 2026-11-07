@@ -67,6 +67,26 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No se puede reproducir la grabación aquí.",
     ),
     (
+        "Die Berechtigung ist derzeit nicht verfügbar.",
+        "Permission is currently unavailable.",
+        "El permiso no está disponible en este momento.",
+    ),
+    (
+        "Die Option ist bereits an erster Stelle.",
+        "The option is already first.",
+        "La opción ya está en primer lugar.",
+    ),
+    (
+        "Die Option ist bereits an letzter Stelle.",
+        "The option is already last.",
+        "La opción ya está en último lugar.",
+    ),
+    (
+        "Die Stimmenzahl entspricht bereits der Anzahl der Optionen.",
+        "The vote limit already matches the number of options.",
+        "El límite de votos ya coincide con el número de opciones.",
+    ),
+    (
         "Die Umfrage konnte nicht beendet werden. Bitte erneut versuchen.",
         "The poll could not be closed. Please try again.",
         "No se pudo finalizar la encuesta. Inténtalo de nuevo.",
@@ -142,6 +162,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Mikrofonzugriff verweigert. Erlaube den Zugriff in den Systemeinstellungen.",
         "Microphone access denied. Allow access in system settings.",
         "Acceso al micrófono denegado. Permítelo en los ajustes del sistema.",
+    ),
+    (
+        "Mindestens zwei Antwortoptionen sind erforderlich.",
+        "At least two answer options are required.",
+        "Se requieren al menos dos opciones de respuesta.",
     ),
     ("Nach oben", "Move up", "Subir"),
     ("Nach unten", "Move down", "Bajar"),

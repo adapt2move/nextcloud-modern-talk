@@ -23,7 +23,6 @@ impl Desktop {
             return self.settings_view(window, cx);
         }
         let overlay = self.overlay.expect("overlay selected");
-        let t = self.theme;
         let side = matches!(
             overlay,
             Overlay::RoomInfo
@@ -212,12 +211,7 @@ impl Desktop {
                 .child(body)
                 .into_any_element()
         };
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
+        self.dialog_scrim()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
             .child(
@@ -899,7 +893,7 @@ impl Desktop {
                         .child(self.hint(&format!(
                             "{} · {}",
                             m.author.as_str(),
-                            m.time_label.as_str()
+                            super::localization::display_time(self.locale, m.time_label.as_str())
                         )));
                 }
             }

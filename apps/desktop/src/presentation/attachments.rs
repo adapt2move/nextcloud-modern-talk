@@ -111,7 +111,8 @@ impl Desktop {
             }
             super::input::PastedContent::Image(extension, image) => (extension, image),
         };
-        if let Ok(name) = Text::new(&format!("clipboard.{extension}")) {
+        let name = self.lf("Zwischenablage.{extension}", &[("extension", extension)]);
+        if let Ok(name) = Text::new(&name) {
             self.submit_message(MessageAction::StageClipboardImage {
                 name,
                 image: image.clone(),

@@ -188,62 +188,52 @@ impl Desktop {
                         .child(footer),
                 )
             });
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(t.scrim)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                self.dialog_shell_surface()
-                    .relative()
-                    .occlude()
-                    .w(px(width))
-                    .h(px(height))
-                    .min_h_0()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_focus)
-                    .tab_group()
-                    .flex()
-                    .when(narrow, |d| d.flex_col())
-                    .child(frame.navigation)
-                    .child(page)
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(8.))
-                            .right(px(8.))
-                            .child(self.icon_button(
-                                frame.close.0,
-                                ("x", frame.close.1),
-                                ButtonStyle::Quiet,
-                                Availability::available(),
-                                LocalAction::Close,
-                                cx,
-                            )),
-                    )
-                    .map(|mut panel| {
-                        // Preserve the frame ID without a Stateful wrapper: the
-                        // shared motion owner accepts the existing Div itself.
-                        panel.interactivity().element_id = Some(frame.id.into());
-                        match self.overlay.filter(|overlay| {
-                            matches!(
-                                overlay,
-                                Overlay::Settings
-                                    | Overlay::Accounts
-                                    | Overlay::RoomInfo
-                                    | Overlay::Participants
-                            )
-                        }) {
-                            Some(overlay) => {
-                                self.dialog_panel(DialogSurface::Overlay(overlay), panel)
-                            }
-                            None => panel.into_any_element(),
-                        }
-                    }),
-            )
+        self.dialog_scrim().items_center().justify_center().child(
+            self.dialog_shell_surface()
+                .relative()
+                .occlude()
+                .w(px(width))
+                .h(px(height))
+                .min_h_0()
+                .overflow_hidden()
+                .track_focus(&self.modal_focus)
+                .tab_group()
+                .flex()
+                .when(narrow, |d| d.flex_col())
+                .child(frame.navigation)
+                .child(page)
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(8.))
+                        .child(self.icon_button(
+                            frame.close.0,
+                            ("x", frame.close.1),
+                            ButtonStyle::Quiet,
+                            Availability::available(),
+                            LocalAction::Close,
+                            cx,
+                        )),
+                )
+                .map(|mut panel| {
+                    // Preserve the frame ID without a Stateful wrapper: the
+                    // shared motion owner accepts the existing Div itself.
+                    panel.interactivity().element_id = Some(frame.id.into());
+                    match self.overlay.filter(|overlay| {
+                        matches!(
+                            overlay,
+                            Overlay::Settings
+                                | Overlay::Accounts
+                                | Overlay::RoomInfo
+                                | Overlay::Participants
+                        )
+                    }) {
+                        Some(overlay) => self.dialog_panel(DialogSurface::Overlay(overlay), panel),
+                        None => panel.into_any_element(),
+                    }
+                }),
+        )
     }
     /// Wide navigation. The header names the dialog and, where relevant, its context.
     pub(super) fn dialog_rail(
