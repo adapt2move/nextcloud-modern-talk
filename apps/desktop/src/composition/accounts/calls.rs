@@ -1072,7 +1072,7 @@ fn project(
                         .iter()
                         .filter(|p| p.kind == talk_core::calls::StreamKind::Camera)
                         .map(|p| ParticipantView {
-                            local_id: p.local,
+                            local_id: p.participant,
                             name: text(p.name.as_str()),
                             initials: initials(p.name.as_str()),
                             role_label: text("Teilnehmend"),
@@ -1179,6 +1179,43 @@ mod action_tests {
         );
         assert!(!model.call_ui.as_ref().unwrap().wishes.microphone);
     }
+    #[test]
+    fn stream_metadata_preserves_actor_identity_and_keeps_screens_out_of_people() {
+        let mut snapshot = invitation(call()).call.unwrap();
+        snapshot.phase = Phase::Active;
+        snapshot.sharing = talk_core::calls::SharingState::Sharing;
+        for (local, kind, dimensions) in [
+            (101, talk_core::calls::StreamKind::Camera, (640, 360)),
+            (202, talk_core::calls::StreamKind::Screen, (1280, 720)),
+        ] {
+            snapshot
+                .participants
+                .try_push(talk_core::calls::Participant {
+                    local,
+                    participant: 7,
+                    kind,
+                    dimensions: Some(dimensions),
+                    flowing: true,
+                    name: text("Mara"),
+                    microphone: true,
+                    camera: true,
+                    raised_hand: true,
+                    speaking: false,
+                    can_mute: false,
+                })
+                .unwrap();
+        }
+        let view = project(&snapshot, &text("Room"), false, None);
+        assert_eq!(view.participants.as_slice().len(), 1);
+        assert_eq!(view.participants.as_slice()[0].local_id, 7);
+        assert_eq!(view.camera_tile(7).unwrap().local_id, 101);
+        let screen = view.screen_stage().unwrap();
+        assert_eq!(screen.tile.local_id, 202);
+        assert_eq!(screen.dimensions, Some((1280, 720)));
+        assert!(screen.flowing);
+        assert_eq!(view.sharing, ScreenShareState::Sharing);
+    }
+
     #[test]
     fn local_sender_has_a_reserved_tile_and_never_displaces_remote_participants() {
         let scope = call();
