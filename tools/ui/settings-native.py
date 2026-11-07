@@ -227,8 +227,8 @@ def notifications(n):
 def call_chat(n):
  n.a.width=720;n.a.height=580;n.app('call-chat',scenario='call-controls');n.click(438,535);n.frame('narrow-call-chat-open')
  # Keyboard-only entry from the real modal close control into its history/editor.
- for _ in range(32):
-  n.key('Tab');d=n.diag()
+ for _ in range(16):
+  n.key('shift+Tab');d=n.diag()
   if 'editor_focused=true' in d['UI_LOCAL_STATE']:break
  n.expect('call-chat-editor-keyboard-reachable','editor_focused=true' in d['UI_LOCAL_STATE'] and 'overlay=Some(CallChat)' in d['UI_LOCAL_STATE'],d)
  n.type('ALPHA');n.key('shift+Return');n.type('BETA');f=n.frame('call-chat-native-multiline-input')
