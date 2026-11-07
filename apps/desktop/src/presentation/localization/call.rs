@@ -17,6 +17,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Finalizando la llamada para todas las personas…",
     ),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
+    ("Aufzeichnung", "Recording", "Grabación"),
     (
         "Aufzeichnung fehlgeschlagen",
         "Recording failed",
@@ -26,11 +27,6 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Aufzeichnung fehlgeschlagen. Bitte die moderierende Person, sie zu prüfen.",
         "Recording failed. Ask the moderator to check it.",
         "La grabación ha fallado. Pide a la persona moderadora que la compruebe.",
-    ),
-    (
-        "Aufzeichnung im Anruf",
-        "Recording in this call",
-        "Grabación de esta llamada",
     ),
     (
         "Aufzeichnung läuft",
@@ -88,6 +84,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
     ),
     (
+        "Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.",
+        "The server may record audio and video. You cannot join without consent.",
+        "El servidor puede grabar audio y vídeo. No puedes unirte sin dar tu consentimiento.",
+    ),
+    (
         "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.",
         "The server will record this call’s audio and video. Everyone in the call can see the recording.",
         "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
@@ -119,14 +120,9 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ("Hand senken", "Lower hand", "Bajar la mano"),
     ("Hand senken (H)", "Lower hand (H)", "Bajar la mano (H)"),
     (
-        "Ich stimme einer möglichen Aufzeichnung zu.",
-        "I agree that this call may be recorded.",
-        "Acepto que esta llamada pueda grabarse.",
-    ),
-    (
-        "In diesem Anruf können Audio und Video auf dem Server aufgezeichnet werden. Ohne Zustimmung kannst du nicht beitreten.",
-        "This call’s audio and video may be recorded on the server. You cannot join without consent.",
-        "El audio y el vídeo de esta llamada pueden grabarse en el servidor. No puedes unirte sin dar tu consentimiento.",
+        "Ich stimme einer Aufzeichnung zu.",
+        "I agree to a recording.",
+        "Doy mi consentimiento para una grabación.",
     ),
     (
         "Kamera ausschalten (V)",

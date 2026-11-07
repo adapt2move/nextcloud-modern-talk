@@ -39,7 +39,7 @@ impl Desktop {
             Overlay::CallChat => ("Chat im Anruf", 440.),
             Overlay::ConfirmEndCall => ("Anruf für alle beenden?", 440.),
             Overlay::ConfirmRecording => ("Aufzeichnung starten?", 440.),
-            Overlay::RecordingConsent => ("Aufzeichnung im Anruf", 440.),
+            Overlay::RecordingConsent => ("Aufzeichnung", 440.),
             Overlay::Search => ("Suchen", 700.),
             Overlay::Create => ("Neues Gespräch", 716.),
             Overlay::Discover => ("Offene Gespräche", 760.),
@@ -171,12 +171,12 @@ impl Desktop {
                     .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
             Overlay::RecordingConsent => {
                 let mut body = div().flex().flex_col().gap_4()
-                    .child(self.hint(self.l("In diesem Anruf können Audio und Video auf dem Server aufgezeichnet werden. Ohne Zustimmung kannst du nicht beitreten.")));
+                    .child(self.hint(self.l("Der Server kann Audio und Video aufzeichnen. Ohne Zustimmung kein Beitritt.")));
                 if let Some(call) = self.snapshot.call.as_ref().filter(|call| call.stage == talk_core::ui::presentation::CallStage::Required(talk_core::ui::presentation::RequiredGate::RecordingConsent)) {
                     let selected = self.recording_consent.selected(call.scope);
                     body = body.child(div().flex().items_center().gap_3()
-                        .child(self.switch("recording-consent-switch", "Ich stimme einer möglichen Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
-                        .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer möglichen Aufzeichnung zu."))))
+                        .child(self.switch("recording-consent-switch", "Ich stimme einer Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
+                        .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer Aufzeichnung zu."))))
                         .child(div().flex().flex_wrap().gap_3()
                             .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Secondary, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
                             .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
