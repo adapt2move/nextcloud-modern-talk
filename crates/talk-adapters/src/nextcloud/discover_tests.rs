@@ -57,7 +57,9 @@ async fn discovery_uses_a_current_listing_ticket_and_closes_its_temporary_sessio
     };
     assert_eq!(joined.id, id);
     let calls = server.seen.lock().unwrap();
-    assert!(String::from_utf8_lossy(&calls[1]).contains("/v4/listed-room?searchTerm=fixture"));
+    let listing = String::from_utf8_lossy(&calls[1]);
+    assert!(listing.contains("/v4/listed-room?"));
+    assert!(listing.contains("searchTerm=fixture"));
     assert!(String::from_utf8_lossy(&calls[3]).starts_with("POST "));
     assert!(String::from_utf8_lossy(&calls[4]).starts_with("DELETE "));
 }

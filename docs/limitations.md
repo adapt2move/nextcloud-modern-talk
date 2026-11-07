@@ -32,6 +32,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   for cached rooms until a capable server supplies it. Conversation notification
   changes use server-confirmed room settings; optimistic changes and a sidebar
   notification menu are not yet implemented.
+- Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
+  does not expose a reliable member count before joining; protected or unknown
+  password states cannot yet be joined through the directory.
 - Account-wide message search requires the server's Talk message provider and
   supported filters. It shows at most two pages and only results for rooms in
   the currently admitted room list; offline suggestions use the selected cached
