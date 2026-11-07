@@ -320,6 +320,14 @@ impl Owner {
             .lock()
             .map_or(true, |s| s.room.is_some())
     }
+    fn transport_stopped(&self) -> bool {
+        self.handle.shared.state.lock().is_ok_and(|state| {
+            matches!(
+                state.status,
+                LiveState::Stopped(ErrorKind::Transport | ErrorKind::Deadline)
+            )
+        })
+    }
     fn poll(&self, context: &OperationContext) -> Result<LiveEventBatch, Error> {
         let shared = &self.handle.shared;
         shared.validate(context).map_err(|e| shared.error(e))?;
@@ -944,8 +952,15 @@ impl Client {
         if settings.mode != SignalingMode::External {
             return Err(self.error(ErrorKind::Unsupported));
         }
-        self.configure_hpb(context, settings)?;
         let own = self.own_room_session(context, room)?;
+        if self.hpb.as_ref().is_some_and(Owner::transport_stopped) {
+            // Only fresh, validated room/call admission renews an exhausted
+            // transport owner. Routine event polling cannot restore a stopped
+            // session, and old route handles remain irreversibly closed.
+            self.cancel_prepared_external_meeting();
+            self.hpb = None;
+        }
+        self.configure_hpb(context, settings)?;
         let handle = self
             .hpb
             .as_ref()

@@ -10,6 +10,119 @@ use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
+#[tokio::test]
+async fn explicit_call_admission_replaces_exhausted_transport_without_reviving_old_routes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/signal/", listener.local_addr().unwrap());
+    let (done, wait) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, false).await;
+        join(&mut socket).await;
+        let _ = wait.await;
+    });
+    let (mut client, binding, runtime) = account();
+    let external = settings(&endpoint);
+    let old = Arc::new(state(binding));
+    *old.settings.lock().unwrap() = external.clone();
+    old.status(LiveState::Stopped(ErrorKind::Transport));
+    let (commands, receive) = mpsc::channel(1);
+    drop(receive); // The exhausted socket task has completed.
+    let handle = Handle {
+        shared: old.clone(),
+        commands,
+    };
+    let old_route = Route {
+        handle: handle.clone(),
+        generation: 1,
+        cancellation: old
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .cancellation
+            .clone(),
+        replaced: Arc::new(AtomicBool::new(false)),
+    };
+    client.hpb = Some(Owner { handle });
+    client.hpb_route = Some(old_route.clone());
+    client.active_room = Some(room());
+    client.room_session = Some(Zeroizing::new("talk-own".into()));
+    let model = SignalingSettings {
+        mode: SignalingMode::External,
+        external: Some(external),
+        ice_servers: Vec::new(),
+    };
+    let ctx = context(&runtime, &old);
+    client.configure_hpb(&ctx, &model).unwrap();
+    assert!(Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    let cancelled = context(&runtime, &old);
+    cancelled.cancellation.cancel();
+    assert_eq!(
+        client
+            .prepare_external_meeting(&cancelled, &room(), &model)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Cancelled
+    );
+    assert!(Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    client
+        .prepare_external_meeting(&ctx, &room(), &model)
+        .await
+        .unwrap();
+    assert!(!Arc::ptr_eq(
+        &client.hpb.as_ref().unwrap().handle.shared,
+        &old
+    ));
+    assert!(old_route.is_closed());
+    assert!(old.stop.is_cancelled());
+    assert!(
+        client
+            .hpb_route
+            .as_ref()
+            .unwrap()
+            .matches(&room(), &peer("talk-own"))
+    );
+    done.send(()).unwrap();
+    server.await.unwrap();
+}
+
+#[test]
+fn fresh_call_transport_retry_does_not_reinterpret_auth_or_policy_rejection() {
+    let (_client, binding, _) = account();
+    let shared = Arc::new(state(binding));
+    let (commands, _receive) = mpsc::channel(1);
+    let owner = Owner {
+        handle: Handle {
+            shared: shared.clone(),
+            commands,
+        },
+    };
+    for error in [
+        ErrorKind::ReauthenticationRequired,
+        ErrorKind::PermissionDenied,
+        ErrorKind::WrongScope,
+        ErrorKind::Unsupported,
+        ErrorKind::Cancelled,
+    ] {
+        shared.status(LiveState::Stopped(error));
+        assert!(!owner.transport_stopped());
+    }
+    for error in [ErrorKind::Transport, ErrorKind::Deadline] {
+        shared.status(LiveState::Stopped(error));
+        assert!(owner.transport_stopped());
+    }
+}
+
 type ServerSocket = WebSocketStream<TcpStream>;
 fn settings(server: &str) -> ExternalSettings {
     ExternalSettings::decode(&json!({

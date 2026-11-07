@@ -44,7 +44,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   supported profile.
 - HPB socket resume preserves mute/camera intent and requires fresh policy before
   publication resumes. ICE recovery has a finite retry budget and a 15-second
-  peer recovery deadline. A rejected HPB resume permits one fresh, scoped
+  peer recovery deadline. The HPB socket retry budget covers consecutive failures;
+  an authenticated connection maintained for 30 seconds renews it. After transport
+  retries are exhausted, explicit call admission can create a fresh signaling
+  owner; routine event polling does not restart a stopped owner. A rejected HPB
+  resume permits one fresh, scoped
   admission after cleanup, retaining mute/camera intent and requiring the call
   to still exist. Subscriptions also wait for HPB in-call readiness; an explicitly
   rejected subscription can retry within the same bounded recovery window and

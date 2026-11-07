@@ -8,6 +8,27 @@ use tokio_tungstenite::{
     tungstenite::{self, Message, client::IntoClientRequest, protocol::WebSocketConfig},
 };
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+#[derive(Default)]
+struct RetryBudget {
+    failures: usize,
+}
+impl RetryBudget {
+    fn interrupted(&mut self) -> bool {
+        if self.failures >= 4 {
+            return false;
+        }
+        self.failures += 1;
+        true
+    }
+    fn connected_for(&mut self, duration: Duration) {
+        // The account socket can live for days. Bound one unstable episode,
+        // rather than exhausting rejoin forever after four unrelated outages.
+        // A handshake alone cannot renew the budget during a rapid flap.
+        if duration >= Duration::from_secs(30) {
+            self.failures = 0;
+        }
+    }
+}
 struct PendingJoin {
     id: String,
     generation: u64,
@@ -510,21 +531,20 @@ async fn connected(
 pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Command>) {
     let mut resume = None;
     let mut counter = 0u64;
-    let mut failures = 0usize;
+    let mut retries = RetryBudget::default();
     let terminal = loop {
         if !shared.live() {
             break ErrorKind::Cancelled;
         }
-        let result = connect(&shared, failures).await;
+        let result = connect(&shared, retries.failures).await;
         let mut socket = match result {
             Ok(socket) => socket,
-            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if failures < 4 => {
+            Err(error @ (ErrorKind::Transport | ErrorKind::Deadline)) if retries.interrupted() => {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 let _ = shared.interrupt();
-                let wait = Duration::from_millis(250u64 << failures);
+                let wait = Duration::from_millis(250u64 << retries.failures);
                 if until(
                     &shared,
                     deadline(&shared, wait.as_millis() as u64 + 100),
@@ -546,11 +566,11 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
         if let Err(error) = authenticate(&shared, &mut socket, &mut resume, &mut counter).await {
             #[cfg(feature = "backend-test")]
             eprintln!("HPB authentication stopped: {error:?}");
-            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && failures < 4 {
+            if matches!(error, ErrorKind::Transport | ErrorKind::Deadline) && retries.interrupted()
+            {
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -562,7 +582,10 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
             let _ = retire(&mut socket, &mut counter).await;
             break error;
         }
-        match connected(&shared, &mut socket, &mut commands, &mut counter).await {
+        let connected_at = Instant::now();
+        let outcome = connected(&shared, &mut socket, &mut commands, &mut counter).await;
+        retries.connected_for(connected_at.elapsed());
+        match outcome {
             End::Retired => {
                 match retire(&mut socket, &mut counter).await {
                     Ok(()) => {
@@ -579,13 +602,12 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
                     Err(_) => break ErrorKind::Uncertain,
                 }
             }
-            End::Reconnect(error) if failures < 4 => {
+            End::Reconnect(error) if retries.interrupted() => {
                 #[cfg(feature = "backend-test")]
                 eprintln!("HPB transport interrupted: {error:?}");
                 if let Ok(mut state) = shared.state.lock() {
                     state.first_transport_failure.get_or_insert(error);
                 }
-                failures += 1;
                 if shared.interrupt().is_err() {
                     break ErrorKind::Busy;
                 }
@@ -608,5 +630,33 @@ pub(super) async fn run(shared: Arc<Shared>, mut commands: mpsc::Receiver<Comman
     shared.status(LiveState::Stopped(terminal));
     while let Ok(command) = commands.try_recv() {
         command.reject(terminal);
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn separate_healthy_episodes_do_not_exhaust_a_long_lived_account() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..100 {
+            assert!(budget.interrupted());
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_secs(30));
+        }
+        assert!(budget.interrupted());
+    }
+
+    #[test]
+    fn handshakes_and_short_flaps_cannot_renew_the_bounded_retry_window() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..4 {
+            assert!(budget.interrupted());
+            budget.connected_for(Duration::from_millis(29_999));
+        }
+        assert!(!budget.interrupted());
+        assert!(!budget.interrupted());
+        assert_eq!(budget.failures, 4);
     }
 }
