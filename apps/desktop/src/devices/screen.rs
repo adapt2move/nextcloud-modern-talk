@@ -1,12 +1,13 @@
 //! One source selection per share generation. The worker owns the portal session
 //! and PipeWire FD until the pipeline is Null; cancellation never selects again.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::time::Duration;
 use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
-    time::Duration,
 };
 use talk_adapters::media::CaptureHandle;
 use talk_core::calls::{ShareFailure, SharingState};
