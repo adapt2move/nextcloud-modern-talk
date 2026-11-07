@@ -2420,6 +2420,7 @@ impl Desktop {
             }
             for entry in self.snapshot.content_panel.poll_drafts.as_slice() {
                 let id = entry.id;
+                let group: gpui::SharedString = format!("poll-draft-{id}").into();
                 let mut actions =
                     div()
                         .flex()
@@ -2430,19 +2431,24 @@ impl Desktop {
                             ("poll-draft-use", id as usize),
                             "Für neue Umfrage verwenden",
                             ButtonStyle::Quiet,
-                            !busy,
+                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
                             LocalAction::Content(Action::LoadDraft { id, edit: false }),
                             cx,
                         ));
                 if self.snapshot.content_panel.poll_drafts_edit.enabled() {
-                    actions = actions.child(self.button(
-                        ("poll-draft-edit", id as usize),
-                        "Entwurf bearbeiten",
-                        ButtonStyle::Quiet,
-                        !busy,
-                        LocalAction::Content(Action::LoadDraft { id, edit: true }),
-                        cx,
-                    ));
+                    actions = actions.child(
+                        self.button(
+                            ("poll-draft-edit", id as usize),
+                            "Entwurf bearbeiten",
+                            ButtonStyle::Quiet,
+                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
+                            LocalAction::Content(Action::LoadDraft { id, edit: true }),
+                            cx,
+                        )
+                        .opacity(0.)
+                        .group_hover(group.clone(), |style| style.opacity(1.))
+                        .focus(|style| style.opacity(1.)),
+                    );
                 }
                 actions = if self.content_ui.delete_draft == Some(id) {
                     actions
@@ -2450,8 +2456,15 @@ impl Desktop {
                         .child(self.button(
                             ("poll-draft-delete-confirm", id as usize),
                             "Entwurf endgültig löschen",
-                            ButtonStyle::Quiet,
-                            !busy && online,
+                            ButtonStyle::Danger,
+                            Availability::when(
+                                !busy && online,
+                                if busy {
+                                    "Eine Anfrage wird bereits bearbeitet."
+                                } else {
+                                    "Die Verbindung ist derzeit nicht bereit."
+                                },
+                            ),
                             LocalAction::Content(Action::DeleteDraft(id)),
                             cx,
                         ))
@@ -2461,7 +2474,7 @@ impl Desktop {
                             ("poll-draft-menu", id as usize),
                             ("more", "Weitere Optionen"),
                             ButtonStyle::Quiet,
-                            Availability::when(!busy, "Die Verbindung ist derzeit nicht bereit."),
+                            Availability::when(!busy, "Eine Anfrage wird bereits bearbeitet."),
                             LocalAction::Content(Action::ToggleDraftMenu(id)),
                             cx,
                         ))
@@ -2478,6 +2491,7 @@ impl Desktop {
                 };
                 body = body.child(
                     div()
+                        .group(group)
                         .flex()
                         .flex_col()
                         .gap_1()
