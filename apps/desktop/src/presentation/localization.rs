@@ -7,6 +7,7 @@ mod conversation;
 mod onboarding;
 mod recovery;
 mod resources;
+mod search_navigation;
 mod updates;
 use super::Desktop;
 use talk_core::preferences::Locale;
@@ -20,6 +21,7 @@ pub fn text(locale: Locale, key: &str) -> &str {
         connection::MESSAGES,
         content::MESSAGES,
         conversation::MESSAGES,
+        search_navigation::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
         updates::MESSAGES,
@@ -77,6 +79,7 @@ mod tests {
     #[test]
     fn resource_keys_are_unique_and_translations_preserve_named_arguments() {
         for catalog in [
+            search_navigation::MESSAGES,
             resources::MESSAGES,
             recovery::MESSAGES,
             conversation::MESSAGES,

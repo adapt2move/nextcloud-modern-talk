@@ -1,0 +1,384 @@
+//! Bounded, account-scoped quick-switcher projection and directory debounce.
+use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
+use gpui::{Context, Div, FontWeight, Task, div, prelude::*};
+use std::time::Duration;
+use talk_core::ui::{
+    conversation::AccountPersonRef,
+    presentation::{ConversationKind, ConversationRef},
+};
+
+const MAX_RESULTS: usize = 20;
+const DEBOUNCE: Duration = Duration::from_millis(300);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Target {
+    Room(ConversationRef),
+    Person(AccountPersonRef),
+}
+
+#[derive(Default)]
+pub(super) struct Switcher {
+    query: String,
+    selected: Option<Target>,
+    debounce: Option<Task<()>>,
+    scheduled: Option<(talk_core::ui::AccountScope, String)>,
+    failures: u8,
+    last_failure: Option<talk_core::ui::presentation::RequestId>,
+}
+
+// Match subsequences, favoring contiguous prefixes while retaining source order
+// for ties. The source is the bounded, recency-ordered conversation snapshot.
+fn score(name: &str, query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let name = name.to_lowercase();
+    if name.starts_with(query) {
+        return Some(0);
+    }
+    if let Some(index) = name.find(query) {
+        return Some(1 + index);
+    }
+    let mut chars = name.chars();
+    let mut skipped = 0;
+    for wanted in query.chars() {
+        loop {
+            match chars.next() {
+                Some(c) if c == wanted => break,
+                Some(_) => skipped += 1,
+                None => return None,
+            }
+        }
+    }
+    Some(256 + skipped)
+}
+
+impl Desktop {
+    pub(super) fn switcher_input_changed(&mut self, cx: &mut Context<Self>) {
+        let query = self.search.read(cx).content.trim().to_lowercase();
+        if self.switcher.query != query {
+            self.switcher.query = query;
+            self.switcher.selected = None;
+            self.switcher.debounce = None;
+            self.switcher.scheduled = None;
+            self.switcher.failures = 0;
+            self.switcher.last_failure = None;
+            self.schedule_switcher_directory(cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn schedule_switcher_directory(&mut self, cx: &mut Context<Self>) {
+        let query = self.switcher.query.clone();
+        let Some(account) = self.snapshot.active_account else {
+            return;
+        };
+        if self.overlay != Some(Overlay::Search)
+            || query.is_empty()
+            || !self.active_account_connected()
+            || !matches!(self.search_kind, SearchKind::All | SearchKind::People)
+            || self.directory_query.as_ref() == Some(&(account, query.clone()))
+            || self.switcher.scheduled.as_ref() == Some(&(account, query.clone()))
+        {
+            return;
+        }
+        self.switcher.scheduled = Some((account, query.clone()));
+        let delay = if self.switcher.failures == 0 {
+            DEBOUNCE
+        } else {
+            Duration::from_secs(1 << (self.switcher.failures - 1))
+        };
+        self.switcher.debounce = Some(cx.spawn(async move |desktop, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = desktop.update(cx, |desktop, cx| {
+                desktop.switcher.scheduled = None;
+                if desktop.overlay == Some(Overlay::Search)
+                    && desktop.snapshot.active_account == Some(account)
+                    && desktop.switcher.query == query
+                    && matches!(desktop.search_kind, SearchKind::All | SearchKind::People)
+                {
+                    desktop.find_search_people(cx);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    pub(super) fn switcher_directory_failed(
+        &mut self,
+        request: talk_core::ui::presentation::RequestId,
+    ) {
+        if self.overlay == Some(Overlay::Search)
+            && self.directory_query.as_ref().is_some_and(|(account, q)| {
+                Some(*account) == self.snapshot.active_account && q == &self.switcher.query
+            })
+            && self.switcher.last_failure != Some(request)
+        {
+            self.switcher.last_failure = Some(request);
+            if self.switcher.failures < 2 {
+                self.switcher.failures += 1;
+                self.directory_query = None;
+            }
+        }
+    }
+
+    fn switcher_targets(&self) -> Vec<Target> {
+        let query = &self.switcher.query;
+        let mut targets = Vec::new();
+        if matches!(
+            self.search_kind,
+            SearchKind::All | SearchKind::Conversations
+        ) {
+            let mut rooms: Vec<_> = self
+                .snapshot
+                .conversations
+                .as_slice()
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| Some(r.context.account) == self.snapshot.active_account)
+                .filter_map(|(index, r)| {
+                    score(r.title.as_str(), query)
+                        .map(|score| (score, std::cmp::Reverse(r.last_activity), index, r.context))
+                })
+                .collect();
+            rooms.sort_by_key(|(score, recent, index, _)| (*score, *recent, *index));
+            let room_limit = if !query.is_empty() && self.search_kind == SearchKind::All {
+                12
+            } else {
+                MAX_RESULTS
+            };
+            targets.extend(
+                rooms
+                    .into_iter()
+                    .take(room_limit)
+                    .map(|(_, _, _, id)| Target::Room(id)),
+            );
+        }
+        if !query.is_empty()
+            && matches!(self.search_kind, SearchKind::All | SearchKind::People)
+            && self.directory_query.as_ref().is_some_and(|(account, q)| {
+                Some(*account) == self.snapshot.active_account && q == query
+            })
+            && let Some(panel) = self
+                .snapshot
+                .create_panel
+                .as_ref()
+                .filter(|p| Some(p.account) == self.snapshot.active_account)
+            && self
+                .room_ui
+                .create_people_request
+                .as_ref()
+                .is_some_and(|request| request.ready(panel))
+        {
+            targets.extend(
+                panel
+                    .people
+                    .as_slice()
+                    .iter()
+                    .take(MAX_RESULTS.saturating_sub(targets.len()))
+                    .map(|p| Target::Person(p.id)),
+            );
+        }
+        targets
+    }
+
+    pub(super) fn switcher_move(&mut self, delta: i8) {
+        let targets = self.switcher_targets();
+        if targets.is_empty() {
+            self.switcher.selected = None;
+            return;
+        }
+        let current = self
+            .switcher
+            .selected
+            .and_then(|target| targets.iter().position(|item| *item == target))
+            .unwrap_or(0);
+        let index = if delta < 0 {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(targets.len() - 1)
+        };
+        self.switcher.selected = targets.get(index).copied();
+    }
+
+    pub(super) fn switcher_action(&self) -> Option<LocalAction> {
+        let targets = self.switcher_targets();
+        let target = self
+            .switcher
+            .selected
+            .filter(|target| targets.contains(target))
+            .or_else(|| targets.first().copied())?;
+        match target {
+            Target::Room(id) => Some(LocalAction::Navigate(id)),
+            Target::Person(id) => Some(LocalAction::CreateDirect(id)),
+        }
+    }
+
+    pub(super) fn retry_switcher_people(&mut self, cx: &mut Context<Self>) {
+        self.switcher.failures = 0;
+        self.switcher.last_failure = None;
+        self.directory_query = None;
+        self.schedule_switcher_directory(cx);
+    }
+
+    pub(super) fn switcher_results(&self, cx: &Context<Self>) -> Div {
+        let mut body = div().flex().flex_col().gap_1();
+        let targets = self.switcher_targets();
+        let selected = self
+            .switcher
+            .selected
+            .and_then(|target| targets.iter().position(|item| *item == target))
+            .unwrap_or(0);
+        for (index, target) in targets.iter().enumerate() {
+            match target {
+                Target::Room(id) => {
+                    if let Some(room) = self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .find(|r| r.context == *id)
+                    {
+                        let kind = match room.kind {
+                            ConversationKind::Direct => "Direktnachricht",
+                            ConversationKind::NoteToSelf => "Notiz an mich",
+                            ConversationKind::Group => "Gruppengespräch",
+                            ConversationKind::GuestAccessible => "Öffentliches Gespräch",
+                            _ => "Gespräch",
+                        };
+                        body = body.child(
+                            self.button(
+                                super::controls::scoped_id("switcher-room", *id, 0, 0),
+                                "",
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::Navigate(*id),
+                                cx,
+                            )
+                            .w_full()
+                            .justify_start()
+                            .gap_3()
+                            .px_3()
+                            .py_2()
+                            .when(index == selected, |d| d.bg(self.theme.selected))
+                            .child(self.content_avatar(
+                                talk_core::ui::content::AssetTarget::ConversationAvatar(*id),
+                                room.initials.as_str(),
+                                32.,
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_ellipsis()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(room.title.as_str().to_owned()),
+                            )
+                            .child(self.hint(self.l(kind)))
+                            .when(room.unread_mention == Some(true), |d| {
+                                d.child(
+                                    div()
+                                        .rounded_full()
+                                        .bg(self.theme.accent)
+                                        .px_2()
+                                        .text_color(self.theme.selected_text)
+                                        .child("@"),
+                                )
+                            })
+                            .when(
+                                room.unread > 0 && room.unread_mention != Some(true),
+                                |d| {
+                                    d.child(
+                                        div()
+                                            .rounded_full()
+                                            .bg(self.theme.accent)
+                                            .px_2()
+                                            .text_color(self.theme.selected_text)
+                                            .child(room.unread.to_string()),
+                                    )
+                                },
+                            ),
+                        );
+                    }
+                }
+                Target::Person(id) => {
+                    if let Some(person) = self
+                        .snapshot
+                        .create_panel
+                        .as_ref()
+                        .and_then(|p| p.people.as_slice().iter().find(|p| p.id == *id))
+                    {
+                        body = body.child(
+                            self.button(
+                                gpui::SharedString::from(format!("switcher-person-{}", id.local)),
+                                "",
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::CreateDirect(*id),
+                                cx,
+                            )
+                            .w_full()
+                            .justify_start()
+                            .gap_3()
+                            .px_3()
+                            .py_2()
+                            .when(index == selected, |d| d.bg(self.theme.selected))
+                            .child(self.content_avatar(
+                                talk_core::ui::content::AssetTarget::PersonAvatar(*id),
+                                "?",
+                                32.,
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_ellipsis()
+                                    .child(person.name.as_str().to_owned()),
+                            )
+                            .child(self.hint(self.l("Person"))),
+                        );
+                    }
+                }
+            }
+        }
+        if self.active_account_connected()
+            && self.switcher.failures >= 2
+            && self.snapshot.create_panel.as_ref().is_some_and(|panel| {
+                matches!(
+                    panel.state,
+                    talk_core::ui::conversation::RemoteState::Failed(_, _)
+                )
+            })
+        {
+            body = body
+                .child(self.hint(self.l("Personensuche ist vorübergehend nicht verfügbar.")))
+                .child(self.button(
+                    "switcher-retry",
+                    "Erneut versuchen",
+                    ButtonStyle::Secondary,
+                    true,
+                    LocalAction::RetrySwitcherPeople,
+                    cx,
+                ));
+        }
+        if !self.active_account_connected() && !self.switcher.query.is_empty() {
+            body = body.child(self.hint(self.l("Personensuche benötigt eine Verbindung.")));
+        }
+        if targets.is_empty() {
+            body = body.child(self.hint(self.l("Keine passenden Gespräche oder Personen.")));
+        }
+        body
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::score;
+    #[test]
+    fn fuzzy_matching_prefers_prefix_and_preserves_unicode() {
+        assert!(score("Navigation Team", "nav") < score("Team Navigation", "nav"));
+        assert!(score("Málaga", "mlg").is_some());
+        assert_eq!(score("Alpha", "xyz"), None);
+        assert_eq!(score("Alpha", ""), Some(0));
+    }
+}

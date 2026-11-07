@@ -126,6 +126,40 @@ def allow_input_caret_timer(source: str) -> str:
     return source[:start] + method + source[end - 1:]
 
 
+def allow_switcher_debounce(source: str) -> str:
+    """One retained foreground debounce may submit a typed directory intent.
+
+    All other worker and I/O calls remain subject to the ordinary boundary scan.
+    The view owns cancellation, query/account validation and a bounded retry count.
+    """
+    code = import_source(source)
+    starts = list(re.finditer(r"\bfn\s+schedule_switcher_directory\s*\([^;{}]*\)\s*\{", code))
+    if not starts:
+        return source
+    require(len(starts) == 1, "switcher must have one debounce owner")
+    if len(starts) != 1:
+        return source
+    start = starts[0].end()
+    depth, end = 1, start
+    while depth and end < len(code):
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    require(depth == 0, "switcher debounce method is not closed")
+    if depth:
+        return source
+    method = source[start:end - 1]
+    calls = list(re.finditer(r"\bcx\s*\.\s*spawn\s*\(", code[start:end - 1]))
+    require(len(calls) == 1, "switcher must own one foreground debounce")
+    if len(calls) != 1:
+        return source
+    call = calls[0]
+    method = method[:call.start()] + "cx.reviewed_switcher_debounce(" + method[call.end():]
+    timer = r"\bcx\s*\.\s*background_executor\s*\(\s*\)\s*\.\s*timer\s*\(\s*delay\s*\)"
+    require(len(re.findall(timer, method)) == 1, "switcher must use one platform debounce timer")
+    method = re.sub(timer, "cx.reviewed_switcher_timer()", method)
+    return source[:start] + method + source[end - 1:]
+
+
 def allow_native_export_waiter(source: str) -> str:
     """One foreground waiter observes bounded snapshots and submits typed intents.
 
@@ -534,6 +568,8 @@ def check() -> None:
         if path == native / "presentation/input.rs":
             hidden_io = allow_input_caret_timer(hidden_io)
             hidden_io = re.sub(r"\.(?:read_from_clipboard|write_to_clipboard)\s*\(", ".reviewed_input_clipboard(", hidden_io)
+        if path == native / "presentation/switcher.rs":
+            hidden_io = allow_switcher_debounce(hidden_io)
         if path == native / "presentation/attachments.rs":
             hidden_io = allow_native_export_waiter(hidden_io)
         if path == native / "presentation/conversation_dialog.rs":

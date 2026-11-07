@@ -34,7 +34,7 @@ impl PeopleRequest {
     fn loading(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && panel.state == RemoteState::Loading(self.request)
     }
-    fn ready(&self, panel: &CreatePanel) -> bool {
+    pub(super) fn ready(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && self.ready && panel.people_loaded && !panel.state.pending()
     }
 }
@@ -120,6 +120,10 @@ impl Desktop {
         if let Some(request) = &mut self.room_ui.create_people_request {
             request.observe(panel);
         }
+        let failure = match panel.state {
+            RemoteState::Failed(request, _) => Some(request),
+            _ => None,
+        };
         if let Some(result) = panel.result
             && result.completion == Completion::ServerAccepted
         {
@@ -137,6 +141,10 @@ impl Desktop {
                 request: result.request,
             });
         }
+        if let Some(request) = failure {
+            self.switcher_directory_failed(request);
+        }
+        self.schedule_switcher_directory(cx);
     }
     pub(super) fn creation_body(&self, cx: &Context<Self>) -> Div {
         let direct = self.room_ui.create_direct;

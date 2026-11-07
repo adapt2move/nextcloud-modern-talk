@@ -70,6 +70,8 @@ pub const SCENARIOS: &[&str] = &[
     "files",
     "thread",
     "search",
+    "search-navigation",
+    "search-filter",
     "create34",
     "create35",
     "discover",
@@ -580,7 +582,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     }
     s.accounts = page([AccountView {
         scope: scope(),
-        navigation_key: None,
+        navigation_key: Some(
+            talk_core::preferences::navigation::NavigationAccountKey::new(
+                "a1:00000000000000000000000000000001:00000000000000000000000000000002",
+            )
+            .expect("fixture key"),
+        ),
         connection: talk_core::ui::presentation::AccountConnectionState::Disconnected,
         connection_failure: match scenario {
             "chat-server-denied" | "accounts-server-denied" => {
@@ -687,6 +694,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 archived: Some(id == 6),
                 archive: Decision::Unknown,
                 unread,
+                unread_mention: Some(id == 1),
+                last_activity: Some(100 - id as u64),
                 presence: if kind == ConversationKind::Direct {
                     Presence::Available
                 } else {

@@ -4,7 +4,7 @@ use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SidebarDestination};
 use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::preferences::navigation::{
-    AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport,
+    AccountNavigation, NavigationEdit, NavigationSection, RemoteNavigationSupport, SidebarFilter,
 };
 use talk_core::ui::presentation::{
     ContentState, ConversationCategory, ConversationKind, ConversationView, FeatureSupport,
@@ -65,7 +65,7 @@ impl Section {
 }
 
 impl Desktop {
-    fn active_account_connected(&self) -> bool {
+    pub(super) fn active_account_connected(&self) -> bool {
         self.snapshot.accounts.as_slice().iter().any(|a| {
             Some(a.scope) == self.snapshot.active_account
                 && matches!(
@@ -320,6 +320,59 @@ impl Desktop {
                     ),
             );
 
+        let filter = self
+            .account_layout()
+            .map_or(SidebarFilter::All, AccountNavigation::filter);
+        let can_filter = account.is_some_and(|a| a.navigation_key.is_some());
+        let mentions_known = self
+            .snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|r| r.unread_mention.is_some());
+        sidebar = sidebar.child(
+            div().flex().gap_1().mt_2().children(
+                [
+                    (SidebarFilter::All, "Alle"),
+                    (SidebarFilter::Unread, "Ungelesen"),
+                    (SidebarFilter::Mentions, "Erwähnungen"),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (value, label))| {
+                    self.button(
+                        ("sidebar-filter", index),
+                        label,
+                        if value == filter {
+                            ButtonStyle::Secondary
+                        } else {
+                            ButtonStyle::Quiet
+                        },
+                        Availability::when(
+                            can_filter
+                                && (value != SidebarFilter::Mentions
+                                    || mentions_known
+                                    || filter == value),
+                            if !can_filter {
+                                "Filter sind für dieses Konto nicht verfügbar."
+                            } else {
+                                "Erwähnungen sind noch nicht verfügbar."
+                            },
+                        ),
+                        LocalAction::SidebarFilter(value),
+                        cx,
+                    )
+                    .flex_1()
+                    .px_1()
+                    .text_size(self.sp(11.))
+                }),
+            ),
+        );
+        let matches_filter = |r: &ConversationView| match filter {
+            SidebarFilter::All => true,
+            SidebarFilter::Unread => r.unread > 0,
+            SidebarFilter::Mentions => r.unread_mention == Some(true),
+        };
         let query = self.sidebar_filter.read(cx).content.to_lowercase();
         let archived = self.destination == SidebarDestination::Archive;
         let state = CollectionState::new(
@@ -350,6 +403,7 @@ impl Desktop {
             .iter()
             .filter(|r| {
                 r.archived == Some(archived)
+                    && matches_filter(r)
                     && self.favorite_value(r) == Some(true)
                     && r.title.as_str().to_lowercase().contains(&query)
             })
@@ -386,6 +440,7 @@ impl Desktop {
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
+                            && matches_filter(r)
                             && !grouped.contains(&r.context)
                             && r.title.as_str().to_lowercase().contains(&query)
                             && r.organization.tags == FeatureSupport::Supported
@@ -453,6 +508,7 @@ impl Desktop {
                     .iter()
                     .filter(|r| {
                         r.archived == Some(archived)
+                            && matches_filter(r)
                             && !grouped.contains(&r.context)
                             && r.title.as_str().to_lowercase().contains(&query)
                             && self.placement(r).is_some_and(|p| p.group == Some(group.id))
@@ -512,6 +568,7 @@ impl Desktop {
                 .iter()
                 .filter(|r| {
                     r.archived == Some(archived)
+                        && matches_filter(r)
                         && !grouped.contains(&r.context)
                         && Section::for_room(r) == section
                         && self.placement(r).is_none_or(|p| p.group.is_none())
@@ -558,6 +615,9 @@ impl Desktop {
                     list = list.child(self.compact_room(row, "room", cx));
                 }
             }
+        }
+        if filter == SidebarFilter::Mentions && rooms.iter().any(|r| r.unread_mention.is_none()) {
+            list = list.child(self.hint(self.l("Einige Erwähnungen sind noch nicht bekannt.")));
         }
         if visible == 0 && self.snapshot.conversation_list.content == ContentState::Ready {
             list = list.child(div().px_2().py_3().child(self.hint(self.l(if archived {

@@ -28,6 +28,7 @@ mod settings_pages;
 mod shell;
 mod sidebar;
 mod state;
+mod switcher;
 pub mod theme;
 mod toast;
 mod window_chrome;
@@ -84,7 +85,6 @@ pub enum LocalAction {
     Content(content::Action),
     CreateMode(bool),
     FindPeople,
-    FindSearchPeople,
     CreateConversation,
     CreateDirect(talk_core::ui::conversation::AccountPersonRef),
     CheckUpdates,
@@ -104,6 +104,7 @@ pub enum LocalAction {
     Navigate(ConversationRef),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
+    SidebarFilter(talk_core::preferences::navigation::SidebarFilter),
     Favorite(ConversationRef, bool),
     Archive(ConversationRef, bool),
     Send,
@@ -157,6 +158,7 @@ pub enum LocalAction {
     StopDevice(talk_core::preferences::devices::DeviceKind),
     Search,
     SearchKind(SearchKind),
+    RetrySwitcherPeople,
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
     MoveLocalGroup(talk_core::preferences::navigation::NavigationGroupId, bool),
@@ -307,6 +309,7 @@ pub struct Desktop {
     account_removal: account_removal::AccountRemovalUi,
     pub search_kind: SearchKind,
     directory_query: Option<(talk_core::ui::AccountScope, String)>,
+    switcher: switcher::Switcher,
     pub thread_parent: Option<(ConversationRef, u128)>,
     drafts: Drafts,
     root_focus: FocusHandle,
@@ -392,7 +395,7 @@ impl Desktop {
             let _ = weak.update(cx, |_, cx| cx.notify());
         });
         let input_observers = [
-            cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.observe(&search, |this, _, cx| this.switcher_input_changed(cx)),
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
         ];
@@ -536,6 +539,7 @@ impl Desktop {
             account_removal: account_removal::AccountRemovalUi::new(cx),
             search_kind: SearchKind::All,
             directory_query: None,
+            switcher: switcher::Switcher::default(),
             thread_parent: None,
             drafts: Drafts::default(),
             root_focus,
@@ -569,7 +573,8 @@ impl Desktop {
             });
         }
         if development && initial_overlay == Some(Overlay::Search) {
-            desktop.search.update(cx, |i, _| i.set_value("Navigation"));
+            desktop.search.update(cx, |i, _| i.set_value("Produkt"));
+            desktop.switcher_input_changed(cx);
         }
         if development {
             desktop
@@ -1023,7 +1028,6 @@ impl Desktop {
                     ));
                 }
             }
-            LocalAction::FindSearchPeople => self.find_search_people(cx),
             LocalAction::CreateConversation => {
                 if let Ok(name) =
                     talk_core::ui::Text::new(self.conversation_name.read(cx).content.trim())
@@ -1032,6 +1036,18 @@ impl Desktop {
                 }
             }
             LocalAction::CreateDirect(person) => {
+                if self.overlay == Some(Overlay::Search)
+                    && !self
+                        .directory_query
+                        .as_ref()
+                        .is_some_and(|(account, query)| {
+                            Some(*account) == self.snapshot.active_account
+                                && *account == person.account
+                                && query == &self.search.read(cx).content.trim().to_lowercase()
+                        })
+                {
+                    return;
+                }
                 self.submit_creation(talk_core::ui::conversation::CreateAction::Direct(person))
             }
             LocalAction::CheckUpdates => {
@@ -1111,6 +1127,8 @@ impl Desktop {
                 self.pending_modal_focus = true;
                 if overlay == Overlay::Search {
                     self.directory_query = None;
+                    self.switcher_input_changed(cx);
+                    self.schedule_switcher_directory(cx);
                     self.search.focus_handle(cx).focus(window);
                 } else {
                     self.modal_focus.focus(window);
@@ -1138,7 +1156,11 @@ impl Desktop {
                     self.handle(LocalAction::Open(Overlay::Thread), window, cx);
                 }
             }
-            LocalAction::SearchKind(kind) => self.search_kind = kind,
+            LocalAction::SearchKind(kind) => {
+                self.search_kind = kind;
+                self.schedule_switcher_directory(cx);
+            }
+            LocalAction::RetrySwitcherPeople => self.retry_switcher_people(cx),
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -1297,6 +1319,11 @@ impl Desktop {
             }
             LocalAction::Destination(destination) => self.destination = destination,
             LocalAction::CollapseSection(section) => self.collapse_sidebar_section(section, cx),
+            LocalAction::SidebarFilter(filter) => self.edit_navigation(
+                talk_core::preferences::navigation::RemoteNavigationSupport::Unsupported,
+                talk_core::preferences::navigation::NavigationEdit::SetFilter(filter),
+                cx,
+            ),
             LocalAction::Favorite(context, favorite) => {
                 if let Some(row) = self
                     .snapshot
@@ -1845,7 +1872,17 @@ impl Desktop {
             && self.search.focus_handle(cx).is_focused(window)
             && !self.search.read(cx).composing()
         {
-            self.handle(LocalAction::FindSearchPeople, window, cx);
+            if let Some(action) = self.switcher_action() {
+                self.handle(action, window, cx);
+            }
+            cx.stop_propagation();
+        } else if matches!(key.as_str(), "up" | "down")
+            && self.overlay == Some(Overlay::Search)
+            && self.search.focus_handle(cx).is_focused(window)
+            && !self.search.read(cx).composing()
+        {
+            self.switcher_move(if key == "up" { -1 } else { 1 });
+            cx.notify();
             cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open

@@ -94,6 +94,8 @@ pub struct Conversation {
     pub archive: Decision,
     pub actions: RoomActions,
     pub unread_messages: Option<u32>,
+    /// None means the server did not supply mention state.
+    pub unread_mention: Option<bool>,
     pub last_activity: Option<u64>,
     pub call_active: Option<bool>,
     pub sensitive: bool,

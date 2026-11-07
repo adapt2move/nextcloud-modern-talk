@@ -150,6 +150,22 @@ class ImportStrings(unittest.TestCase):
             with self.subTest(filename=filename, source=value):
                 self.assertTrue(self.native(value, filename=filename))
 
+    def test_switcher_debounce_is_scoped_to_its_owner(self):
+        source = ('impl View { fn schedule_switcher_directory(&mut self, cx: &mut Context<Self>) { '
+                  'self.task = Some(cx.spawn(async move |view, cx| { '
+                  'cx.background_executor().timer(delay).await; })); } }')
+        self.assertEqual(self.native(source, filename='switcher.rs'), [])
+        for value, filename in [
+            (source, 'fixture.rs'),
+            (source + ' fn other() { cx.spawn_in(window, async {}); }', 'switcher.rs'),
+            (source.replace('cx.background_executor()', 'cx.http_client(); cx.background_executor()'), 'switcher.rs'),
+            (source.replace('timer(delay)', 'timer(other)'), 'switcher.rs'),
+            (source + ' fn other() { cx.background_executor().timer(delay); }', 'switcher.rs'),
+            (source + source, 'switcher.rs'),
+        ]:
+            with self.subTest(filename=filename, source=value):
+                self.assertTrue(self.native(value, filename=filename))
+
     def test_native_interaction_edges_stay_out_of_core_and_views(self):
         # Platform cfg is presentation metadata, not an OS API invocation.
         self.assertEqual(self.native('#[cfg(target_os = "windows")]\nfn platform_label() {}',
