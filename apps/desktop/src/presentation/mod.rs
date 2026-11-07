@@ -116,6 +116,7 @@ pub enum LocalAction {
     ToggleCallParticipants,
     ToggleCallModeration,
     ToggleCallSecondary,
+    DismissRecordingFailure(CallScope),
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -342,6 +343,9 @@ pub struct Desktop {
     call_minimized: Option<CallScope>,
     call_started: Option<(CallScope, std::time::Instant)>,
     call_reconnecting_since: Option<(CallScope, Instant)>,
+    call_ended_since: Option<(CallScope, Instant)>,
+    dismissed_recording_failure: Option<CallScope>,
+    call_recovery: call::recovery::Recovery,
     call_clock: Option<gpui::Task<()>>,
     recording_consent: call::consent::State,
     fixture_call_reaction: Option<(CallScope, u64)>,
@@ -570,6 +574,11 @@ impl Desktop {
             .as_ref()
             .filter(|call| call.stage == CallStage::Active)
             .map(|call| (call.scope, std::time::Instant::now()));
+        let call_ended_since = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Ended)
+            .map(|call| (call.scope, Instant::now()));
         let call_reconnecting_since = snapshot
             .call
             .as_ref()
@@ -672,6 +681,9 @@ impl Desktop {
             call_minimized,
             call_started,
             call_reconnecting_since,
+            call_ended_since,
+            dismissed_recording_failure: None,
+            call_recovery: call::recovery::Recovery::default(),
             call_clock: None,
             recording_consent,
             recent_call_reaction,
@@ -754,13 +766,16 @@ impl Desktop {
                 .server
                 .update(cx, |i, _| i.set_value("cloud.example.test"));
         }
+        desktop
+            .call_recovery
+            .observe(desktop.snapshot.call.as_ref(), Instant::now());
         desktop.refresh_message_ui(cx);
-        if desktop
-            .snapshot
-            .call
-            .as_ref()
-            .is_some_and(|c| matches!(c.stage, CallStage::Active | CallStage::Reconnecting))
-        {
+        if desktop.snapshot.call.as_ref().is_some_and(|c| {
+            matches!(
+                c.stage,
+                CallStage::Active | CallStage::Reconnecting | CallStage::Ended
+            )
+        }) {
             desktop.start_call_clock(cx);
         }
         desktop
@@ -774,7 +789,22 @@ impl Desktop {
         self.call_clock = Some(cx.spawn(async move |desktop, cx| {
             loop {
                 cx.background_executor().timer(CALL_CLOCK_INTERVAL).await;
-                if desktop.update(cx, |_, cx| cx.notify()).is_err() {
+                let keep = desktop.update(cx, |this, cx| {
+                    if let Some((scope, at)) = this.call_ended_since
+                        && at.elapsed() >= std::time::Duration::from_secs(3)
+                        && this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        })
+                    {
+                        this.dismissed_terminal_call = Some(scope);
+                        this.call_ended_since = None;
+                        cx.notify();
+                        return false;
+                    }
+                    cx.notify();
+                    true
+                });
+                if !matches!(keep, Ok(true)) {
                     break;
                 }
             }
@@ -835,6 +865,8 @@ impl Desktop {
             return;
         }
         self.projection_blocked = false;
+        self.call_recovery
+            .observe(next.call.as_ref(), Instant::now());
         if self.snapshot.call.as_ref().map(|call| call.scope)
             != next.call.as_ref().map(|call| call.scope)
         {
@@ -842,6 +874,7 @@ impl Desktop {
             self.call_participants_open = false;
             self.call_moderation_open = false;
             self.call_secondary_open = false;
+            self.call_clock = None;
         }
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
@@ -1002,11 +1035,33 @@ impl Desktop {
         } else {
             self.call_reconnecting_since = None;
         }
-        if next
+        if let Some(call) = next
             .call
             .as_ref()
-            .is_some_and(|call| matches!(call.stage, CallStage::Active | CallStage::Reconnecting))
+            .filter(|call| call.stage == CallStage::Ended)
         {
+            if self
+                .call_ended_since
+                .is_none_or(|(scope, _)| scope != call.scope)
+                && self.dismissed_terminal_call != Some(call.scope)
+            {
+                self.call_ended_since = Some((call.scope, Instant::now()));
+            }
+        } else {
+            self.call_ended_since = None;
+        }
+        if next.call.as_ref().is_none_or(|call| {
+            call.recording != talk_core::ui::presentation::CallRecordingState::Failed
+                || Some(call.scope) != self.dismissed_recording_failure
+        }) {
+            self.dismissed_recording_failure = None;
+        }
+        if next.call.as_ref().is_some_and(|call| {
+            matches!(
+                call.stage,
+                CallStage::Active | CallStage::Reconnecting | CallStage::Ended
+            )
+        }) {
             self.start_call_clock(cx);
         } else {
             self.call_clock = None;
@@ -1759,6 +1814,14 @@ impl Desktop {
                     self.recording_consent.reset();
                     self.overlay = None;
                     self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DismissRecordingFailure(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && call.recording == talk_core::ui::presentation::CallRecordingState::Failed
+                }) {
+                    self.dismissed_recording_failure = Some(scope);
                 }
             }
             LocalAction::ToggleCallSecondary => {
@@ -2917,7 +2980,17 @@ impl Render for Desktop {
             i.borderless = true;
         });
         if let Some(row) = self.selected() {
-            let placeholder = self.lf("Nachricht an {name}", &[("name", row.title.as_str())]);
+            let name = self
+                .snapshot
+                .call
+                .as_ref()
+                .filter(|call| {
+                    (self.call_chat_open || self.overlay == Some(Overlay::CallChat))
+                        && call.scope.account == row.context.account
+                        && call.scope.conversation == row.context.conversation
+                })
+                .map_or(row.title.as_str(), |call| call.title.as_str());
+            let placeholder = self.lf("Nachricht an {name}", &[("name", name)]);
             self.composer
                 .update(cx, |i, _| i.set_placeholder(&placeholder));
         }
@@ -3203,6 +3276,9 @@ impl Render for Desktop {
                     self.search.focus_handle(cx).focus(window);
                     None
                 }
+                Some(Overlay::ConfirmEndCall) => Some("cancel-end-everyone".into()),
+                Some(Overlay::ConfirmRecording) => Some("cancel-recording".into()),
+                Some(Overlay::RecordingConsent) => Some("decline-recording-consent".into()),
                 Some(Overlay::CreatePoll) => {
                     self.content_ui.question.focus_handle(cx).focus(window);
                     None

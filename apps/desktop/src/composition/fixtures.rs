@@ -158,6 +158,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-error-unknown",
     "call-controls",
     "call-gallery",
+    "call-recovery",
     "call-participants-raised",
     "call-dock",
     "call-devices",
@@ -979,6 +980,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error-unknown"
             | "call-controls"
             | "call-gallery"
+            | "call-recovery"
             | "call-participants-raised"
             | "call-dock"
             | "call-devices"
@@ -1067,6 +1069,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 ScreenShareState::Idle
             },
             streams: Page::empty(),
+            replacement_generation: scenario == "call-recovery",
+            remote_audio_received: 0,
             recording: match scenario {
                 "call-recording" => talk_core::ui::presentation::CallRecordingState::Active,
                 "call-recording-failed" => talk_core::ui::presentation::CallRecordingState::Failed,
@@ -2272,6 +2276,8 @@ impl NativeDesktopPort for DevelopmentPort {
                     share: MediaState::Unavailable,
                     sharing: ScreenShareState::Idle,
                     streams: Page::empty(),
+                    replacement_generation: false,
+                    remote_audio_received: 0,
                     recording: talk_core::ui::presentation::CallRecordingState::Unknown,
                     recording_control: None,
                     recording_pending: false,
@@ -2293,6 +2299,24 @@ impl NativeDesktopPort for DevelopmentPort {
                         page(participants())
                     },
                 });
+            }
+            UiIntent::RecoverCallMedia(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.replacement_generation
+                            && view.stage == CallStage::Active
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.replacement_generation = false;
+                view.stage = CallStage::Connecting;
+                println!(
+                    "UI_INTENT recover-call-media room={}",
+                    call.conversation.local
+                );
             }
             UiIntent::SetCallRecording { call, start } => {
                 let view = self

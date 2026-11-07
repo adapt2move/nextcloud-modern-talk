@@ -591,7 +591,8 @@ impl NextcloudClient {
                             }
                             prepare = true;
                         }
-                        Command::SetHand { .. }
+                        Command::RecoverMedia(_)
+                        | Command::SetHand { .. }
                         | Command::React { .. }
                         | Command::Ring { .. }
                         | Command::MuteParticipant { .. }
@@ -639,18 +640,41 @@ impl NextcloudClient {
                     }
                 }
                 CallOwner::Live(live) => {
-                    if matches!(command, Command::Reconnect(_) | Command::Stop(_)) {
-                        live.close();
+                    if matches!(
+                        command,
+                        Command::Reconnect(_) | Command::RecoverMedia(_) | Command::Stop(_)
+                    ) {
                         let mut snapshot = live
                             .snapshot()
                             .map_err(|k| self.error(transport::kind(k)))?;
+                        if matches!(command, Command::RecoverMedia(_))
+                            && snapshot.phase != Phase::Active
+                        {
+                            self.meeting_owner = Some(CallOwner::Live(live));
+                            return Err(self.error(ErrorKind::PermissionDenied));
+                        }
+                        live.close();
                         drop(live);
-                        let restart = matches!(command, Command::Reconnect(_)).then_some(Restart {
-                            wishes: MediaWishes::default(),
-                            entry: Entry::PreparedConference,
-                            continuity: false,
-                        });
-                        snapshot.wishes = MediaWishes::default();
+                        let restart = match command {
+                            Command::Reconnect(_) => Some(Restart {
+                                wishes: MediaWishes::default(),
+                                entry: Entry::PreparedConference,
+                                continuity: false,
+                            }),
+                            Command::RecoverMedia(_) if snapshot.phase == Phase::Active => {
+                                let mut wishes = snapshot.wishes;
+                                wishes.screen = false;
+                                Some(Restart {
+                                    wishes,
+                                    entry: snapshot.entry,
+                                    continuity: true,
+                                })
+                            }
+                            _ => None,
+                        };
+                        if restart.is_none_or(|restart| !restart.continuity) {
+                            snapshot.wishes = MediaWishes::default();
+                        }
                         snapshot.phase = if restart.is_some() {
                             Phase::Reconnecting
                         } else {
@@ -677,7 +701,8 @@ impl NextcloudClient {
                 } => {
                     if matches!(
                         command,
-                        Command::SetHand { .. }
+                        Command::RecoverMedia(_)
+                            | Command::SetHand { .. }
                             | Command::React { .. }
                             | Command::Ring { .. }
                             | Command::MuteParticipant { .. }

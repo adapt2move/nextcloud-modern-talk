@@ -170,11 +170,17 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "End for everyone",
         "Finalizar para todas las personas",
     ),
+    (
+        "Gerätewechsel stoppt die Übertragung.",
+        "Changing devices stops the stream.",
+        "Cambiar de dispositivo detiene la transmisión.",
+    ),
     ("Hand gehoben", "Hand raised", "Mano levantada"),
     ("Hand heben", "Raise hand", "Levantar la mano"),
     ("Hand heben (H)", "Raise hand (H)", "Levantar la mano (H)"),
     ("Hand senken", "Lower hand", "Bajar la mano"),
     ("Hand senken (H)", "Lower hand (H)", "Bajar la mano (H)"),
+    ("Hände", "Hands", "Manos"),
     (
         "Ich stimme einer Aufzeichnung zu.",
         "I agree to a recording.",
@@ -234,6 +240,7 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Iniciar videollamada",
     ),
     ("Moderation", "Moderation", "Moderación"),
+    ("Neu beitreten", "Rejoin", "Volver a unirse"),
     ("Nicht beitreten", "Do not join", "No unirse"),
     ("Nicht im Anruf", "Not in the call", "Fuera de la llamada"),
     (
@@ -296,6 +303,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Tastenkürzel: V",
         "Keyboard shortcut: V",
         "Atajo de teclado: V",
+    ),
+    (
+        "Ton oder Bild fehlen?",
+        "Missing sound or video?",
+        "¿Falta sonido o imagen?",
     ),
     (
         "Vollbild umschalten",

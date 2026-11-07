@@ -704,6 +704,8 @@ fn update_admission_rechecks_nonterminal_calls_and_pending_call_work() {
             share: MediaState::Unavailable,
             sharing: ScreenShareState::Idle,
             streams: Page::empty(),
+            replacement_generation: false,
+            remote_audio_received: 0,
             recording: talk_core::ui::presentation::CallRecordingState::Unknown,
             recording_control: None,
             recording_pending: false,

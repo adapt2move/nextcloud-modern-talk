@@ -70,6 +70,7 @@ impl Desktop {
                     body = body.child(div().flex().items_center().gap_3()
                         .child(self.switch("recording-consent-switch", "Ich stimme einer Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
                         .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer Aufzeichnung zu."))))
+                        .when(!selected, |d| d.child(self.hint(self.l("Bestätige zuerst die Zustimmung."))))
                         .child(div().flex().flex_wrap().justify_end().gap_3()
                             .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Quiet, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
                             .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
@@ -80,7 +81,7 @@ impl Desktop {
                 .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
                 .child(div().flex().flex_wrap().justify_end().gap_3()
                     .child(self.button("cancel-end-everyone", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
-                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx))),
+                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx).bg(gpui::rgb(0x9e3e32)).text_color(gpui::white()))),
             Overlay::Thread => self.thread_body(cx),
             Overlay::Search => self.search_body(cx),
             Overlay::Create => self.creation_body(cx),
@@ -251,6 +252,9 @@ impl Desktop {
                 call.participants.as_slice().len()
             )));
             for raised in [true, false] {
+                if raised && call.participants.as_slice().iter().any(|p| p.raised_hand) {
+                    body = body.child(self.hint(self.l("Hände")));
+                }
                 for p in call
                     .participants
                     .as_slice()

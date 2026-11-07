@@ -95,6 +95,8 @@ def capture(args, before_runtime_cleanup=None):
                             run(["xdotool", "mousemove", "--window", xid, str(args.width - 49), "86", "click", "1"], env)
                             time.sleep(.5)
                         run(["xdotool", "mousemove", "--sync", "1590", "1190"], env)
+                        if args.settle_seconds:
+                            time.sleep(args.settle_seconds)
                         screenshot = out / f"{label}.png"
                         # A visible X11 window can precede its first Vulkan frame,
                         # especially during cold shader compilation on software GPUs.
@@ -152,6 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=1200)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--scale", type=int, choices=[100,125,150,200], default=100)
+    parser.add_argument("--settle-seconds", type=float, default=0, help="Wait for a bounded timed state before capture")
     parser.add_argument("--call-fullscreen", action="store_true", help="Activate the call header fullscreen control before capture")
     parser.add_argument("--interactions", action="store_true", help="Run native keyboard/mouse checks; requires tesseract-ocr")
     capture(parser.parse_args())

@@ -494,8 +494,22 @@ impl Desktop {
                 }
             }
         }
-        list = list.child(self.hint(self.l("Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.")))
-            .child(self.button("call-device-settings", "Geräteeinstellungen öffnen", ButtonStyle::Quiet, true, LocalAction::OpenDeviceSettings, cx).w_full());
+        list = list
+            .child(
+                self.hint(self.l("Gerätewechsel stoppt die Übertragung."))
+                    .text_ellipsis(),
+            )
+            .child(
+                self.button(
+                    "call-device-settings",
+                    "Geräteeinstellungen öffnen",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::OpenDeviceSettings,
+                    cx,
+                )
+                .w_full(),
+            );
         Some(list)
     }
 

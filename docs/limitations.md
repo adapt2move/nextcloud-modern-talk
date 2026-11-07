@@ -63,7 +63,11 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   native subscription requests despite advertised in-call flags. The native
   fresh admission remains blocked rather than bypassing that denial. An explicit
   web-peer call leave/rejoin restores AV in the exercised case. This is separate
-  from the qualified interruption/resume of a surviving HPB session.
+  from the qualified interruption/resume of a surviving HPB session. After an
+  observed automatic generation replacement, the call view offers an explicit
+  rejoin if peers remain but no decoded remote audio or video has flowed for ten
+  seconds. This revalidates admission and consent and retains microphone/camera
+  intent; it does not repair the remote peer's HPB state or promise AV recovery.
 - Guest/federated media and required call E2EE remain unavailable.
 - The call view has adaptive gallery, local focus and a speaking-level-based
   speaker view. The level is a short-lived indicator from received audio or

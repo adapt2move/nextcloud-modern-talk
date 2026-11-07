@@ -394,14 +394,38 @@ impl Desktop {
                 },
             )
             .when(row.kind != ConversationKind::NoteToSelf, |d| {
-                d.child(self.icon_button(
-                    "call",
-                    (call_icon, call_name),
-                    ButtonStyle::Quiet,
-                    call_availability.explained_elsewhere(),
-                    LocalAction::Call,
-                    cx,
-                ))
+                d.child(if row.call_active == Some(true) {
+                    self.control(
+                        "call",
+                        ButtonStyle::Quiet,
+                        call_availability.hinted(),
+                        LocalAction::Call,
+                        cx,
+                    )
+                    .relative()
+                    .size(px(34.))
+                    .min_h(px(34.))
+                    .p_0()
+                    .child(self.scaled_icon("headphones", 18., t.success))
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(3.))
+                            .right(px(3.))
+                            .size(px(6.))
+                            .rounded_full()
+                            .bg(t.success),
+                    )
+                } else {
+                    self.icon_button(
+                        "call",
+                        (call_icon, call_name),
+                        ButtonStyle::Quiet,
+                        call_availability.explained_elsewhere(),
+                        LocalAction::Call,
+                        cx,
+                    )
+                })
             })
             .when(row.kind == ConversationKind::Direct, |d| {
                 d.child(self.icon_button(
@@ -878,14 +902,14 @@ impl Desktop {
             .child(self.scroll_area(super::navigation::Region::Call).max_h_full().w_full().max_w(px(360.)).rounded(px(16.)).bg(t.surface).border_1().border_color(t.border).shadow_lg().p_6()
                 .child(div().flex().flex_col().items_center().gap_4().text_center()
                     .child(div().flex().items_center().gap_2().child(self.scaled_icon("phone",16.,t.muted)).child(self.hint(self.l("Eingehender Direktanruf"))))
-                    .child(self.avatar(call.participants.as_slice().iter().find(|p|!p.self_user).map_or("?",|p|p.initials.as_str()),true))
+                    .child(self.incoming_call_avatar(self.avatar(call.participants.as_slice().iter().find(|p|!p.self_user).map_or("?",|p|p.initials.as_str()),true)))
                     .child(div().text_size(self.sp(24.)).font_weight(FontWeight::MEDIUM).child(self.lf("{name} ruft an", &[("name", call.title.as_str())])))
                     .child(self.hint(&self.lf("Persönliches Gespräch · {account}",&[("account",account)])))
                     .child(self.hint(self.l("Mikrofon und Kamera bleiben bis zur Annahme aus.")))
-                    .child(div().flex().justify_center().gap_8().py_3()
+                    .child(div().flex().justify_center().gap_3().py_3()
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("decline",("phone-down","Ablehnen"),ButtonStyle::StageDanger,Availability::available().labelled(),LocalAction::Intent(UiIntent::DeclineDirect(call.scope)),cx).size(px(56.)).min_h(px(56.))).child(self.l("Ablehnen")))
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx).size(px(56.)).min_h(px(56.))).child(self.l("Annehmen")))
-                        .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept-video",("video","Mit Video annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::AcceptCallWithVideo,cx)).child(self.l("Mit Video annehmen"))))
+                        .child(div().flex().flex_col().items_center().justify_center().gap_2().child(self.button_with_icon("accept-video", ("Mit Video annehmen", "video"), ButtonStyle::Primary, Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(), LocalAction::AcceptCallWithVideo, cx).min_h(px(44.)).rounded_full())))
                     .child(self.button("dismiss","Später ansehen",ButtonStyle::Quiet,true,LocalAction::DismissIncoming,cx))))
     }
 }

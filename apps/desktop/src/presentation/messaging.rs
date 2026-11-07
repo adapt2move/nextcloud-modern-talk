@@ -1342,7 +1342,8 @@ impl Desktop {
                 )
                 .into_any_element()
             } else {
-                self.message_history(px(0.), compact, cx).into_any_element()
+                self.message_history(if compact { self.sp(8.) } else { px(0.) }, compact, cx)
+                    .into_any_element()
             });
         } else if state.confirmed_empty() && !context_pending {
             let has_older = self.snapshot.message_panel.as_ref().is_some_and(|panel| {

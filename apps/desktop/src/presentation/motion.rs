@@ -106,8 +106,7 @@ impl MotionTrigger {
 }
 
 impl Desktop {
-    /// The live recording indicator is the only repeating motion here; it is
-    /// mounted only during capture and becomes static under Reduce Motion.
+    /// The live recording indicator becomes static under Reduce Motion.
     pub(super) fn recording_dot(&self) -> AnyElement {
         let dot = div()
             .size(gpui::px(8.))
@@ -120,6 +119,47 @@ impl Desktop {
                 "voice-recording-dot",
                 Animation::new(Duration::from_millis(1_200)).repeat(),
                 |dot, progress| dot.opacity(0.55 + 0.45 * (1. - (2. * progress - 1.).abs())),
+            )
+            .into_any_element()
+        }
+    }
+
+    pub(super) fn incoming_call_avatar(&self, avatar: Div) -> AnyElement {
+        let ring = div()
+            .p(gpui::px(6.))
+            .rounded_full()
+            .border_2()
+            .border_color(self.theme.accent)
+            .child(avatar);
+        if self.reduced_motion {
+            ring.into_any_element()
+        } else {
+            ring.with_animation(
+                "incoming-call-ring",
+                Animation::new(Duration::from_millis(1600)).repeat(),
+                |ring, progress| ring.opacity(0.72 + 0.28 * (1. - (2. * progress - 1.).abs())),
+            )
+            .into_any_element()
+        }
+    }
+
+    pub(super) fn call_speaking_bars(&self, id: ElementId, color: gpui::Hsla) -> AnyElement {
+        let bars = div().flex().items_end().gap_1().h(gpui::px(12.)).children(
+            [5., 10., 7.].into_iter().map(|height| {
+                div()
+                    .w(gpui::px(2.))
+                    .h(gpui::px(height))
+                    .rounded_full()
+                    .bg(color)
+            }),
+        );
+        if self.reduced_motion {
+            bars.into_any_element()
+        } else {
+            bars.with_animation(
+                id,
+                Animation::new(Duration::from_millis(900)).repeat(),
+                |bars, progress| bars.opacity(0.65 + 0.35 * (1. - (2. * progress - 1.).abs())),
             )
             .into_any_element()
         }
@@ -254,7 +294,7 @@ impl Desktop {
                     move |element, progress| {
                         count_frame(&frames);
                         element
-                            .bottom(gpui::px(20. + 32. * progress))
+                            .bottom(gpui::relative(0.5 + 0.18 * progress))
                             .opacity(1. - progress)
                     },
                 )
