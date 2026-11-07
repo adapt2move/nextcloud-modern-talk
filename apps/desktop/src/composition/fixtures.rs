@@ -709,6 +709,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 } else {
                     7
                 }),
+                participant_names: if id == 1 {
+                    page([text("Mara Fischer"), text("Jonas Weber")])
+                } else {
+                    Page::empty()
+                },
                 send: Decision::Allowed,
                 attach: Decision::Unknown,
                 draft_clipboard: Decision::Allowed,

@@ -24,14 +24,19 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- The quick switcher searches loaded conversation names and the server's user
-  directory. It does not yet match group participant names. Sidebar unread and
+- The quick switcher searches loaded conversation names, up to 16 observed
+  participant names per eligible room, and the server's user directory. Its
+  participant index is session-only and is filled gradually when permitted.
+  Sidebar unread and
   mention filters are stored per durable account; mention state is unavailable
   for cached rooms until a capable server supplies it. Conversation notification
   changes use server-confirmed room settings; optimistic changes and a sidebar
   notification menu are not yet implemented.
-- Typing indicators, voice messages, complete document viewers, account-wide
-  content search and parts of moderation remain incomplete. Documents can open
+- Account-wide message search requires the server's Talk message provider and
+  supported filters. It shows at most two pages and only results for rooms in
+  the currently admitted room list; offline suggestions use the selected cached
+  history. Search dates are UTC. Typing indicators, voice messages, complete
+  document viewers and parts of moderation remain incomplete. Documents can open
   in the Cloud web view; poll drafts remain server-managed.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document

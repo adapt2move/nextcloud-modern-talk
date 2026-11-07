@@ -23,11 +23,13 @@ struct RoomObservation {
     dirty: bool,
     operation: Option<OperationId>,
     reading_details: bool,
+    index_generation: u64,
 }
 #[derive(Default)]
 pub(super) struct Metadata {
     rooms: Vec<RoomObservation>,
     hinted: bool,
+    index_generation: u64,
 }
 fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     let mut identity = room.clone();
@@ -45,11 +47,26 @@ impl Metadata {
             room.context == context && room.listed.actions.read_messages == Decision::Allowed
         })
     }
+    pub(super) fn participant_index_ticket(&self, context: ConversationRef) -> Option<u64> {
+        self.rooms
+            .iter()
+            .find(|room| {
+                room.context == context
+                    && room.listed.actions.read_messages == Decision::Allowed
+                    && room.listed.actions.list_participants == Decision::Allowed
+                    && !room.listed.classified
+                    && !room.listed.sensitive
+                    && !room.listed.unknown_restrictions
+            })
+            .map(|room| room.index_generation)
+    }
     pub(super) fn hint(&mut self) -> Vec<ConversationRef> {
         self.hinted = true;
+        self.index_generation = self.index_generation.saturating_add(1);
         let mut retired = Vec::new();
         for room in &mut self.rooms {
             room.dirty = true;
+            room.index_generation = self.index_generation;
             if room.reading_details && room.operation.take().is_some() {
                 retired.push(room.context);
             }
@@ -62,6 +79,8 @@ impl Metadata {
         list: &protocol::ConversationList,
     ) -> Vec<(ConversationRef, bool)> {
         let mut retired = Vec::new();
+        self.index_generation = self.index_generation.saturating_add(1);
+        let index_generation = self.index_generation;
         self.rooms.retain(|old| {
             old.context.account == scope
                 && list
@@ -78,6 +97,7 @@ impl Metadata {
             let listed = metadata_identity(room);
             if let Some(old) = self.rooms.iter_mut().find(|r| r.context == context) {
                 if self.hinted || old.listed != listed {
+                    old.index_generation = index_generation;
                     let policy_changed = old.listed.role != listed.role
                         || old.listed.actions != listed.actions
                         || old.listed.sensitive != listed.sensitive
@@ -103,6 +123,7 @@ impl Metadata {
                     dirty: true,
                     operation: None,
                     reading_details: false,
+                    index_generation,
                 });
             }
         }
@@ -176,7 +197,9 @@ impl Metadata {
             .flatten()
     }
     pub(super) fn revoke(&mut self, context: ConversationRef) {
+        self.index_generation = self.index_generation.saturating_add(1);
         if let Some(room) = self.rooms.iter_mut().find(|r| r.context == context) {
+            room.index_generation = self.index_generation;
             room.details = None;
             room.observed_at = None;
             room.observed = None;
@@ -366,6 +389,15 @@ impl Accounts {
         if let Some(account) = self.background.account_mut(context.account) {
             account.metadata.revoke(context);
         }
+        self.background.forget_member_names(context);
+        self.snapshot.conversations =
+            page(self.snapshot.conversations.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = Page::empty();
+                }
+                row
+            }));
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if matches!(pending.purpose, Purpose::Room(_, c, _, _) if c == context) {
@@ -686,6 +718,25 @@ impl Accounts {
                         panel.details_stale = false;
                     }
                     wire::ConversationResult::Members(people) => {
+                        let names: Page<Text<256>, 16> = page(
+                            people
+                                .as_slice()
+                                .iter()
+                                .filter(|m| !m.is_self && !m.name.as_str().trim().is_empty())
+                                .take(16)
+                                .map(|m| m.name.clone()),
+                        );
+                        let names_allowed =
+                            self.background.account(context.account).is_some_and(|a| {
+                                a.metadata.participant_index_ticket(context).is_some()
+                            });
+                        if names_allowed {
+                            self.background.remember_member_names(
+                                context,
+                                names.clone(),
+                                Instant::now(),
+                            );
+                        }
                         panel.members = page(people.as_slice().iter().map(|m| view::Member {
                             id: person(context, m.id.local),
                             name: m.name.clone(),
@@ -708,6 +759,11 @@ impl Accounts {
                                 let mut row = row.clone();
                                 if row.context == context {
                                     row.participants = count;
+                                    row.participant_names = if names_allowed {
+                                        names.clone()
+                                    } else {
+                                        Page::empty()
+                                    };
                                 }
                                 row
                             }));

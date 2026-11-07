@@ -54,6 +54,18 @@ fn score(name: &str, query: &str) -> Option<usize> {
     Some(256 + skipped)
 }
 
+fn room_score(room: &talk_core::ui::presentation::ConversationView, query: &str) -> Option<usize> {
+    score(room.title.as_str(), query)
+        .into_iter()
+        .chain(
+            room.participant_names
+                .as_slice()
+                .iter()
+                .filter_map(|name| score(name.as_str(), query).map(|value| value + 8)),
+        )
+        .min()
+}
+
 fn retryable(reason: talk_core::ui::UnavailableReason) -> bool {
     use talk_core::ui::{UnavailableReason, presentation::ConnectionFailure};
     matches!(
@@ -160,7 +172,7 @@ impl Desktop {
                 .enumerate()
                 .filter(|(_, r)| Some(r.context.account) == self.snapshot.active_account)
                 .filter_map(|(index, r)| {
-                    score(r.title.as_str(), query)
+                    room_score(r, query)
                         .map(|score| (score, std::cmp::Reverse(r.last_activity), index, r.context))
                 })
                 .collect();
@@ -406,12 +418,25 @@ impl Desktop {
 
 #[cfg(test)]
 mod tests {
-    use super::score;
+    use super::{room_score, score};
     #[test]
     fn fuzzy_matching_prefers_prefix_and_preserves_unicode() {
         assert!(score("Navigation Team", "nav") < score("Team Navigation", "nav"));
         assert!(score("Málaga", "mlg").is_some());
         assert_eq!(score("Alpha", "xyz"), None);
         assert_eq!(score("Alpha", ""), Some(0));
+    }
+    #[test]
+    fn group_matches_observed_participant_names_without_a_title_match() {
+        let fixture = crate::composition::fixtures::snapshot(Some("search-navigation"));
+        let room = fixture
+            .conversations
+            .as_slice()
+            .iter()
+            .find(|room| room.title.as_str() == "Produktteam")
+            .unwrap();
+        assert_eq!(score(room.title.as_str(), "fischer"), None);
+        assert!(room_score(room, "fischer").is_some());
+        assert_eq!(room_score(room, "unknown person"), None);
     }
 }

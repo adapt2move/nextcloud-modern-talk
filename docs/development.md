@@ -157,7 +157,7 @@ The fixture shows a pending send rather than fabricating upload success. It has
 no file or server I/O. Native Finder promises require a real macOS account-connected
 run; an isolated Cocoa binding check or Linux UI run does not qualify them.
 
-Use `search-navigation` for the fictional quick switcher and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
+Use `search-navigation` for the fictional quick switcher, `account-search` for grouped message results and filters, and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
 
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 

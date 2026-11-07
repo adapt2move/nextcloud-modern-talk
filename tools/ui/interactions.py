@@ -162,9 +162,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
         type_text('Jonas')
-        expect('shortcut focuses the switcher input', ['Jonas Weber'])
+        expect('switcher matches a group participant as well as a direct room', ['Jonas Weber', 'Produktteam'])
         key('Escape')
         expect('Escape closes switcher', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+    elif scenario == 'account-search':
+        expect('account search groups matching messages', ['Produktteam', 'Navigation', 'Mara Fischer'])
+        key('Return')
+        expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

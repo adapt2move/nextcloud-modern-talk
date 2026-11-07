@@ -103,6 +103,31 @@ fn known(now: Instant) -> (Accounts, ConversationRef, protocol::Conversation) {
 }
 
 #[test]
+fn participant_index_tickets_retire_on_hints_permission_changes_and_removal() {
+    let now = Instant::now();
+    let (mut model, context, mut room) = known(now);
+    let metadata = &mut model
+        .background
+        .account_mut(context.account)
+        .unwrap()
+        .metadata;
+    let first = metadata.participant_index_ticket(context).unwrap();
+    metadata.hint();
+    let after_hint = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(first, after_hint);
+    room.actions.list_participants = Decision::Denied;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    assert_eq!(metadata.participant_index_ticket(context), None);
+    room.actions.list_participants = Decision::Allowed;
+    metadata.reconcile(context.account, &list(context, [room.clone()]));
+    let restored = metadata.participant_index_ticket(context).unwrap();
+    assert_ne!(after_hint, restored);
+    metadata.reconcile(context.account, &list(context, []));
+    metadata.reconcile(context.account, &list(context, [room]));
+    assert_ne!(metadata.participant_index_ticket(context), Some(restored));
+}
+
+#[test]
 fn newly_created_room_can_track_its_first_detail_read_before_list_refresh() {
     let now = Instant::now();
     let (mut model, old, _) = known(now);

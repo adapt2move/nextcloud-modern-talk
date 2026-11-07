@@ -359,6 +359,8 @@ pub struct ConversationView {
     pub archive: Decision,
     pub presence: Presence,
     pub participants: Option<u16>,
+    /// A small, session-only index of names observed with participant permission.
+    pub participant_names: Page<Text<256>, 16>,
     pub send: Decision,
     pub attach: Decision,
     /// Explicit clipboard-export privacy policy, not a generic server permission

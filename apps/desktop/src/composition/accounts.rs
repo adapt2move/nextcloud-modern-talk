@@ -59,6 +59,7 @@ enum Purpose {
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
     Search(RequestId, AccountScope, bool),
+    ParticipantIndex(ConversationRef, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
@@ -555,6 +556,7 @@ impl Accounts {
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
+        self.tick_participant_index();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -671,6 +673,7 @@ impl Accounts {
             Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Search(request,account,append)=>self.complete_account_search(request,account,append,result),
+            Purpose::ParticipantIndex(context, generation)=>self.complete_participant_index(context,generation,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
@@ -1599,6 +1602,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         archive: r.archive,
         presence: Presence::Unknown,
         participants: None,
+        participant_names: Page::empty(),
         send: r.actions.send_message,
         attach: Decision::Unknown,
         draft_clipboard: if r.sensitive || r.classified || r.organization.classified == Some(true) {

@@ -73,6 +73,7 @@ fn snapshot() -> PresentationSnapshot {
         archive: Decision::Unknown,
         presence: Presence::Unknown,
         participants: None,
+        participant_names: Page::empty(),
         send: Decision::Allowed,
         attach: Decision::Denied,
         draft_clipboard: Decision::Allowed,

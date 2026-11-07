@@ -589,6 +589,7 @@ fn row(room: &CacheRoom, context: ConversationRef) -> ConversationView {
         archive: Decision::Unknown,
         presence: Presence::Unknown,
         participants: room.participant_count.and_then(|n| u16::try_from(n).ok()),
+        participant_names: Page::empty(),
         send: Decision::Unknown,
         attach: Decision::Unknown,
         draft_clipboard: Decision::Unknown,
