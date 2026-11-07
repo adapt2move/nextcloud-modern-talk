@@ -320,6 +320,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('search shortcut opens the search surface', ['Suchen', 'Personen'])
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
+        time.sleep(.3)  # Allow native focus restoration after closing search.
         type_text('DRAFTALPHA'); key('Return')
         expect('draft retained after busy rejection' if scenario == 'busy' else 'draft retained after asynchronous failure',
                ['DRAFTALPHA', 'ausgelastet' if scenario == 'busy' else 'Nicht gesendet'])
