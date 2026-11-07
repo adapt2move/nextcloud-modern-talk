@@ -214,6 +214,16 @@ impl Transport {
     ) -> Result<api::signaling::PeerSession, PortError> {
         self.api.own_room_session(&context(c), room).map_err(error)
     }
+    pub(super) async fn retire_stopped_external_meeting(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+    ) -> Result<(), PortError> {
+        self.api
+            .retire_stopped_external_meeting(&context(c), room)
+            .await
+            .map_err(error)
+    }
     pub(super) async fn finish_meeting(
         &mut self,
         c: &OperationContext,

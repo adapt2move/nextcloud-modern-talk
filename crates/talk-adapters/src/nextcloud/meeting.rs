@@ -503,6 +503,13 @@ impl NextcloudClient {
         if self.media_service.is_none() {
             return Err(self.error(ErrorKind::Unconfigured));
         }
+        if matches!(command, Command::Start { .. }) {
+            let room = RoomToken::parse(self.check_room(scope.conversation)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            self.transport
+                .retire_stopped_external_meeting(context, &room)
+                .await?;
+        }
         self.settle_call(context).await?;
         if let Command::Start { entry, wishes, .. } = command {
             if entry == Entry::IncomingDirect {
