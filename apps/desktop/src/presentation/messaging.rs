@@ -2104,6 +2104,7 @@ impl Desktop {
                 super::shell::chat_header::scroll_under_header(
                     header,
                     constrained,
+                    !self.theme.reduced_transparency && !cfg!(target_os = "windows"),
                     cx.processor(move |this, inset, _, cx| {
                         this.in_surface(inert, |this| this.message_history(inset, compact, cx))
                     }),

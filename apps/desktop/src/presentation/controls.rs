@@ -1,10 +1,13 @@
 //! Private native control vocabulary; all icons are fixed embedded SVG assets.
 mod feedback;
 mod forms;
+mod material;
 mod skeletons;
 mod surfaces;
 use super::{ButtonStyle, Desktop, LocalAction};
 pub(super) use crate::presentation::controls::feedback::BannerRole;
+pub(super) use crate::presentation::controls::material::{Materials, Texture};
+pub(super) use crate::presentation::controls::material::{glass, glass_corners};
 pub(super) use crate::presentation::controls::skeletons::Skeleton;
 pub(super) use crate::presentation::controls::surfaces::CONTENT_RADIUS;
 use gpui::{
@@ -449,7 +452,7 @@ impl gpui::RenderOnce for ReasonTip {
                     .text_color(self.theme.text)
                     .text_size(self.text_size)
                     .line_height(self.line_height)
-                    .shadow_sm()
+                    .shadow(self.theme.elevation(super::theme::Elevation::Raised))
                     .flex()
                     .flex_col()
                     .gap_1()

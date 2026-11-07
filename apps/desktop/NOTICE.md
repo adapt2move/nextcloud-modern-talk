@@ -52,4 +52,7 @@ project artwork under EUPL-1.2. [Icon provenance](assets/icons/PROVENANCE.md) an
 `assets/icons/lucide-manifest.json` identify exact upstream paths and hashes.
 SVG bytes are embedded; no runtime asset directory is needed.
 
+The material grain and dot-grid PNG tiles are original project artwork under
+EUPL-1.2, generated deterministically by `tools/ui/generate-materials.py`.
+
 Application sounds have separate upstream licenses. See [sound attribution](assets/sounds/README.md) and the included license texts; retain them in binary distributions.

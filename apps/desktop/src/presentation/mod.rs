@@ -269,9 +269,18 @@ pub enum ButtonStyle {
 
 use crate::presentation::probes::Probe;
 
+/// Prepared, bounded decorative images; composition owns decoding the embedded assets.
+pub struct MaterialImages {
+    pub grain: Option<gpui::ImageSource>,
+    pub light: Option<gpui::ImageSource>,
+    pub dark: Option<gpui::ImageSource>,
+}
+
 pub struct InitialView {
     pub probe: Probe,
     pub development: bool,
+    pub material_preview: bool,
+    pub material_images: MaterialImages,
     pub palette: Palette,
     pub appearance: Appearance,
     pub overlay: Option<Overlay>,
@@ -292,6 +301,8 @@ pub struct InitialView {
 use crate::presentation::feedback::Feedback;
 
 pub struct Desktop {
+    materials: controls::Materials,
+    material_preview: bool,
     text_selection: Entity<selectable::Selection>,
     _text_selection_observer: Subscription,
     _text_link_subscription: Subscription,
@@ -497,6 +508,8 @@ impl Desktop {
         let InitialView {
             probe,
             development,
+            material_preview,
+            material_images,
             palette,
             appearance,
             overlay: initial_overlay,
@@ -697,6 +710,8 @@ impl Desktop {
             None
         };
         let mut desktop = Self {
+            materials: controls::Materials::new(material_images, cx),
+            material_preview,
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
             text_selection,
@@ -1048,7 +1063,9 @@ impl Desktop {
             cx.notify();
         }
         self.refresh_preferences(cx);
-        if self.theme.reduced_transparency != self.settings_port.reduced_transparency() {
+        if self.theme.reduced_transparency
+            != (self.settings_port.reduced_transparency() && !self.material_preview)
+        {
             cx.notify();
         }
         self.refresh_onboarding(cx);
@@ -3468,6 +3485,7 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.materials.begin_frame();
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;
@@ -3560,7 +3578,8 @@ impl Render for Desktop {
         self.navigation.hints.begin();
         self.navigation.prepare_history(self.snapshot.selected);
         self.theme = Theme::resolve(self.palette, self.appearance, cx.window_appearance());
-        self.theme.reduced_transparency = self.settings_port.reduced_transparency();
+        self.theme.reduced_transparency =
+            self.settings_port.reduced_transparency() && !self.material_preview;
         let t = self.theme;
         for input in self.content_ui.inputs() {
             input.update(cx, |i, _| {
@@ -3936,6 +3955,18 @@ impl Render for Desktop {
             .text_size(self.sp(14.))
             .line_height(self.sp(22.))
             .bg(t.chrome())
+            .children(self.materials.layer(
+                if t.dark {
+                    controls::Texture::PatternDark
+                } else {
+                    controls::Texture::PatternLight
+                },
+                t.reduced_transparency,
+            ))
+            .children(
+                self.materials
+                    .layer(controls::Texture::Grain, t.reduced_transparency),
+            )
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()

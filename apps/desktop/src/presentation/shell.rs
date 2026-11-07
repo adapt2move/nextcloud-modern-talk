@@ -186,11 +186,20 @@ impl Desktop {
             }
             return self.content_card(
                 div()
+                    .relative()
                     .flex()
                     .items_center()
                     .justify_center()
                     .flex_col()
                     .gap_4()
+                    .children(self.materials.layer(
+                        if t.dark {
+                            super::controls::Texture::PatternDark
+                        } else {
+                            super::controls::Texture::PatternLight
+                        },
+                        t.reduced_transparency,
+                    ))
                     .child(self.l("Wähle ein Gespräch."))
                     .when(self.local_feedback_visible(), |d| {
                         d.child(self.feedback_view(cx))
@@ -281,8 +290,17 @@ impl Desktop {
         let header = div()
             .id("conversation-header")
             .group("conversation-header")
+            .relative()
             .rounded_t(px(CONTENT_RADIUS))
-            .bg(chat_header::surface(h))
+            .bg(if h.reduced_transparency { h.surface } else { gpui::transparent_black() })
+            .children((!h.reduced_transparency).then(|| {
+                super::controls::glass_corners(h.surface, h.dark, gpui::Corners {
+                    top_left: px(CONTENT_RADIUS),
+                    top_right: px(CONTENT_RADIUS),
+                    bottom_left: px(0.),
+                    bottom_right: px(0.),
+                })
+            }))
             .text_color(h.text)
             .flex_none()
             .flex()
@@ -777,6 +795,7 @@ impl Desktop {
                     .relative()
                     .child(self.field_ring(input.focus_handle(cx), 10.))
                     .rounded(px(10.))
+                    .bg(t.surface)
                     .border_1()
                     .border_color(if input.read(cx).rejected {
                         t.danger

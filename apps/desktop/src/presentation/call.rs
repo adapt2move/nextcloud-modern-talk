@@ -686,6 +686,10 @@ impl Desktop {
                     } else {
                         t.stage_panel
                     })
+                    .children(
+                        self.materials
+                            .layer(super::controls::Texture::Tile, t.reduced_transparency),
+                    )
                     .flex()
                     .flex_col()
                     .items_center()
@@ -1403,6 +1407,13 @@ impl Desktop {
                 .child(navigation_controls.child(more));
         }
         let controls = div()
+            .relative()
+            .bg(if t.reduced_transparency {
+                t.stage
+            } else {
+                gpui::transparent_black()
+            })
+            .children((!t.reduced_transparency).then(|| super::controls::glass(t.stage, true, 0.)))
             .flex_none()
             .flex()
             .items_center()
@@ -1434,6 +1445,8 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .bg(t.stage)
+                    .children(self.materials.layer(super::controls::Texture::PatternDark, t.reduced_transparency))
+                    .children(self.materials.layer(super::controls::Texture::Card, t.reduced_transparency))
                     .text_color(t.stage_text)
                     .child(
                         div()

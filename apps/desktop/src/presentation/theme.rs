@@ -1,4 +1,12 @@
-use gpui::{Hsla, WindowAppearance, rgb};
+use gpui::{BoxShadow, Hsla, WindowAppearance, point, px, rgb};
+
+#[derive(Clone, Copy)]
+pub(super) enum Elevation {
+    Card,
+    Raised,
+    Popover,
+    Dialog,
+}
 
 pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +50,38 @@ fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
 impl Theme {
+    /// Two cool shadow layers keep elevation consistent with the brand palette.
+    pub(super) fn elevation(self, level: Elevation) -> Vec<BoxShadow> {
+        let (offset, blur, strength) = match level {
+            Elevation::Card => (8., 24., 1.),
+            Elevation::Raised => (3., 8., 0.7),
+            Elevation::Popover => (8., 24., 1.3),
+            Elevation::Dialog => (16., 40., 1.6),
+        };
+        let color = if self.dark {
+            gpui::black()
+        } else {
+            color(0x26354b)
+        };
+        vec![
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.18 } else { 0.05 } * strength),
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(2.),
+                spread_radius: px(0.),
+            },
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.35 } else { 0.07 } * strength),
+                offset: point(px(0.), px(offset)),
+                blur_radius: px(blur),
+                spread_radius: px(0.),
+            },
+        ]
+    }
+
+    pub(super) fn inner_highlight(self) -> Hsla {
+        gpui::rgba(if self.dark { 0xffffff1c } else { 0xffffff99 }).into()
+    }
     /// Small presence marks use distinct, saturated colors, independent of the
     /// darker warning/error text colors used on light surfaces.
     pub fn presence_dot(self, presence: talk_core::ui::presentation::Presence) -> Hsla {

@@ -218,6 +218,7 @@ impl Desktop {
             .iter()
             .find(|a| Some(a.scope) == self.snapshot.active_account);
         let mut sidebar = div()
+            .relative()
             .flex_none()
             .w(px(260.))
             .when(!narrow, |d| d.h_full())
@@ -225,7 +226,14 @@ impl Desktop {
             .flex_col()
             .px(px(12.))
             .pt(px(14.))
-            .pb(px(10.));
+            .pb(px(10.))
+            .children(
+                (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
+            )
+            .children(
+                self.materials
+                    .layer(super::controls::Texture::Grain, t.reduced_transparency),
+            );
         if self
             .preferences
             .active

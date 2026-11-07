@@ -1,6 +1,9 @@
 //! Shared elevation and geometry for content surfaces and context menus.
 use crate::presentation::{Desktop, Overlay};
-use gpui::{BoxShadow, Div, div, point, prelude::*, px, rgb};
+use gpui::{Div, div, prelude::*, px};
+
+use super::{Texture, material};
+use crate::presentation::theme::Elevation;
 
 pub(in crate::presentation) const CONTENT_RADIUS: f32 = 16.;
 
@@ -39,17 +42,46 @@ impl Desktop {
         }
     }
 
-    /// Common opaque dialog panel; callers own geometry, contents and focus.
+    /// Common dialog panel; callers own geometry, contents and focus.
     pub(in crate::presentation) fn dialog_shell_surface(&self) -> Div {
         self.style_dialog_shell(div())
     }
-    pub(in crate::presentation) fn style_dialog_shell<T: Styled>(&self, surface: T) -> T {
+    pub(in crate::presentation) fn style_dialog_shell<T: Styled + ParentElement>(
+        &self,
+        surface: T,
+    ) -> T {
+        let t = self.theme;
+        self.style_floating_surface(
+            surface.relative(),
+            t.surface,
+            t.dark,
+            16.,
+            Elevation::Dialog,
+        )
+        .children(self.materials.layer(Texture::Card, t.reduced_transparency))
+    }
+
+    pub(in crate::presentation) fn style_floating_surface<T: Styled + ParentElement>(
+        &self,
+        surface: T,
+        tint: gpui::Hsla,
+        dark: bool,
+        radius: f32,
+        elevation: Elevation,
+    ) -> T {
+        let t = self.theme;
         surface
-            .bg(self.theme.content_material())
-            .rounded(px(16.))
+            .bg(if t.reduced_transparency {
+                tint
+            } else {
+                gpui::transparent_black()
+            })
+            .rounded(px(radius))
             .border_1()
-            .border_color(self.theme.border)
-            .shadow_lg()
+            .border_color(t.border)
+            .shadow(t.elevation(elevation))
+            .children((!t.reduced_transparency).then(|| material::glass(tint, dark, radius)))
+            .child(inner_highlight(t, radius))
     }
     pub(in crate::presentation) fn dialog_header(&self) -> Div {
         div()
@@ -77,26 +109,18 @@ impl Desktop {
             .border_color(self.theme.border)
     }
     pub(in crate::presentation) fn context_menu_surface(&self) -> Div {
-        div()
+        let t = self.theme;
+        self.style_floating_surface(div().relative(), t.surface, t.dark, 12., Elevation::Popover)
             .flex()
             .flex_col()
             .gap(px(4.))
             .p_1()
-            .rounded(px(12.))
-            .border_1()
-            .border_color(self.theme.border)
-            .bg(self.theme.surface)
-            .shadow_lg()
     }
     /// Keep the shadow outside the rectangular overflow mask. GPUI 0.2.2 does
     /// not round that mask: full-bleed children must also round their exposed
     /// corners, rather than relying on `overflow_hidden` to clip their fill.
     pub(in crate::presentation) fn content_card(&self, content: Div) -> Div {
-        let color = if self.theme.dark {
-            gpui::black()
-        } else {
-            rgb(0x26354b).into()
-        };
+        let t = self.theme;
         div()
             .relative()
             .size_full()
@@ -108,20 +132,8 @@ impl Desktop {
             } else {
                 gpui::rgba(0x26354b14)
             })
-            .shadow(vec![
-                BoxShadow {
-                    color: color.opacity(if self.theme.dark { 0.18 } else { 0.05 }),
-                    offset: point(px(0.), px(1.)),
-                    blur_radius: px(2.),
-                    spread_radius: px(0.),
-                },
-                BoxShadow {
-                    color: color.opacity(if self.theme.dark { 0.35 } else { 0.07 }),
-                    offset: point(px(0.), px(8.)),
-                    blur_radius: px(24.),
-                    spread_radius: px(0.),
-                },
-            ])
+            .shadow(t.elevation(Elevation::Card))
+            .children(self.materials.layer(Texture::Card, t.reduced_transparency))
             .child(
                 content
                     .relative()
@@ -129,5 +141,15 @@ impl Desktop {
                     .rounded(px(CONTENT_RADIUS))
                     .overflow_hidden(),
             )
+            .child(inner_highlight(t, CONTENT_RADIUS))
     }
+}
+
+fn inner_highlight(theme: crate::presentation::Theme, radius: f32) -> Div {
+    div()
+        .absolute()
+        .inset(px(1.))
+        .rounded(px((radius - 1.).max(0.)))
+        .border_t_1()
+        .border_color(theme.inner_highlight())
 }

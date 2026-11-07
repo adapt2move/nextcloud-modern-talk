@@ -221,58 +221,54 @@ impl Desktop {
                 && Instant::now() < toast.expires
         })?;
         Some(
-            div()
-                .absolute()
-                .right_4()
-                .bottom_4()
-                .occlude()
-                .w(self
+            self.style_floating_surface(
+                div().absolute().right_4().bottom_4().occlude().w(self
                     .sp(360.)
-                    .min((window.viewport_size().width - px(32.)).max(px(1.))))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(self.theme.border)
-                .bg(self.theme.surface)
-                .shadow_lg()
-                .p_3()
-                .flex()
-                .items_start()
-                .gap_2()
-                .child(self.scaled_icon(
-                    "info",
-                    17.,
-                    if toast.reason == MessageActionError::Uncertain {
-                        self.theme.warning
-                    } else {
-                        self.theme.danger
-                    },
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(self.sp(13.))
-                        .line_height(self.sp(19.))
-                        .text_color(self.theme.text)
-                        .child(self.l(copy(toast.reason))),
+                    .min((window.viewport_size().width - px(32.)).max(px(1.)))),
+                self.theme.surface,
+                self.theme.dark,
+                10.,
+                super::theme::Elevation::Popover,
+            )
+            .p_3()
+            .flex()
+            .items_start()
+            .gap_2()
+            .child(self.scaled_icon(
+                "info",
+                17.,
+                if toast.reason == MessageActionError::Uncertain {
+                    self.theme.warning
+                } else {
+                    self.theme.danger
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(self.sp(13.))
+                    .line_height(self.sp(19.))
+                    .text_color(self.theme.text)
+                    .child(self.l(copy(toast.reason))),
+            )
+            .child(
+                self.icon_button(
+                    scoped_id(
+                        "dismiss-action-toast",
+                        toast.key.context,
+                        u128::from(toast.key.id),
+                        0,
+                    ),
+                    ("x", "Meldung schließen"),
+                    ButtonStyle::Quiet,
+                    Availability::available(),
+                    LocalAction::DismissActionToast(toast.key.context, toast.key.id),
+                    cx,
                 )
-                .child(
-                    self.icon_button(
-                        scoped_id(
-                            "dismiss-action-toast",
-                            toast.key.context,
-                            u128::from(toast.key.id),
-                            0,
-                        ),
-                        ("x", "Meldung schließen"),
-                        ButtonStyle::Quiet,
-                        Availability::available(),
-                        LocalAction::DismissActionToast(toast.key.context, toast.key.id),
-                        cx,
-                    )
-                    .size(px(28.))
-                    .min_h(px(28.)),
-                ),
+                .size(px(28.))
+                .min_h(px(28.)),
+            ),
         )
     }
 }

@@ -28,6 +28,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         python("tools/check_docs.py")
+        python("tools/ui/generate-materials.py", "--check")
         python("tools/check_architecture.py")
         python("tools/release/check_workflows.py")
         cargo("fmt", "--all", "--", "--check")

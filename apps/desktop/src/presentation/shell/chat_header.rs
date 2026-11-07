@@ -27,12 +27,14 @@ const TIMELINE_CLEARANCE: f32 = 16.;
 pub(in crate::presentation) fn scroll_under_header(
     header: Div,
     constrained: bool,
+    translucent: bool,
     history: impl FnOnce(Pixels, &mut Window, &mut App) -> Div + 'static,
 ) -> impl IntoElement {
     ScrollUnderHeader {
         header: header.into_any_element(),
         history: Some(Box::new(history)),
         constrained,
+        translucent,
     }
 }
 
@@ -40,6 +42,7 @@ struct ScrollUnderHeader {
     header: AnyElement,
     history: Option<History>,
     constrained: bool,
+    translucent: bool,
 }
 
 impl IntoElement for ScrollUnderHeader {
@@ -137,8 +140,10 @@ impl Element for ScrollUnderHeader {
         let (history, visible) = prepaint;
         // GPUI registers tab stops while painting. Explicit sibling groups
         // retain header -> history -> composer navigation despite paint order.
-        // Apply the same timeline clip used for prepaint and hit testing.
-        window.with_content_mask(Some(ContentMask { bounds: *visible }), |window| {
+        // Hitboxes stay clipped below the header. With glass, paint may extend
+        // behind it so the backdrop can sample the scrolling timeline.
+        let paint_clip = (!self.translucent).then_some(ContentMask { bounds: *visible });
+        window.with_content_mask(paint_clip, |window| {
             window.with_tab_group(Some(1), |window| history.paint(window, cx));
         });
         window.with_tab_group(Some(0), |window| self.header.paint(window, cx));
@@ -172,7 +177,7 @@ mod tests {
                 let original = Theme::resolve(palette, mode, gpui::WindowAppearance::Light);
                 let header = theme(original, palette);
                 let tint = gpui::Rgba::from(header.surface);
-                let alphas = [1., 1.];
+                let alphas = [1., if header.dark { 0.92 } else { 0.98 }];
                 for alpha in alphas {
                     for underlying in [0., 1.] {
                         let background = gpui::Rgba {
