@@ -1193,6 +1193,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 |(name, local)| Member {
                     id: PersonRef { context, local },
                     name: text(name),
+                    author_key: None,
+                    presence: Presence::Unknown,
+                    status_icon: None,
+                    status_message: None,
                     role: MemberRole::Member,
                     source: DirectorySource::User,
                     permissions: Some(255),
