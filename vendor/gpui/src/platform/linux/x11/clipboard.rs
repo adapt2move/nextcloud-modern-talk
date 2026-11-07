@@ -77,7 +77,7 @@ x11rb::atom_manager! {
         TEXT_MIME_UNKNOWN: b"text/plain",
 
         // HTML: b"text/html",
-        // URI_LIST: b"text/uri-list",
+        URI_LIST: b"text/uri-list",
 
         PNG__MIME: ImageFormat::mime_type(ImageFormat::Png ).as_bytes(),
         JPEG_MIME: ImageFormat::mime_type(ImageFormat::Jpeg).as_bytes(),
@@ -561,6 +561,12 @@ impl Inner {
         // `reply.type_` will have format information, but `bytes` will only be non-empty if `ANY`
         // is provided.
         let property_type = AtomEnum::ANY;
+        let is_file_list = target_format == self.atoms.URI_LIST;
+        let units = if is_file_list {
+            (crate::platform::CLIPBOARD_FILES_MAX_BYTES / 4 + 1) as u32
+        } else {
+            u32::MAX / 4
+        };
         // request the selection
         let mut reply = reader
             .conn
@@ -570,7 +576,7 @@ impl Inner {
                 event.property,
                 property_type,
                 0,
-                u32::MAX / 4,
+                units,
             )
             .map_err(into_unknown)?
             .reply()
@@ -590,7 +596,7 @@ impl Inner {
                     event.property,
                     self.atoms.INCR,
                     0,
-                    u32::MAX / 4,
+                    units,
                 )
                 .map_err(into_unknown)?
                 .reply()
@@ -602,10 +608,27 @@ impl Inner {
                     .value32()
                     .and_then(|mut vals| vals.next())
                     .unwrap_or(0);
+                if is_file_list
+                    && min_data_len as usize > crate::platform::CLIPBOARD_FILES_MAX_BYTES
+                {
+                    return Ok(ReadSelNotifyResult::GotData(ClipboardData {
+                        bytes: vec![0; crate::platform::CLIPBOARD_FILES_MAX_BYTES + 1],
+                        format: target_format,
+                    }));
+                }
                 incr_data.reserve(min_data_len as usize);
             }
             Ok(ReadSelNotifyResult::IncrStarted)
         } else {
+            if is_file_list
+                && (reply.bytes_after > 0
+                    || reply.value.len() > crate::platform::CLIPBOARD_FILES_MAX_BYTES)
+            {
+                return Ok(ReadSelNotifyResult::GotData(ClipboardData {
+                    bytes: vec![0; crate::platform::CLIPBOARD_FILES_MAX_BYTES + 1],
+                    format: target_format,
+                }));
+            }
             Ok(ReadSelNotifyResult::GotData(ClipboardData {
                 bytes: reply.value,
                 format: reply.type_,
@@ -643,7 +666,11 @@ impl Inner {
                     target_format
                 },
                 0,
-                u32::MAX / 4,
+                if target_format == self.atoms.URI_LIST {
+                    (crate::platform::CLIPBOARD_FILES_MAX_BYTES / 4 + 1) as u32
+                } else {
+                    u32::MAX / 4
+                },
             )
             .map_err(into_unknown)?
             .reply()
@@ -652,6 +679,14 @@ impl Inner {
         // log::trace!("Received segment. value_len {}", reply.value_len,);
         if reply.value_len == 0 {
             // This indicates that all the data has been sent.
+            return Ok(true);
+        }
+        if target_format == self.atoms.URI_LIST
+            && (reply.bytes_after > 0
+                || reply.value.len()
+                    > crate::platform::CLIPBOARD_FILES_MAX_BYTES.saturating_sub(incr_data.len()))
+        {
+            *incr_data = vec![0; crate::platform::CLIPBOARD_FILES_MAX_BYTES + 1];
             return Ok(true);
         }
         incr_data.extend(reply.value);
@@ -1044,17 +1079,25 @@ impl Clipboard {
 
         let atom_none: Atom = AtomEnum::NONE.into();
 
-        const FORMAT_ATOM_COUNT: usize = TEXT_FORMAT_COUNT + IMAGE_FORMAT_COUNT;
+        const FORMAT_ATOM_COUNT: usize = TEXT_FORMAT_COUNT + IMAGE_FORMAT_COUNT + 1;
 
         let mut format_atoms: [Atom; FORMAT_ATOM_COUNT] = [atom_none; FORMAT_ATOM_COUNT];
 
         // image formats first, as they are more specific, and read will return the first
         // format that the contents can be converted to
-        format_atoms[0..IMAGE_FORMAT_COUNT].copy_from_slice(&image_format_atoms);
-        format_atoms[IMAGE_FORMAT_COUNT..].copy_from_slice(&text_format_atoms);
+        format_atoms[0] = self.inner.atoms.URI_LIST;
+        format_atoms[1..1 + IMAGE_FORMAT_COUNT].copy_from_slice(&image_format_atoms);
+        format_atoms[1 + IMAGE_FORMAT_COUNT..].copy_from_slice(&text_format_atoms);
         debug_assert!(!format_atoms.contains(&atom_none));
 
-        let result = self.inner.read(&format_atoms, selection)?;
+        let mut result = self.inner.read(&format_atoms, selection)?;
+        if result.format == self.inner.atoms.URI_LIST {
+            if let Some(files) = crate::platform::clipboard_file_uris(&result.bytes) {
+                return Ok(files);
+            }
+            // A copied web URL can offer URI-list too; keep normal text paste.
+            result = self.inner.read(&format_atoms[1..], selection)?;
+        }
 
         log::trace!(
             "read clipboard as format {:?}",

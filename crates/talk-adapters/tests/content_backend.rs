@@ -38,6 +38,23 @@ fn context(runtime: &NetworkRuntime, scope: AccountScope) -> OperationContext {
 fn text<const N: usize>(value: &str) -> Text<N> {
     Text::new(value).unwrap()
 }
+fn accepted_message(result: MR, operation: OperationId) -> talk_core::protocol::MessageId {
+    match result {
+        MR::Message(message) => {
+            assert!(message.own);
+            assert_eq!(message.message.own_operation, Some(operation));
+            message.message.id
+        }
+        MR::Send(receipt) => {
+            assert_eq!(receipt.operation, operation);
+            let talk_core::protocol::SendState::ServerAccepted(id) = receipt.state else {
+                panic!("fixture message was not confirmed");
+            };
+            id
+        }
+        _ => panic!("fixture message returned no correlated acceptance"),
+    }
+}
 fn page<T, const N: usize>(values: impl IntoIterator<Item = T>) -> Page<T, N> {
     let mut page = Page::empty();
     for value in values {
@@ -122,6 +139,298 @@ fn raster(result: R) {
         b.starts_with(b"\x89PNG\r\n\x1a\n") || b.starts_with(b"\xff\xd8") || b.starts_with(b"RIFF")
     );
     assert!(b.len() <= 4 * 1024 * 1024);
+}
+
+#[tokio::test]
+#[ignore = "requires private disposable NC34/Talk24 or NC35/Talk25 fixtures"]
+async fn released_server_file_listing_and_existing_share() {
+    let directory = std::env::var_os("NMT_FIXTURE_DIR").expect("private fixture");
+    let root = Path::new(&directory);
+    let runtime = NetworkRuntime::new(ClockEpoch::from_local(740));
+    let account = scope(740);
+    let mut client = test_support::from_private_fixture(
+        &root.join("alice.json"),
+        account,
+        HostId::from_local(740),
+        runtime.clone(),
+    )
+    .unwrap();
+    client
+        .request(context(&runtime, account), ProtocolRequest::InspectAccount)
+        .await
+        .unwrap();
+    let room = client.fixture_conversation().unwrap();
+    let mut sequence = 7000;
+    let R::Files(files) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        C::ListFiles { path: text("/") },
+    )
+    .await
+    .unwrap() else {
+        panic!("directory reply");
+    };
+    assert!(files.as_slice().len() <= 1000);
+    assert!(
+        files
+            .as_slice()
+            .iter()
+            .any(|entry| entry.path.as_str() == "/nmt-files-fixture.txt")
+    );
+    let mut listed = std::collections::HashSet::new();
+    for offset in [0, 40, 80] {
+        let R::FilePage { files, pagination } = content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::ListFilesPage {
+                path: text("/nmt-files-pages"),
+                offset,
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("folder page reply");
+        };
+        assert_eq!(pagination, Some((offset, 86)));
+        assert_eq!(
+            files.as_slice().len(),
+            if offset == 0 {
+                39
+            } else if offset == 40 {
+                40
+            } else {
+                6
+            }
+        );
+        for file in files.as_slice() {
+            assert!(!file.directory);
+            assert!(file.path.as_str().starts_with("/nmt-files-pages/page-"));
+            assert!(
+                listed.insert(file.path.as_str().to_owned()),
+                "DAV pages must not overlap"
+            );
+        }
+    }
+    assert_eq!(listed.len(), 85);
+    assert!(matches!(
+        content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::FavoriteFiles
+        )
+        .await
+        .unwrap(),
+        R::Files(_)
+    ));
+    assert!(matches!(
+        content(
+            &mut client,
+            &runtime,
+            account,
+            &mut sequence,
+            C::SearchFiles { query: None }
+        )
+        .await
+        .unwrap(),
+        R::Files(_)
+    ));
+    let path = text("/nmt-files-fixture.txt");
+    let destination = root.join("downloaded-fixture.txt");
+    let download = C::DownloadCloudFile {
+        path: path.clone(),
+        destination: text(destination.to_str().unwrap()),
+        progress: TransferProgress::default(),
+    };
+    let R::CloudFileSaved(bytes) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        download.clone(),
+    )
+    .await
+    .unwrap() else {
+        panic!("download reply");
+    };
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"Fictional file browser fixture\n"
+    );
+    assert_eq!(bytes, 31);
+    assert_eq!(
+        content(&mut client, &runtime, account, &mut sequence, download)
+            .await
+            .unwrap_err()
+            .kind,
+        ErrorKind::Conflict
+    );
+    let R::Files(search) = content(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        C::SearchFiles {
+            query: Some(text("nmt-files-fixture")),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("search reply");
+    };
+    assert!(search.as_slice().iter().any(|entry| entry.path == path));
+    let reply_target = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::Send {
+            text: text("Fixture reply target"),
+            options: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let parent = accepted_message(reply_target, OperationId::from_local(sequence));
+    let shared = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::ShareExistingFile {
+            path,
+            caption: text("Fixture caption"),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                reply_to: Some(parent),
+                silent: true,
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let share_operation = OperationId::from_local(sequence);
+    assert!(matches!(shared, MR::Changed));
+    // The shared-items index can omit the reply context; the room history is
+    // the authoritative source for the caption's parent.
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::SharedFiles { before: None },
+    )
+    .await
+    .unwrap() else {
+        panic!("shared items reply");
+    };
+    assert!(messages.as_slice().iter().any(|message| {
+        message
+            .rich
+            .as_slice()
+            .iter()
+            .any(|item| item.kind.as_str() == "file")
+    }));
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(share_operation)
+                && message.message.text.as_str().contains("Fixture caption")
+        }),
+        "the shared file must reconcile its reference and caption"
+    );
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::History {
+            before: None,
+            thread: None,
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("chat history reply");
+    };
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(share_operation)
+                && message
+                    .parent
+                    .as_ref()
+                    .is_some_and(|reply| reply.id == parent)
+        }),
+        "history must retain the share's reply target"
+    );
+    let thread_root = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::Send {
+            text: text("Fixture thread root"),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                thread_title: Some(text("Fixture thread")),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let thread = accepted_message(thread_root, OperationId::from_local(sequence));
+    let shared = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::ShareExistingFile {
+            path: text("/nmt-files-thread.txt"),
+            caption: text("Fixture thread caption"),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                thread: Some(thread),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let thread_share = OperationId::from_local(sequence);
+    assert!(matches!(shared, MR::Changed));
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::History {
+            before: None,
+            thread: Some(thread),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("thread history reply");
+    };
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(thread_share)
+                && message.message.text.as_str() == "Fixture thread caption"
+                && message.thread == Some(thread)
+        }),
+        "thread history must retain the share and its caption"
+    );
+    println!("files-backend directory-and-existing-share: pass");
 }
 
 #[tokio::test]
@@ -365,6 +674,7 @@ async fn released_server_polls_avatars_previews_and_downloads() {
             M::ShareFile {
                 path,
                 caption: text(""),
+                options: Default::default(),
             },
         )
         .await

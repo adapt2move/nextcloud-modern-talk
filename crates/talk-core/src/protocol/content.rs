@@ -89,6 +89,7 @@ impl ImageBytes {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AssetRequest {
+    CloudFile(u64),
     SelfAvatar,
     ConversationAvatar(ConversationId),
     MessageAvatar(MessageId),
@@ -106,6 +107,18 @@ pub struct PollDraft {
     pub options: Page<Text<1000>, 100>,
     pub multiple: bool,
     pub hidden_results: bool,
+}
+/// Account-scoped DAV metadata. No server URL or credential crosses this boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudFile {
+    pub name: Text<255>,
+    pub path: Text<16384>,
+    pub directory: bool,
+    pub size: Option<u64>,
+    pub modified: Option<Text<256>>,
+    pub modified_unix: Option<i64>,
+    pub mime: Option<Text<256>>,
+    pub file_id: Option<Text<256>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PollOption {
@@ -143,6 +156,25 @@ pub enum PollCommand {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentCommand {
+    ListFiles {
+        path: Text<16384>,
+    },
+    /// A DAV page offset counts the directory itself as the first result.
+    /// The transport, not this value, owns the server's opaque page token.
+    ListFilesPage {
+        path: Text<16384>,
+        offset: u64,
+    },
+    SearchFiles {
+        query: Option<Text<256>>,
+    },
+    FavoriteFiles,
+    OpenCloudFile(u64),
+    DownloadCloudFile {
+        path: Text<16384>,
+        destination: Text<16384>,
+        progress: TransferProgress,
+    },
     SelfProfile,
     RevalidateProfile,
     Asset(AssetRequest),
@@ -164,6 +196,12 @@ pub enum ContentCommand {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentResult {
+    Files(Page<CloudFile, 1000>),
+    FilePage {
+        files: Page<CloudFile, 1000>,
+        pagination: Option<(u64, u64)>,
+    },
+    CloudFileSaved(u64),
     SelfProfile {
         name: Option<Text<256>>,
         organization: Option<Text<256>>,

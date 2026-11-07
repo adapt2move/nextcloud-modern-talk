@@ -80,6 +80,13 @@ pub(crate) fn write_to_clipboard(item: ClipboardItem) {
 
 pub(crate) fn read_from_clipboard() -> Option<ClipboardItem> {
     with_clipboard(|| {
+        if unsafe { IsClipboardFormatAvailable(CF_HDROP.0 as u32).is_ok() }
+            && let Some(entry) = read_files_from_clipboard()
+        {
+            return Some(ClipboardItem {
+                entries: vec![entry],
+            });
+        }
         with_best_match_format(|item_format| match format_to_type(item_format) {
             ClipboardFormatType::Text => read_string_from_clipboard(),
             ClipboardFormatType::Image => read_image_from_clipboard(item_format),
@@ -159,6 +166,8 @@ fn write_to_clipboard_inner(item: ClipboardItem) -> Result<()> {
             ClipboardEntry::Image(image) => {
                 write_image_to_clipboard(image)?;
             }
+            // This input-only extension does not publish files to other apps.
+            ClipboardEntry::Files(_) => {}
         },
         None => {
             // Writing an empty list of entries just clears the clipboard.
@@ -346,18 +355,27 @@ fn read_image_for_type(format_number: u32, format: ImageFormat) -> Option<Clipbo
 }
 
 fn read_files_from_clipboard() -> Option<ClipboardEntry> {
-    let text = with_clipboard_data(CF_HDROP.0 as u32, |data_ptr, _size| {
-        let hdrop = HDROP(data_ptr);
-        let mut filenames = String::new();
-        with_file_names(hdrop, |file_name| {
-            filenames.push_str(&file_name);
-        });
-        filenames
-    })?;
-    Some(ClipboardEntry::String(ClipboardString {
-        text,
-        metadata: None,
-    }))
+    // DragQueryFileW expects the clipboard's global-memory handle, not the
+    // pointer returned by GlobalLock. The clipboard retains ownership.
+    let handle = unsafe { GetClipboardData(CF_HDROP.0 as u32).ok()? };
+    let hdrop = HDROP(handle.0);
+    let count = unsafe { DragQueryFileW(hdrop, DRAGDROP_GET_FILES_COUNT, None) };
+    let mut paths = Vec::new();
+    for index in 0..count.min(9) {
+        let length = unsafe { DragQueryFileW(hdrop, index, None) } as usize;
+        if length == 0 || length > 16_384 {
+            return Some(ClipboardEntry::Files(Vec::new()));
+        }
+        let mut buffer = vec![0u16; length + 1];
+        if unsafe { DragQueryFileW(hdrop, index, Some(buffer.as_mut_slice())) } == 0 {
+            return Some(ClipboardEntry::Files(Vec::new()));
+        }
+        let Ok(path) = String::from_utf16(&buffer[..length]) else {
+            return Some(ClipboardEntry::Files(Vec::new()));
+        };
+        paths.push(std::path::PathBuf::from(path));
+    }
+    Some(ClipboardEntry::Files(paths))
 }
 
 fn with_clipboard_data<F, R>(format: u32, f: F) -> Option<R>

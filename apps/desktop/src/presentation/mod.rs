@@ -56,6 +56,7 @@ pub enum Overlay {
     RoomInfo,
     Participants,
     Files,
+    CloudFiles,
     Accounts,
     Thread,
     Forward,
@@ -357,6 +358,7 @@ pub struct Desktop {
     last_incoming_scope: Option<CallScope>,
     _appearance_observer: Subscription,
     _input_observers: [Subscription; 3],
+    _composer_paste_subscription: Subscription,
     _composer_focus_observers: [Subscription; 2],
     _dialog_observers: Vec<Subscription>,
     pending_ack: Option<talk_core::ui::presentation::SubmissionResult>,
@@ -433,6 +435,10 @@ impl Desktop {
             cx.observe(&sidebar_filter, |_, _, cx| cx.notify()),
             cx.observe(&composer, |_, _, cx| cx.notify()),
         ];
+        let composer_paste_subscription =
+            cx.subscribe(&composer, |this, _, content: &input::PastedContent, cx| {
+                this.paste_clipboard_attachment(content, cx);
+            });
         let composer_focus = cx.focus_handle().tab_stop(false);
         let composer_focus_observers = [
             cx.on_focus_in(&composer_focus, window, |_, _, cx| cx.notify()),
@@ -607,6 +613,7 @@ impl Desktop {
             last_incoming_scope: None,
             _appearance_observer: observer,
             _input_observers: input_observers,
+            _composer_paste_subscription: composer_paste_subscription,
             _composer_focus_observers: composer_focus_observers,
             _dialog_observers: dialog_observers,
             pending_ack: None,
@@ -2134,6 +2141,20 @@ impl Render for Desktop {
                     && !incoming;
             });
         }
+        self.content_ui.browser_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.clipboard_export_allowed = true;
+            input.interactive = self.overlay == Some(Overlay::CloudFiles)
+                && self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_some_and(|browser| browser.search_available)
+                && !incoming;
+            input.set_placeholder(self.l("Dateien suchen …"));
+        });
         self.content_ui
             .question
             .update(cx, |i, _| i.set_placeholder(self.l("Frage der Umfrage")));
@@ -2435,6 +2456,7 @@ impl Render for Desktop {
                 }
                 if !composing
                     && (this.person_key(event, window, cx)
+                        || this.cloud_browser_key(event, window, cx)
                         || this.member_dialog_key(event, window, cx)
                         || this.composer_menu_key(event, window, cx)
                         || this.message_menu_key(event, window, cx)

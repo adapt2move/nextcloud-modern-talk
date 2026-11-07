@@ -524,6 +524,38 @@
       "scope": "Create-only filename probing; no replace-existing mode."
     },
     {
+      "operation_id": "files-dav-search",
+      "method": "SEARCH",
+      "path": "/remote.php/dav/",
+      "status": "partial",
+      "api": "Client::search_files",
+      "scope": "Account-scoped name search or recent files, limited to 200 results and bounded response bytes. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/search.html"
+    },
+    {
+      "operation_id": "files-dav-favorites",
+      "method": "REPORT",
+      "path": "/remote.php/dav/files/{user}",
+      "status": "partial",
+      "api": "Client::favorite_files",
+      "scope": "Account-scoped recursive favorites with bounded response and entry count. Source: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html#listing-favorites"
+    },
+    {
+      "operation_id": "files-dav-list-directory",
+      "method": "PROPFIND",
+      "path": "/remote.php/dav/files/{user}/{path}",
+      "status": "partial",
+      "api": "Client::list_directory / Client::list_directory_page",
+      "scope": "Depth-one listings support the NC31+ DAV pagination headers, with a short-lived account-owned token and bounded page size. Servers without pagination fall back to bounded complete listings. Sources: https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html and https://docs.nextcloud.com/server/stable/developer_manual/release_notes/previous/upgrade_to_31.html"
+    },
+    {
+      "operation_id": "files-sharing-share-to-room",
+      "method": "POST",
+      "path": "/ocs/v2.php/apps/files_sharing/api/v1/shares",
+      "status": "partial",
+      "api": "Client::share_existing_file",
+      "scope": "Existing-file room share with optional caption; caller owns capability and permission checks. Source: https://github.com/nextcloud/spreed/blob/main/docs/chat.md#share-a-file-to-the-chat"
+    },
+    {
       "operation_id": "chat-post-attachment-to-room",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/attachment",

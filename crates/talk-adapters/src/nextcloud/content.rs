@@ -9,10 +9,11 @@ use talk_core::protocol::{FeatureSupport, Role, RoomKind};
 pub(super) fn is_mutation(command: &ContentCommand) -> bool {
     matches!(
         command,
-        ContentCommand::Poll {
-            command: PollCommand::Create(_) | PollCommand::Vote { .. } | PollCommand::Close(_),
-            ..
-        }
+        ContentCommand::DownloadCloudFile { .. }
+            | ContentCommand::Poll {
+                command: PollCommand::Create(_) | PollCommand::Vote { .. } | PollCommand::Close(_),
+                ..
+            }
     )
 }
 fn poll_availability(room: &Conversation, caps: &Capabilities, create: bool) -> ActionAvailability {
@@ -72,6 +73,90 @@ impl NextcloudClient {
     ) -> Result<ContentResult, PortError> {
         let revalidate = matches!(&command, ContentCommand::RevalidateAvatar(_));
         match command {
+            ContentCommand::DownloadCloudFile {
+                path,
+                destination,
+                progress,
+            } => {
+                let path = api::files::FilePath::parse(path.as_str())
+                    .map_err(|kind| self.error(transport::kind(kind)))?;
+                let bytes = self
+                    .download_to_file(c, path, destination.as_str(), &progress)
+                    .await?;
+                Ok(ContentResult::CloudFileSaved(bytes))
+            }
+            ContentCommand::OpenCloudFile(file) => {
+                let link = self.transport.file_link(file)?;
+                Ok(ContentResult::CloudLink(
+                    Text::new(&link).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                ))
+            }
+            ContentCommand::ListFiles { .. }
+            | ContentCommand::ListFilesPage { .. }
+            | ContentCommand::SearchFiles { .. }
+            | ContentCommand::FavoriteFiles => {
+                let (entries, pagination, folder_page) = match command {
+                    ContentCommand::ListFiles { path } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        (self.transport.list_files(c, path).await?, None, false)
+                    }
+                    ContentCommand::ListFilesPage { path, offset } => {
+                        let path = api::files::DirectoryPath::parse(path.as_str())
+                            .map_err(|kind| self.error(transport::kind(kind)))?;
+                        let page = self.transport.list_files_page(c, path, offset).await?;
+                        (page.entries, page.pagination, true)
+                    }
+                    ContentCommand::SearchFiles { query } => (
+                        self.transport
+                            .search_files(c, query.as_ref().map(Text::as_str))
+                            .await?,
+                        None,
+                        false,
+                    ),
+                    ContentCommand::FavoriteFiles => {
+                        (self.transport.favorite_files(c).await?, None, false)
+                    }
+                    _ => unreachable!(),
+                };
+                let mut files = Page::empty();
+                for entry in entries {
+                    files
+                        .try_push(CloudFile {
+                            name: Text::new(&entry.name)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            path: Text::new(&entry.path)
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            directory: entry.is_directory,
+                            size: entry.size,
+                            modified: entry
+                                .modified
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            modified_unix: entry.modified_unix,
+                            mime: entry
+                                .content_type
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                            file_id: entry
+                                .file_id
+                                .as_deref()
+                                .map(Text::new)
+                                .transpose()
+                                .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        })
+                        .map_err(|_| self.error(ErrorKind::TooLarge))?;
+                }
+                if folder_page {
+                    Ok(ContentResult::FilePage { files, pagination })
+                } else {
+                    Ok(ContentResult::Files(files))
+                }
+            }
             ContentCommand::Video {
                 message,
                 placeholder,
@@ -168,6 +253,19 @@ impl NextcloudClient {
                 let mut room_key = None;
                 let mut room_identity = None;
                 let image = match request {
+                    AssetRequest::CloudFile(file) => {
+                        if file == 0 {
+                            return Err(self.error(ErrorKind::Malformed));
+                        }
+                        let bytes = self
+                            .transport
+                            .image(c, I::FilePreview { file, large: false })
+                            .await?;
+                        self.transport.validate(c)?;
+                        return Ok(ContentResult::Image(
+                            ImageBytes::new(bytes).map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        ));
+                    }
                     AssetRequest::SelfAvatar => I::UserAvatar {
                         user: self.transport.user().to_owned(),
                     },

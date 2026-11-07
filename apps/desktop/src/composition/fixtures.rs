@@ -58,11 +58,14 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "thread-error",
     "chat-content",
+    "chat-cloud-files",
+    "chat-cloud-files-offline",
     "chat-content-progress",
     "chat-content-loading",
     "chat-content-failed",
     "chat-attachments",
     "chat-upload",
+    "chat-upload-preview",
     "chat-upload-uncertain",
     "chat-motion",
     "history",
@@ -468,8 +471,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         scenario,
         Some(
             "chat-content"
+                | "chat-cloud-files"
+                | "chat-cloud-files-offline"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -478,11 +484,26 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     ) {
         let mut state = snapshot(Some("chat-ux"));
         content::configure(&mut state);
+        if matches!(
+            scenario,
+            Some("chat-cloud-files" | "chat-cloud-files-offline")
+        ) {
+            content::cloud_files(&mut state, "/");
+            if scenario == Some("chat-cloud-files-offline") {
+                state.content = ContentState::Offline;
+                if let Some(browser) = state.content_panel.file_browser.as_mut() {
+                    browser.offline = true;
+                }
+            }
+        }
         if scenario == Some("chat-attachments") {
             content::attachments(&mut state);
         }
         if matches!(scenario, Some("chat-upload" | "chat-upload-uncertain")) {
             content::pending_upload(&mut state, scenario == Some("chat-upload-uncertain"));
+        }
+        if scenario == Some("chat-upload-preview") {
+            content::staged_image(&mut state);
         }
         if matches!(
             scenario,
@@ -1261,8 +1282,11 @@ impl DevelopmentPort {
                 scenario,
                 Some(
                     "chat-content"
+                        | "chat-cloud-files"
+                        | "chat-cloud-files-offline"
                         | "chat-attachments"
                         | "chat-upload"
+                        | "chat-upload-preview"
                         | "chat-upload-uncertain"
                         | "chat-content-progress"
                         | "chat-content-loading"
@@ -1794,6 +1818,24 @@ impl NativeDesktopPort for DevelopmentPort {
                                 server_message: None,
                             });
                         }
+                        panel.uploads = page(uploads);
+                    }
+                    MessageAction::StageClipboardImage { name, image } => {
+                        use talk_core::ui::messaging::{UploadState, UploadView};
+                        let mut uploads = panel.uploads.as_slice().to_vec();
+                        if uploads.len() >= 8 {
+                            return Err(SubmitError::Busy);
+                        }
+                        uploads.push(UploadView {
+                            id: 1000 + uploads.len() as u64,
+                            name,
+                            bytes: Some(image.as_slice().len() as u64),
+                            state: UploadState::Selected,
+                            submitted: false,
+                            transferred: 0,
+                            uploaded: false,
+                            server_message: None,
+                        });
                         panel.uploads = page(uploads);
                     }
                     MessageAction::RemoveFile(id) => {

@@ -11,6 +11,7 @@ pub(crate) struct Target {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Choice {
     File,
+    CloudFile,
     Poll,
     Schedule,
     Scheduled,
@@ -126,10 +127,30 @@ impl Desktop {
         vec![
             message(
                 Choice::File,
-                "Datei anhängen",
+                "Vom Computer hochladen",
                 "paperclip",
                 MessageFeature::Files,
             ),
+            Item {
+                choice: Choice::CloudFile,
+                label: "Aus NextCloud teilen",
+                icon: "cloud",
+                availability: Availability::when(
+                    (self.message_feature_enabled(MessageFeature::Files)
+                        || self.snapshot.content == ContentState::Offline
+                            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                                panel.context == target.context
+                                    && panel.availability(MessageFeature::Files).enabled()
+                            }))
+                        && self.composer_available()
+                        && self.snapshot.content_panel.file_browser_supported != Some(false),
+                    if self.snapshot.content_panel.file_browser_supported == Some(false) {
+                        "Diese Dateioption ist derzeit nicht verfügbar."
+                    } else {
+                        "Dateien können in diesem Gespräch nicht gesendet werden."
+                    },
+                ),
+            },
             Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",
@@ -239,6 +260,9 @@ impl Desktop {
         self.composer.focus_handle(cx).focus(window);
         let action = match choice {
             Choice::File => LocalAction::Message(Action::Command(MessageAction::PickUpload)),
+            Choice::CloudFile => {
+                LocalAction::Content(crate::presentation::content::Action::OpenCloudBrowser)
+            }
             Choice::Poll => LocalAction::Content(crate::presentation::content::Action::CreatePoll),
             Choice::Schedule => LocalAction::Message(Action::Schedule),
             Choice::Scheduled => LocalAction::Message(Action::Command(MessageAction::Scheduled)),

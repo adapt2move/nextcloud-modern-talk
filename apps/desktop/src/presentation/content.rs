@@ -1,5 +1,6 @@
 //! Native content surfaces over scoped observations and composition-owned images.
 //! Views never resolve a URL, decode remote bytes, or report transfer success.
+mod browser;
 pub(in crate::presentation) mod gallery;
 pub(in crate::presentation) mod groups;
 mod window;
@@ -27,6 +28,17 @@ const MAX_POLL_OPTIONS: usize = 8;
 
 #[derive(Clone)]
 pub(crate) enum Action {
+    OpenCloudBrowser,
+    OpenFolderPicker,
+    ChooseFolder,
+    BrowseDirectory(Text<16384>),
+    BrowserBack,
+    BrowserPage(i8),
+    BrowserRecent,
+    BrowserFavorites,
+    BrowserRetry,
+    BrowserSort(talk_core::ui::content::FileSort),
+    BrowserStageSelection,
     Menu,
     ComposerChoice(composer_menu::Target, composer_menu::Choice),
     CreatePoll,
@@ -48,6 +60,17 @@ pub(super) struct ContentUi {
     requested: Vec<AssetTarget>,
     request: u64,
     pub menu: bool,
+    browser_page: usize,
+    browser_folder_picker: bool,
+    browser_cursor: Option<Text<16384>>,
+    browser_selection: Vec<Text<16384>>,
+    browser_anchor: Option<Text<16384>>,
+    browser_history: Vec<browser::Location>,
+    browser_typeahead: String,
+    browser_typeahead_at: Option<std::time::Instant>,
+    pub(super) browser_search: Entity<TextInput>,
+    browser_search_value: String,
+    browser_search_since: Option<std::time::Instant>,
     pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
     gallery: Vec<AttachmentRef>,
@@ -71,6 +94,7 @@ impl ContentUi {
         context: Option<ConversationRef>,
         cx: &mut Context<Desktop>,
     ) -> Self {
+        let browser_search = cx.new(|cx| TextInput::new("Dateien suchen …", 256, theme, cx));
         Self {
             account,
             context,
@@ -78,6 +102,17 @@ impl ContentUi {
             requested: Vec::new(),
             request: 0,
             menu: false,
+            browser_page: 0,
+            browser_folder_picker: false,
+            browser_cursor: None,
+            browser_selection: Vec::new(),
+            browser_anchor: None,
+            browser_history: Vec::new(),
+            browser_typeahead: String::new(),
+            browser_typeahead_at: None,
+            browser_search,
+            browser_search_value: String::new(),
+            browser_search_since: None,
             composer_menu: composer_menu::Menu::new(cx),
             preview: None,
             gallery: Vec::new(),
@@ -221,6 +256,45 @@ impl Desktop {
     /// no render callback starts work.
     pub(super) fn refresh_content_ui(&mut self, cx: &mut Context<Self>) {
         self.refresh_attachment_send(cx);
+        if self.overlay == Some(Overlay::CloudFiles) {
+            let value = self.content_ui.browser_search.read(cx).content.to_string();
+            if value != self.content_ui.browser_search_value {
+                self.content_ui.browser_search_value = value;
+                self.content_ui.browser_search_since = Some(std::time::Instant::now());
+            }
+            if self
+                .content_ui
+                .browser_search_since
+                .is_some_and(|since| since.elapsed() >= std::time::Duration::from_millis(250))
+            {
+                self.content_ui.browser_search_since = None;
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
+                let value = self.content_ui.browser_search_value.trim();
+                let action = if value.is_empty() {
+                    Some(ContentAction::ListFiles(Text::new("/").expect("constant")))
+                } else {
+                    Text::new(value).ok().map(ContentAction::SearchFiles)
+                };
+                if !value.is_empty()
+                    && self
+                        .snapshot
+                        .content_panel
+                        .file_browser
+                        .as_ref()
+                        .is_some_and(|browser| {
+                            browser.section != talk_core::ui::content::FileSection::Search
+                        })
+                {
+                    self.remember_cloud_location();
+                }
+                if let Some(action) = action {
+                    self.submit_content(action);
+                }
+            }
+        }
         let account = self.snapshot.active_account;
         if self.content_ui.account != account || self.content_ui.context != self.snapshot.selected {
             self.content_ui.requested.clear();
@@ -236,9 +310,10 @@ impl Desktop {
             self.content_ui.multiple = false;
             self.content_ui.hidden_results = false;
             self.content_ui.return_overlay = None;
+            self.content_ui.browser_history.clear();
             if matches!(
                 self.overlay,
-                Some(Overlay::ContentPreview | Overlay::CreatePoll)
+                Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
             ) {
                 self.overlay = None;
                 self.pending_modal_focus = false;
@@ -429,6 +504,45 @@ impl Desktop {
                 }
             }
         }
+        if self.overlay == Some(Overlay::CloudFiles)
+            && !self.media_offline()
+            && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+        {
+            for entry in browser
+                .entries
+                .as_slice()
+                .iter()
+                .skip(
+                    self.content_ui
+                        .browser_page
+                        .saturating_mul(browser::PAGE_SIZE),
+                )
+                .take(browser::PAGE_SIZE)
+                .filter(|entry| {
+                    !entry.directory
+                        && entry.mime.as_ref().is_some_and(|mime| {
+                            mime.as_str().starts_with("image/")
+                                || mime.as_str() == "application/pdf"
+                        })
+                })
+                .take(8)
+            {
+                if let Some(file) = entry
+                    .file_id
+                    .as_ref()
+                    .and_then(|id| id.as_str().parse::<u64>().ok())
+                    .filter(|id| *id > 0)
+                    && targets.len() < MAX_IMAGES
+                {
+                    targets.push(AssetTarget::CloudFile {
+                        account,
+                        path: entry.path.clone(),
+                        file,
+                        generation: browser.generation,
+                    });
+                }
+            }
+        }
         // Scrolling retires UI dedup keys. The backend owns the actual byte and
         // request limits and can return a terminal unavailable observation.
         self.content_ui.requested.retain(|t| {
@@ -597,6 +711,210 @@ impl Desktop {
             return;
         }
         match action {
+            Action::OpenCloudBrowser => {
+                self.content_ui.return_overlay = self.overlay;
+                self.content_ui.browser_folder_picker = false;
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
+                self.content_ui.browser_history.clear();
+                self.clear_cloud_search(cx);
+                if self
+                    .submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")))
+                    .is_some()
+                {
+                    self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
+                }
+            }
+            Action::OpenFolderPicker => {
+                self.content_ui.return_overlay = self.overlay;
+                self.content_ui.browser_folder_picker = true;
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
+                self.content_ui.browser_history.clear();
+                self.clear_cloud_search(cx);
+                let path = self.upload_folder.read(cx).content.to_string();
+                let path = if talk_core::preferences::account::NextcloudFolder::new(&path).is_ok() {
+                    path
+                } else {
+                    "/".to_owned()
+                };
+                if let Ok(path) = Text::new(&path)
+                    && self
+                        .submit_content(ContentAction::ListFiles(path))
+                        .is_some()
+                {
+                    self.handle(LocalAction::Open(Overlay::CloudFiles), window, cx);
+                }
+            }
+            Action::ChooseFolder => {
+                if self.content_ui.browser_folder_picker
+                    && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && browser.section == talk_core::ui::content::FileSection::All
+                    && Some(browser.account) == self.snapshot.active_account
+                    && talk_core::preferences::account::NextcloudFolder::new(browser.path.as_str())
+                        .is_ok()
+                {
+                    let path = browser.path.as_str().to_owned();
+                    self.upload_folder.update(cx, |input, cx| {
+                        input.set_context_value(&path);
+                        cx.notify();
+                    });
+                    self.close_content_overlay();
+                }
+            }
+            Action::BrowseDirectory(path) => {
+                let changed = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_none_or(|browser| {
+                        browser.section != talk_core::ui::content::FileSection::All
+                            || browser.path != path
+                    });
+                if changed {
+                    self.remember_cloud_location();
+                }
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
+                self.clear_cloud_search(cx);
+                self.submit_content(ContentAction::ListFiles(path));
+            }
+            Action::BrowserBack => {
+                if let Some(location) = self.content_ui.browser_history.pop() {
+                    self.content_ui.browser_page = 0;
+                    self.content_ui.browser_cursor = None;
+                    self.content_ui.browser_selection.clear();
+                    self.content_ui.browser_anchor = None;
+                    self.clear_cloud_search(cx);
+                    let command = match location.clone() {
+                        browser::Location::Folder(path) => ContentAction::ListFiles(path),
+                        browser::Location::Recent => ContentAction::RecentFiles,
+                        browser::Location::Favorites => ContentAction::FavoriteFiles,
+                        browser::Location::Search(term) => {
+                            self.content_ui.browser_search_value = term.as_str().to_owned();
+                            self.content_ui.browser_search.update(cx, |input, cx| {
+                                input.set_context_value(term.as_str());
+                                cx.notify();
+                            });
+                            ContentAction::SearchFiles(term)
+                        }
+                    };
+                    if self.submit_content(command).is_none() {
+                        self.content_ui.browser_history.push(location);
+                    }
+                }
+            }
+            Action::BrowserPage(delta) => {
+                if let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && let Some((offset, total)) = browser.pagination
+                {
+                    let next = if delta < 0 {
+                        offset.saturating_sub(40)
+                    } else {
+                        offset.saturating_add(40)
+                    };
+                    if next != offset && next < total && !browser.loading {
+                        let path = browser.path.clone();
+                        self.content_ui.browser_page = 0;
+                        self.content_ui.browser_cursor = None;
+                        self.content_ui.browser_selection.clear();
+                        self.content_ui.browser_anchor = None;
+                        self.submit_content(ContentAction::ListFilesPage { path, offset: next });
+                    }
+                    cx.notify();
+                    return;
+                }
+                let count = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map_or(0, |b| b.entries.as_slice().len());
+                let last = count.saturating_sub(1) / browser::PAGE_SIZE;
+                self.content_ui.browser_page = if delta < 0 {
+                    self.content_ui.browser_page.saturating_sub(1)
+                } else {
+                    (self.content_ui.browser_page + 1).min(last)
+                };
+            }
+            Action::BrowserRecent | Action::BrowserFavorites => {
+                let desired = if matches!(action, Action::BrowserRecent) {
+                    talk_core::ui::content::FileSection::Recent
+                } else {
+                    talk_core::ui::content::FileSection::Favorites
+                };
+                if self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .is_none_or(|browser| browser.section != desired)
+                {
+                    self.remember_cloud_location();
+                }
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.content_ui.browser_selection.clear();
+                self.content_ui.browser_anchor = None;
+                self.clear_cloud_search(cx);
+                self.submit_content(if matches!(action, Action::BrowserRecent) {
+                    ContentAction::RecentFiles
+                } else {
+                    ContentAction::FavoriteFiles
+                });
+            }
+            Action::BrowserRetry => {
+                use talk_core::ui::content::FileSection;
+                if let Some(browser) = self.snapshot.content_panel.file_browser.as_ref() {
+                    let retry = match browser.section {
+                        FileSection::All => Some(ContentAction::ListFiles(browser.path.clone())),
+                        FileSection::Recent => Some(ContentAction::RecentFiles),
+                        FileSection::Favorites => Some(ContentAction::FavoriteFiles),
+                        FileSection::Search => {
+                            Text::new(self.content_ui.browser_search_value.trim())
+                                .ok()
+                                .map(ContentAction::SearchFiles)
+                        }
+                    };
+                    if let Some(retry) = retry {
+                        self.submit_content(retry);
+                    }
+                }
+            }
+            Action::BrowserSort(sort) => {
+                self.content_ui.browser_page = 0;
+                self.content_ui.browser_cursor = None;
+                self.submit_content(ContentAction::SortFiles(sort));
+            }
+            Action::BrowserStageSelection => {
+                if let Some(context) = self.snapshot.selected
+                    && let Some(browser) = self.snapshot.content_panel.file_browser.as_ref()
+                    && self.cloud_can_stage(browser)
+                {
+                    let mut paths = Page::empty();
+                    for path in &self.content_ui.browser_selection {
+                        if paths.try_push(path.clone()).is_err() {
+                            return;
+                        }
+                    }
+                    if !paths.as_slice().is_empty()
+                        && self
+                            .submit_content(ContentAction::StageCloudFiles { context, paths })
+                            .is_some()
+                        && self.close_content_overlay()
+                        && self.overlay.is_none()
+                    {
+                        self.composer.focus_handle(cx).focus(window);
+                    }
+                }
+            }
             Action::Menu => self.toggle_composer_menu(window, cx),
             Action::ComposerChoice(target, choice) => {
                 self.choose_composer_menu(target, choice, window, cx);
@@ -649,7 +967,14 @@ impl Desktop {
                 }
             }
             Action::Command(command) => {
-                self.submit_content(command);
+                let selected_file = matches!(&command, ContentAction::StageCloudFile { .. });
+                if self.submit_content(command).is_some()
+                    && selected_file
+                    && self.close_content_overlay()
+                    && self.overlay.is_none()
+                {
+                    self.composer.focus_handle(cx).focus(window);
+                }
             }
         }
         cx.notify();
@@ -658,7 +983,7 @@ impl Desktop {
     pub(super) fn close_content_overlay(&mut self) -> bool {
         if !matches!(
             self.overlay,
-            Some(Overlay::ContentPreview | Overlay::CreatePoll)
+            Some(Overlay::ContentPreview | Overlay::CreatePoll | Overlay::CloudFiles)
         ) {
             return false;
         }
@@ -669,6 +994,11 @@ impl Desktop {
                 self.submit_content(ContentAction::ClosePreview);
             }
             self.content_ui.preview = None;
+        }
+        if self.overlay == Some(Overlay::CloudFiles) {
+            self.content_ui.browser_search_since = None;
+            self.content_ui.browser_history.clear();
+            self.submit_content(ContentAction::CloseFileBrowser);
         }
         self.overlay = self.content_ui.return_overlay.take();
         self.pending_modal_focus = self.overlay.is_some();

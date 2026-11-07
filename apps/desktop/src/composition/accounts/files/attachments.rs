@@ -25,6 +25,8 @@ pub(in crate::composition::accounts) struct Work {
 struct File {
     local: Text<16384>,
     remote: Option<Text<16384>>,
+    existing: bool,
+    image: Option<protocol::content::ImageBytes>,
     view: UploadView,
     progress: protocol::content::TransferProgress,
     outgoing: Option<Outgoing>,
@@ -35,6 +37,7 @@ struct Outgoing {
     caption: Text<4096>,
     created: u64,
     operation: Option<OperationId>,
+    options: protocol::messaging::ComposeOptions,
 }
 struct Batch {
     context: ConversationRef,
@@ -53,19 +56,43 @@ impl Batch {
             .iter()
             .find(|file| file.view.submitted && file.view.state == UploadState::Selected)?;
         let (step, command) = if let Some(path) = &file.remote {
+            let caption = file
+                .outgoing
+                .as_ref()
+                .and_then(|outgoing| {
+                    self.captions
+                        .iter()
+                        .find(|(request, _)| *request == outgoing.request)
+                })
+                .map_or_else(|| text(""), |(_, caption)| caption.clone());
+            let options = file
+                .outgoing
+                .as_ref()
+                .map(|outgoing| outgoing.options.clone())
+                .unwrap_or_default();
             (
                 Step::Share,
-                Command::ShareFile {
-                    path: path.clone(),
-                    caption: file
-                        .outgoing
-                        .as_ref()
-                        .and_then(|outgoing| {
-                            self.captions
-                                .iter()
-                                .find(|(request, _)| *request == outgoing.request)
-                        })
-                        .map_or_else(|| text(""), |(_, caption)| caption.clone()),
+                if file.existing {
+                    Command::ShareExistingFile {
+                        path: path.clone(),
+                        caption,
+                        options,
+                    }
+                } else {
+                    Command::ShareFile {
+                        path: path.clone(),
+                        caption,
+                        options,
+                    }
+                },
+            )
+        } else if let Some(image) = &file.image {
+            (
+                Step::Upload,
+                Command::UploadImage {
+                    name: file.view.name.clone(),
+                    image: image.clone(),
+                    progress: file.progress.clone(),
                 },
             )
         } else {
@@ -98,6 +125,11 @@ fn allowed(snapshot: &PresentationSnapshot, context: ConversationRef) -> bool {
     snapshot.selected == Some(context)
         && snapshot.active_account == Some(context.account)
         && snapshot.content == ContentState::Ready
+        && snapshot
+            .conversations
+            .as_slice()
+            .iter()
+            .any(|room| room.context == context && room.send == Decision::Allowed)
         && snapshot.message_panel.as_ref().is_some_and(|panel| {
             panel.context == context && panel.availability(MessageFeature::Files).enabled()
         })
@@ -253,6 +285,8 @@ impl Accounts {
             batch.files.push(File {
                 local,
                 remote: None,
+                existing: false,
+                image: None,
                 view: UploadView {
                     id: self.attachment_owner.next,
                     name,
@@ -275,6 +309,240 @@ impl Accounts {
         self.queue_upload_previews();
         Ok(())
     }
+    pub(in crate::composition::accounts) fn stage_cloud_file(
+        &mut self,
+        context: ConversationRef,
+        path: Text<16384>,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context) {
+            return Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            ));
+        }
+        let browser = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == context.account)
+            .ok_or(SubmitError::StaleScope)?;
+        let entry = browser
+            .entries
+            .as_slice()
+            .iter()
+            .find(|entry| entry.path == path && !entry.directory)
+            .ok_or(SubmitError::StaleScope)?;
+        let bytes = entry.size;
+        let name = entry.name.clone();
+        if self
+            .attachment_owner
+            .batch
+            .as_ref()
+            .is_some_and(|batch| batch.context != context || batch.running)
+        {
+            return Err(SubmitError::Busy);
+        }
+        let batch = self.attachment_owner.batch.get_or_insert_with(|| Batch {
+            context,
+            files: Vec::new(),
+            captions: Vec::new(),
+            running: false,
+            created: Instant::now(),
+        });
+        if batch.files.iter().any(|file| {
+            file.existing
+                && file.remote.as_ref() == Some(&path)
+                && file.view.state != UploadState::Shared
+        }) {
+            return Ok(());
+        }
+        if batch
+            .files
+            .iter()
+            .filter(|file| file.view.state != UploadState::Shared)
+            .count()
+            >= 8
+        {
+            return Err(SubmitError::Busy);
+        }
+        while batch.files.len() >= 8 {
+            let Some(index) = batch
+                .files
+                .iter()
+                .position(|file| file.view.state == UploadState::Shared)
+            else {
+                return Err(SubmitError::Busy);
+            };
+            batch.files.remove(index).progress.cancel();
+        }
+        let Some(next) = self.attachment_owner.next.checked_add(1) else {
+            return Err(SubmitError::Busy);
+        };
+        self.attachment_owner.next = next;
+        batch.files.push(File {
+            local: text(""),
+            remote: Some(path),
+            existing: true,
+            image: None,
+            view: UploadView {
+                id: next,
+                name,
+                bytes,
+                state: UploadState::Selected,
+                submitted: false,
+                transferred: 0,
+                uploaded: true,
+                server_message: None,
+            },
+            progress: protocol::content::TransferProgress::default(),
+            outgoing: None,
+            preview_queued: true,
+        });
+        self.project_uploads();
+        Ok(())
+    }
+    pub(in crate::composition::accounts) fn stage_cloud_files(
+        &mut self,
+        context: ConversationRef,
+        paths: Page<Text<16384>, 8>,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context) {
+            return Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            ));
+        }
+        let browser = self
+            .snapshot
+            .content_panel
+            .file_browser
+            .as_ref()
+            .filter(|browser| browser.account == context.account)
+            .ok_or(SubmitError::StaleScope)?;
+        let batch = self.attachment_owner.batch.as_ref();
+        if batch.is_some_and(|batch| batch.context != context || batch.running) {
+            return Err(SubmitError::Busy);
+        }
+        let mut additions: Vec<Text<16384>> = Vec::new();
+        for path in paths.as_slice() {
+            if !browser
+                .entries
+                .as_slice()
+                .iter()
+                .any(|entry| entry.path == *path && !entry.directory)
+            {
+                return Err(SubmitError::StaleScope);
+            }
+            if additions.contains(path)
+                || batch.is_some_and(|batch| {
+                    batch.files.iter().any(|file| {
+                        file.existing
+                            && file.remote.as_ref() == Some(path)
+                            && file.view.state != UploadState::Shared
+                    })
+                })
+            {
+                continue;
+            }
+            additions.push(path.clone());
+        }
+        let existing = batch.map_or(0, |batch| {
+            batch
+                .files
+                .iter()
+                .filter(|file| file.view.state != UploadState::Shared)
+                .count()
+        });
+        if existing + additions.len() > 8
+            || self
+                .attachment_owner
+                .next
+                .checked_add(additions.len() as u64)
+                .is_none()
+        {
+            return Err(SubmitError::Busy);
+        }
+        for path in additions {
+            self.stage_cloud_file(context, path)?;
+        }
+        Ok(())
+    }
+    pub(in crate::composition::accounts) fn stage_clipboard_image(
+        &mut self,
+        context: ConversationRef,
+        name: Text<255>,
+        image: talk_core::ui::ClipboardImage,
+    ) -> Result<(), SubmitError> {
+        if !allowed(&self.snapshot, context) {
+            return Err(SubmitError::Unavailable(
+                UnavailableReason::PermissionDenied,
+            ));
+        }
+        let bytes = image.as_slice().len() as u64;
+        let image = protocol::content::ImageBytes::new(image.as_slice().to_vec())
+            .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+        if self
+            .attachment_owner
+            .batch
+            .as_ref()
+            .is_some_and(|batch| batch.context != context || batch.running)
+        {
+            return Err(SubmitError::Busy);
+        }
+        let batch = self.attachment_owner.batch.get_or_insert_with(|| Batch {
+            context,
+            files: Vec::new(),
+            captions: Vec::new(),
+            running: false,
+            created: Instant::now(),
+        });
+        if batch
+            .files
+            .iter()
+            .filter(|file| file.view.state != UploadState::Shared)
+            .count()
+            >= 8
+        {
+            return Err(SubmitError::Busy);
+        }
+        while batch.files.len() >= 8 {
+            let Some(index) = batch
+                .files
+                .iter()
+                .position(|file| file.view.state == UploadState::Shared)
+            else {
+                return Err(SubmitError::Busy);
+            };
+            batch.files.remove(index).progress.cancel();
+        }
+        let next = self
+            .attachment_owner
+            .next
+            .checked_add(1)
+            .ok_or(SubmitError::Busy)?;
+        self.attachment_owner.next = next;
+        batch.files.push(File {
+            local: text(""),
+            remote: None,
+            existing: false,
+            image: Some(image),
+            view: UploadView {
+                id: next,
+                name,
+                bytes: Some(bytes),
+                state: UploadState::Selected,
+                submitted: false,
+                transferred: 0,
+                uploaded: false,
+                server_message: None,
+            },
+            progress: protocol::content::TransferProgress::default(),
+            outgoing: None,
+            preview_queued: false,
+        });
+        self.project_uploads();
+        self.queue_upload_previews();
+        Ok(())
+    }
     pub(in crate::composition::accounts) fn send_files(
         &mut self,
         request: RequestId,
@@ -287,9 +555,34 @@ impl Accounts {
                 UnavailableReason::PermissionDenied,
             ));
         }
-        if target != ComposeTarget::default() {
+        let panel = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+            .ok_or(SubmitError::StaleScope)?;
+        if ((!caption.as_str().is_empty() || target.silent) && !panel.media_caption)
+            || (target.reply_to.is_some() && !panel.availability(MessageFeature::Reply).enabled())
+            || (target.thread.is_some() && !panel.availability(MessageFeature::Threads).enabled())
+        {
             return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
         }
+        let message = |id: u128| -> Result<protocol::MessageId, SubmitError> {
+            let sequence = u64::try_from(id)
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or(SubmitError::StaleScope)?;
+            Ok(protocol::MessageId {
+                conversation: context.conversation,
+                sequence,
+            })
+        };
+        let options = protocol::messaging::ComposeOptions {
+            reply_to: target.reply_to.map(message).transpose()?,
+            thread: target.thread.map(message).transpose()?,
+            thread_title: None,
+            silent: target.silent,
+        };
         if self.content_owner.transfer.is_some()
             || self.attachment_owner.flight.is_some()
             || self.file_export_pending()
@@ -329,6 +622,7 @@ impl Accounts {
                 caption: if first { caption.clone() } else { text("") },
                 created: history::now_unix(),
                 operation: None,
+                options: options.clone(),
             });
             first = false;
         }

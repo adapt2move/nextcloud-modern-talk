@@ -69,7 +69,9 @@ fn feature(c: &MessagingCommand) -> MessagingFeature {
         C::Forward { .. } | C::ForwardApproved { .. } => F::Forward,
         C::SharedFiles { .. }
         | C::ShareFile { .. }
+        | C::ShareExistingFile { .. }
         | C::UploadFile { .. }
+        | C::UploadImage { .. }
         | C::DownloadFile { .. } => F::Files,
         C::Translate { .. } => F::Translation,
         C::Summarize { .. } => F::Summary,
@@ -230,6 +232,65 @@ impl Drop for PartialDownload {
     }
 }
 impl NextcloudClient {
+    pub(super) async fn download_to_file(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::FilePath,
+        destination: &str,
+        progress: &talk_core::protocol::content::TransferProgress,
+    ) -> Result<u64, PortError> {
+        let destination = std::path::PathBuf::from(destination);
+        if !destination.is_absolute() || destination.file_name().is_none() {
+            return Err(self.error(ErrorKind::Malformed));
+        }
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let temporary = parent.join(format!(".nmt-download-{:032x}.part", self.opaque()?));
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&temporary)
+            .await
+            .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
+        let partial = PartialDownload(temporary);
+        self.transport.validate(c)?;
+        let progress_copy = progress.clone();
+        let cancellation = c.cancellation.clone();
+        let observe = move |received, total| {
+            progress_copy.update(received, total);
+            if progress_copy.is_cancelled() {
+                cancellation.cancel();
+            }
+        };
+        let length = self
+            .transport
+            .download_file(c, path, &mut file, &observe)
+            .await?;
+        if progress.is_cancelled() {
+            return Err(self.error(ErrorKind::Cancelled));
+        }
+        progress.committing();
+        file.sync_all()
+            .await
+            .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
+        drop(file);
+        self.transport.validate(c)?;
+        tokio::fs::hard_link(&partial.0, &destination)
+            .await
+            .map_err(|e| {
+                self.error(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    ErrorKind::Conflict
+                } else {
+                    ErrorKind::StorageUnavailable
+                })
+            })?;
+        progress.published();
+        Ok(length)
+    }
     fn message_scope(&self, id: MessageId, conversation: ConversationId) -> Result<u64, PortError> {
         if id.conversation != conversation || id.sequence == 0 {
             return Err(self.error(ErrorKind::WrongScope));
@@ -283,6 +344,7 @@ impl NextcloudClient {
             },
             message_limit: caps.message_limit,
             file_limit: api::files::MAX_FILE_BYTES,
+            media_caption: caps.has("media-caption"),
             read_receipts: caps.read_receipts,
             typing_status: caps.typing_status,
         })
@@ -747,7 +809,91 @@ impl NextcloudClient {
                 .reconcile_durable_send(c, id, operation, &room, caps)
                 .await;
         }
-        if matches!(command, C::UploadFile { .. } | C::ShareFile { .. }) {
+        if let C::ShareExistingFile {
+            path,
+            caption,
+            options,
+        } = &command
+        {
+            self.message_action(MessagingFeature::Send, &room, &data, caps)?;
+            if room.classified || room.sensitive || caps.attachments_allowed != Some(true) {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            if !caps.has("chat-reference-id")
+                || ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
+                || (options.thread.is_some() && !caps.has("threads"))
+                || options.thread_title.is_some()
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if options.reply_to.is_some() {
+                self.message_action(MessagingFeature::Reply, &room, &data, caps)?;
+            }
+            let reply_to = options
+                .reply_to
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let thread = options
+                .thread
+                .map(|m| self.message_scope(m, id))
+                .transpose()?;
+            let path = api::files::FilePath::parse(path.as_str())
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            if self.sends.len() >= 100 {
+                if let Some(index) = self
+                    .sends
+                    .iter()
+                    .position(|s| s.state != SendState::Uncertain)
+                {
+                    self.sends.remove(index);
+                } else {
+                    return Err(self.error(ErrorKind::Busy));
+                }
+            }
+            self.admit_action(id, operation)?;
+            let reference = send_reference(operation);
+            self.sends.push(PendingSend {
+                operation,
+                conversation: id,
+                reference: reference.clone(),
+                state: SendState::Uncertain,
+            });
+            let options = api::files::ShareOptions {
+                caption: caption.as_str().to_owned(),
+                reply_to,
+                thread,
+                silent: options.silent,
+            };
+            let result = self
+                .transport
+                .share_existing_file(c, &token, &path, &reference, &options)
+                .await;
+            if let Err(error) = &result
+                && matches!(
+                    error.kind,
+                    ErrorKind::PermissionDenied
+                        | ErrorKind::NotFound
+                        | ErrorKind::Unsupported
+                        | ErrorKind::ReauthenticationRequired
+                        | ErrorKind::Conflict
+                        | ErrorKind::TooLarge
+                )
+                && let Some(send) = self
+                    .sends
+                    .iter_mut()
+                    .find(|s| s.operation == operation && s.conversation == id)
+            {
+                send.state = SendState::Rejected;
+            }
+            self.settle_action(operation, result.as_ref().err());
+            return result.map(|_| R::Changed);
+        }
+        if matches!(
+            command,
+            C::UploadFile { .. } | C::UploadImage { .. } | C::ShareFile { .. }
+        ) {
             self.message_action(MessagingFeature::Send, &room, &data, caps)?;
             if caps.conversation_subfolders != Some(true) {
                 return Err(self.error(ErrorKind::Unsupported));
@@ -756,29 +902,47 @@ impl NextcloudClient {
                 return Err(self.error(ErrorKind::Unsupported));
             }
         }
-        if let C::UploadFile {
-            local_path,
-            name,
-            progress,
-        } = &command
-        {
+        if matches!(&command, C::UploadFile { .. } | C::UploadImage { .. }) {
             if caps.attachments_allowed != Some(true) || room.classified {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
             if self.uploads.len() >= 100 {
                 return Err(self.error(ErrorKind::Busy));
             }
-            let file = tokio::fs::File::open(local_path.as_str())
-                .await
-                .map_err(|_| self.error(ErrorKind::NotFound))?;
-            let metadata = file
-                .metadata()
-                .await
-                .map_err(|_| self.error(ErrorKind::Transport))?;
-            if !metadata.is_file() {
-                return Err(self.error(ErrorKind::Unsupported));
-            }
-            let size = metadata.len();
+            let (name, progress, file, size): (
+                _,
+                _,
+                Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+                u64,
+            ) = match &command {
+                C::UploadFile {
+                    local_path,
+                    name,
+                    progress,
+                } => {
+                    let file = tokio::fs::File::open(local_path.as_str())
+                        .await
+                        .map_err(|_| self.error(ErrorKind::NotFound))?;
+                    let metadata = file
+                        .metadata()
+                        .await
+                        .map_err(|_| self.error(ErrorKind::Transport))?;
+                    if !metadata.is_file() {
+                        return Err(self.error(ErrorKind::Unsupported));
+                    }
+                    (name, progress, Box::new(file), metadata.len())
+                }
+                C::UploadImage {
+                    name,
+                    image,
+                    progress,
+                } => {
+                    let bytes = image.as_slice().to_vec();
+                    let size = bytes.len() as u64;
+                    (name, progress, Box::new(std::io::Cursor::new(bytes)), size)
+                }
+                _ => return Err(self.error(ErrorKind::Malformed)),
+            };
             if size > api::files::MAX_FILE_BYTES {
                 return Err(self.error(ErrorKind::TooLarge));
             }
@@ -851,60 +1015,13 @@ impl NextcloudClient {
                 .ok_or_else(|| self.error(ErrorKind::Unsupported))?;
             let path = api::files::FilePath::parse(&format!("/{}", raw.trim_start_matches('/')))
                 .map_err(|k| self.error(transport::kind(k)))?;
-            let destination = std::path::PathBuf::from(destination.as_str());
-            let parent = destination
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or(std::path::Path::new("."));
-            let temporary = parent.join(format!(".nmt-download-{:032x}.part", self.opaque()?));
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            options.mode(0o600);
-            let mut file = options
-                .open(&temporary)
-                .await
-                .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
-            let partial = PartialDownload(temporary);
-            self.transport.validate(c)?;
             self.admit_action(id, operation)?;
-            let result = async {
-                let progress_copy = progress.clone();
-                let cancellation = c.cancellation.clone();
-                let observe = move |received, total| {
-                    progress_copy.update(received, total);
-                    if progress_copy.is_cancelled() {
-                        cancellation.cancel();
-                    }
-                };
-                let length = self
-                    .transport
-                    .download_file(c, path, &mut file, &observe)
-                    .await?;
-                if progress.is_cancelled() {
-                    return Err(self.error(ErrorKind::Cancelled));
-                }
-                progress.committing();
-                file.sync_all()
-                    .await
-                    .map_err(|_| self.error(ErrorKind::StorageUnavailable))?;
-                drop(file);
-                self.transport.validate(c)?;
-                tokio::fs::hard_link(&partial.0, &destination)
-                    .await
-                    .map_err(|e| {
-                        self.error(if e.kind() == std::io::ErrorKind::AlreadyExists {
-                            ErrorKind::Conflict
-                        } else {
-                            ErrorKind::StorageUnavailable
-                        })
-                    })?;
-                progress.published();
-                Ok(R::FileSaved {
+            let result = self
+                .download_to_file(c, path, destination.as_str(), progress)
+                .await
+                .map(|length| R::FileSaved {
                     bytes: length as u32,
-                })
-            }
-            .await;
+                });
             self.settle_action(operation, result.as_ref().err());
             return result;
         }
@@ -1141,9 +1258,22 @@ impl NextcloudClient {
                 object_type: "file".into(),
                 before: before.map(|m| self.message_scope(m, id)).transpose()?,
             },
-            C::ShareFile { path, caption } => {
+            C::ShareFile {
+                path,
+                caption,
+                options,
+            } => {
                 if caps.attachments_allowed != Some(true) {
                     return Err(self.error(ErrorKind::PermissionDenied));
+                }
+                if ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
+                    || (options.thread.is_some() && !caps.has("threads"))
+                    || options.thread_title.is_some()
+                {
+                    return Err(self.error(ErrorKind::Unsupported));
+                }
+                if options.reply_to.is_some() {
+                    self.message_action(MessagingFeature::Reply, &room, &data, caps)?;
                 }
                 WireCommand::ShareAttachment {
                     path: path.as_str().into(),
@@ -1156,6 +1286,18 @@ impl NextcloudClient {
                         .clone(),
                     caption: caption.as_str().into(),
                     reference: send_reference(operation),
+                    options: api::chat::ComposeOptions {
+                        reply_to: options
+                            .reply_to
+                            .map(|m| self.message_scope(m, id))
+                            .transpose()?,
+                        thread: options
+                            .thread
+                            .map(|m| self.message_scope(m, id))
+                            .transpose()?,
+                        thread_title: None,
+                        silent: options.silent,
+                    },
                 }
             }
             _ => return Err(self.error(ErrorKind::Unconfigured)),

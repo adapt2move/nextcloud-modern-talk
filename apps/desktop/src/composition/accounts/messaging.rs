@@ -595,6 +595,9 @@ impl Accounts {
         };
         match &action {
             V::StageFiles(paths) => return self.stage_files(context, paths.clone()),
+            V::StageClipboardImage { name, image } => {
+                return self.stage_clipboard_image(context, name.clone(), image.clone());
+            }
             V::SendFiles { caption, target } => {
                 return self.send_files(request, context, caption.clone(), target.clone());
             }
@@ -703,6 +706,7 @@ impl Accounts {
             | V::Download { .. }
             | V::DismissUpload
             | V::StageFiles(_)
+            | V::StageClipboardImage { .. }
             | V::SendFiles { .. }
             | V::RemoveFile(_)
             | V::RetryFile(_)
@@ -720,6 +724,7 @@ impl Accounts {
                     .path
                     .clone(),
                 caption,
+                options: Default::default(),
             },
             V::Thread(root) => W::History {
                 before: None,
@@ -823,7 +828,11 @@ impl Accounts {
                     destination: destination.conversation,
                 }
             }
-            V::ShareFile { path, caption } => W::ShareFile { path, caption },
+            V::ShareFile { path, caption } => W::ShareFile {
+                path,
+                caption,
+                options: Default::default(),
+            },
         };
         self.start_message(request, context, command, work)?;
         if let Some(root) = thread_root
@@ -1730,6 +1739,7 @@ pub(super) fn project_capabilities(
 ) {
     panel.pin_change = capabilities.pin_change;
     panel.file_limit = capabilities.file_limit;
+    panel.media_caption = capabilities.media_caption;
     panel.message_limit = capabilities.message_limit.unwrap_or(4096).min(4096);
     panel.features = page(
         capabilities

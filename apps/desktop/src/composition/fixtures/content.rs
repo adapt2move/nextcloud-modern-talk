@@ -145,6 +145,9 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         }]),
         ..Default::default()
     };
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.media_caption = true;
+    }
 }
 
 pub(super) fn attachments(snapshot: &mut PresentationSnapshot) {
@@ -228,6 +231,108 @@ pub(super) fn action(
     action: ContentAction,
 ) -> Result<(), SubmitError> {
     match action {
+        ContentAction::ListFiles(path) => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
+        ContentAction::ListFilesPage { path, .. } => {
+            cloud_files(snapshot, path.as_str());
+            Ok(())
+        }
+        ContentAction::RecentFiles | ContentAction::FavoriteFiles => {
+            let section = if matches!(action, ContentAction::RecentFiles) {
+                talk_core::ui::content::FileSection::Recent
+            } else {
+                talk_core::ui::content::FileSection::Favorites
+            };
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = section;
+            }
+            Ok(())
+        }
+        ContentAction::SearchFiles(term) => {
+            cloud_files(snapshot, "/");
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.section = talk_core::ui::content::FileSection::Search;
+                let term = term.as_str().to_lowercase();
+                browser.entries = page(
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .filter(|entry| entry.name.as_str().to_lowercase().contains(&term))
+                        .cloned(),
+                );
+            }
+            Ok(())
+        }
+        ContentAction::CloseFileBrowser => {
+            snapshot.content_panel.file_browser = None;
+            Ok(())
+        }
+        ContentAction::SortFiles(sort) => {
+            if let Some(browser) = &mut snapshot.content_panel.file_browser {
+                browser.sort = sort;
+            }
+            Ok(())
+        }
+        ContentAction::StageCloudFile { context, path } => {
+            let entry = snapshot
+                .content_panel
+                .file_browser
+                .as_ref()
+                .filter(|browser| browser.account == context.account)
+                .and_then(|browser| {
+                    browser
+                        .entries
+                        .as_slice()
+                        .iter()
+                        .find(|item| item.path == path && !item.directory)
+                })
+                .ok_or(SubmitError::StaleScope)?;
+            let size = entry.size;
+            let name = entry.name.clone();
+            let panel = snapshot
+                .message_panel
+                .as_mut()
+                .filter(|panel| panel.context == context)
+                .ok_or(SubmitError::StaleScope)?;
+            if panel
+                .uploads
+                .as_slice()
+                .iter()
+                .any(|item| item.name == name)
+            {
+                return Ok(());
+            }
+            panel
+                .uploads
+                .try_push(talk_core::ui::messaging::UploadView {
+                    id: 8000 + panel.uploads.as_slice().len() as u64,
+                    name,
+                    bytes: size,
+                    state: talk_core::ui::messaging::UploadState::Selected,
+                    submitted: false,
+                    transferred: 0,
+                    uploaded: true,
+                    server_message: None,
+                })
+                .map_err(|_| SubmitError::Busy)?;
+            Ok(())
+        }
+        ContentAction::StageCloudFiles { context, paths } => {
+            for path in paths.as_slice() {
+                self::action(
+                    snapshot,
+                    ContentAction::StageCloudFile {
+                        context,
+                        path: path.clone(),
+                    },
+                )?;
+            }
+            Ok(())
+        }
         ContentAction::Load(target)
             if snapshot
                 .content_panel
@@ -286,13 +391,133 @@ pub(super) fn action(
     }
 }
 
+pub(super) fn cloud_files(snapshot: &mut PresentationSnapshot, path: &str) {
+    use talk_core::ui::content::{CloudFileView, FileBrowserView};
+    let Some(account) = snapshot.active_account else {
+        return;
+    };
+    let names: &[(&str, bool, Option<u64>)] = if path == "/" {
+        &[
+            ("Entwürfe", true, None),
+            ("Team", true, None),
+            ("Projektübersicht.pdf", false, Some(1_240_000)),
+            ("Workshop.png", false, Some(485_000)),
+        ]
+    } else {
+        &[
+            ("Konzept.pdf", false, Some(288_000)),
+            ("Notizen.txt", false, Some(4200)),
+        ]
+    };
+    snapshot.content_panel.file_browser = Some(FileBrowserView {
+        account,
+        path: text(path),
+        section: talk_core::ui::content::FileSection::All,
+        sort: talk_core::ui::content::FileSort::Name,
+        generation: 1,
+        pagination: None,
+        search_available: true,
+        favorites_available: true,
+        has_listing: true,
+        loading: false,
+        offline: false,
+        error: None,
+        entries: page(names.iter().map(|(name, directory, size)| CloudFileView {
+            name: text(name),
+            path: text(&format!(
+                "{}{}{}",
+                if path == "/" { "" } else { path },
+                "/",
+                name
+            )),
+            directory: *directory,
+            size: *size,
+            modified: Some(text("04 Nov 2026")),
+            modified_unix: Some(1793750400),
+            mime: if name.ends_with(".png") {
+                Some(text("image/png"))
+            } else if name.ends_with(".pdf") {
+                Some(text("application/pdf"))
+            } else {
+                None
+            },
+            file_id: match *name {
+                "Workshop.png" => Some(text("7101")),
+                "Projektübersicht.pdf" => Some(text("7102")),
+                _ => None,
+            },
+        })),
+    });
+    let mut assets: Vec<_> = snapshot
+        .content_panel
+        .assets
+        .as_slice()
+        .iter()
+        .filter(|asset| !matches!(asset.target, AssetTarget::CloudFile { .. }))
+        .cloned()
+        .collect();
+    if path == "/" {
+        for (file, name, key) in [(7101, "Workshop.png", 4), (7102, "Projektübersicht.pdf", 5)] {
+            assets.push(AssetView {
+                target: AssetTarget::CloudFile {
+                    account,
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                state: AssetState::Ready { key },
+                emoji: None,
+                color: None,
+                document_pages: None,
+            });
+        }
+    }
+    snapshot.content_panel.assets = page(assets);
+}
+
 pub(crate) fn images(scenario: Option<&str>) -> Vec<super::super::accounts::content::ImageJob> {
+    if scenario == Some("chat-cloud-files") {
+        let mut jobs = images(Some("chat-content"));
+        for (file, name, key, bytes) in [
+            (
+                7101,
+                "Workshop.png",
+                4,
+                include_bytes!("../../../assets/fixtures/content-photo.png").as_slice(),
+            ),
+            (
+                7102,
+                "Projektübersicht.pdf",
+                5,
+                include_bytes!("../../../assets/fixtures/content-document.png").as_slice(),
+            ),
+        ] {
+            jobs.push(super::super::accounts::content::ImageJob {
+                cached: false,
+                local: None,
+                attachment: None,
+                preview_generation: None,
+                account: scope(),
+                target: AssetTarget::CloudFile {
+                    account: scope(),
+                    path: text(&format!("/{name}")),
+                    file,
+                    generation: 1,
+                },
+                key,
+                bytes: talk_core::protocol::content::ImageBytes::new(bytes.to_vec())
+                    .expect("bounded authored fixture"),
+            });
+        }
+        return jobs;
+    }
     if !matches!(
         scenario,
         Some(
             "chat-content"
                 | "chat-attachments"
                 | "chat-upload"
+                | "chat-upload-preview"
                 | "chat-upload-uncertain"
                 | "chat-content-progress"
                 | "chat-content-loading"
@@ -390,5 +615,38 @@ pub(super) fn pending_upload(snapshot: &mut PresentationSnapshot, uncertain: boo
     if let Some(panel) = snapshot.message_panel.as_mut() {
         panel.uploads = page([file]);
         panel.uploads_running = !uncertain;
+    }
+}
+
+pub(super) fn staged_image(snapshot: &mut PresentationSnapshot) {
+    use talk_core::ui::messaging::{UploadState, UploadView};
+    let context = snapshot.selected.unwrap();
+    let file = UploadView {
+        id: 1,
+        name: text("Zwischenablage.png"),
+        bytes: Some(190313),
+        state: UploadState::Selected,
+        submitted: false,
+        transferred: 0,
+        uploaded: false,
+        server_message: None,
+    };
+    snapshot
+        .content_panel
+        .assets
+        .try_push(AssetView {
+            target: AssetTarget::Thumbnail(AttachmentRef {
+                context,
+                message: file.message_id(),
+                placeholder: text("upload"),
+            }),
+            state: AssetState::Ready { key: 2 },
+            emoji: None,
+            color: None,
+            document_pages: None,
+        })
+        .unwrap();
+    if let Some(panel) = snapshot.message_panel.as_mut() {
+        panel.uploads = page([file]);
     }
 }

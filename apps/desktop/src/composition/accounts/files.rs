@@ -18,6 +18,10 @@ pub(crate) enum Kind {
         placeholder: Text<128>,
         name: Text<255>,
     },
+    CloudDownload {
+        path: Text<16384>,
+        name: Text<255>,
+    },
 }
 #[derive(Clone)]
 pub(crate) struct Picker {
@@ -368,8 +372,18 @@ impl Accounts {
             .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
         let mut upload_name = None;
         let mut download = None;
+        if let Kind::CloudDownload { path, name } = &picker.kind {
+            return self.start_browser_download(
+                picker.request,
+                picker.context.account,
+                path.clone(),
+                name.clone(),
+                local,
+            );
+        }
         let command = match &picker.kind {
             Kind::Csv { .. } => return Err(SubmitError::StaleScope),
+            Kind::CloudDownload { .. } => return Err(SubmitError::StaleScope),
             Kind::Upload => {
                 let name = path
                     .file_name()

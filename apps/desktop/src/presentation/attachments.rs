@@ -56,6 +56,66 @@ pub(super) fn file_detail(name: &str, bytes: Option<u64>) -> String {
     }
 }
 impl Desktop {
+    pub(super) fn paste_clipboard_attachment(
+        &mut self,
+        pasted: &super::input::PastedContent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.overlay.is_some()
+            || self.background_inert
+            || !self.composer_available()
+            || self.snapshot.content != talk_core::ui::presentation::ContentState::Ready
+            || !self
+                .selected()
+                .is_some_and(|room| room.send == talk_core::ui::Decision::Allowed)
+            || !self.message_feature_enabled(MessageFeature::Files)
+        {
+            return;
+        }
+        let Some(context) = self.snapshot.selected else {
+            return;
+        };
+        let (extension, image) = match pasted {
+            super::input::PastedContent::None => return,
+            super::input::PastedContent::Unsupported => {
+                self.feedback = Some(
+                    Feedback::error("Diese Dateiauswahl wird nicht unterstützt.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::TooLarge => {
+                self.feedback = Some(
+                    Feedback::error("Das Bild aus der Zwischenablage ist zu groß.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::TooMany => {
+                self.feedback = Some(
+                    Feedback::error("Du kannst höchstens 8 Dateien auf einmal anhängen.")
+                        .in_conversation(context),
+                );
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Files(paths) => {
+                self.submit_message(MessageAction::StageFiles(paths.clone()));
+                cx.notify();
+                return;
+            }
+            super::input::PastedContent::Image(extension, image) => (extension, image),
+        };
+        if let Ok(name) = Text::new(&format!("clipboard.{extension}")) {
+            self.submit_message(MessageAction::StageClipboardImage {
+                name,
+                image: image.clone(),
+            });
+        }
+        cx.notify();
+    }
     pub(super) fn stage_dropped_files(
         &mut self,
         context: ConversationRef,

@@ -301,11 +301,61 @@ impl Transport {
     pub(super) fn validate(&self, c: &OperationContext) -> Result<(), PortError> {
         self.api.validate(&context(c)).map_err(error)
     }
-    pub(super) async fn upload_file(
+    pub(super) async fn list_files(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .list_directory(&context(c), &path)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn search_files(
+        &mut self,
+        c: &OperationContext,
+        term: Option<&str>,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api
+            .search_files(&context(c), term)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn list_files_page(
+        &mut self,
+        c: &OperationContext,
+        path: api::files::DirectoryPath,
+        offset: u64,
+    ) -> Result<api::files::DirectoryPage, PortError> {
+        self.api
+            .list_directory_page(&context(c), &path, offset)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn favorite_files(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<Vec<api::files::DirectoryEntry>, PortError> {
+        self.api.favorite_files(&context(c)).await.map_err(error)
+    }
+    pub(super) async fn share_existing_file(
+        &mut self,
+        c: &OperationContext,
+        room: &RoomToken,
+        path: &api::files::FilePath,
+        reference: &str,
+        options: &api::files::ShareOptions,
+    ) -> Result<String, PortError> {
+        self.api
+            .share_existing_file(&context(c), room, path, reference, options)
+            .await
+            .map_err(error)
+    }
+    pub(super) async fn upload_file<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
         &mut self,
         c: &OperationContext,
         path: api::files::FilePath,
-        file: tokio::fs::File,
+        file: R,
         size: u64,
         progress: talk_core::protocol::content::TransferProgress,
     ) -> Result<(), PortError> {

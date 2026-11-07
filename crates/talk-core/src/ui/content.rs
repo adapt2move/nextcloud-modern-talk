@@ -2,7 +2,6 @@
 use super::conversation::{AccountPersonRef, Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{AccountScope, Page, Text, UnavailableReason};
-
 /// One native file promise's bounded observation, retained until acknowledged.
 /// This correlation grants no authority to read the former account or room.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +30,12 @@ pub enum AssetTarget {
         participant: u128,
     },
     PersonAvatar(AccountPersonRef),
+    CloudFile {
+        account: AccountScope,
+        path: Text<16384>,
+        file: u64,
+        generation: u64,
+    },
     Thumbnail(AttachmentRef),
     Image(AttachmentRef),
 }
@@ -41,7 +46,7 @@ impl AssetTarget {
             | Self::MessageAvatar { context: c, .. }
             | Self::ParticipantAvatar { context: c, .. } => Some(*c),
             Self::Thumbnail(a) | Self::Image(a) => Some(a.context),
-            Self::SelfAvatar | Self::PersonAvatar(_) => None,
+            Self::SelfAvatar | Self::PersonAvatar(_) | Self::CloudFile { .. } => None,
         }
     }
 }
@@ -133,7 +138,62 @@ pub struct PlaybackView {
     pub stop_unconfirmed: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloudFileView {
+    pub name: Text<255>,
+    pub path: Text<16384>,
+    pub directory: bool,
+    pub size: Option<u64>,
+    pub modified: Option<Text<256>>,
+    pub modified_unix: Option<i64>,
+    pub mime: Option<Text<256>>,
+    pub file_id: Option<Text<256>>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileBrowserView {
+    pub account: AccountScope,
+    pub path: Text<16384>,
+    pub section: FileSection,
+    pub sort: FileSort,
+    pub entries: Page<CloudFileView, 1000>,
+    /// Local listing identity, retired when a fresh server observation arrives.
+    pub generation: u64,
+    /// DAV page offset and total, including the folder itself. No server token.
+    pub pagination: Option<(u64, u64)>,
+    pub search_available: bool,
+    pub favorites_available: bool,
+    /// Whether these entries came from a completed listing, including an empty one.
+    pub has_listing: bool,
+    pub loading: bool,
+    pub offline: bool,
+    pub error: Option<UnavailableReason>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserDownloadView {
+    pub request: RequestId,
+    pub name: Text<255>,
+    pub received: u64,
+    pub total: Option<u64>,
+    pub state: DownloadState,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSection {
+    All,
+    Recent,
+    Favorites,
+    Search,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSort {
+    Name,
+    Modified,
+    Size,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentPanel {
+    pub file_browser: Option<FileBrowserView>,
+    /// Explicit DAV refusal for this account; unknown until observed.
+    pub file_browser_supported: Option<bool>,
+    pub browser_download: Option<BrowserDownloadView>,
     pub self_name: Option<Text<256>>,
     pub organization: Option<Text<256>>,
     pub account: Option<AccountScope>,
@@ -153,6 +213,9 @@ pub struct ContentPanel {
 impl Default for ContentPanel {
     fn default() -> Self {
         Self {
+            file_browser: None,
+            file_browser_supported: None,
+            browser_download: None,
             self_name: None,
             organization: None,
             account: None,
@@ -171,6 +234,28 @@ impl Default for ContentPanel {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentAction {
+    ListFiles(Text<16384>),
+    ListFilesPage {
+        path: Text<16384>,
+        offset: u64,
+    },
+    RecentFiles,
+    FavoriteFiles,
+    SearchFiles(Text<256>),
+    SortFiles(FileSort),
+    OpenBrowserFile(Text<16384>),
+    DownloadBrowserFile(Text<16384>),
+    CancelBrowserDownload,
+    DismissBrowserDownload,
+    CloseFileBrowser,
+    StageCloudFile {
+        context: ConversationRef,
+        path: Text<16384>,
+    },
+    StageCloudFiles {
+        context: ConversationRef,
+        paths: Page<Text<16384>, 8>,
+    },
     DismissDownload,
     Load(AssetTarget),
     Preview(AttachmentRef),

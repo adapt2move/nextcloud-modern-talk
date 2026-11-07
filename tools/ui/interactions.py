@@ -6,6 +6,7 @@ assertions concern observable transitions and retained input, not pixel goldens.
 import csv
 import io
 import re
+import subprocess
 import time
 import unicodedata
 from pathlib import Path
@@ -44,7 +45,28 @@ def exercise(scenario, env, xid, out, label, large=False):
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
         ocr_path.unlink()
         for term in required:
-            if normalized(term).replace(' ', '') not in text.replace(' ', ''):
+            # At small sizes Tesseract sometimes reads the highlighted German
+            # selection count's final letters as "ahit". Keep the numeric count
+            # and prefix exact; the subsequent staged chips verify both files.
+            selection_count = re.fullmatch(r'([12]) ausgewählt', term)
+            fuzzy_count = selection_count and re.search(
+                rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', text)
+            if selection_count and not fuzzy_count and (width, height) == (1280, 800):
+                # This inspected footer location is stable in the fixed-size
+                # fixture. A contrast-enhanced crop also works in dark mode.
+                count_path=out/f'{label}-ocr-count.png'
+                run(['convert', str(path), '-crop', '120x35+440+660', '+repage',
+                     '-resize', '400%', '-colorspace', 'gray', '-negate',
+                     '-contrast-stretch', '2%x2%', str(count_path)], env)
+                count_text=normalized(run(['tesseract', str(count_path), 'stdout', '--psm', '7'], env).stdout)
+                count_path.unlink()
+                fuzzy_count=re.search(rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', count_text)
+            aliases = {
+                'Projektübersicht.pdf': ('projektibersichtpdf', 'projektiibersichtpdf'),
+                'Zwischenablage.png': ('wischenablagepng',),
+            }
+            alternate = any(alias in text.replace(' ', '') for alias in aliases.get(term, ()))
+            if normalized(term).replace(' ', '') not in text.replace(' ', '') and not fuzzy_count and not alternate:
                 raise AssertionError(f'{name}: missing {term!r}; evidence {path.name}; OCR {text}')
         for term in absent:
             if normalized(term).replace(' ', '') in text.replace(' ', ''):
@@ -157,6 +179,55 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('unknown privacy policy blocks export but permits selected-text replacement by paste',['CLIPMARK'],['DRAFTSAFE'])
         key('ctrl+k');key('ctrl+v')
         expect('denied draft copy did not replace platform clipboard',['CLIPMARK'])
+    elif scenario == 'chat-content':
+        # The plus control is a native icon; this point was inspected at 1280x800.
+        run(['xdotool', 'mousemove', '--window', xid, '314', '742', 'click', '1'], env)
+        expect('composer plus exposes both file sources', ['Vom Computer hochladen', 'Aus NextCloud teilen'])
+        key('Escape')
+        click('Nachricht', xmin=200, ymin=600)
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
+                       input='file:///tmp/Fictional-paste.txt\r\n', text=True, env=env,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
+        data = run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-o'], env).stdout
+        if data.strip() != 'file:///tmp/Fictional-paste.txt':
+            raise AssertionError('the X11 clipboard did not retain the native file-list fixture')
+        key('ctrl+v')
+        expect('native file-list paste stages a file chip', ['Fictional-paste.txt', 'Bereit zum Senden'])
+        image = Path('apps/desktop/assets/fixtures/content-photo.png').read_bytes()
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i'],
+                       input=image, env=env, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True, timeout=10)
+        key('ctrl+v')
+        expect('native image paste stages an image chip', ['Fictional-paste.txt', 'clipboard.png'])
+    elif scenario == 'chat-cloud-files':
+        click('Team', xmin=285, ymin=400)
+        expect('folder navigation opens its listing', ['Konzept.pdf', 'Notizen.txt'])
+        key('BackSpace')
+        expect('backspace navigates to the parent folder', ['Projektübersicht.pdf', 'Workshop.png'])
+        click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
+        type_text('Workshop')
+        time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
+        expect('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
+        key('ctrl+a'); key('BackSpace')
+        time.sleep(.7)
+        expect('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
+        # The file row is visible in dark and light captures, but low contrast
+        # can make Tesseract miss its name. Verify the resulting selection below.
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
+        key('w'); key('ctrl+space')
+        expect('type-ahead and control-space select the matching file', ['2 ausgewählt'])
+        key('ctrl+space')
+        expect('control-space toggles the focused file', ['1 ausgewählt'])
+        click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 555))
+        key('shift+Down')
+        expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
+        key('Return')
+        expect('keyboard selection returns both cloud files to the composer',
+               ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
+    elif scenario == 'chat-cloud-files-offline':
+        expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
+    elif scenario == 'chat-upload-preview':
+        expect('staged image has a composer chip', ['Zwischenablage.png', 'Bereit zum Senden'])
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')

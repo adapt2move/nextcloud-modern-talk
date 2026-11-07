@@ -1,7 +1,7 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
-use super::{Decision, Page, Text, UnavailableReason};
+use super::{ClipboardImage, Decision, Page, Text, UnavailableReason};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
@@ -233,6 +233,7 @@ pub struct MessagePanel {
     pub pin_change: Decision,
     pub shared_files: Page<super::presentation::MessageView, 50>,
     pub file_limit: u64,
+    pub media_caption: bool,
     pub uploaded: Option<UploadedFile>,
     pub uploads: Page<UploadView, 8>,
     pub uploads_running: bool,
@@ -281,6 +282,7 @@ impl MessagePanel {
             pin_change: Decision::Unknown,
             shared_files: Page::empty(),
             file_limit: 0,
+            media_caption: false,
             uploaded: None,
             uploads: Page::empty(),
             uploads_running: false,
@@ -333,6 +335,10 @@ pub enum MessageAction {
     DiscardQueued(u128),
     PickUpload,
     StageFiles(Page<Text<16384>, 8>),
+    StageClipboardImage {
+        name: Text<255>,
+        image: ClipboardImage,
+    },
     SendFiles {
         caption: Text<4096>,
         target: ComposeTarget,
