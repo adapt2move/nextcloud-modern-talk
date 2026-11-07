@@ -1236,6 +1236,48 @@ mod action_tests {
         assert!(!model.call_ui.as_ref().unwrap().wishes.microphone);
     }
     #[test]
+    fn generation_replacement_is_scoped_and_explicit_restart_is_not_misidentified() {
+        let mut model = super::super::tests::model();
+        let old = call();
+        let incoming = invitation(old);
+        let mut snapshot = incoming.call.clone().unwrap();
+        model.apply_incoming(
+            old.account,
+            incoming,
+            talk_core::lifecycle::Cancellation::default(),
+        );
+        snapshot.phase = Phase::Active;
+        model.complete_call(
+            old,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(
+                snapshot.clone(),
+            ))),
+        );
+        assert!(!model.snapshot.call.as_ref().unwrap().replacement_generation);
+        let mut fresh = old;
+        fresh.call = CallGeneration::from_local(6);
+        snapshot.call = fresh;
+        model.complete_call(
+            old,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(
+                snapshot.clone(),
+            ))),
+        );
+        assert!(model.snapshot.call.as_ref().unwrap().replacement_generation);
+        // An obsolete completion cannot overwrite the adopted generation.
+        model.complete_call(old, Err(IdentityError::Request(ErrorKind::Transport)));
+        assert_eq!(model.snapshot.call.as_ref().unwrap().scope, fresh);
+        model.call_ui.as_mut().unwrap().explicit_restart = true;
+        let mut next = fresh;
+        next.call = CallGeneration::from_local(7);
+        snapshot.call = next;
+        model.complete_call(
+            fresh,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Meeting(snapshot))),
+        );
+        assert!(!model.snapshot.call.as_ref().unwrap().replacement_generation);
+    }
+    #[test]
     fn stream_metadata_preserves_actor_identity_and_keeps_screens_out_of_people() {
         let mut snapshot = invitation(call()).call.unwrap();
         snapshot.phase = Phase::Active;
