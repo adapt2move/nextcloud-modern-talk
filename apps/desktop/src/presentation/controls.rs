@@ -1400,8 +1400,8 @@ impl Desktop {
             .justify_center()
             .bg(bg)
             .text_color(fg)
-            .text_size(px(extent * 0.36))
-            .line_height(px(extent * 0.5))
+            .text_size(px((extent * 0.36).max(12.)))
+            .line_height(px((extent * 0.5).max(18.)))
             .font_weight(FontWeight::MEDIUM)
             .child(initials.to_owned())
     }
