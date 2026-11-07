@@ -1,6 +1,7 @@
 //! Stable, variable-height native history and deliberate message actions.
 mod arrival;
 pub(super) mod composer_menu;
+mod date_picker;
 mod deadline;
 pub(super) mod forward;
 mod history;
@@ -9,6 +10,8 @@ mod pins;
 mod reactions;
 mod recovery;
 mod row;
+mod summary;
+mod translation;
 
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
@@ -50,14 +53,18 @@ pub(crate) enum Action {
     CloseSearch,
     Locate(u128),
     OpenLocation(u128, Text<128>, Text<1024>),
+    Translate(u128),
+    HideTranslation(u128),
     CyclePin { current: u128, forward: bool },
     Schedule,
+    EditScheduled(u128),
     ToggleScheduled,
     CancelTime,
     Remind(u128),
     SubmitTime,
     SubmitRepeatedTime(talk_core::preferences::time::RepeatedTime),
     ChooseTime(talk_core::preferences::time::DeadlineChoice),
+    DatePicker(date_picker::PickerAction),
     InsertMention(String),
 }
 pub(super) struct MessageUi {
@@ -66,6 +73,9 @@ pub(super) struct MessageUi {
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
     observed_pins: Vec<u128>,
+    observed_translations: Vec<talk_core::ui::messaging::Translation>,
+    observed_translation_status: (Option<u128>, Option<u128>),
+    hidden_translations: Vec<u128>,
     arrival: Rc<RefCell<arrival::Arrival>>,
     geometry: Rc<RefCell<MessageGeometry>>,
     pub editing: Option<u128>,
@@ -83,9 +93,11 @@ pub(super) struct MessageUi {
     last_read: Option<(ConversationRef, u128)>,
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
+    picker: Option<talk_core::preferences::time::calendar::Calendar>,
+    scheduled_edit: Option<(u128, bool)>,
     show_scheduled: bool,
     fixture_menu_pending: bool,
-    pub time_input: Entity<TextInput>,
+    pub scheduled_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
     pub search: Entity<TextInput>,
     show_search: bool,
@@ -244,6 +256,9 @@ impl MessageUi {
             context: None,
             observed: Vec::new(),
             observed_pins: Vec::new(),
+            observed_translations: Vec::new(),
+            observed_translation_status: (None, None),
+            hidden_translations: Vec::new(),
             editing: None,
             composer_load_failed: None,
             edit_generation: 0,
@@ -259,9 +274,11 @@ impl MessageUi {
             last_read: None,
             last_located: None,
             time_target: None,
+            picker: None,
+            scheduled_edit: None,
             show_scheduled: false,
             fixture_menu_pending: false,
-            time_input: cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx)),
+            scheduled_input: cx.new(|cx| TextInput::new("Nachricht bearbeiten", 4096, theme, cx)),
             time_error: None,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
             show_search: false,
@@ -293,7 +310,12 @@ impl Desktop {
                     cx.notify();
                 });
                 self.open_message_deadline(None, window, cx);
+                if self.message_ui.picker.is_none() {
+                    self.message_ui.picker =
+                        talk_core::preferences::time::calendar::Calendar::parse("2027-01-16 09:00");
+                }
             }
+            "chat-schedule-edit" => self.open_scheduled_edit(41, window, cx),
             _ => self.message_ui.show_scheduled = true,
         }
     }
@@ -458,10 +480,26 @@ impl Desktop {
             .flat_map(|panel| panel.pinned_messages.as_slice())
             .map(|message| message.local_id)
             .collect();
+        let (translations, translation_status) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| Some(panel.context) == self.snapshot.selected)
+            .map_or_else(
+                || (Vec::new(), (None, None)),
+                |panel| {
+                    (
+                        panel.translations.as_slice().to_vec(),
+                        (panel.translation_pending, panel.translation_failed),
+                    )
+                },
+            );
         // Pin markers change row height without changing canonical message text.
         // Invalidate the same bounded list geometry and visibility observation.
-        let rows_changed =
-            self.message_ui.observed != rows || self.message_ui.observed_pins != pins;
+        let rows_changed = self.message_ui.observed != rows
+            || self.message_ui.observed_pins != pins
+            || self.message_ui.observed_translations != translations
+            || self.message_ui.observed_translation_status != translation_status;
         if rows_changed {
             self.message_ui.geometry.borrow_mut().visible_read = None;
         }
@@ -507,7 +545,10 @@ impl Desktop {
                 self.message_ui.pending_edit = None;
             }
             self.message_ui.time_target = None;
+            self.message_ui.picker = None;
+            self.message_ui.scheduled_edit = None;
             self.message_ui.show_scheduled = false;
+            self.message_ui.hidden_translations.clear();
             self.message_ui.show_search = false;
             self.message_ui.search_return_focus = None;
             self.message_ui.search_pending_focus = false;
@@ -572,6 +613,8 @@ impl Desktop {
             self.message_ui.observed = rows.to_vec();
         }
         self.message_ui.observed_pins = pins;
+        self.message_ui.observed_translations = translations;
+        self.message_ui.observed_translation_status = translation_status;
         if let Some(panel) = self
             .snapshot
             .message_panel
@@ -1121,6 +1164,7 @@ impl Desktop {
                 }
                 self.message_ui.editing = None;
                 self.message_ui.time_target = None;
+                self.message_ui.scheduled_edit = None;
             }
             Action::Command(command) => {
                 if matches!(command, MessageAction::Scheduled | MessageAction::Reminders) {
@@ -1166,8 +1210,20 @@ impl Desktop {
                     id,
                 });
             }
+            Action::Translate(message) => self.translate_message(context, message),
+            Action::HideTranslation(message) => {
+                if !self.message_ui.hidden_translations.contains(&message)
+                    && self.message_ui.hidden_translations.len() < 100
+                {
+                    self.message_ui.hidden_translations.push(message);
+                }
+            }
             Action::Schedule => {
+                self.message_ui.scheduled_edit = None;
                 self.open_message_deadline(None, window, cx);
+            }
+            Action::EditScheduled(id) => {
+                self.open_scheduled_edit(id, window, cx);
             }
             Action::ToggleScheduled => {
                 self.message_ui.show_scheduled = !self.message_ui.show_scheduled;
@@ -1177,10 +1233,13 @@ impl Desktop {
             }
             Action::CancelTime => {
                 self.message_ui.time_target = None;
+                self.message_ui.picker = None;
+                self.message_ui.scheduled_edit = None;
                 self.message_ui.time_error = None;
                 self.restore_deadline_focus(window, cx);
             }
             Action::Remind(id) => {
+                self.message_ui.scheduled_edit = None;
                 self.open_message_deadline(Some(id), window, cx);
             }
             Action::SubmitTime => {
@@ -1193,6 +1252,7 @@ impl Desktop {
             Action::SubmitRepeatedTime(repeated) => {
                 self.submit_custom_deadline(repeated, window, cx)
             }
+            Action::DatePicker(action) => self.date_picker_action(context, action, window, cx),
             Action::ChooseTime(choice) => self.submit_message_deadline(choice, window, cx),
             Action::InsertMention(identifier) => {
                 self.composer
@@ -2061,6 +2121,9 @@ impl Desktop {
         let Some(context) = self.snapshot.selected else {
             return rows;
         };
+        if let Some(card) = self.summary_card(context, cx) {
+            rows.push(card.into_any_element());
+        }
         let target = self.drafts.target(context);
         // Explicit reply/edit context and silent sending are the only persistent
         // composer states; each is one slim strip with its own dismissal.
@@ -2187,19 +2250,51 @@ impl Desktop {
                     } else {
                         label
                     };
-                    self.composer_list_row(
-                        label,
-                        self.button(
-                            ("schedule-cancel", scheduled.id as usize),
+                    let confirmed = u64::try_from(scheduled.id).is_ok();
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .pl_3()
+                        .pr_1()
+                        .py_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(self.sp(13.))
+                                .child(label),
+                        )
+                        .child(self.button(
+                            scoped_id("schedule-edit", context, scheduled.id, 0),
+                            "Bearbeiten",
+                            ButtonStyle::Quiet,
+                            if !scheduled.editable {
+                                Availability::when(
+                                    false,
+                                    "Dieser Text ist für die Bearbeitung zu lang.",
+                                )
+                            } else {
+                                self.message_available(MessageFeature::Schedules)
+                            },
+                            LocalAction::MessageIn(context, Action::EditScheduled(scheduled.id)),
+                            cx,
+                        ))
+                        .child(self.button(
+                            scoped_id("schedule-cancel", context, scheduled.id, 0),
                             "Planung abbrechen",
                             ButtonStyle::Quiet,
-                            self.message_available(MessageFeature::Schedules),
-                            LocalAction::Message(Action::Command(MessageAction::CancelScheduled(
-                                scheduled.id,
-                            ))),
+                            if !confirmed {
+                                Availability::when(false, "Die Planung wird noch gespeichert.")
+                            } else {
+                                self.message_available(MessageFeature::Schedules)
+                            },
+                            LocalAction::MessageIn(
+                                context,
+                                Action::Command(MessageAction::CancelScheduled(scheduled.id)),
+                            ),
                             cx,
-                        ),
-                    )
+                        ))
                 })
                 .collect();
             if !scheduled.is_empty() {
@@ -2415,6 +2510,7 @@ fn action_notice(action: &MessageAction) -> Option<Option<&'static str>> {
             timestamp: None, ..
         } => Some("Erinnerung entfernt."),
         MessageAction::Schedule { .. } => Some("Nachricht geplant."),
+        MessageAction::EditScheduled { .. } => Some("Planung aktualisiert."),
         MessageAction::CancelScheduled(_) => Some("Geplante Nachricht entfernt."),
         _ => return None,
     })

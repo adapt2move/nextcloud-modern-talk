@@ -192,6 +192,7 @@ enum EmptyResponse {
     Reject,
     History,
     NotificationList,
+    Summary,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -521,6 +522,26 @@ impl Transport {
         )
         .await
     }
+    pub(crate) async fn summary(
+        &mut self,
+        context: &OperationContext,
+        route: &str,
+        form: &[(&str, String)],
+    ) -> Result<Response, PortError> {
+        self.perform(
+            context,
+            Method::POST,
+            route,
+            &[],
+            form,
+            RequestOptions {
+                account_probe: false,
+                limit: REQUEST_LIMIT,
+                empty_response: EmptyResponse::Summary,
+            },
+        )
+        .await
+    }
     pub(crate) async fn signaling_poll(
         &mut self,
         context: &OperationContext,
@@ -687,7 +708,12 @@ impl Transport {
             }
             // Notifications v2 uses 204 when no notifier is registered, not an
             // empty successful list. Only this read can expose that bodyless state.
-            if status == 204 && matches!(options.empty_response, EmptyResponse::NotificationList) {
+            if status == 204
+                && matches!(
+                    options.empty_response,
+                    EmptyResponse::NotificationList | EmptyResponse::Summary
+                )
+            {
                 return Ok((
                     Response {
                         status,

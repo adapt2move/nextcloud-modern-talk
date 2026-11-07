@@ -24,6 +24,11 @@ pub(super) enum Work {
     Reminders,
     Scheduled,
     ScheduledPoll,
+    TranslationOptions,
+    Translate(u128),
+    SummaryStart,
+    SummaryStatus,
+    SummaryContinue,
     Pins,
     PinChange { message: u128, pinned: bool },
     Share,
@@ -83,6 +88,10 @@ impl Work {
                 | Self::Metadata
                 | Self::Recovery
                 | Self::ScheduledPoll
+                | Self::TranslationOptions
+                | Self::SummaryStart
+                | Self::SummaryStatus
+                | Self::SummaryContinue
         )
     }
 }
@@ -542,6 +551,26 @@ impl Accounts {
                 Work::Pins,
             );
         }
+        if self
+            .translation_poll
+            .is_none_or(|(room, due)| room != context || now >= due)
+            && self.pending.len() < 12
+            && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                panel.context == context
+                    && panel.translation_targets.is_none()
+                    && panel
+                        .availability(view::MessageFeature::Translation)
+                        .enabled()
+            })
+        {
+            self.translation_poll = Some((context, now + Duration::from_secs(60)));
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::TranslationLanguages,
+                Work::TranslationOptions,
+            );
+        }
         let Ok((command, work)) = self.live_message_request(context) else {
             return;
         };
@@ -572,6 +601,26 @@ impl Accounts {
         context: ConversationRef,
         action: view::MessageAction,
     ) -> Result<(), SubmitError> {
+        if matches!(action, view::MessageAction::Summarize) {
+            return self.begin_summary(request, context);
+        }
+        if matches!(action, view::MessageAction::DismissSummary) {
+            return self.dismiss_summary(context);
+        }
+        if let view::MessageAction::Translate {
+            message,
+            source,
+            language,
+        } = &action
+        {
+            return self.begin_translation(
+                request,
+                context,
+                *message,
+                source.clone(),
+                language.clone(),
+            );
+        }
         if let Some(result) = self.deliberate_read(request, context, &action) {
             return result;
         }
@@ -704,6 +753,7 @@ impl Accounts {
             V::Reminder { message, .. } => Work::Reminder(*message),
             V::CancelScheduled(id) => Work::CancelScheduled(*id),
             V::EditScheduled { id, .. } => Work::EditScheduled(*id),
+            V::Translate { message, .. } => Work::Translate(*message),
             _ => Work::Action,
         };
         if work == Work::Send
@@ -734,6 +784,7 @@ impl Accounts {
             None
         };
         let command = match action {
+            V::Summarize | V::DismissSummary => return Err(SubmitError::StaleScope),
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
             V::PickUpload
             | V::Download { .. }
@@ -839,10 +890,27 @@ impl Accounts {
                 options: options(context, target)?,
             },
             V::Scheduled => W::Scheduled,
-            V::EditScheduled { id, body, timestamp, silent } => W::EditScheduled {
-                id: message_id(context, id)?, text: text(body.as_str()), send_at: timestamp, silent,
+            V::EditScheduled {
+                id,
+                body,
+                timestamp,
+                silent,
+            } => W::EditScheduled {
+                id: message_id(context, id)?,
+                text: text(body.as_str()),
+                send_at: timestamp,
+                silent,
             },
             V::CancelScheduled(id) => W::CancelScheduled(message_id(context, id)?),
+            V::Translate {
+                message,
+                source,
+                language,
+            } => W::Translate {
+                message: message_id(context, message)?,
+                source,
+                language,
+            },
             V::Forward {
                 message,
                 destination,
@@ -883,6 +951,16 @@ impl Accounts {
         work: Work,
         reply: Result<RuntimeReply, IdentityError>,
     ) {
+        let reply = if let Work::Translate(message) = work {
+            self.translation_reply(request, context, operation, message, reply)
+        } else if matches!(
+            work,
+            Work::SummaryStart | Work::SummaryStatus | Work::SummaryContinue
+        ) {
+            self.summary_reply(request, context, operation, work, reply)
+        } else {
+            reply
+        };
         let event = diagnostic_result(diagnostic_request, context, operation, work, &reply);
         if self.current(context.account).is_err() {
             self.outbox.lost_scope(operation);
@@ -1056,6 +1134,8 @@ impl Accounts {
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
                 | (Work::ScheduledPoll, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::TranslationOptions, Ok(wire::MessagingResult::TranslationLanguages(_)))
+                | (Work::Translate(_), Ok(wire::MessagingResult::Translation { .. }))
                 | (
                     Work::Files | Work::Pins | Work::Metadata,
                     Ok(wire::MessagingResult::Messages { .. }),
@@ -1065,6 +1145,8 @@ impl Accounts {
                     | Work::Reminders
                     | Work::Scheduled
                     | Work::ScheduledPoll
+                    | Work::TranslationOptions
+                    | Work::Translate(_)
                     | Work::Files
                     | Work::Pins
                     | Work::Metadata,
@@ -1285,7 +1367,14 @@ impl Accounts {
                                 })),
                         );
                     }
-                    wire::MessagingResult::Scheduled(_) | wire::MessagingResult::Schedule(_) => (),
+                    wire::MessagingResult::Scheduled(_)
+                    | wire::MessagingResult::Schedule(_)
+                    | wire::MessagingResult::TranslationLanguages(_)
+                    | wire::MessagingResult::Translation { .. }
+                    | wire::MessagingResult::SummaryStarted { .. }
+                    | wire::MessagingResult::SummaryPending
+                    | wire::MessagingResult::SummaryPart { .. }
+                    | wire::MessagingResult::SummaryEmpty => (),
                     wire::MessagingResult::Uploaded { path, bytes } => {
                         let name = panel.upload_name.take().unwrap_or_else(|| text("File"));
                         panel.uploaded = Some(view::UploadedFile {
@@ -1592,6 +1681,9 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
             .as_slice()
             .iter()
             .all(|s| s.id.conversation == context.conversation),
+        wire::MessagingResult::Translation { message, .. } => {
+            message.conversation == context.conversation
+        }
         wire::MessagingResult::Search { hits, .. } => hits
             .as_slice()
             .iter()
@@ -1935,6 +2027,8 @@ fn feature_view(f: wire::MessagingFeature) -> Option<view::MessageFeature> {
         W::Files => V::Files,
         W::Typing => V::Typing,
         W::ReadReceipts => V::ReadReceipts,
+        W::Translation => V::Translation,
+        W::Summary => V::Summary,
         _ => return None,
     })
 }

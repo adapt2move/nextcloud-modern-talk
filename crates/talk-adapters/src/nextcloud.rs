@@ -6,6 +6,7 @@ mod content;
 mod conversation;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
+mod federation;
 mod live;
 mod meeting;
 mod meeting_runtime;
@@ -17,6 +18,7 @@ mod people;
 mod preferences;
 mod projection;
 mod reminders;
+mod summary;
 mod tags;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod test_support;
@@ -116,6 +118,9 @@ pub struct NextcloudClient {
     sends: Vec<PendingSend>,
     actions: Vec<conversation::PendingAction>,
     uploads: Vec<messaging::UploadName>,
+    summaries: Vec<summary::Binding>,
+    invitations: Vec<federation::Binding>,
+    invitation_actions: Vec<OperationId>,
     members: Vec<conversation::MemberBinding>,
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
@@ -217,6 +222,9 @@ impl NextcloudClient {
             sends: Vec::new(),
             actions: Vec::new(),
             uploads: Vec::new(),
+            summaries: Vec::new(),
+            invitations: Vec::new(),
+            invitation_actions: Vec::new(),
             members: Vec::new(),
             recipients: Vec::new(),
             people: Vec::new(),
@@ -720,6 +728,18 @@ impl NextcloudClient {
             ProtocolRequest::UpcomingReminders => {
                 return self.upcoming_reminders(context).await;
             }
+            ProtocolRequest::FederationInvitations => {
+                return self.federation_invitations(context).await;
+            }
+            ProtocolRequest::ChangeFederationInvitation {
+                operation,
+                invitation,
+                accept,
+            } => {
+                return self
+                    .change_federation_invitation(context, operation, invitation, accept)
+                    .await;
+            }
             ProtocolRequest::PollLiveEvents => {
                 return self
                     .transport
@@ -1122,6 +1142,7 @@ impl NextcloudPort for NextcloudClient {
                 request => matches!(
                     request,
                     ProtocolRequest::Send(_)
+                        | ProtocolRequest::ChangeFederationInvitation { .. }
                         | ProtocolRequest::SetPreference { .. }
                         | ProtocolRequest::SetArchived { .. }
                         | ProtocolRequest::SetFavorite { .. }

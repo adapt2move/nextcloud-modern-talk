@@ -309,6 +309,36 @@ impl Desktop {
                     )
                 },
             )
+            .when_some(
+                self.snapshot
+                    .federation_invitations
+                    .as_ref()
+                    .filter(|view| {
+                        Some(view.scope) == self.snapshot.active_account
+                            && view.support == FeatureSupport::Supported
+                            && !view.invitations.as_slice().is_empty()
+                    }),
+                |sidebar, view| {
+                    sidebar.child(
+                        self.button_with_leading_icon(
+                            "nav-federation",
+                            (
+                                self.lf(
+                                    "Einladungen ({n})",
+                                    &[("n", &view.invitations.as_slice().len().to_string())],
+                                ),
+                                "users",
+                            ),
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::Open(Overlay::Federation),
+                            cx,
+                        )
+                        .w_full()
+                        .justify_start(),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex_none()

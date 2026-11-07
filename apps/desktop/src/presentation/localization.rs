@@ -4,7 +4,11 @@ mod chat;
 mod connection;
 mod content;
 mod conversation;
+mod date_picker;
+mod federation;
+mod message_summary;
 mod message_tools;
+mod message_translation;
 mod onboarding;
 mod recovery;
 mod resources;
@@ -19,8 +23,12 @@ pub fn text(locale: Locale, key: &str) -> &str {
     for catalog in [
         chat::MESSAGES,
         message_tools::MESSAGES,
+        message_translation::MESSAGES,
+        message_summary::MESSAGES,
         connection::MESSAGES,
         content::MESSAGES,
+        date_picker::MESSAGES,
+        federation::MESSAGES,
         conversation::MESSAGES,
         resources::MESSAGES,
         recovery::MESSAGES,
@@ -84,8 +92,12 @@ mod tests {
             conversation::MESSAGES,
             chat::MESSAGES,
             message_tools::MESSAGES,
+            message_translation::MESSAGES,
+            message_summary::MESSAGES,
             connection::MESSAGES,
             content::MESSAGES,
+            date_picker::MESSAGES,
+            federation::MESSAGES,
             updates::MESSAGES,
             onboarding::MESSAGES,
         ] {

@@ -65,6 +65,10 @@ pub(super) struct Capabilities {
     pub recording_consent: Option<u64>,
     pub recording_enabled: Option<bool>,
     pub breakouts_enabled: Option<bool>,
+    pub translation_providers: Option<bool>,
+    pub summary_threshold: Option<u32>,
+    pub federation_enabled: Option<bool>,
+    pub federation_incoming: Option<bool>,
     pub encryption_required: Option<bool>,
 }
 impl Capabilities {
@@ -113,6 +117,12 @@ impl Capabilities {
             recording_consent: integer(spreed["config"]["call"].get("recording-consent")),
             recording_enabled: spreed["config"]["call"]["recording"].as_bool(),
             breakouts_enabled: spreed["config"]["call"]["breakout-rooms"].as_bool(),
+            translation_providers: spreed["config"]["chat"]["has-translation-providers"].as_bool(),
+            summary_threshold: integer(spreed["config"]["chat"].get("summary-threshold"))
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n > 0),
+            federation_enabled: spreed["config"]["federation"]["enabled"].as_bool(),
+            federation_incoming: spreed["config"]["federation"]["incoming-enabled"].as_bool(),
             encryption_required: spreed["config"]["call"]
                 .get("end-to-end-encryption")
                 .and_then(Value::as_bool),

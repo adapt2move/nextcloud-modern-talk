@@ -5,6 +5,7 @@ use crate::bounded::{Page, Text};
 use crate::ids::{AccountScope, CallScope, ConversationId, OperationId};
 use crate::policy::Decision;
 use crate::preferences::navigation::NavigationRoomKey;
+pub mod federation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeatureSupport {

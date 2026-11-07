@@ -5,6 +5,7 @@ mod calls;
 pub(super) mod content;
 mod conversations;
 mod creation;
+mod federation;
 pub(super) mod files;
 mod history;
 mod messaging;
@@ -15,6 +16,8 @@ mod reads;
 mod reminders;
 mod removal;
 mod startup;
+mod summary;
+mod translation;
 mod update;
 use crate::diagnostics::{
     self, Event as Diagnostic, Operation as DiagnosticOperation, Outcome as DiagnosticOutcome,
@@ -63,6 +66,8 @@ enum Purpose {
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
     AccountReminders(AccountScope, u64),
+    FederationInvitations(AccountScope, u64),
+    FederationChange(AccountScope, OperationId, u128),
     LiveEvents(AccountScope),
     Call(talk_core::ids::CallScope),
     Tags(AccountScope),
@@ -146,6 +151,7 @@ pub struct Accounts {
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     notices: notifications::Notices,
     reminders: reminders::Reminders,
+    federation: federation::Federation,
     background: background::Background,
     history: history::Cache,
     cache: cache::Cache,
@@ -156,6 +162,9 @@ pub struct Accounts {
     message_poll_at: Instant,
     message_poll_request: u64,
     scheduled_poll: Option<(ConversationRef, Instant)>,
+    translation: translation::Translations,
+    translation_poll: Option<(ConversationRef, Instant)>,
+    summary: summary::Summaries,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -194,6 +203,7 @@ impl Accounts {
             message_search: None,
             notices: notifications::Notices::default(),
             reminders: reminders::Reminders::default(),
+            federation: federation::Federation::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
@@ -204,6 +214,9 @@ impl Accounts {
             message_poll_at: Instant::now(),
             message_poll_request: 0,
             scheduled_poll: None,
+            translation: translation::Translations::default(),
+            summary: summary::Summaries::default(),
+            translation_poll: None,
         }))
     }
     pub fn shutdown(&mut self) {
@@ -550,6 +563,9 @@ impl Accounts {
         self.tick_file_work();
         self.tick_background();
         self.tick_account_reminders();
+        self.tick_federation();
+        self.tick_translations();
+        self.tick_summary();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
@@ -677,6 +693,8 @@ impl Accounts {
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
             Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),
+            Purpose::FederationInvitations(scope, version) => self.complete_federation(scope, version, result),
+            Purpose::FederationChange(scope, operation, invitation) => self.complete_federation_change(scope, operation, invitation, result),
             Purpose::LiveEvents(scope) => {
                 if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
                     return;
@@ -1318,6 +1336,19 @@ impl Accounts {
                     return Err(SubmitError::StaleScope);
                 }
                 self.refresh_account_reminders(scope);
+            }
+            UiIntent::RefreshFederationInvitations(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_federation(scope);
+            }
+            UiIntent::ChangeFederationInvitation {
+                scope,
+                invitation,
+                accept,
+            } => {
+                self.change_federation(scope, invitation, accept)?;
             }
             UiIntent::OpenReminder {
                 request,

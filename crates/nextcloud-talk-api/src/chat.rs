@@ -26,6 +26,9 @@ pub enum Command {
         thread: Option<u64>,
     },
     Context(u64),
+    Summarize {
+        from: u64,
+    },
     Send {
         message: String,
         reference: String,
@@ -320,10 +323,16 @@ pub enum Response {
     Reminders(Vec<Reminder>),
     Scheduled(Vec<ScheduledMessage>),
     Schedule(ScheduledMessage),
+    Summary(Option<SummaryTask>),
     Threads(Vec<Thread>),
     Thread(Thread),
     AttachmentFolder(AttachmentFolder),
     AttachmentShared(Vec<(String, String)>),
+}
+#[derive(Clone, Debug)]
+pub struct SummaryTask {
+    pub task_id: u64,
+    pub next_offset: Option<u64>,
 }
 #[derive(Clone, Copy)]
 pub(crate) enum ResponseKind {
@@ -334,6 +343,7 @@ pub(crate) enum ResponseKind {
     Reminders,
     Scheduled,
     Schedule,
+    Summary,
     Threads,
     Thread,
     AttachmentFolder,
@@ -484,6 +494,16 @@ pub(crate) fn decode(kind: ResponseKind, v: &Value) -> Result<crate::Reply, Erro
         K::Reminders => R::Reminders(array(v, 100, reminder)?),
         K::Scheduled => R::Scheduled(array(v, 100, schedule)?),
         K::Schedule => R::Schedule(schedule(v)?),
+        K::Summary => R::Summary(if v.is_null() {
+            None
+        } else {
+            let task_id = number(v, "taskId")?;
+            positive(task_id)?;
+            Some(SummaryTask {
+                task_id,
+                next_offset: integer(v.get("nextOffset")).filter(|id| *id > 0),
+            })
+        }),
         K::Threads => R::Threads(array(v, 50, thread)?),
         K::Thread => R::Thread(thread(v)?),
         K::AttachmentFolder => R::AttachmentFolder(AttachmentFolder {
@@ -561,6 +581,13 @@ pub(crate) fn plan(room: &RoomToken, c: &Command) -> Result<Plan, ErrorKind> {
     let mut f = Vec::new();
     let mut kind = Kind::Ack;
     match c {
+        C::Summarize { from } => {
+            positive(*from)?;
+            route.push_str("/summarize");
+            method = Method::POST;
+            f.push(("fromMessageId", from.to_string()));
+            kind = Kind::Chat(K::Summary);
+        }
         C::History { thread, .. } | C::Poll { thread, .. } => {
             let future = matches!(c, C::Poll { .. });
             let cursor = match c {

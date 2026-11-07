@@ -123,6 +123,7 @@ fn snapshot() -> PresentationSnapshot {
         tag_state: ContentState::Ready,
         organization_result: None,
         account_reminders: None,
+        federation_invitations: None,
         selected: Some(source),
         content: ContentState::Ready,
         messages: page([message()]),

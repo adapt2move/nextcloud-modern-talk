@@ -10,6 +10,7 @@ pub mod conversation;
 pub mod diagnostics;
 mod error;
 pub mod events;
+pub mod federation;
 pub mod files;
 pub mod hpb;
 mod json;
@@ -20,6 +21,8 @@ pub mod poll;
 pub mod presence;
 pub mod scope;
 pub mod signaling;
+pub mod task_processing;
+pub mod translation;
 mod transport;
 pub use error::{ErrorKind, PortError as Error, Retry};
 use models::*;
@@ -67,6 +70,21 @@ impl AppCredential {
 pub enum Request {
     /// Account-wide reminder list; it does not require an active room session.
     UpcomingReminders,
+    FederationInvitations,
+    AcceptFederationInvitation {
+        id: u64,
+    },
+    DeclineFederationInvitation {
+        id: u64,
+    },
+    TranslationLanguages,
+    Translate {
+        text: String,
+        to_language: String,
+    },
+    TaskProcessing {
+        id: u64,
+    },
     Chat {
         room: RoomToken,
         command: chat::Command,
@@ -149,6 +167,10 @@ pub enum Request {
 }
 pub enum Reply {
     Chat(chat::Response),
+    FederationInvitations(Vec<federation::Invitation>),
+    TranslationLanguages(translation::Languages),
+    Translated(String),
+    TaskProcessing(task_processing::Task),
     Conversation(conversation::Response),
     Account(Account),
     Capabilities(Capabilities),
@@ -480,6 +502,14 @@ impl Client {
             self.room_session = None;
         }
         let response = if matches!(
+            &request,
+            Request::Chat {
+                command: chat::Command::Summarize { .. },
+                ..
+            }
+        ) {
+            self.transport.summary(context, &route, &form).await
+        } else if matches!(
             request,
             Request::History { .. }
                 | Request::Chat {
@@ -612,6 +642,9 @@ impl Client {
             }
             (Request::Chat { room, .. }, Reply::Chat(reply)) => chat::validate(room, reply)
                 .map_err(|k| self.error(if mutation { ErrorKind::Uncertain } else { k }))?,
+            (Request::TaskProcessing { id }, Reply::TaskProcessing(task)) if task.id != *id => {
+                return Err(self.error(ErrorKind::WrongScope));
+            }
             _ => {}
         }
         if let Reply::Account(ref account) = decoded
@@ -705,7 +738,11 @@ impl Client {
 }
 #[derive(Clone, Copy)]
 enum Kind {
+    FederationInvitations,
     Chat(chat::ResponseKind),
+    TranslationLanguages,
+    Translation,
+    TaskProcessing,
     Conversation(conversation::ResponseKind),
     Account,
     Capabilities,
@@ -748,6 +785,63 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
         format!("ocs/v2.php/apps/spreed/api/v4/tags/{}{suffix}", id.as_str())
     };
     let (method, route, query, form, kind) = match request {
+        Request::FederationInvitations => (
+            Method::GET,
+            "ocs/v2.php/apps/spreed/api/v1/federation/invitation".into(),
+            vec![],
+            vec![],
+            Kind::FederationInvitations,
+        ),
+        Request::AcceptFederationInvitation { id }
+        | Request::DeclineFederationInvitation { id }
+            if *id > 0 =>
+        {
+            (
+                if matches!(request, Request::AcceptFederationInvitation { .. }) {
+                    Method::POST
+                } else {
+                    Method::DELETE
+                },
+                format!("ocs/v2.php/apps/spreed/api/v1/federation/invitation/{id}"),
+                vec![],
+                vec![],
+                if matches!(request, Request::AcceptFederationInvitation { .. }) {
+                    Kind::Room
+                } else {
+                    Kind::Ack
+                },
+            )
+        }
+        Request::AcceptFederationInvitation { .. }
+        | Request::DeclineFederationInvitation { .. } => return Err(ErrorKind::Malformed),
+        Request::TaskProcessing { id } if *id > 0 => (
+            Method::GET,
+            format!("ocs/v2.php/taskprocessing/task/{id}"),
+            vec![],
+            vec![],
+            Kind::TaskProcessing,
+        ),
+        Request::TaskProcessing { .. } => return Err(ErrorKind::Malformed),
+        Request::TranslationLanguages => (
+            Method::GET,
+            "ocs/v2.php/translation/languages".into(),
+            vec![],
+            vec![],
+            Kind::TranslationLanguages,
+        ),
+        Request::Translate { text, to_language } => {
+            bounded(text, 4096)?;
+            if text.trim().is_empty() || !translation::valid_language(to_language) {
+                return Err(ErrorKind::Malformed);
+            }
+            (
+                Method::POST,
+                "ocs/v2.php/translation/translate".into(),
+                vec![],
+                vec![("text", text.clone()), ("toLanguage", to_language.clone())],
+                Kind::Translation,
+            )
+        }
         Request::UpcomingReminders => (
             Method::GET,
             "ocs/v2.php/apps/spreed/api/v1/chat/upcoming-reminders".into(),
@@ -1066,7 +1160,7 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             Kind::Ack,
         ),
     };
-    let mutation = method != Method::GET;
+    let mutation = method != Method::GET && !matches!(request, Request::Translate { .. });
     Ok((method, route, query, form, kind, mutation))
 }
 fn list<T>(
@@ -1083,7 +1177,15 @@ fn list<T>(
 fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
     let v = &r.data;
     Ok(match kind {
+        Kind::FederationInvitations => {
+            Reply::FederationInvitations(list(v, 100, federation::Invitation::decode)?)
+        }
         Kind::Chat(kind) => return chat::decode(kind, v),
+        Kind::TranslationLanguages => {
+            Reply::TranslationLanguages(translation::Languages::decode(v)?)
+        }
+        Kind::Translation => Reply::Translated(translation::translated(v)?),
+        Kind::TaskProcessing => Reply::TaskProcessing(task_processing::Task::decode(v)?),
         Kind::Conversation(kind) => return conversation::decode(kind, v),
         Kind::Account => Reply::Account(Account::decode(v)?),
         Kind::Capabilities => Reply::Capabilities(Capabilities::decode(v)?),

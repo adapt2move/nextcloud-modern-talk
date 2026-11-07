@@ -619,7 +619,14 @@ fn project(reply: api::Reply) -> Result<Response, ErrorKind> {
     let mut last_given = None;
     let mut common_read = None;
     let data = match reply {
-        R::Chat(_) | R::Conversation(_) => return Err(ErrorKind::Malformed),
+        R::Chat(_)
+        | R::Conversation(_)
+        | R::TranslationLanguages(_)
+        | R::Translated(_)
+        | R::FederationInvitations(_)
+        | R::TaskProcessing(_) => {
+            return Err(ErrorKind::Malformed);
+        }
         R::Account(v) => v.project(),
         R::Capabilities(v) => v.project(),
         R::Room(v) => v.project(),

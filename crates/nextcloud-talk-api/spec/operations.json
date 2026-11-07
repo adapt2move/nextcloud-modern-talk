@@ -1,8 +1,34 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
+  "additional_operations": [
+    {
+      "operation_id": "core-translation-languages",
+      "method": "GET",
+      "path": "/ocs/v2.php/translation/languages",
+      "api": "Request::TranslationLanguages",
+      "provenance": "https://docs.nextcloud.com/server/35/developer_manual/client_apis/OCS/ocs-translation-api.html#get-available-translation-options",
+      "scope": "Nextcloud core API outside the pinned Talk OpenAPI count; source-language detection and bounded target pairs are checked before enabling translation."
+    },
+    {
+      "operation_id": "core-translation-translate",
+      "method": "POST",
+      "path": "/ocs/v2.php/translation/translate",
+      "api": "Request::Translate",
+      "provenance": "https://docs.nextcloud.com/server/35/developer_manual/client_apis/OCS/ocs-translation-api.html#translate-a-string",
+      "scope": "Nextcloud core API outside the pinned Talk OpenAPI count; no source language is sent unless the provider advertises detection."
+    },
+    {
+      "operation_id": "core-task-processing-get",
+      "method": "GET",
+      "path": "/ocs/v2.php/taskprocessing/task/{id}",
+      "api": "Request::TaskProcessing",
+      "provenance": "https://github.com/nextcloud/server/blob/v35.0.2/core/Controller/TaskProcessingApiController.php",
+      "scope": "Authenticated core task status outside the pinned Talk OpenAPI count; the adapter validates the task owner, app, type and room binding."
+    }
+  ],
   "counts": {
-    "implemented": 90,
-    "missing": 61,
+    "implemented": 94,
+    "missing": 57,
     "not-client": 23,
     "partial": 13
   },
@@ -347,9 +373,10 @@
       "operation_id": "chat-summarize-chat",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/summarize",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "chat::Command::Summarize",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/ChatController.php",
+      "scope": "Provider-gated summary task for the selected room; task status is read using Nextcloud core TaskProcessing."
     },
     {
       "operation_id": "chat-get-message-context",
@@ -1283,25 +1310,28 @@
       "operation_id": "federation-accept-share",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::AcceptFederationInvitation",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "federation-reject-share",
       "method": "DELETE",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::DeclineFederationInvitation",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "federation-get-shares",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::FederationInvitations",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "room-join-federated-room",

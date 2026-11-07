@@ -2,7 +2,7 @@
 use super::conversation::ActionAvailability;
 use super::{Message, MessageId, SendReceipt};
 use crate::bounded::{Page, Text};
-use crate::ids::ConversationId;
+use crate::ids::{ConversationId, OperationId};
 use crate::policy::Decision;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -128,6 +128,12 @@ pub struct MessagingCapabilities {
     pub file_limit: u64,
     pub read_receipts: Option<bool>,
     pub typing_status: Option<bool>,
+    pub summary_offer: Option<SummaryOffer>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SummaryOffer {
+    pub from: MessageId,
+    pub unread: u32,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessagingCommand {
@@ -239,12 +245,20 @@ pub enum MessagingCommand {
         path: Text<16384>,
         caption: Text<4096>,
     },
+    TranslationLanguages,
     Translate {
         message: MessageId,
         language: Text<64>,
+        source: Text<4096>,
     },
     Summarize {
         from: MessageId,
+    },
+    SummaryStatus {
+        handle: OperationId,
+    },
+    SummaryContinue {
+        handle: OperationId,
     },
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,6 +289,22 @@ pub enum MessagingResult {
     Reminders(Page<MessageReminder, 100>),
     Scheduled(Page<ScheduledMessage, 100>),
     Schedule(Box<ScheduledMessage>),
+    TranslationLanguages(Page<Text<64>, 64>),
+    Translation {
+        message: MessageId,
+        source: Text<4096>,
+        language: Text<64>,
+        text: Text<4096>,
+    },
+    SummaryStarted {
+        handle: OperationId,
+    },
+    SummaryPending,
+    SummaryPart {
+        text: Text<4096>,
+        more: bool,
+    },
+    SummaryEmpty,
     Threads(Page<Thread, 50>),
     Thread(Box<Thread>),
     Uploaded {

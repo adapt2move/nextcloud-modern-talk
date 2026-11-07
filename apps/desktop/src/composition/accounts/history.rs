@@ -78,6 +78,10 @@ pub(super) struct History {
     pins_read_at: Option<Instant>,
     schedules: Page<talk_core::ui::messaging::Scheduled, 100>,
     schedules_version: Version,
+    translation_targets: Option<(Instant, Page<Text<64>, 64>)>,
+    translations: Page<talk_core::ui::messaging::Translation, 50>,
+    pub(super) summary: Option<talk_core::ui::messaging::Summary>,
+    summary_dismissed: bool,
 }
 impl History {
     fn new(context: ConversationRef) -> Self {
@@ -108,6 +112,10 @@ impl History {
             pins_read_at: None,
             schedules: Page::empty(),
             schedules_version: Version(0, false),
+            translation_targets: None,
+            translations: Page::empty(),
+            summary: None,
+            summary_dismissed: false,
         }
     }
     pub(super) fn project(&self, panel: &mut MessagePanel) {
@@ -125,6 +133,25 @@ impl History {
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
         panel.scheduled = self.schedules.clone();
+        panel.summary = self.summary.clone();
+        panel.translation_targets = self
+            .translation_targets
+            .as_ref()
+            .filter(|(expires, _)| Instant::now() < *expires)
+            .map(|(_, targets)| targets.clone());
+        panel.translations = page(
+            self.translations
+                .as_slice()
+                .iter()
+                .filter(|translation| {
+                    self.messages.as_slice().iter().any(|message| {
+                        message.local_id == translation.message
+                            && !message.metadata.deleted
+                            && message.body == translation.source
+                    })
+                })
+                .cloned(),
+        );
         if let Some((expires, _, capabilities)) = &self.capabilities
             && Instant::now() < *expires
         {
@@ -504,6 +531,24 @@ impl Cache {
     pub(super) fn get(&self, context: ConversationRef) -> Option<&History> {
         self.rooms.iter().find(|r| r.context == context)
     }
+    pub(super) fn dismiss_summary(&mut self, context: ConversationRef) {
+        if let Some(room) = self.get_mut(context) {
+            room.summary = None;
+            room.summary_dismissed = true;
+        }
+    }
+    pub(super) fn set_summary(
+        &mut self,
+        context: ConversationRef,
+        value: talk_core::ui::messaging::Summary,
+    ) -> bool {
+        if let Some(room) = self.get_mut(context) {
+            room.summary = Some(value);
+            true
+        } else {
+            false
+        }
+    }
     /// Durable projections contain confirmed content only, never live policy,
     /// transport identifiers, attachments or unresolved optimistic messages.
     pub(super) fn durable(
@@ -765,6 +810,41 @@ impl Cache {
                 );
                 room.schedules_version = flight.version;
             }
+            Ok(MessagingResult::TranslationLanguages(targets))
+                if work == Work::TranslationOptions =>
+            {
+                room.translation_targets =
+                    Some((Instant::now() + Duration::from_secs(600), targets.clone()));
+            }
+            Ok(MessagingResult::Translation {
+                message,
+                source,
+                language,
+                text,
+            }) if matches!(work, Work::Translate(id) if id == u128::from(message.sequence)) => {
+                let id = u128::from(message.sequence);
+                if room
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .any(|row| row.local_id == id && !row.metadata.deleted && row.body == *source)
+                {
+                    room.translations = page(
+                        room.translations
+                            .as_slice()
+                            .iter()
+                            .filter(|known| known.message != id || known.language != *language)
+                            .take(49)
+                            .cloned()
+                            .chain(std::iter::once(talk_core::ui::messaging::Translation {
+                                message: id,
+                                source: source.clone(),
+                                language: language.clone(),
+                                text: text.clone(),
+                            })),
+                    );
+                }
+            }
             Ok(MessagingResult::Schedule(value)) => {
                 let value = super::messaging::scheduled_view(value);
                 let id = value.id;
@@ -804,6 +884,16 @@ impl Cache {
                 .as_ref()
                 .is_none_or(|(_, version, _)| *version <= flight.version)
         {
+            if !room.summary_dismissed
+                && room.summary.is_none()
+                && let Some(offer) = &capabilities.summary_offer
+                && offer.from.conversation == context.conversation
+            {
+                room.summary = Some(talk_core::ui::messaging::Summary::Offer {
+                    from: u128::from(offer.from.sequence),
+                    unread: offer.unread,
+                });
+            }
             room.capabilities = Some((
                 flight.started + background::SOURCE_LIFETIME,
                 flight.version,

@@ -528,6 +528,7 @@ pub struct PresentationSnapshot {
     pub organization_result: Option<OrganizationResult>,
     /// Upcoming reminders belong to the active account, independently of selection.
     pub account_reminders: Option<AccountRemindersView>,
+    pub federation_invitations: Option<FederationInvitationsView>,
     /// History/files/participants below belong to exactly this runtime+host context.
     pub selected: Option<ConversationRef>,
     pub content: ContentState,
@@ -564,6 +565,20 @@ pub struct AccountRemindersView {
     /// False if the server returned reminders in rooms outside the observed list.
     pub complete: bool,
     pub reminders: Page<AccountReminderView, 100>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationView {
+    pub id: u128,
+    pub room: Text<256>,
+    pub inviter: Text<256>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FederationInvitationsView {
+    pub scope: AccountScope,
+    pub support: FeatureSupport,
+    pub invitations: Page<FederationInvitationView, 100>,
+    pub failed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -665,6 +680,12 @@ pub enum UiIntent {
     SelectAccount(AccountScope),
     OpenConversation(ConversationRef),
     RefreshAccountReminders(AccountScope),
+    RefreshFederationInvitations(AccountScope),
+    ChangeFederationInvitation {
+        scope: AccountScope,
+        invitation: u128,
+        accept: bool,
+    },
     OpenReminder {
         request: RequestId,
         context: ConversationRef,

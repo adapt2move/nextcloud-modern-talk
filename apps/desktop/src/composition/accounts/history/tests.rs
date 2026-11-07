@@ -2440,6 +2440,7 @@ fn with_capabilities(mut result: MessagingResult, allowed: Decision) -> Messagin
         file_limit: 12_000,
         read_receipts: Some(true),
         typing_status: Some(true),
+        summary_offer: None,
     });
     result
 }

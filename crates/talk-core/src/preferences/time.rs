@@ -1,5 +1,6 @@
 //! Bounded local-clock requests. Platform timezone discovery belongs to the host.
 use crate::bounded::Text;
+pub mod calendar;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RepeatedTime {

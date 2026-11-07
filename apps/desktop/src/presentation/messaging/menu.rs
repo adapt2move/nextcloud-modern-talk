@@ -20,6 +20,7 @@ pub(crate) enum Choice {
     Unpin,
     Remind,
     RemoveReminder,
+    Translate,
     Forward,
     Thread,
     Back,
@@ -161,6 +162,7 @@ impl Choice {
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
             Self::RemoveReminder => "trash-2",
+            Self::Translate => "globe",
             Self::Forward => "arrow-right",
             Self::Thread => "chat",
             Self::Back => "arrow-left",
@@ -177,6 +179,7 @@ impl Choice {
             Self::Unpin => 10,
             Self::Remind => 5,
             Self::RemoveReminder => 11,
+            Self::Translate => 12,
             Self::Forward => 6,
             Self::Thread => 8,
             Self::Back => 9,
@@ -301,6 +304,29 @@ impl Desktop {
                         "Erinnerung löschen",
                         feature(MessageFeature::Reminders),
                         "Erinnerungen sind derzeit nicht verfügbar.",
+                    ));
+                }
+                if self.translation_available(target.context, message) {
+                    let translated = self.current_translation(message).is_some();
+                    items.push(Item::new(
+                        Choice::Translate,
+                        if translated
+                            && self
+                                .message_ui
+                                .hidden_translations
+                                .contains(&message.local_id)
+                        {
+                            "Übersetzung anzeigen"
+                        } else if translated {
+                            "Original anzeigen"
+                        } else {
+                            "Übersetzen"
+                        },
+                        self.snapshot
+                            .message_panel
+                            .as_ref()
+                            .is_some_and(|panel| panel.translation_pending.is_none()),
+                        "Die Übersetzung wird bereits geladen.",
                     ));
                 }
                 if message.metadata.replyable {
@@ -513,13 +539,15 @@ impl Desktop {
                     }
                     Choice::Remind => {
                         self.message_action(Action::Remind(target.message), window, cx);
-                        self.message_ui.time_input.focus_handle(cx).focus(window);
                     }
                     Choice::RemoveReminder => {
                         self.submit_message(MessageAction::Reminder {
                             message: target.message,
                             timestamp: None,
                         });
+                    }
+                    Choice::Translate => {
+                        self.message_action(Action::Translate(target.message), window, cx)
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)

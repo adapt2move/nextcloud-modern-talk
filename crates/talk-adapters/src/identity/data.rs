@@ -716,7 +716,10 @@ impl Store {
             || record.phase != OutboxPhase::Queued
             || !matches!(
                 record.kind,
-                OutboxKind::Send | OutboxKind::Edit | OutboxKind::Schedule | OutboxKind::EditScheduled
+                OutboxKind::Send
+                    | OutboxKind::Edit
+                    | OutboxKind::Schedule
+                    | OutboxKind::EditScheduled
             )
         {
             return Err(DataError::InvalidInput);

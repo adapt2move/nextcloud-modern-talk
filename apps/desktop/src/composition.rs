@@ -222,6 +222,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
         Some("account-reminders") => Some(Overlay::Reminders),
+        Some("federation-invitations") => Some(Overlay::Federation),
         Some("thread") => Some(Overlay::Thread),
         Some("search") => Some(Overlay::Search),
         Some("create34" | "create35") => Some(Overlay::Create),
@@ -294,7 +295,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             cx.new(|cx| {
                 let mut view = Desktop::new(port, InitialView { probe, development, palette: saved.active.palette, appearance: saved.active.appearance, overlay, prejoin, onboarding: options.scenario.as_deref() == Some("ready"), scale: saved.active.scale.percent() }, bridge, window, cx);
                 match options.scenario.as_deref() {
-                    Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time")) => view.fixture_message_tools(name, window, cx),
+                    Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time" | "chat-schedule-edit")) => view.fixture_message_tools(name, window, cx),
                     Some("lobby-settings") => view.fixture_lobby_settings(cx),
                     _ => (),
                 }

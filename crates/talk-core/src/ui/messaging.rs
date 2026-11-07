@@ -21,6 +21,8 @@ pub enum MessageFeature {
     Files,
     Typing,
     ReadReceipts,
+    Translation,
+    Summary,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {
@@ -132,6 +134,13 @@ pub struct Mention {
 pub struct Reminder {
     pub message: u128,
     pub timestamp: u64,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Translation {
+    pub message: u128,
+    pub source: Text<4096>,
+    pub language: Text<64>,
+    pub text: Text<4096>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Scheduled {
@@ -265,6 +274,12 @@ pub struct MessagePanel {
     pub mentions: Page<Mention, 100>,
     pub reminders: Page<Reminder, 100>,
     pub scheduled: Page<Scheduled, 100>,
+    /// Only targets for which the server can detect the source language.
+    pub translation_targets: Option<Page<Text<64>, 64>>,
+    pub translations: Page<Translation, 50>,
+    pub translation_pending: Option<u128>,
+    pub translation_failed: Option<u128>,
+    pub summary: Option<Summary>,
     pub result: Option<(RequestId, Completion)>,
 }
 impl MessagePanel {
@@ -308,6 +323,11 @@ impl MessagePanel {
             mentions: Page::empty(),
             reminders: Page::empty(),
             scheduled: Page::empty(),
+            translation_targets: None,
+            translations: Page::empty(),
+            translation_pending: None,
+            translation_failed: None,
+            summary: None,
             result: None,
         }
     }
@@ -318,6 +338,23 @@ impl MessagePanel {
             .find(|(key, _)| *key == feature)
             .map_or(Availability::UNKNOWN, |(_, value)| *value)
     }
+}
+/// Bounded room-local summary state; generated text is never an authority grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Summary {
+    Offer {
+        from: u128,
+        unread: u32,
+    },
+    Pending {
+        parts: Page<Text<4096>, 4>,
+    },
+    Ready {
+        parts: Page<Text<4096>, 4>,
+        partial: bool,
+    },
+    Empty,
+    Failed,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeTarget {
@@ -397,6 +434,13 @@ pub enum MessageAction {
     },
     Scheduled,
     CancelScheduled(u128),
+    Translate {
+        message: u128,
+        source: Text<4096>,
+        language: Text<64>,
+    },
+    Summarize,
+    DismissSummary,
     Forward {
         message: u128,
         destination: ConversationRef,

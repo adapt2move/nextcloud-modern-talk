@@ -69,7 +69,7 @@ impl Desktop {
                                 .child(time),
                         ),
                 )
-                .child(self.scaled_icon("chevron-right", 16., self.theme.muted)),
+                .child(self.scaled_icon("arrow-right", 16., self.theme.muted)),
             );
         }
         if !view.complete {

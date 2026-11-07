@@ -175,12 +175,11 @@ impl Desktop {
                     self.message_ui.editing = Some(message);
                 }
                 if let FailedDraftKind::Schedule(timestamp) = draft.kind {
+                    self.message_ui.scheduled_edit = None;
                     self.open_message_deadline(None, window, cx);
                     if let Some(local) = self.settings_port.local_datetime(timestamp) {
-                        self.message_ui.time_input.update(cx, |input, cx| {
-                            input.set_context_value(local.as_str());
-                            cx.notify();
-                        });
+                        self.message_ui.picker =
+                            talk_core::preferences::time::calendar::Calendar::parse(local.as_str());
                     }
                 } else {
                     self.composer.focus_handle(cx).focus(window);

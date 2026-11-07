@@ -92,7 +92,12 @@ impl OutboxIntent {
                 options: o,
             } => !body.as_str().trim().is_empty() && *timestamp > 0 && options(o),
             Self::Edit { message, body } => *message > 0 && !body.as_str().trim().is_empty(),
-            Self::EditScheduled { id, body, timestamp, .. } => *id > 0 && *timestamp > 0 && !body.as_str().trim().is_empty(),
+            Self::EditScheduled {
+                id,
+                body,
+                timestamp,
+                ..
+            } => *id > 0 && *timestamp > 0 && !body.as_str().trim().is_empty(),
             Self::Reaction { message, emoji, .. } => {
                 *message > 0 && !emoji.as_str().trim().is_empty()
             }

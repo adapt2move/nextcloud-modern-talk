@@ -526,13 +526,18 @@ async fn unsupported_provider_and_unknown_permissions_are_truthful() {
         caps.actions
             .as_slice()
             .iter()
-            .any(|(f, a)| *f == MessagingFeature::Translation && !a.implemented)
+            .any(|(f, a)| *f == MessagingFeature::Translation
+                && a.implemented
+                && a.allowed == Decision::Unknown)
     );
     assert!(
         caps.actions
             .as_slice()
             .iter()
-            .any(|(f, a)| *f == MessagingFeature::Summary && !a.implemented)
+            .any(|(f, a)| *f == MessagingFeature::Summary
+                && a.implemented
+                && a.server == FeatureSupport::Unsupported
+                && a.allowed == Decision::Unknown)
     );
     assert!(
         caps.actions
@@ -830,6 +835,218 @@ async fn account_reminders_do_not_require_a_selected_room_and_keep_unknown_rooms
                 assert!(result.reminders.as_slice().is_empty());
                 assert_eq!(server.count(), 1);
             }
+        }
+    }
+}
+
+#[tokio::test]
+async fn translation_requires_provider_detection_and_matching_source() {
+    for major in [34, 35] {
+        for case in ["disabled", "no-detection", "changed", "translated"] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["config"]["chat"]["has-translation-providers"] =
+                json!(case != "disabled");
+            let mut replies = vec![Reply::data(capabilities), Reply::data(room())];
+            if case != "disabled" {
+                replies.push(Reply::data(json!([message(7)])));
+                if case != "changed" {
+                    replies.push(Reply::data(json!({"languageDetection": case != "no-detection", "languages":[{"from":"en", "to":"de"}]})));
+                    if case == "translated" {
+                        replies.push(Reply::data(json!({"text":"übersetzt", "from":"en"})));
+                    }
+                }
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let result = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(1),
+                        command: M::Translate {
+                            message: MessageId {
+                                conversation,
+                                sequence: 7,
+                            },
+                            language: Text::new("de").unwrap(),
+                            source: Text::new(if case == "changed" {
+                                "outdated"
+                            } else {
+                                "original"
+                            })
+                            .unwrap(),
+                        },
+                    },
+                )
+                .await;
+            match case {
+                "disabled" | "no-detection" => {
+                    assert_eq!(result.err().unwrap().kind, ErrorKind::Unsupported)
+                }
+                "changed" => assert_eq!(result.err().unwrap().kind, ErrorKind::Conflict),
+                _ => assert!(
+                    matches!(result, Ok(ProtocolReply::Messaging { result: R::Translation { text, .. }, .. }) if text.as_str() == "übersetzt")
+                ),
+            }
+            assert_eq!(
+                server.count(),
+                match case {
+                    "disabled" => 2,
+                    "changed" => 3,
+                    "no-detection" => 4,
+                    _ => 5,
+                }
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn summary_requires_capability_threshold_and_correlated_task() {
+    for major in [34, 35] {
+        for case in ["not-advertised", "below-threshold", "ready", "wrong-owner"] {
+            let mut capabilities = caps(major);
+            if case != "not-advertised" {
+                capabilities["capabilities"]["spreed"]["features"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("chat-summary-api"));
+            }
+            capabilities["capabilities"]["spreed"]["config"]["chat"]["summary-threshold"] =
+                json!(100);
+            let mut data = room();
+            data["lastReadMessage"] = json!(7);
+            data["unreadMessages"] = json!(if case == "below-threshold" { 99 } else { 120 });
+            let mut replies = vec![Reply::data(capabilities.clone()), Reply::data(data.clone())];
+            if matches!(case, "ready" | "wrong-owner") {
+                replies.extend([
+                    Reply::data(capabilities.clone()), Reply::data(data.clone()),
+                    Reply::envelope(201, "ok", 201, json!({"taskId":44, "nextOffset":17})),
+                    Reply::data(capabilities.clone()), Reply::data(data.clone()),
+                    Reply::data(json!({"task":{"id":44,"type":"core:text2text:summary","status":"STATUS_SUCCESSFUL", "appId":"spreed", "userId":if case == "wrong-owner" {"someone_else"} else {"fixture_user"}, "customId":"summary/testroom", "output":{"output":"A bounded summary."}}})),
+                ]);
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let conversation = bind(&mut client);
+            let ProtocolReply::Messaging {
+                result: R::Capabilities(projected),
+                ..
+            } = client
+                .request(
+                    context(&runtime),
+                    ProtocolRequest::Messaging {
+                        conversation,
+                        operation: OperationId::from_local(1),
+                        command: M::Capabilities,
+                    },
+                )
+                .await
+                .unwrap()
+            else {
+                panic!("capabilities")
+            };
+            assert_eq!(
+                projected.summary_offer.is_some(),
+                matches!(case, "ready" | "wrong-owner")
+            );
+            if matches!(case, "ready" | "wrong-owner") {
+                let handle = OperationId::from_local(2);
+                let start = client
+                    .request(
+                        context(&runtime),
+                        ProtocolRequest::Messaging {
+                            conversation,
+                            operation: handle,
+                            command: M::Summarize {
+                                from: MessageId {
+                                    conversation,
+                                    sequence: 7,
+                                },
+                            },
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(start, ProtocolReply::Messaging { result: R::SummaryStarted { handle: got }, .. } if got == handle)
+                );
+                let status = client
+                    .request(
+                        context(&runtime),
+                        ProtocolRequest::Messaging {
+                            conversation,
+                            operation: OperationId::from_local(3),
+                            command: M::SummaryStatus { handle },
+                        },
+                    )
+                    .await;
+                if case == "wrong-owner" {
+                    assert_eq!(status.err().unwrap().kind, ErrorKind::WrongScope);
+                } else {
+                    assert!(
+                        matches!(status, Ok(ProtocolReply::Messaging { result: R::SummaryPart { text, more: true }, .. }) if text.as_str() == "A bounded summary.")
+                    );
+                }
+                let observed = server.seen.lock().unwrap();
+                assert!(String::from_utf8_lossy(&observed[4]).starts_with(
+                    "POST /cloud/ocs/v2.php/apps/spreed/api/v1/chat/testroom/summarize"
+                ));
+                assert!(
+                    String::from_utf8_lossy(&observed[7])
+                        .starts_with("GET /cloud/ocs/v2.php/taskprocessing/task/44")
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn federation_invitation_actions_are_capability_and_account_scoped() {
+    for major in [34, 35] {
+        for case in ["disabled", "wrong-user", "accept", "decline"] {
+            let mut capabilities = caps(major);
+            capabilities["capabilities"]["spreed"]["features"].as_array_mut().unwrap().push(json!("federation-v1"));
+            capabilities["capabilities"]["spreed"]["config"]["federation"] = json!({
+                "enabled": case != "disabled", "incoming-enabled": true,
+            });
+            let invitation = json!({"id":9,"localToken":"testroom", "userId": if case == "wrong-user" {"someone_else"} else {"fixture_user"},
+                "roomName":"Fictional room", "inviterDisplayName":"Fictional inviter"});
+            let mut replies = vec![Reply::data(capabilities.clone())];
+            if case != "disabled" { replies.push(Reply::data(json!([invitation]))); }
+            if matches!(case, "accept" | "decline") {
+                replies.push(Reply::data(capabilities));
+                let mut accepted = room();
+                accepted["remoteServer"] = json!("https://remote.example.invalid");
+                replies.push(Reply::data(if case == "accept" { accepted } else { Value::Null }));
+            }
+            let server = Server::start(replies).await;
+            let runtime = runtime();
+            let mut client = client(&server.origin, runtime.clone());
+            let list = client.request(context(&runtime), ProtocolRequest::FederationInvitations).await;
+            if case == "wrong-user" {
+                assert_eq!(list.err().unwrap().kind, ErrorKind::WrongScope);
+                continue;
+            }
+            let ProtocolReply::FederationInvitations(view) = list.unwrap() else { panic!("invitations") };
+            assert_eq!(view.supported, case != "disabled");
+            if case == "disabled" { assert_eq!(server.count(), 1); continue; }
+            let item = &view.items.as_slice()[0];
+            assert_eq!(item.room.as_str(), "Fictional room");
+            assert_ne!(item.id, 9);
+            let operation = OperationId::from_local(44);
+            let reply = client.request(context(&runtime), ProtocolRequest::ChangeFederationInvitation {
+                operation, invitation: item.id, accept: case == "accept",
+            }).await.unwrap();
+            assert!(matches!(reply, ProtocolReply::FederationInvitationChanged { operation: got, invitation } if got == operation && invitation == item.id));
+            let seen = server.seen.lock().unwrap();
+            let request = String::from_utf8_lossy(&seen[3]);
+            assert!(request.starts_with(if case == "accept" { "POST " } else { "DELETE " }));
+            assert!(request.contains("/ocs/v2.php/apps/spreed/api/v1/federation/invitation/9"));
         }
     }
 }

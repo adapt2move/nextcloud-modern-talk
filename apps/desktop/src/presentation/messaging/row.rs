@@ -178,6 +178,9 @@ impl Desktop {
                     .child(self.hint(self.l("Erinnerung"))),
             );
         }
+        if let Some(translation) = self.translation_row(context, m, cx) {
+            content = content.child(translation);
+        }
         if let Some(upload) = upload {
             content = content.child(self.pending_upload_card(context, upload, cx));
         }

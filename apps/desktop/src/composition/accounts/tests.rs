@@ -750,6 +750,7 @@ pub(super) fn model() -> Accounts {
         message_search: None,
         notices: notifications::Notices::default(),
         reminders: reminders::Reminders::default(),
+        federation: federation::Federation::default(),
         background: background::Background::default(),
         history: history::Cache::default(),
         cache: cache::Cache::default(),
@@ -760,6 +761,9 @@ pub(super) fn model() -> Accounts {
         message_poll_at: Instant::now(),
         message_poll_request: 0,
         scheduled_poll: None,
+        translation: translation::Translations::default(),
+        summary: summary::Summaries::default(),
+        translation_poll: None,
     }
 }
 fn completion(scope: AccountScope, current: bool, reply: ProtocolReply) -> ConnectionCompletion {

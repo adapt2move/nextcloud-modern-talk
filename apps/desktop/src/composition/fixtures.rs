@@ -53,7 +53,13 @@ pub const SCENARIOS: &[&str] = &[
     "chat-reminder-time",
     "chat-reminder-menu",
     "account-reminders",
+    "federation-invitations",
     "chat-schedule-time",
+    "chat-schedule-edit",
+    "chat-translation",
+    "chat-summary-offer",
+    "chat-summary-pending",
+    "chat-summary-result",
     "lobby-settings",
     "thread-error",
     "chat-content",
@@ -202,6 +208,107 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("federation-invitations") {
+        use talk_core::ui::presentation::{
+            FeatureSupport, FederationInvitationView, FederationInvitationsView,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(scope) = state.active_account {
+            state.federation_invitations = Some(FederationInvitationsView {
+                scope,
+                support: FeatureSupport::Supported,
+                failed: false,
+                invitations: page([
+                    FederationInvitationView {
+                        id: 101,
+                        room: text("Community planning"),
+                        inviter: text("Alex Morgan"),
+                    },
+                    FederationInvitationView {
+                        id: 102,
+                        room: text("Design exchange"),
+                        inviter: text("Sam Rivera"),
+                    },
+                ]),
+            });
+        }
+        return state;
+    }
+    if matches!(
+        scenario,
+        Some("chat-summary-offer" | "chat-summary-pending" | "chat-summary-result")
+    ) {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Summary},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(panel) = state.message_panel.as_mut() {
+            let _ = panel.features.try_push((
+                MessageFeature::Summary,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.summary = Some(match scenario {
+                Some("chat-summary-pending") => Summary::Pending {
+                    parts: Page::empty(),
+                },
+                Some("chat-summary-result") => Summary::Ready {
+                    parts: page([text(
+                        "The team agreed to share the draft on Friday. Mara will collect feedback before the next meeting.",
+                    )]),
+                    partial: false,
+                },
+                _ => Summary::Offer {
+                    from: 12,
+                    unread: 120,
+                },
+            });
+        }
+        return state;
+    }
+    if scenario == Some("chat-translation") {
+        use talk_core::ui::{
+            conversation::Availability,
+            messaging::{MessageFeature, Translation},
+            presentation::FeatureSupport,
+        };
+        let mut state = snapshot(Some("chat-ux"));
+        if let Some(message) = state
+            .messages
+            .as_slice()
+            .iter()
+            .find(|message| {
+                !message.metadata.system
+                    && !message.metadata.deleted
+                    && !message.body.as_str().trim().is_empty()
+                    && message.metadata.rich.as_slice().is_empty()
+            })
+            .cloned()
+            && let Some(panel) = state.message_panel.as_mut()
+        {
+            let _ = panel.features.try_push((
+                MessageFeature::Translation,
+                Availability {
+                    implemented: true,
+                    server: FeatureSupport::Supported,
+                    allowed: Decision::Allowed,
+                },
+            ));
+            panel.translation_targets = Some(page([text("de"), text("en"), text("es")]));
+            panel.translations = page(["de", "en", "es"].map(|language| Translation {
+                message: message.local_id,
+                source: message.body.clone(),
+                language: text(language),
+                text: text("Fictional translated message for the team."),
+            }));
+        }
+        return state;
+    }
     if scenario == Some("account-reminders") {
         use talk_core::ui::presentation::{
             AccountReminderView, AccountRemindersView, FeatureSupport,
@@ -216,7 +323,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             .map(|(index, room)| AccountReminderView {
                 context: room.context,
                 message: 45 + index as u128,
-                timestamp: 1_800_003_600 + index as u64 * 3600,
+                timestamp: if index == 0 {
+                    1_800_003_600
+                } else {
+                    1_800_090_000
+                },
             })
             .collect::<Vec<_>>();
         state.account_reminders = Some(AccountRemindersView {
@@ -265,6 +376,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "chat-reminder-time"
                 | "chat-reminder-menu"
                 | "chat-schedule-time"
+                | "chat-schedule-edit"
         )
     ) {
         let mut state = snapshot(Some("chat-ux"));
@@ -612,6 +724,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         tag_state: ContentState::Unconfigured,
         organization_result: None,
         account_reminders: None,
+        federation_invitations: None,
         selected: None,
         content: ContentState::Unconfigured,
         messages: Page::empty(),

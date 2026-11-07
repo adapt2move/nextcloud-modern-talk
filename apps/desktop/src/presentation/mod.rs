@@ -9,6 +9,7 @@ mod controls;
 mod conversation_dialog;
 mod creation;
 mod device_settings;
+mod federation;
 mod feedback;
 mod focus;
 pub mod input;
@@ -65,6 +66,7 @@ pub enum Overlay {
     ContentPreview,
     CreatePoll,
     Reminders,
+    Federation,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SidebarDestination {
@@ -438,7 +440,10 @@ impl Desktop {
         for input in room_ui
             .inputs()
             .into_iter()
-            .chain([message_ui.search.clone(), message_ui.time_input.clone()])
+            .chain([
+                message_ui.search.clone(),
+                message_ui.scheduled_input.clone(),
+            ])
             .chain(content_ui.inputs().cloned())
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
@@ -1129,6 +1134,11 @@ impl Desktop {
                     && let Some(scope) = self.snapshot.active_account
                 {
                     self.submit(UiIntent::RefreshAccountReminders(scope));
+                }
+                if overlay == Overlay::Federation
+                    && let Some(scope) = self.snapshot.active_account
+                {
+                    self.submit(UiIntent::RefreshFederationInvitations(scope));
                 }
                 if overlay == Overlay::Settings
                     && self.settings_tab == preferences::SettingsTab::Notifications
@@ -1951,7 +1961,7 @@ impl Desktop {
             &self.group_name,
             &self.upload_folder,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())
@@ -1970,7 +1980,7 @@ impl Desktop {
             &self.group_name,
             &self.upload_folder,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())
@@ -2115,7 +2125,7 @@ impl Render for Desktop {
                 i.interactive = !incoming && self.room_ui.create_direct
             });
         }
-        for input in [&self.message_ui.search, &self.message_ui.time_input] {
+        for input in [&self.message_ui.search, &self.message_ui.scheduled_input] {
             input.update(cx, |i, _| {
                 i.theme = t;
                 i.text_scale = f32::from(self.scale) / 100.;
@@ -2135,7 +2145,7 @@ impl Render for Desktop {
             (&self.room_ui.avatar, "Emoji"),
             (&self.room_ui.password, "Neues Passwort"),
             (&self.message_ui.search, "Im Gespräch suchen …"),
-            (&self.message_ui.time_input, "JJJJ-MM-TT HH:MM"),
+            (&self.message_ui.scheduled_input, "Nachricht bearbeiten"),
         ] {
             input.update(cx, |i, _| i.set_placeholder(self.l(key)));
         }
@@ -2223,7 +2233,7 @@ impl Render for Desktop {
             &self.group_name,
             &self.upload_folder,
             &self.message_ui.search,
-            &self.message_ui.time_input,
+            &self.message_ui.scheduled_input,
         ]
         .into_iter()
         .chain(self.room_ui.inputs().iter())

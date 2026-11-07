@@ -108,6 +108,12 @@ pub enum ProtocolRequest {
     PollMessageNotifications,
     /// Bounded account-wide reminder observation, without a selected conversation.
     UpcomingReminders,
+    FederationInvitations,
+    ChangeFederationInvitation {
+        operation: OperationId,
+        invitation: u128,
+        accept: bool,
+    },
     /// Drain the admitted account's bounded live mailbox; hints only request fresh reads.
     PollLiveEvents,
     Meeting(crate::calls::Command),
@@ -195,6 +201,11 @@ pub enum ProtocolReply {
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
     UpcomingReminders(crate::protocol::messaging::AccountReminders),
+    FederationInvitations(crate::protocol::federation::Invitations),
+    FederationInvitationChanged {
+        operation: OperationId,
+        invitation: u128,
+    },
     LiveEvents(crate::protocol::AccountLiveEvents),
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),
