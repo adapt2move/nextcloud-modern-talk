@@ -179,6 +179,14 @@ impl AccountConnection {
         request: ConnectionRequestId,
         command: RuntimeCommand,
     ) -> Result<()> {
+        self.try_submit_priority(request, command, super::runtime::RequestPriority::User)
+    }
+    pub fn try_submit_priority(
+        &mut self,
+        request: ConnectionRequestId,
+        command: RuntimeCommand,
+        priority: super::runtime::RequestPriority,
+    ) -> Result<()> {
         if self.state != ConnectionState::Ready {
             return Err(match self.state {
                 ConnectionState::Failed(error) => error,
@@ -212,7 +220,7 @@ impl AccountConnection {
             command,
             RuntimeCommand::Restore { .. } | RuntimeCommand::RestoreExact { .. }
         );
-        let observation = self.runtime.try_submit(command)?;
+        let observation = self.runtime.try_submit_priority(command, priority)?;
         self.last_request = request.0;
         self.jobs.push(Retained {
             request,
@@ -361,6 +369,12 @@ impl AccountConnection {
         })
     }
 
+    pub fn network_revision(&self) -> u64 {
+        self.runtime.network_revision()
+    }
+    pub fn network_changed(&self) {
+        self.runtime.network_changed();
+    }
     /// Retains the job and its eventual result. This also cancels an unread successful
     /// activation; a consumed/acknowledged activation is closed by logout instead.
     pub fn cancel_request(&mut self, request: ConnectionRequestId) -> Result<()> {

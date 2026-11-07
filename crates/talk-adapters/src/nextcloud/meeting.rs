@@ -248,7 +248,10 @@ impl NextcloudClient {
         {
             return Ok(Some(*scope));
         }
-        if self.call_bindings.len() >= 100 {
+        // One inert action identity per admitted room, not one media session.
+        // Match the room registry so an ordinary full listing cannot exhaust
+        // call projection before any call has even been joined.
+        if self.call_bindings.len() >= 256 {
             return Err(self.error(ErrorKind::Busy));
         }
         let mut bytes = [0; 16];

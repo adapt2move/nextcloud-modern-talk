@@ -37,12 +37,17 @@ pub(crate) use duplex::{
 };
 
 pub(crate) const BODY_LIMIT: usize = crate::MAX_RESPONSE_BYTES;
-const REQUEST_LIMIT: Duration = Duration::from_secs(3);
+const ENCODED_REQUEST_LIMIT: usize = 256 * 1024;
+// A slow server is not a failed connection. Keep connect establishment short,
+// but allow ordinary bounded JSON operations to complete behind optimistic UI.
+const REQUEST_LIMIT: Duration = Duration::from_secs(15);
 
 /// One application-wide owner, shared by every account transport. No work queue.
 #[derive(Clone)]
 pub struct NetworkRuntime(Arc<Runtime>);
 struct Runtime {
+    connectivity: std::sync::atomic::AtomicU64,
+    connectivity_wake: tokio::sync::Notify,
     requests: Arc<Semaphore>,
     accounts: Arc<Semaphore>,
     meetings: Arc<Semaphore>,
@@ -59,6 +64,8 @@ struct Runtime {
 impl NetworkRuntime {
     pub fn new(epoch: ClockId) -> Self {
         Self(Arc::new(Runtime {
+            connectivity: std::sync::atomic::AtomicU64::new(0),
+            connectivity_wake: tokio::sync::Notify::new(),
             requests: Arc::new(Semaphore::new(8)),
             accounts: Arc::new(Semaphore::new(8)),
             meetings: Arc::new(Semaphore::new(2)),
@@ -72,6 +79,30 @@ impl NetworkRuntime {
             epoch,
             bindings: Mutex::new(Vec::new()),
         }))
+    }
+    /// A resume/network-change hint interrupts sockets, never grants access or
+    /// replays a mutation. Existing account/call cancellation remains irreversible.
+    pub fn network_changed(&self) {
+        self.0
+            .connectivity
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.0.connectivity_wake.notify_waiters();
+    }
+    pub fn connectivity_epoch(&self) -> u64 {
+        self.0
+            .connectivity
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+    pub(crate) async fn connectivity_changed(&self, epoch: u64) {
+        loop {
+            let notified = self.0.connectivity_wake.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.connectivity_epoch() != epoch {
+                return;
+            }
+            notified.await;
+        }
     }
     /// Ordinary request timing only; this clock does not qualify suspend-safe media leases.
     pub fn now(&self) -> Moment {
@@ -408,7 +439,7 @@ impl Transport {
             .no_brotli()
             .no_deflate()
             .no_zstd()
-            .connect_timeout(REQUEST_LIMIT)
+            .connect_timeout(Duration::from_secs(3))
             .read_timeout(Duration::from_secs(35))
             .timeout(REQUEST_LIMIT)
             .pool_max_idle_per_host(1)
@@ -749,7 +780,7 @@ impl Transport {
                     > if avatar {
                         crate::MAX_AVATAR_BYTES + 512
                     } else {
-                        BODY_LIMIT
+                        ENCODED_REQUEST_LIMIT
                     }
             })
         {
@@ -764,6 +795,8 @@ impl Transport {
         )
         .min(options.limit);
         let cancel = self.binding.cancellation.clone();
+        let network_runtime = self.runtime.clone();
+        let connectivity_epoch = network_runtime.connectivity_epoch();
         let work = async {
             self.request_dispatched = true;
             let mut response = self.client.execute(request).await.map_err(|e| {
@@ -937,6 +970,7 @@ impl Transport {
         };
         let result = tokio::select! {
             biased;
+            _ = network_runtime.connectivity_changed(connectivity_epoch) => Err(PortError { kind: ErrorKind::Transport, account: Some(context.scope.account), retry: Retry::UserAction }),
             _ = cancellation => Err(PortError { kind: ErrorKind::Cancelled, account: Some(context.scope.account), retry: Retry::Never }),
             result = tokio::time::timeout(deadline, work) => result.unwrap_or(Err(PortError { kind: ErrorKind::Deadline, account: Some(context.scope.account), retry: Retry::UserAction })),
         };
@@ -1133,6 +1167,43 @@ fn notification_allowed(status: Option<&str>) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn connectivity_change_wakes_all_waiters_and_cannot_be_lost_before_registration() {
+        let runtime = super::NetworkRuntime::new(crate::scope::ClockId::from_key(1));
+        let epoch = runtime.connectivity_epoch();
+        let first = runtime.clone();
+        let second = runtime.clone();
+        let one = tokio::spawn(async move {
+            first.connectivity_changed(epoch).await;
+        });
+        let two = tokio::spawn(async move {
+            second.connectivity_changed(epoch).await;
+        });
+        tokio::task::yield_now().await;
+        runtime.network_changed();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            one.await.unwrap();
+            two.await.unwrap();
+        })
+        .await
+        .unwrap();
+        // Change-before-await is as important as a notification to a live socket.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            runtime.connectivity_changed(epoch),
+        )
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                runtime.connectivity_changed(runtime.connectivity_epoch())
+            )
+            .await
+            .is_err()
+        );
+    }
+
     use super::*;
     #[test]
     fn notification_status_distinguishes_busy_from_do_not_disturb() {

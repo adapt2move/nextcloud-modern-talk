@@ -15,6 +15,8 @@ mod federation;
 mod feedback;
 mod focus;
 pub mod input;
+#[cfg(feature = "dev-probes")]
+mod latency_probe;
 pub mod localization;
 mod messaging;
 mod motion;
@@ -466,12 +468,17 @@ pub struct Desktop {
     thread_renaming: bool,
     drafts: Drafts,
     thread_drafts: Drafts,
+    draft_storage_unavailable: Option<ConversationRef>,
     root_focus: FocusHandle,
     modal_focus: FocusHandle,
     pending_modal_focus: bool,
     pending_feedback_focus: bool,
     pending_navigation_focus: Option<bool>,
     diagnostic_frames: u8,
+    #[cfg(debug_assertions)]
+    latency_probe: bool,
+    #[cfg(feature = "dev-probes")]
+    perf_probe: Option<latency_probe::PerfRun>,
     return_focus: Option<FocusHandle>,
     prejoin_return_focus: Option<CallScope>,
     pending_prejoin_return: Option<CallScope>,
@@ -849,12 +856,17 @@ impl Desktop {
             thread_renaming: false,
             drafts: Drafts::default(),
             thread_drafts: Drafts::thread_editor(),
+            draft_storage_unavailable: None,
             root_focus,
             modal_focus,
             pending_modal_focus: initial_overlay.is_some() || prejoin.is_some(),
             pending_feedback_focus: false,
             pending_navigation_focus: None,
             diagnostic_frames: 0,
+            #[cfg(debug_assertions)]
+            latency_probe: false,
+            #[cfg(feature = "dev-probes")]
+            perf_probe: None,
             return_focus: None,
             prejoin_return_focus: None,
             pending_prejoin_return: None,
@@ -1059,6 +1071,24 @@ impl Desktop {
                 .is_ok()
         {
             self.pending_ack = None;
+        }
+        if let Some(context) = self.snapshot.selected
+            && self.message_ui.editing.is_none()
+            && self.message_ui.composer_load_failed != Some(context)
+            && !self.composer.read(cx).composing()
+        {
+            let _ = self
+                .drafts
+                .save(context, self.composer.read(cx).committed_value());
+        }
+        let _ = self.save_thread_draft(cx);
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
         }
         let Some(next) = self.port.take_snapshot() else {
             return;
@@ -1368,6 +1398,25 @@ impl Desktop {
         }
         self.observe_reference_previews(&next);
         self.snapshot = next;
+        if let Some(context) = self.snapshot.selected {
+            let stored = self.port.composer_drafts(context);
+            if self
+                .drafts
+                .restore_durable(context, stored.as_slice(), false)
+            {
+                reset_draft = true;
+            }
+            self.thread_drafts
+                .restore_durable(context, stored.as_slice(), true);
+        }
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
+        }
         self.retain_thread_edit();
         if self.waiting_in_lobby() {
             self.call_chat_open = false;
@@ -2603,7 +2652,7 @@ impl Desktop {
                 if self.snapshot.conversation_list.content == ContentState::Ready
                     && self.snapshot.conversations.as_slice().iter().any(|r| {
                         r.context == context
-                            && r.archive == Decision::Allowed
+                            && r.archive != Decision::Denied
                             && r.archived == Some(!archived)
                     })
                     && let Some(request) = self.archive_request.checked_add(1)
@@ -3469,6 +3518,23 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "dev-probes")]
+        let build_started = std::time::Instant::now();
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_frame(window, cx);
+        #[cfg(debug_assertions)]
+        if self.latency_probe {
+            let snapshot = self.snapshot.clone();
+            let view = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                if view
+                    .update(cx, |view, _| view.port.observe_rendered(&snapshot))
+                    .is_err()
+                {
+                    println!("DEV_FRAME_UNAVAILABLE");
+                }
+            });
+        }
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;
@@ -3893,7 +3959,6 @@ impl Render for Desktop {
             .flatten()
             .map(|dialog| self.dialog_backdrop(motion::DialogSurface::AccountRemoval, dialog));
         let incoming_card = incoming.then(|| self.incoming(cx));
-        let action_toast = self.action_toast_view(window, cx);
         let message_menu = self.message_menu_popup(window, cx);
         let composer_menu = self.composer_menu_popup(window, cx);
         let pin_motion_overlay = self.pin_motion_overlay(cx);
@@ -4026,6 +4091,7 @@ impl Render for Desktop {
             .on_key_down(cx.listener(Self::key))
             .child(self.pointer_modality(cx))
             .child(self.window_chrome(window, shell_visible, cx))
+            .children(self.connection_banner())
             .child(
                 div()
                     .relative()
@@ -4035,7 +4101,6 @@ impl Render for Desktop {
                     .when_some(overlay, |d, overlay| d.child(overlay))
                     .when_some(account_removal_dialog, |d, dialog| d.child(dialog))
                     .when_some(incoming_card, |d, card| d.child(card))
-                    .when_some(action_toast, |d, toast| d.child(toast))
                     .when_some(message_menu, |d, menu| d.child(menu))
                     .when_some(composer_menu, |d, menu| d.child(menu))
                     .when_some(pin_motion_overlay, |d, motion| d.child(motion)),
@@ -4177,6 +4242,8 @@ impl Render for Desktop {
         }
         self.finish_onboarding_focus(window, cx);
         self.finish_search_focus(window, cx);
+        #[cfg(feature = "dev-probes")]
+        self.observe_perf_build(build_started);
         view
     }
 }

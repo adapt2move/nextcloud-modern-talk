@@ -90,6 +90,9 @@ pub(super) struct MessageUi {
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
     observed_pins: Vec<u128>,
+    // Session-only anchors, bounded independently of virtual list metadata.
+    scroll_anchors: Vec<(ConversationRef, Option<u128>, gpui::Pixels)>,
+
     observed_translations: Vec<talk_core::ui::messaging::Translation>,
     observed_translation_status: (Option<u128>, Option<u128>),
     hidden_translations: Vec<u128>,
@@ -252,6 +255,24 @@ fn preserved_row_offset(
 }
 
 impl MessageUi {
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_history(&self) -> String {
+        format!(
+            "{:?} {:?} {}",
+            self.history.borrow().diagnostic(),
+            self.list.logical_scroll_top(),
+            self.list.item_count()
+        )
+    }
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_scroll_by(&self, delta: gpui::Pixels) {
+        (self.pins.cancellation())();
+        self.arrival.borrow_mut().manual_scroll();
+        if delta < px(0.) {
+            self.history.borrow_mut().upward();
+        }
+        self.list.scroll_by(delta);
+    }
     fn visible_bounds(&self) -> gpui::Bounds<gpui::Pixels> {
         let bounds = self.list.viewport_bounds();
         let inset = self.geometry.borrow().header_inset.min(bounds.size.height);
@@ -292,6 +313,8 @@ impl MessageUi {
             context: None,
             observed: Vec::new(),
             observed_pins: Vec::new(),
+            scroll_anchors: Vec::new(),
+
             observed_translations: Vec::new(),
             observed_translation_status: (None, None),
             hidden_translations: Vec::new(),
@@ -412,10 +435,7 @@ impl Desktop {
         if !self.save_thread_draft(cx)
             || !self.thread_drafts.set_target(
                 context,
-                ComposeTarget {
-                    thread: Some(root),
-                    ..ComposeTarget::default()
-                },
+                self.thread_drafts.restored_thread_target(context, root),
             )
         {
             return false;
@@ -823,6 +843,30 @@ impl Desktop {
                 self.return_focus = None;
                 self.pending_modal_focus = false;
             }
+            self.message_ui.scroll_anchors.retain(|(c, _, _)| {
+                self.snapshot
+                    .accounts
+                    .as_slice()
+                    .iter()
+                    .any(|a| a.scope == c.account)
+            });
+            if let Some(context) = self.message_ui.context {
+                let top = self.message_ui.list.logical_scroll_top();
+                let anchor = self
+                    .message_ui
+                    .observed
+                    .get(top.item_ix)
+                    .map(|m| m.local_id);
+                self.message_ui
+                    .scroll_anchors
+                    .retain(|(c, _, _)| *c != context);
+                if self.message_ui.scroll_anchors.len() == 32 {
+                    self.message_ui.scroll_anchors.remove(0);
+                }
+                self.message_ui
+                    .scroll_anchors
+                    .push((context, anchor, top.offset_in_item));
+            }
             self.message_ui.context = self.snapshot.selected;
             self.message_ui.unread_marker = self.snapshot.selected.and_then(|context| {
                 self.snapshot
@@ -835,6 +879,19 @@ impl Desktop {
             self.message_ui.first_unread = None;
             self.message_ui.unread_jump = None;
             self.message_ui.list.reset(rows.len());
+            if let Some((_, anchor, offset)) = self
+                .message_ui
+                .scroll_anchors
+                .iter()
+                .find(|(c, _, _)| Some(*c) == self.snapshot.selected)
+                && let Some(index) =
+                    anchor.and_then(|id| rows.iter().position(|m| m.local_id == id))
+            {
+                self.message_ui.list.scroll_to(ListOffset {
+                    item_ix: index,
+                    offset_in_item: *offset,
+                });
+            }
             self.message_ui.observed = rows.to_vec();
             self.message_ui.menu.clear();
             self.message_ui.reaction_request = None;
@@ -1126,7 +1183,12 @@ impl Desktop {
             return;
         }
         if !self.snapshot.message_panel.as_ref().is_some_and(|p| {
-            p.context == context && p.availability(MessageFeature::ReadReceipts).enabled()
+            p.context == context
+                && read_marker_intent_allowed(
+                    self.snapshot.content,
+                    p.availability(MessageFeature::ReadReceipts),
+                    self.local_message_intents(),
+                )
         }) {
             return;
         }
@@ -2782,10 +2844,11 @@ impl Desktop {
             text
         } else {
             let handles = if permitted {
-                (0..self
-                    .text_selection
-                    .read(cx)
-                    .link_count(message.body.as_str()))
+                (0..message
+                    .metadata
+                    .prepared
+                    .as_ref()
+                    .map_or(0, |p| p.document().links.as_slice().len()))
                     .map(|ordinal| {
                         // A timeline row and a rendered thread copy must never
                         // share focus ownership, even for the same message.
@@ -2803,6 +2866,7 @@ impl Desktop {
                 Vec::new()
             };
             text.rich(message.body.as_str(), f32::from(self.scale) / 100.)
+                .prepared(message.metadata.prepared.clone())
                 .links(context, message.local_id, message.body.clone(), handles)
         }
     }
@@ -3315,6 +3379,22 @@ fn thread_reply_feature_allowed(
             && value.allowed != Decision::Denied
 }
 
+// Local read-marker intent is separate from permission to expose read receipts.
+// An eligible cached visible row may stage its marker; dispatch still rechecks
+// current privacy/policy, and delivery indicators retain their strict feature gate.
+fn read_marker_intent_allowed(
+    content: ContentState,
+    value: talk_core::ui::conversation::Availability,
+    queue_available: bool,
+) -> bool {
+    value.enabled() && content == ContentState::Ready
+        || queue_available
+            && matches!(content, ContentState::Ready | ContentState::Offline)
+            && value.implemented
+            && value.server != talk_core::ui::presentation::FeatureSupport::Unsupported
+            && value.allowed != Decision::Denied
+}
+
 fn feature_allows_intent(
     content: ContentState,
     value: talk_core::ui::conversation::Availability,
@@ -3361,6 +3441,49 @@ fn message_mutation_allowed(
 mod tests {
     use super::*;
 
+    #[test]
+    fn cached_visible_read_can_queue_without_granting_public_receipt_support() {
+        use talk_core::ui::conversation::Availability;
+        use talk_core::ui::presentation::FeatureSupport;
+        let unknown = Availability::UNKNOWN;
+        assert!(read_marker_intent_allowed(
+            ContentState::Offline,
+            unknown,
+            true
+        ));
+        assert!(!feature_allows_intent(
+            ContentState::Offline,
+            unknown,
+            MessageFeature::ReadReceipts,
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            unknown,
+            false
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Denied,
+            unknown,
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            Availability {
+                allowed: Decision::Denied,
+                ..unknown
+            },
+            true
+        ));
+        assert!(!read_marker_intent_allowed(
+            ContentState::Offline,
+            Availability {
+                server: FeatureSupport::Unsupported,
+                ..unknown
+            },
+            true
+        ));
+    }
     #[test]
     fn offline_thread_reply_stages_from_an_observed_root_without_stale_authority() {
         use talk_core::ui::conversation::Availability;

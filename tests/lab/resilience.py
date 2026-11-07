@@ -25,7 +25,15 @@ class FaultRelay(Relay):
     def __init__(self, host, port, control):
         super().__init__(host, port)
         self.control = control
-        self.injected = {"500": 0, "403": 0, "offline": 0}
+        self.injected = {mode: 0 for mode in ("500", "403", "offline", "latency-1500", "latency-4000", "slow-poll", "intermittent", "disconnected")}
+        self.requests = 0
+        self.chat_reads = 0
+
+    async def disconnect(self):
+        # An owned lab network transition also drops already admitted sockets.
+        active=list(self.tasks)
+        for task in active: task.cancel()
+        await asyncio.gather(*active,return_exceptions=True)
 
     async def connection(self, reader, writer):
         if len(self.tasks) >= 8:
@@ -40,8 +48,24 @@ class FaultRelay(Relay):
             header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
             line = header.split(b"\r\n", 1)[0].split(b" ")
             mode = self.control.read_text() if self.control.exists() else "healthy"
-            if len(line) == 3 and line[0] == b"GET" and b"/api/v1/chat/" in line[1] and mode in self.injected:
+            self.requests += 1
+            if len(line) == 3 and line[0] == b"GET" and b"/api/v1/chat/" in line[1]:
+                self.chat_reads += 1
+            if mode in ("latency-1500", "latency-4000", "slow-poll", "intermittent"):
                 self.injected[mode] += 1
+                if mode.startswith("latency-"):
+                    await asyncio.sleep(int(mode.split("-")[1]) / 1000)
+                elif mode == "slow-poll" and (b"lookIntoFuture=1" in header or b"/signaling/" in header):
+                    await asyncio.sleep(4)
+                elif mode == "intermittent" and self.chat_reads > 0 and self.chat_reads % 3 == 0 and b"/api/v1/chat/" in line[1]:
+                    # Deterministic, content-free fault cadence. Only reads are
+                    # faulted: this is not a safe mutation-replay simulator.
+                    mode = ("502", "504", "offline")[(self.chat_reads // 3) % 3]
+            if mode == "disconnected":
+                self.injected[mode] += 1
+                return
+            if len(line) == 3 and line[0] == b"GET" and b"/api/v1/chat/" in line[1] and mode in ("500", "403", "offline", "502", "504"):
+                self.injected[mode] = self.injected.get(mode, 0) + 1
                 if mode != "offline":
                     status = int(mode)
                     body = b"<html>Temporary gateway failure</html>"
@@ -171,6 +195,8 @@ class RecoveryLab(Lab):
         result, injected = asyncio.run(self.client(directory, port, target))
         self.require("recovery.typed-client", result == 0, {"exit_code": result})
         for mode, count in injected.items():
+            if mode not in ("500", "403", "offline"):
+                continue
             self.require("recovery.injected." + mode, count > 0, {"requests": count})
         self.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"], expected=(200, 404), name="recovery.remove-room")
         self.request("lab_bob", "DELETE", listed_path, expected=(200, 404), name="recovery.remove-listed-room")
@@ -206,6 +232,8 @@ class RecoveryLab(Lab):
                             if not reminder_job.done():
                                 reminder_job.cancel()
                             await asyncio.gather(reminder_job, return_exceptions=True)
+                if (directory / "latency.json").exists():
+                    save(output / "latency.json", __import__("json").loads((directory / "latency.json").read_text()))
                 results.append({"command": command, "exit_code": code,
                                 "seconds": round(time.monotonic() - start, 2)})
                 save(output / "client-results.json", results)

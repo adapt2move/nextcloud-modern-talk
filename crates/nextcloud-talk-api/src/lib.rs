@@ -35,7 +35,7 @@ use scope::*;
 pub use transport::{NetworkRuntime, ServerOrigin};
 use zeroize::Zeroizing;
 /// Maximum complete HTTP response body before JSON decoding.
-pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// Encoded square PNG avatar; untrusted files are decoded and bounded by the caller.
 pub const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 
@@ -1366,7 +1366,7 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
             if r.status != 200 {
                 return Err(ErrorKind::Malformed);
             }
-            Reply::Rooms(list(v, 100, Room::decode)?)
+            Reply::Rooms(list(v, 256, Room::decode)?)
         }
         Kind::BreakoutRooms => {
             if !matches!(r.status, 200 | 201) {

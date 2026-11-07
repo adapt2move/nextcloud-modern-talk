@@ -65,6 +65,7 @@ pub(super) struct OptimisticJoin {
 
 fn pending_row(room: &Room) -> ConversationView {
     ConversationView {
+        action_error: None,
         context: room.context,
         navigation_key: None,
         title: room.name.clone(),
@@ -105,9 +106,9 @@ fn pending_row(room: &Room) -> ConversationView {
 }
 
 fn with_pending_row(
-    rows: &Page<ConversationView, 100>,
+    rows: &Page<ConversationView, 256>,
     join: &OptimisticJoin,
-) -> Page<ConversationView, 100> {
+) -> Page<ConversationView, 256> {
     let previous = join
         .previous
         .filter(|id| *id != join.context)

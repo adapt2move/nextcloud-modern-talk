@@ -154,6 +154,7 @@ mod tests {
     fn snapshot() -> PresentationSnapshot {
         let context = room(1, 1);
         PresentationSnapshot {
+            pending_intents: 0,
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,

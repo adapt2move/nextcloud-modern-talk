@@ -899,6 +899,10 @@ impl Accounts {
             _ => None,
         };
         let command = match action {
+            V::SetFavorite(_)
+            | V::SetArchived(_)
+            | V::SetNotificationLevel(_)
+            | V::VotePoll { .. } => return Err(SubmitError::StaleScope),
             V::Summarize | V::DismissSummary => return Err(SubmitError::StaleScope),
             V::RetryQueued(_) | V::DiscardQueued(_) => return Err(SubmitError::StaleScope),
             V::PickUpload
@@ -2491,6 +2495,7 @@ pub(super) fn message_view(m: &wire::MessageDetails) -> MessageView {
         attachments: Page::empty(),
         reply_count: m.thread_replies.unwrap_or(0).min(u32::from(u16::MAX)) as u16,
         metadata: view::MessageMetadata {
+            prepared: None,
             local_operation: m.message.own_operation.map(OperationId::as_local),
             local_order: None,
             author_key: m.author_key.clone(),

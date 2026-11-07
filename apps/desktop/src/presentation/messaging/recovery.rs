@@ -68,6 +68,7 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> bool {
         !draft.retrying
+            && draft.kind != FailedDraftKind::File
             && self.composer.read(cx).content.is_empty()
             && !self.composer.read(cx).composing()
             && self.message_ui.editing.is_none()
@@ -86,7 +87,7 @@ impl Desktop {
         !draft.retrying
             && self.local_message_intents()
             && match draft.kind {
-                FailedDraftKind::Send => self
+                FailedDraftKind::File | FailedDraftKind::Send => self
                     .selected()
                     .is_some_and(|row| decision_allows_intent(row.send, true)),
                 FailedDraftKind::Edit(message) => {
@@ -206,7 +207,7 @@ impl Desktop {
         Some(self.composer_card().p_3().gap_2()
             .child(div().flex().items_center().gap_2()
                 .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(self.l(match draft.kind {
-                    FailedDraftKind::Send => "Senden fehlgeschlagen",
+                    FailedDraftKind::File | FailedDraftKind::Send => "Senden fehlgeschlagen",
                     FailedDraftKind::Edit(_) => "Änderung fehlgeschlagen",
                     FailedDraftKind::Schedule(_) | FailedDraftKind::EditScheduled(_) => "Planung fehlgeschlagen",
                 })))

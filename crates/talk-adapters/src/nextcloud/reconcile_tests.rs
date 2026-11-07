@@ -31,6 +31,7 @@ async fn existing_file_share_is_permission_checked_and_reference_correlated() {
                 conversation,
                 operation,
                 command: M::ShareExistingFile {
+                    voice_message: false,
                     path: Text::new("/Plans/plan.pdf").unwrap(),
                     caption: Text::new("caption").unwrap(),
                     options: Default::default(),

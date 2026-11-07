@@ -1,5 +1,6 @@
 //! Native presentation projection. Producers own policy, identity and operation lifetimes.
 //! All collections/text are bounded. No transport DTO, endpoint, secret or frame is exported.
+use super::messaging::ComposerDraft;
 use super::{
     AccountId, AccountScope, CallScope, ConversationId, Decision, MediaIntent, Page, SubmitError,
     Text, UnavailableReason, UserIntent,
@@ -340,6 +341,8 @@ pub struct OrganizationResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationView {
+    /// Scoped action failure; never cached or used as permission evidence.
+    pub action_error: Option<super::messaging::MessageActionError>,
     pub context: ConversationRef,
     pub navigation_key: Option<NavigationRoomKey>,
     pub title: Text<256>,
@@ -667,6 +670,8 @@ pub struct AccountRemovalResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSnapshot {
+    /// Accepted changes awaiting dispatch for the active durable account.
+    pub pending_intents: u16,
     pub content_panel: super::content::ContentPanel,
     pub file_export: Option<super::content::FileExportView>,
     pub create_panel: Option<super::conversation::CreatePanel>,
@@ -681,7 +686,7 @@ pub struct PresentationSnapshot {
     /// Correlated local removal/cleanup outcome, retained until acknowledged.
     pub account_removal: Option<AccountRemovalResult>,
     pub active_account: Option<AccountScope>,
-    pub conversations: Page<ConversationView, 100>,
+    pub conversations: Page<ConversationView, 256>,
     pub threads: ThreadList,
     pub conversation_list: ConversationListState,
     pub tags: Page<TagView, 102>,
@@ -1010,6 +1015,23 @@ pub enum UiIntent {
 /// One coalesced snapshot and at most 64 queued intents; priority leave/logout must
 /// remain independently admissible as required by ADR-002.
 pub trait NativeDesktopPort {
+    /// Debug observation of prepared render content, not display presentation.
+    #[cfg(debug_assertions)]
+    fn observe_rendered(&mut self, _snapshot: &PresentationSnapshot) {}
+    #[cfg(debug_assertions)]
+    fn enable_latency_probe(&mut self) {}
+
+    fn composer_drafts(&self, _context: ConversationRef) -> Page<ComposerDraft, 32> {
+        Page::empty()
+    }
+    fn save_composer_draft(
+        &mut self,
+        _context: ConversationRef,
+        _draft: ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    }
+
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError>;
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot>;
 }

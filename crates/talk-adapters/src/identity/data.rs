@@ -3,7 +3,7 @@
 //! This is private, unencrypted per-user storage, not an authorization source or
 //! an at-rest encryption claim. The identity worker admits only confirmed ordinary
 //! rooms here. Restricted/unknown rooms and session-only accounts stay in memory.
-//! One account database owns room metadata, eight recent histories and 64 durable
+//! One account database owns room metadata, 32 recent histories and 64 durable
 //! intents; cache eviction never evicts an intent. No credential, transport URL,
 //! room token, permission grant or original media payload belongs in these records.
 //! Disposable, downscaled ordinary-room previews have a separate finite budget.
@@ -18,14 +18,16 @@ use talk_core::{
 };
 
 mod codec;
+mod drafts;
 mod intent;
+pub use drafts::{CACHE_DRAFT_LIMIT, CacheDraft};
 mod presence;
 mod thumbnails;
 pub use intent::{OutboxIntent, OutboxOptions, OutboxPrivateReply};
 pub use presence::{CACHE_PRESENCE_LIFETIME, CacheUserStatus, CachedPresence};
 
-pub const CACHE_ROOM_LIMIT: usize = 100;
-pub const CACHE_HISTORY_LIMIT: usize = 8;
+pub const CACHE_ROOM_LIMIT: usize = 256;
+pub const CACHE_HISTORY_LIMIT: usize = 32;
 pub const OUTBOX_LIMIT: usize = 64;
 pub const CACHE_LIFETIME: u64 = 30 * 24 * 60 * 60;
 pub const CACHE_THUMBNAIL_LIMIT: usize = 24;
@@ -248,6 +250,12 @@ pub struct CacheHistory {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutboxKind {
+    MarkRead,
+    ShareFile,
+    Favorite,
+    Archived,
+    Notifications,
+    PollVote,
     Send,
     Edit,
     Delete,
@@ -265,6 +273,12 @@ pub enum OutboxKind {
 impl OutboxKind {
     fn code(self) -> i64 {
         match self {
+            Self::MarkRead => 18,
+            Self::ShareFile => 17,
+            Self::Favorite => 13,
+            Self::Archived => 14,
+            Self::Notifications => 15,
+            Self::PollVote => 16,
             Self::Send => 0,
             Self::Edit => 1,
             Self::Delete => 2,
@@ -283,6 +297,12 @@ impl OutboxKind {
     }
     fn parse(code: i64) -> Result<Self> {
         Ok(match code {
+            18 => Self::MarkRead,
+            17 => Self::ShareFile,
+            13 => Self::Favorite,
+            14 => Self::Archived,
+            15 => Self::Notifications,
+            16 => Self::PollVote,
             0 => Self::Send,
             1 => Self::Edit,
             2 => Self::Delete,
@@ -370,6 +390,7 @@ impl std::fmt::Debug for CacheThumbnail {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataSnapshot {
+    pub drafts: Page<CacheDraft, CACHE_DRAFT_LIMIT>,
     pub rooms: Page<CacheRoom, CACHE_ROOM_LIMIT>,
     pub histories: Page<CacheHistory, CACHE_HISTORY_LIMIT>,
     pub outbox: Page<OutboxEntry, OUTBOX_LIMIT>,
@@ -382,6 +403,7 @@ pub enum DataCommand {
     /// and histories are removed atomically; pending intents are retained.
     PutRooms(Page<CacheRoom, CACHE_ROOM_LIMIT>),
     PutHistory(CacheHistory),
+    PutDraft(CacheDraft),
     PutThumbnail(CacheThumbnail),
     RemoveThumbnail {
         room: NavigationRoomKey,
@@ -431,6 +453,7 @@ impl Store {
         match command {
             DataCommand::Load => return self.load(now).map(DataResult::Snapshot),
             DataCommand::PutRooms(rooms) => self.put_rooms(&rooms, now)?,
+            DataCommand::PutDraft(draft) => self.put_draft(&draft, now)?,
             DataCommand::PutHistory(history) => self.put_history(&history, now)?,
             DataCommand::PutThumbnail(thumbnail) => self.put_thumbnail(&thumbnail, now)?,
             DataCommand::RemoveThumbnail {
@@ -483,7 +506,7 @@ impl Store {
         let mut histories = Page::empty();
         let keys: Vec<String> = {
             let mut query =
-                sql(db.prepare("SELECT room FROM histories ORDER BY saved DESC,room LIMIT 9"))?;
+                sql(db.prepare("SELECT room FROM histories ORDER BY saved DESC,room LIMIT 33"))?;
             sql(query.query_map([], |row| row.get(0)))?
                 .collect::<rusqlite::Result<_>>()
                 .map_err(|_| DataError::Corrupt)?
@@ -504,7 +527,12 @@ impl Store {
         for thumbnail in thumbnails.as_slice() {
             self.check_room(&ledger, &thumbnail.room)?;
         }
+        let drafts = drafts::read(&db, now)?;
+        for draft in drafts.as_slice() {
+            self.check_room(&ledger, &draft.room)?;
+        }
         Ok(DataSnapshot {
+            drafts,
             rooms,
             histories,
             outbox,
@@ -520,7 +548,7 @@ impl Store {
         prune(&mut db, now)?;
         let tx = sql(db.transaction())?;
         let existing: Vec<String> = {
-            let mut statement = sql(tx.prepare("SELECT room FROM rooms LIMIT 101"))?;
+            let mut statement = sql(tx.prepare("SELECT room FROM rooms LIMIT 257"))?;
             let mut rows = sql(statement.query([]))?;
             let mut keys = Vec::new();
             while let Some(row) = sql(rows.next())? {
@@ -537,7 +565,7 @@ impl Store {
                 sql(tx.execute("DELETE FROM rooms WHERE room=?1", [key.as_str()]))?;
             }
         }
-        for room in rooms.as_slice() {
+        for (position, room) in rooms.as_slice().iter().enumerate() {
             self.check_room(&ledger, &room.key)?;
             if room.kind == CachedRoomKind::Unknown
                 || !fresh(room.saved_at, now)
@@ -562,8 +590,8 @@ impl Store {
             }
             let bytes = codec::encode(&room, META_BYTES)?;
             thumbnails::reserve_for_write(&tx, bytes.len())?;
-            sql(tx.execute("INSERT INTO rooms(room,saved,bytes) VALUES(?1,?2,?3) ON CONFLICT(room) DO UPDATE SET saved=excluded.saved,bytes=excluded.bytes",
-                params![room.key.as_str(), integer(room.saved_at)?, bytes]))?;
+            sql(tx.execute("INSERT INTO rooms(room,saved,bytes,position) VALUES(?1,?2,?3,?4) ON CONFLICT(room) DO UPDATE SET saved=excluded.saved,bytes=excluded.bytes,position=excluded.position",
+                params![room.key.as_str(), integer(room.saved_at)?, bytes, position as i64]))?;
         }
         loop {
             let count: i64 = sql(tx.query_row("SELECT count(*) FROM rooms", [], |row| row.get(0)))?;
@@ -773,7 +801,8 @@ impl Store {
         ))?;
         sql(tx.commit())
     }
-    /// Failed drafts are replaced and admitted in one transaction: capacity or
+    /// Failed drafts and explicit replacements of uncertain unread markers are
+    /// replaced and admitted in one transaction: capacity or
     /// storage failure leaves the original intact, including at 64 records.
     pub(super) fn replace(
         &self,
@@ -787,7 +816,9 @@ impl Store {
             || record.phase != OutboxPhase::Queued
             || !matches!(
                 record.kind,
-                OutboxKind::Send
+                OutboxKind::MarkRead
+                    | OutboxKind::MarkUnread
+                    | OutboxKind::Send
                     | OutboxKind::Edit
                     | OutboxKind::Schedule
                     | OutboxKind::EditScheduled
@@ -810,10 +841,17 @@ impl Store {
             .iter()
             .find(|e| e.record.operation == record.operation);
         if let Some(old) = prior {
-            if old.record.phase != OutboxPhase::Failed
-                || old.record.room != record.room
-                || old.record.kind != record.kind
-                || old.record.payload != record.payload
+            let unread_replacement = old.record.kind == OutboxKind::MarkUnread
+                && matches!(
+                    old.record.phase,
+                    OutboxPhase::Dispatched | OutboxPhase::Uncertain
+                )
+                && matches!(record.kind, OutboxKind::MarkUnread | OutboxKind::MarkRead);
+            if old.record.room != record.room
+                || !unread_replacement
+                    && (old.record.phase != OutboxPhase::Failed
+                        || old.record.kind != record.kind
+                        || old.record.payload != record.payload)
             {
                 return Err(DataError::InvalidInput);
             }
@@ -924,7 +962,7 @@ fn open(dir: &PrivateDir, account: AccountId) -> Result<Connection> {
         (HISTORY_BYTES + META_BYTES) as i32,
     ))?;
     let version: i64 = sql(db.query_row("PRAGMA user_version", [], |row| row.get(0)))?;
-    if !(0..=3).contains(&version) {
+    if !(0..=4).contains(&version) {
         return Err(DataError::Corrupt);
     }
     sql(db.execute_batch("PRAGMA page_size=4096; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
@@ -947,7 +985,20 @@ fn open(dir: &PrivateDir, account: AccountId) -> Result<Connection> {
         }
         sql(db.execute("DELETE FROM thumbnails", []))?;
     }
-    sql(db.execute_batch("PRAGMA user_version=3;"))?;
+    if version < 4 {
+        let columns: Vec<String> = {
+            let mut q = sql(db.prepare("PRAGMA table_info(rooms)"))?;
+            sql(q.query_map([], |r| r.get(1)))?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(|_| DataError::Corrupt)?
+        };
+        if !columns.iter().any(|c| c == "position") {
+            sql(db.execute_batch(
+                "ALTER TABLE rooms ADD COLUMN position INTEGER NOT NULL DEFAULT 0;",
+            ))?;
+        }
+    }
+    sql(db.execute_batch("CREATE TABLE IF NOT EXISTS drafts(room TEXT NOT NULL REFERENCES rooms(room) ON DELETE CASCADE,thread INTEGER NOT NULL, saved INTEGER NOT NULL,bytes BLOB NOT NULL, PRIMARY KEY(room,thread)); PRAGMA user_version=4;"))?;
     let page_size: i64 = sql(db.query_row("PRAGMA page_size", [], |row| row.get(0)))?;
     let page_count: i64 = sql(db.query_row("PRAGMA page_count", [], |row| row.get(0)))?;
     if page_size != 4096 || page_count > 4096 {
@@ -965,6 +1016,7 @@ fn prune(db: &mut Connection, now: u64) -> Result<()> {
         "DELETE FROM rooms WHERE (saved>?1 OR saved<=?2) AND room NOT IN (SELECT room FROM outbox)",
         params![now, oldest],
     ))?;
+    drafts::prune(&tx, now as u64)?;
     thumbnails::prune(&tx, now as u64)?;
     sql(tx.execute(
         "DELETE FROM histories WHERE saved>?1 OR saved<=?2 OR room NOT IN (SELECT room FROM rooms)",
@@ -973,7 +1025,7 @@ fn prune(db: &mut Connection, now: u64) -> Result<()> {
     sql(tx.commit())
 }
 fn read_rooms(db: &Connection, now: u64) -> Result<Page<CacheRoom, CACHE_ROOM_LIMIT>> {
-    let mut query=sql(db.prepare("SELECT room,saved,bytes FROM rooms WHERE length(bytes)<=?1 ORDER BY saved DESC,room LIMIT 101"))?;
+    let mut query=sql(db.prepare("SELECT room,saved,bytes FROM rooms WHERE length(bytes)<=?1 ORDER BY position,room LIMIT 257"))?;
     let mut rows = sql(query.query([META_BYTES as i64]))?;
     let mut result = Page::empty();
     let mut expired = Vec::new();
@@ -1097,7 +1149,12 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
         }
         Ok(Some(message))
     };
-    for message in history.messages.as_slice() {
+    for message in history
+        .messages
+        .as_slice()
+        .iter()
+        .skip(history.messages.as_slice().len().saturating_sub(50))
+    {
         if let Some(message) = clean_message(message)? {
             result
                 .messages

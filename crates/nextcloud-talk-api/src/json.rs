@@ -9,7 +9,10 @@ pub(crate) fn json(bytes: &[u8]) -> Result<Value, ErrorKind> {
     if bytes.len() > super::transport::BODY_LIMIT {
         return Err(ErrorKind::TooLarge);
     }
-    let mut budget = 4096usize;
+    // A full 256-room response includes many capability/policy keys per row.
+    // Keep ingress finite without rejecting a valid large sidebar before its
+    // typed row bound is checked. The independent byte/depth limits still apply.
+    let mut budget = 131_072usize;
     let mut de = serde_json::Deserializer::from_slice(bytes);
     let value = Seed {
         budget: &mut budget,
@@ -96,10 +99,18 @@ impl<'de> Visitor<'de> for Seed<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn full_room_metadata_fits_the_shared_structure_budget() {
+        let room: serde_json::Map<String, Value> = (0..150)
+            .map(|i| (format!("field{i}"), Value::Bool(false)))
+            .collect();
+        let bytes = serde_json::to_vec(&vec![room; 256]).unwrap();
+        assert_eq!(json(&bytes).unwrap().as_array().unwrap().len(), 256);
+    }
+    #[test]
     fn hostile_json_has_finite_structure_and_no_duplicate_policy_keys() {
         assert!(json(br#"{"permission":true,"permission":false}"#).is_err());
         assert!(json(format!("{}0{}", "[".repeat(66), "]".repeat(66)).as_bytes()).is_err());
-        assert!(json(format!("[{}0]", "0,".repeat(4097)).as_bytes()).is_err());
+        assert!(json(format!("[{}0]", "0,".repeat(131_073)).as_bytes()).is_err());
         assert!(json(b"{} trailing").is_err());
         assert!(json(br#"{"newField":{"unknown":true},"text":"Unicode \u00fc"}"#).is_ok());
     }

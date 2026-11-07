@@ -588,6 +588,22 @@ impl Desktop {
         cx.notify();
     }
     fn room_available(&self, setting: RoomSetting) -> Availability {
+        if setting == RoomSetting::Notifications
+            && self.local_message_intents()
+            && self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .filter(|p| Some(p.context) == self.room_ui.context)
+                .and_then(|p| p.details.as_ref())
+                .is_some_and(|d| {
+                    d.notifications.is_some()
+                        && d.availability(setting).server != FeatureSupport::Unsupported
+                        && d.availability(setting).allowed != Decision::Denied
+                })
+        {
+            return Availability::available();
+        }
         let panel = self
             .snapshot
             .conversation_panel

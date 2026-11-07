@@ -8,8 +8,8 @@ use talk_core::preferences::navigation::{
 };
 use talk_core::ui::Decision;
 use talk_core::ui::presentation::{
-    ContentState, ConversationCategory, ConversationKind, ConversationView, FeatureSupport,
-    TagEdit, TagKind,
+    ContentState, ConversationCategory, ConversationKind, ConversationRef, ConversationView,
+    FeatureSupport, TagEdit, TagKind,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,7 +195,7 @@ impl Desktop {
         self.snapshot.conversation_list.content == ContentState::Ready
             && match row.organization.favorites {
                 FeatureSupport::Supported => {
-                    row.organization.favorite_change == Decision::Allowed && row.favorite.is_some()
+                    row.organization.favorite_change != Decision::Denied && row.favorite.is_some()
                 }
                 FeatureSupport::Unsupported => {
                     row.navigation_key.is_some()
@@ -206,7 +206,7 @@ impl Desktop {
                             .iter()
                             .any(|a| a.scope == row.context.account && a.navigation_key.is_some())
                 }
-                FeatureSupport::Unknown => false,
+                FeatureSupport::Unknown => row.navigation_key.is_some() && row.favorite.is_some(),
             }
     }
     pub(super) fn sidebar(&self, narrow: bool, cx: &Context<Self>) -> Div {
@@ -539,7 +539,7 @@ impl Desktop {
             visible += favorites.len();
             for row in favorites {
                 grouped.push(row.context);
-                list = list.child(self.compact_room(row, "room", cx));
+                list = list.child(self.sidebar_room(row, cx));
             }
         }
         if self.snapshot.tag_state == ContentState::Ready {
@@ -608,7 +608,7 @@ impl Desktop {
                 );
                 if !tag.collapsed || !query.is_empty() {
                     for row in rows {
-                        list = list.child(self.compact_room(row, "room", cx));
+                        list = list.child(self.sidebar_room(row, cx));
                     }
                 }
             }
@@ -671,7 +671,7 @@ impl Desktop {
                 );
                 if !group.collapsed || !query.is_empty() {
                     for row in rows {
-                        list = list.child(self.compact_room(row, "room", cx));
+                        list = list.child(self.sidebar_room(row, cx));
                     }
                 }
             }
@@ -725,7 +725,7 @@ impl Desktop {
             );
             if !collapsed {
                 for row in rows {
-                    list = list.child(self.compact_room(row, "room", cx));
+                    list = list.child(self.sidebar_room(row, cx));
                 }
             }
         }
@@ -891,6 +891,135 @@ impl Desktop {
         })
     }
 
+    /// Cull expensive row contents against the current scroll mask, without a
+    /// retained geometry cache or an estimated scroll position. Offscreen rows
+    /// keep their two real controls: native Tab can focus them and the existing
+    /// reveal owner scrolls that same stable handle into view. Focused rows and
+    /// expanded/variable-height rows always use their complete presentation.
+    fn sidebar_room(&self, row: &ConversationView, cx: &Context<Self>) -> gpui::Stateful<Div> {
+        let context = row.context;
+        let host = div()
+            .id(scoped_id("sidebar-row-host", context, 0, 0))
+            .w_full()
+            .flex_none();
+        let joining = self
+            .snapshot
+            .discover_panel
+            .as_ref()
+            .is_some_and(|panel| panel.joining == Some(context) && panel.state.pending());
+        if self.room_menu == Some((context, "room")) || row.call_active == Some(true) || joining {
+            return host.child(self.compact_room(row, "room", cx));
+        }
+        // The ordinary single-line row uses the main button minimum; the
+        // absolute 28-pixel More control does not determine its flow height.
+        let height = self.sp(20.) + px(12.);
+        host.child(
+            gpui::canvas(
+                cx.processor(
+                    move |this, bounds: gpui::Bounds<gpui::Pixels>, window, cx| {
+                        let row = this
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|row| row.context == context)?;
+                        let focused = [
+                            scoped_id("room", context, 0, 0),
+                            scoped_id("room", context, 1, 1),
+                        ]
+                        .into_iter()
+                        .filter_map(|id| this.control_focus(id, cx))
+                        .any(|focus| focus.contains_focused(window, cx));
+                        let visible = bounds.intersects(&window.content_mask().bounds);
+                        let mut element = if visible || focused {
+                            this.compact_room(row, "room", cx)
+                                .w_full()
+                                .into_any_element()
+                        } else {
+                            this.sidebar_room_shell(context, height, cx)
+                                .into_any_element()
+                        };
+                        element.layout_as_root(
+                            gpui::size(
+                                gpui::AvailableSpace::Definite(bounds.size.width),
+                                gpui::AvailableSpace::Definite(bounds.size.height),
+                            ),
+                            window,
+                            cx,
+                        );
+                        element.prepaint_at(bounds.origin, window, cx);
+                        Some(element)
+                    },
+                ),
+                |_, element: Option<gpui::AnyElement>, window, cx| {
+                    if let Some(mut element) = element {
+                        element.paint(window, cx);
+                    }
+                },
+            )
+            .w_full()
+            .h(height),
+        )
+    }
+
+    fn sidebar_room_shell(
+        &self,
+        context: ConversationRef,
+        height: gpui::Pixels,
+        cx: &Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        // These controls are clipped out. Keep native focus and activation,
+        // but omit decoration, hover surfaces and hint geometry. The next
+        // focused prepaint uses compact_room, including its focus/reveal ring.
+        let control = |id: gpui::ElementId, action: LocalAction| {
+            div()
+                .id(id.clone())
+                .when_some(self.control_focus(id, cx), |d, focus| {
+                    d.track_focus(&focus.tab_stop(!self.background_inert))
+                })
+                .when(!self.background_inert, |d| {
+                    d.on_key_down(|event: &gpui::KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            cx.stop_propagation();
+                        }
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.handle(action.clone(), window, cx);
+                    }))
+                })
+        };
+        div()
+            .id(scoped_id("room", context, 1, 0))
+            .w_full()
+            .h(height)
+            .pl(px(4.))
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .child(
+                        control(
+                            scoped_id("room", context, 0, 0),
+                            LocalAction::Navigate(context),
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .h(height),
+                    )
+                    .child(
+                        control(
+                            scoped_id("room", context, 1, 1),
+                            LocalAction::ToggleRoomMenu(context, "room"),
+                        )
+                        .absolute()
+                        .right_0()
+                        .size(px(28.)),
+                    ),
+            )
+    }
+
     fn compact_room(
         &self,
         row: &ConversationView,
@@ -1033,6 +1162,20 @@ impl Desktop {
                     scoped_id(namespace, context, 0, 1),
                     ("star-filled", "Favorit"),
                     (13., t.accent),
+                    row_focus.clone(),
+                    cx,
+                ))
+            })
+            .when_some(row.action_error, |d, reason| {
+                d.child(self.status_icon(
+                    scoped_id(
+                        "sidebar-action-error",
+                        context,
+                        u128::from(namespace != "room"),
+                        0,
+                    ),
+                    ("info", super::toast::copy(reason)),
+                    (12., t.warning),
                     row_focus,
                     cx,
                 ))
@@ -1197,7 +1340,7 @@ impl Desktop {
                                 ),
                                 ButtonStyle::Quiet,
                                 Availability::when(
-                                    row.archive == Decision::Allowed && row.archived.is_some(),
+                                    row.archive != Decision::Denied && row.archived.is_some(),
                                     "Der Archivstatus kann derzeit nicht geändert werden.",
                                 ),
                                 LocalAction::Archive(context, row.archived != Some(true)),

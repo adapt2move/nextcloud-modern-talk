@@ -4,6 +4,69 @@ use talk_core::protocol::messaging::{MessageDetails, ReplyContext};
 use talk_core::protocol::{Message, MessageId, MessageKind};
 
 #[test]
+fn wake_catchup_rejects_old_and_failed_pages_without_losing_the_reading_window() {
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    complete(
+        &mut cache,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 2, "Retained")], None),
+    );
+    let old = admit(&mut cache, key, 2, Work::Latest);
+    cache.request_catchup(key);
+    let retained = cache.get(key).unwrap().messages.clone();
+    assert!(cache.complete(
+        key,
+        old,
+        Work::Latest,
+        RequestId(2),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().messages, retained);
+    assert_eq!(cache.get(key).unwrap().poll_cursor(Instant::now()), None);
+    let failed = admit(&mut cache, key, 3, Work::Latest);
+    assert!(cache.complete(
+        key,
+        failed,
+        Work::Latest,
+        RequestId(3),
+        &Err(Completion::Failed(UnavailableReason::Unconfigured)),
+        true
+    ));
+    assert_eq!(cache.get(key).unwrap().messages, retained);
+    assert_eq!(cache.get(key).unwrap().poll_cursor(Instant::now()), None);
+    // An otherwise fresh page from before a second wake is stale too.
+    let second = admit(&mut cache, key, 4, Work::Latest);
+    cache.request_catchup(key);
+    assert!(cache.complete(
+        key,
+        second,
+        Work::Latest,
+        RequestId(4),
+        &Ok(messages(key, [], None)),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().poll_cursor(Instant::now()), None);
+    complete(
+        &mut cache,
+        key,
+        5,
+        Work::Latest,
+        messages(
+            key,
+            [message(key, 2, "Retained"), message(key, 3, "New")],
+            None,
+        ),
+    );
+    assert_eq!(cache.get(key).unwrap().messages.as_slice().len(), 2);
+    assert_eq!(cache.get(key).unwrap().poll_cursor(Instant::now()), Some(3));
+}
+
+#[test]
 fn thread_metadata_mutation_fences_old_reads_and_does_not_persist_authority() {
     let key = context(1, 1, 1, 1);
     let mut cache = Cache::default();

@@ -1070,6 +1070,7 @@ impl NextcloudClient {
                 .await;
         }
         if let C::ShareExistingFile {
+            voice_message,
             path,
             caption,
             options,
@@ -1079,7 +1080,8 @@ impl NextcloudClient {
             if room.classified || room.sensitive || caps.attachments_allowed != Some(true) {
                 return Err(self.error(ErrorKind::PermissionDenied));
             }
-            if !caps.has("chat-reference-id")
+            if (*voice_message && !caps.has("voice-message-sharing"))
+                || !caps.has("chat-reference-id")
                 || ((!caption.as_str().is_empty() || options.silent) && !caps.has("media-caption"))
                 || (options.thread.is_some() && !caps.has("threads"))
                 || options.thread_title.is_some()
@@ -1125,6 +1127,7 @@ impl NextcloudClient {
                 reply_to,
                 thread,
                 silent: options.silent,
+                voice_message: *voice_message,
             };
             let result = self
                 .transport

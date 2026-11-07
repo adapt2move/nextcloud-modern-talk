@@ -939,7 +939,7 @@ impl NextcloudClient {
                     .data
                     .as_array()
                     .ok_or_else(|| self.error(ErrorKind::Malformed))?;
-                if list.len() > 100 {
+                if list.len() > 256 {
                     return Err(self.error(ErrorKind::TooLarge));
                 }
                 let mut rooms = Page::empty();

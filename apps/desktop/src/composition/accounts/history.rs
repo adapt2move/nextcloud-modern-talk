@@ -61,6 +61,7 @@ pub(super) struct History {
     pub(super) older: Option<u128>,
     pub(super) latest: Option<u128>,
     common_read: Option<u128>,
+    catchup_after: Option<Version>,
     observation_version: Version,
     pub(super) state: RemoteState,
     state_owner: Work,
@@ -119,6 +120,7 @@ impl History {
             older: None,
             latest: None,
             common_read: None,
+            catchup_after: None,
             observation_version: Version(0, false),
             state: RemoteState::Idle,
             state_owner: Work::History,
@@ -484,6 +486,9 @@ impl History {
         }
     }
     pub(super) fn poll_cursor(&self, now: Instant) -> Option<u128> {
+        if self.catchup_after.is_some() {
+            return None;
+        }
         let latest = self.latest?;
         let Some(last_visible) = self
             .messages
@@ -1128,6 +1133,17 @@ impl Cache {
             room.thread_activity_requested = Some(started);
         }
     }
+    /// Revalidate the newest page immediately after a network/suspend gap.
+    /// Retain the reading window, known read marker and anchors. Suspend polling
+    /// until a newer bounded snapshot completes; an old completion cannot undo it.
+    pub(super) fn request_catchup(&mut self, context: ConversationRef) {
+        let fence = Version(self.last_admission, true);
+        if let Some(room) = self.get_mut(context) {
+            room.catchup_after = Some(fence);
+            room.tail_probe = None;
+            room.read_tail = None;
+        }
+    }
     pub(super) fn admission_failed(
         &mut self,
         context: ConversationRef,
@@ -1505,6 +1521,13 @@ impl Cache {
                     None
                 };
                 room.latest = room.latest.max(latest);
+                if matches!(work, Work::Latest | Work::History)
+                    && room
+                        .catchup_after
+                        .is_some_and(|fence| flight.version > fence)
+                {
+                    room.catchup_after = None;
+                }
                 if flight.version >= room.observation_version && work != Work::Recovery {
                     // Missing headers on an older page are not a revocation.
                     // Explicit zero still clears receipts (e.g. read privacy).

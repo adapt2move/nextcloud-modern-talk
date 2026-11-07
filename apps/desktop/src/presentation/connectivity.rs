@@ -7,7 +7,7 @@ use talk_core::ui::{
     presentation::{ConnectionFailure, ContentState, ConversationRef, UiIntent},
 };
 
-const OFFLINE_GRACE: Duration = Duration::from_secs(4);
+const OFFLINE_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy)]
 enum Observation {
@@ -106,13 +106,19 @@ impl Desktop {
         self.offline_notice.visible(self.snapshot.active_account)
     }
 
-    pub(super) fn offline_footer(
-        &self,
-        context: ConversationRef,
-        cx: &Context<Self>,
-    ) -> Option<Div> {
-        self.offline_notice_visible()
-            .then(|| self.connection_line(context, None, cx))
+    pub(super) fn connection_banner(&self) -> Option<gpui::Stateful<Div>> {
+        self.offline_notice_visible().then(|| {
+            self.banner(
+                super::controls::BannerRole::Warning,
+                self.l(if self.snapshot.pending_intents > 0 {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                }),
+            )
+            .id("connection-status")
+            .flex_none()
+        })
     }
 
     pub(super) fn connection_failure_footer(
@@ -132,7 +138,19 @@ impl Desktop {
     ) -> Div {
         let (label, detail) = failure
             .map(super::state::connection_failure_copy)
-            .unwrap_or(("Offline", ""));
+            .unwrap_or((
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .is_some_and(|p| p.queued_actions > 0)
+                {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                },
+                "",
+            ));
         let availability = Availability::available().help(detail);
         let id = super::controls::scoped_id("connection-retry", context, 0, 0);
         self.banner(

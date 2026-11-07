@@ -112,6 +112,7 @@ async fn existing_file_share_sends_room_path_and_caption() {
             &path,
             "reference-1",
             &crate::files::ShareOptions {
+                voice_message: false,
                 caption: "A caption".into(),
                 reply_to: Some(12),
                 thread: Some(13),
@@ -158,6 +159,7 @@ async fn existing_file_share_rejects_invalid_caption_before_dispatch() {
             &path,
             "ref",
             &crate::files::ShareOptions {
+                voice_message: false,
                 caption: "bad\0caption".into(),
                 ..Default::default()
             },

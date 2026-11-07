@@ -2,6 +2,41 @@ use super::*;
 use talk_core::preferences::account::{AccountPreferenceResult, AccountPreferences};
 use talk_core::ui::presentation::ScreenShareState;
 
+#[cfg(feature = "dev-probes")]
+#[test]
+#[ignore = "requires an owned 200-room server and private NMT_FIXTURE_DIR"]
+fn released_server_startup_exposes_two_hundred_rooms() {
+    let directory =
+        std::path::PathBuf::from(std::env::var_os("NMT_FIXTURE_DIR").expect("owned fixture"));
+    let profile = directory.join("composition-profile");
+    talk_adapters::identity::lab::seed_private_lab(&profile, &directory.join("alice.json"))
+        .expect("seed account");
+    let model = Accounts::start_with_config(
+        talk_adapters::media::MediaService::new(),
+        RuntimeConfig::isolated_fixture(profile),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let mut accounts = model.borrow_mut();
+        accounts.tick();
+        if accounts.snapshot.conversations.as_slice().len() == 200 {
+            assert_eq!(
+                accounts.snapshot.conversation_list.content,
+                ContentState::Ready
+            );
+            accounts.shutdown();
+            break;
+        }
+        if Instant::now() >= deadline {
+            let state = accounts.snapshot.conversation_list.content;
+            accounts.shutdown();
+            panic!("complete room list did not reach presentation: {state:?}");
+        }
+        drop(accounts);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn pending_login() -> (Accounts, RequestId, AccountId, LoginAttemptId) {
     let mut model = model();
     let request = RequestId(17);
@@ -764,11 +799,13 @@ pub(super) fn model() -> Accounts {
         load_rooms: None,
         load_tags: None,
         preferences: Vec::new(),
+        status_retry: Vec::new(),
         status_pending: Vec::new(),
         message_pending: Vec::new(),
         failures: Vec::new(),
         unresolved: Vec::new(),
         queued_send: None,
+        optimistic_room: None,
         queued_read: reads::Reads::default(),
         outbox: outbox::Outbox::default(),
         room_invite: None,
@@ -787,13 +824,18 @@ pub(super) fn model() -> Accounts {
         background: background::Background::default(),
         typing: typing::Typing::default(),
         history: history::Cache::default(),
+        markup: markup::Owner::default(),
         cache: cache::Cache::default(),
+        #[cfg(debug_assertions)]
+        latency: latency::Metrics::default(),
         picker: None,
         picker_open: false,
         avatar_picker: None,
         avatar_dialog: None,
         csv_file_owner: files::CsvOwner::default(),
         attachment_owner: files::Owner::default(),
+        network_revision: 0,
+        last_tick: std::time::SystemTime::now(),
         message_poll_at: Instant::now(),
         message_poll_request: 0,
         thread_refresh_due: None,
@@ -1255,5 +1297,38 @@ fn temporary_status_read_failure_preserves_message_but_observed_clear_removes_it
             .unwrap()
             .status_message
             .is_none()
+    );
+}
+
+#[test]
+fn favorite_and_archive_feedback_overlays_never_replace_canonical_rows_or_other_rooms() {
+    let canonical = super::super::fixtures::snapshot(Some("chat"));
+    let context = canonical.selected.unwrap();
+    let mut shown = canonical.clone();
+    OptimisticRoom {
+        request: RequestId(1),
+        context,
+        favorite: Some(true),
+        archived: Some(true),
+    }
+    .project(&mut shown);
+    for (old, new) in canonical
+        .conversations
+        .as_slice()
+        .iter()
+        .zip(shown.conversations.as_slice())
+    {
+        if old.context == context {
+            assert_eq!(new.favorite, Some(true));
+            assert_eq!(new.archived, Some(true));
+        } else {
+            assert_eq!(old, new);
+        }
+    }
+    // Dropping the failed/finished overlay exposes the latest canonical state,
+    // not a snapshot retained before an intervening room refresh.
+    assert_eq!(
+        canonical.conversations,
+        super::super::fixtures::snapshot(Some("chat")).conversations
     );
 }

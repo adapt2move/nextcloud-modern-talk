@@ -80,11 +80,6 @@ impl Selection {
         self.context = None;
         cx.notify();
     }
-    /// The first frame reserves a finite maximum. Following frames admit only
-    /// prepared links; no parsing or interior mutation is needed by Desktop.
-    pub fn link_count(&self, source: &str) -> usize {
-        self.documents.link_count(source)
-    }
     fn prepare(&mut self, source: SharedString, context: Option<ConversationRef>) -> Block {
         if context.is_some() && self.context != context {
             self.state = SelectionState::default();
@@ -122,6 +117,8 @@ pub(super) struct SelectableText {
     theme: Theme,
     permitted: bool,
     rich: bool,
+    prepared: Option<talk_core::ui::markup::Prepared>,
+    deferred: bool,
     scale: f32,
     links: Option<MessageLinks>,
 }
@@ -144,6 +141,8 @@ impl SelectableText {
             theme,
             permitted: permitted && text.len() <= SOURCE_BYTES,
             rich: false,
+            prepared: None,
+            deferred: false,
             scale: 1.,
             links: None,
         }
@@ -158,6 +157,13 @@ impl SelectableText {
         self.source = text[..end].to_owned().into();
         self.rich = true;
         self.scale = scale;
+        self
+    }
+    /// Chat rows never parse Markdown during native layout. Until the scoped
+    /// background result arrives, their complete source is readable as text.
+    pub fn prepared(mut self, prepared: Option<talk_core::ui::markup::Prepared>) -> Self {
+        self.prepared = prepared.filter(|value| value.source() == self.source.as_ref());
+        self.deferred = true;
         self
     }
     pub fn links(
@@ -205,10 +211,16 @@ impl RenderOnce for SelectableText {
             theme,
             permitted,
             rich,
+            prepared,
+            deferred,
             scale,
             links,
         } = self;
-        let block = if rich && permitted {
+        let block = if let Some(prepared) = prepared {
+            Block::prepared(source, prepared.document())
+        } else if deferred {
+            Block::new(source, false)
+        } else if rich && permitted {
             selection.update(cx, |owner, _| {
                 owner.prepare(source, links.as_ref().map(|links| links.context))
             })

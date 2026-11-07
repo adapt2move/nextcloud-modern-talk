@@ -379,8 +379,10 @@ impl DiagnosticPrepared {
                         tokio::time::sleep(Duration::from_millis(25)).await;
                     }
                 };
+                let connectivity_epoch = charge.account.runtime.connectivity_epoch();
                 let result = tokio::select! {
                     biased;
+                    _=charge.account.runtime.connectivity_changed(connectivity_epoch)=>Err(charge.error(ErrorKind::Transport)),
                     _=cancellation=>Err(charge.error(ErrorKind::Cancelled)),
                     result=tokio::time::timeout(deadline,work)=>result.unwrap_or_else(|_|Err(charge.error(ErrorKind::Deadline))),
                 };

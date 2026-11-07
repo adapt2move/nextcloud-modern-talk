@@ -283,6 +283,15 @@ fn reveal_delta(top: f32, bottom: f32, start: f32, end: f32) -> f32 {
     }
 }
 impl Navigation {
+    #[cfg(feature = "dev-probes")]
+    pub(super) fn probe_scroll_rooms(&self, delta: Pixels) {
+        let scroll = &self.viewports[Region::Rooms.index()].scroll;
+        let old = scroll.offset();
+        scroll.set_offset(gpui::point(
+            old.x,
+            (old.y + delta).clamp(-scroll.max_offset().height, px(0.)),
+        ));
+    }
     pub fn geometry(&self) -> [Bounds<Pixels>; 8] {
         std::array::from_fn(|i| self.viewports[i].scroll.bounds())
     }

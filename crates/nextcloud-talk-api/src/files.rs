@@ -231,6 +231,7 @@ impl FilePath {
 }
 #[derive(Clone, Debug, Default)]
 pub struct ShareOptions {
+    pub voice_message: bool,
     pub caption: String,
     pub reply_to: Option<u64>,
     pub thread: Option<u64>,
@@ -376,6 +377,9 @@ impl Client {
             ("referenceId", reference.to_owned()),
         ];
         let mut metadata = serde_json::Map::new();
+        if options.voice_message {
+            metadata.insert("messageType".into(), "voice-message".into());
+        }
         if !options.caption.is_empty() {
             metadata.insert("caption".into(), options.caption.clone().into());
         }

@@ -215,6 +215,9 @@ pub const SCENARIOS: &[&str] = &[
     "voice-room",
     "prejoin-voice",
     "offline",
+    "connection-reconnecting",
+    "offline-with-queue",
+    "startup-from-cache",
     "offline-empty",
     "loading",
     "loading-retained",
@@ -316,6 +319,25 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(
+        scenario,
+        Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")
+    ) {
+        let mut state = snapshot(Some("offline"));
+        state.pending_intents = u16::from(scenario == Some("offline-with-queue"));
+        if let Some(context) = state.selected {
+            let mut panel = talk_core::ui::messaging::MessagePanel::new(context);
+            panel.queue_available = true;
+            panel.queued_actions = u32::from(scenario == Some("offline-with-queue"));
+            state.message_panel = Some(panel);
+        }
+        if scenario == Some("startup-from-cache") {
+            state.content = ContentState::Loading;
+            state.conversation_list.content = ContentState::Loading;
+        }
+        return state;
+    }
+
     if scenario == Some("private-reply") {
         let mut state = snapshot(Some("chat-ux"));
         let direct = context(3);
@@ -1201,6 +1223,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.members = page([("Mara Fischer", 11), ("Jonas Weber", 12)].map(
                 |(name, local)| Member {
                     id: PersonRef { context, local },
+                    author_key: None,
+                    presence: Presence::Unknown,
+                    status_icon: None,
+                    status_message: None,
                     name: text(name),
                     author_key: None,
                     presence: Presence::Unknown,
@@ -1380,6 +1406,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         return ready;
     }
     let mut s = PresentationSnapshot {
+        pending_intents: 0,
         content_panel: talk_core::ui::content::ContentPanel::default(),
         file_export: None,
         create_panel: None,
@@ -1584,6 +1611,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
     s.conversations = page(
         rows.map(
             |(id, title, initials, subtitle, kind, favorite, unread)| ConversationView {
+                action_error: None,
                 tags: None,
                 context: context(id),
                 navigation_key: None,

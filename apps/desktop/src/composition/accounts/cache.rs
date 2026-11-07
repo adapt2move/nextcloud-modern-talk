@@ -80,6 +80,7 @@ pub(super) struct Cache {
     writes: Vec<Write>,
     in_flight: Option<Write>,
     selection: Option<(AccountId, NavigationRoomKey)>,
+    selections: Vec<(AccountId, NavigationRoomKey)>,
     next_generation: u64,
     thumbnail_denials: Vec<(AccountId, u64, NavigationRoomKey, u64, Text<128>)>,
     thumbnail_load_blocked: Vec<(AccountId, u64)>,
@@ -87,6 +88,8 @@ pub(super) struct Cache {
     // in the existing 24-write budget and collapses to a preview-only clear.
     cleanup_failures: Vec<CleanupFailure>,
     last_presence_second: Option<u64>,
+    draft_failures: Vec<(AccountId, NavigationRoomKey, Option<u64>)>,
+    draft_retry_at: Option<Instant>,
 }
 fn required_cleanup(command: &DataCommand) -> bool {
     matches!(
@@ -95,6 +98,14 @@ fn required_cleanup(command: &DataCommand) -> bool {
     )
 }
 impl Cache {
+    pub(super) fn remember_selection(&mut self, account: AccountId, key: NavigationRoomKey) {
+        if let Some((_, previous)) = self.selections.iter_mut().find(|(id, _)| *id == account) {
+            *previous = key.clone();
+        } else if self.selections.len() < 8 {
+            self.selections.push((account, key.clone()));
+        }
+        self.selection = Some((account, key));
+    }
     fn write_ready(&self, now: Instant) -> Option<usize> {
         let current = |w: &Write| {
             self.accounts
@@ -111,9 +122,12 @@ impl Cache {
                     })
             })
             .or_else(|| {
-                self.writes
-                    .iter()
-                    .position(|w| current(w) && !required_cleanup(&w.command))
+                self.writes.iter().position(|w| {
+                    current(w)
+                        && !required_cleanup(&w.command)
+                        && (!matches!(w.command, DataCommand::PutDraft(_))
+                            || self.draft_retry_at.is_none_or(|at| now >= at))
+                })
             })
     }
     fn cleanup_failed(&mut self, account: AccountId, generation: u64, now: Instant) -> bool {
@@ -250,6 +264,7 @@ impl Cache {
             if let DataCommand::PutRooms(rooms) = &command {
                 return match &w.command {
                     DataCommand::PutRooms(_) | DataCommand::RemoveRoom(_) => false,
+                    DataCommand::PutDraft(draft) => rooms.as_slice().iter().any(|r| r.key == draft.room),
                     DataCommand::PutHistory(history) => {
                         rooms.as_slice().iter().any(|r| r.key == history.room)
                     }
@@ -286,6 +301,7 @@ impl Cache {
                 !matches!(
                     w.command,
                     DataCommand::PutRooms(_)
+                        | DataCommand::PutDraft(_)
                         | DataCommand::RemoveThumbnail { .. }
                         | DataCommand::ClearThumbnails
                 )
@@ -512,6 +528,9 @@ fn same_slot(a: &DataCommand, b: &DataCommand) -> bool {
     match (a, b) {
         (DataCommand::PutRooms(_), DataCommand::PutRooms(_)) => true,
         (DataCommand::PutHistory(a), DataCommand::PutHistory(b)) => a.room == b.room,
+        (DataCommand::PutDraft(a), DataCommand::PutDraft(b)) => {
+            a.room == b.room && a.thread == b.thread
+        }
         (DataCommand::PutThumbnail(a), DataCommand::PutThumbnail(b)) => {
             a.room == b.room && a.message == b.message && a.placeholder == b.placeholder
         }
@@ -570,6 +589,7 @@ fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationV
         .as_ref()
         .filter(|status| room.kind == CachedRoomKind::Direct && status.fresh(now));
     ConversationView {
+        action_error: None,
         context,
         navigation_key: Some(room.key.clone()),
         title: room.title.clone(),
@@ -641,7 +661,7 @@ impl Accounts {
         if let Some(context) = self.snapshot.selected
             && let Some(key) = self.cache.stable_room(context)
         {
-            self.cache.selection = Some((context.account.account, key));
+            self.cache.remember_selection(context.account.account, key);
         }
         self.cache.accounts.retain(|a| {
             state
@@ -649,6 +669,13 @@ impl Accounts {
                 .as_slice()
                 .iter()
                 .any(|s| s.summary.account == a.id && eligible(s))
+        });
+        self.cache.selections.retain(|(id, _)| {
+            state
+                .accounts
+                .as_slice()
+                .iter()
+                .any(|a| a.summary.account == *id)
         });
         self.cache.writes.retain(|w| {
             self.cache
@@ -907,6 +934,32 @@ impl Accounts {
             let Some(write) = self.cache.in_flight.take() else {
                 return;
             };
+            if let DataCommand::PutDraft(draft) = &write.command {
+                let key = (account, draft.room.clone(), draft.thread);
+                if matches!(&result, Ok(RuntimeReply::AccountData { account: returned, result: Ok(DataResult::Saved) }) if *returned == account)
+                {
+                    self.cache.draft_failures.retain(|old| *old != key);
+                } else if self.cache.accounts.iter().any(|a| {
+                    a.id == account
+                        && a.generation == generation
+                        && a.bindings.iter().any(|b| b.ordinary && b.key == draft.room)
+                }) {
+                    if !self.cache.draft_failures.contains(&key)
+                        && self.cache.draft_failures.len() < 256
+                    {
+                        self.cache.draft_failures.push(key);
+                    }
+                    self.cache.draft_retry_at = Some(Instant::now() + CLEANUP_RETRY);
+                    if !self
+                        .cache
+                        .writes
+                        .iter()
+                        .any(|w| w.account == account && same_slot(&w.command, &write.command))
+                    {
+                        self.cache.enqueue(account, write.command.clone());
+                    }
+                }
+            }
             if required_cleanup(&write.command)
                 && self
                     .cache
@@ -1002,10 +1055,18 @@ impl Accounts {
                             retain_thumbnail(&mut current.thumbnails, thumbnail.clone(), now);
                         }
                     }
+                    current.drafts = page(
+                        snapshot
+                            .drafts
+                            .as_slice()
+                            .iter()
+                            .filter(|d| a.bindings.iter().any(|b| b.ordinary && b.key == d.room))
+                            .cloned(),
+                    );
                     current.outbox = snapshot.outbox;
                     let mut histories: Vec<_> = current.histories.as_slice().to_vec();
                     for h in snapshot.histories.as_slice() {
-                        if histories.len() < 8
+                        if histories.len() < talk_adapters::identity::CACHE_HISTORY_LIMIT
                             && !histories.iter().any(|old| old.room == h.room)
                             && a.bindings.iter().any(|b| b.ordinary && b.key == h.room)
                         {
@@ -1111,6 +1172,21 @@ impl Accounts {
             }
             account.hydrated = Some(scope);
             if self.snapshot.active_account == Some(scope) {
+                // Restore useful history immediately, before the account or
+                // room-list network probe has completed. This selects only a
+                // presentation identity and confers no protocol authority.
+                if self.cache.selection.is_none() && self.snapshot.selected.is_none() {
+                    self.cache.selection = snapshot
+                        .histories
+                        .as_slice()
+                        .iter()
+                        .filter(|h| {
+                            !h.messages.as_slice().is_empty()
+                                && snapshot.rooms.as_slice().iter().any(|r| r.key == h.room)
+                        })
+                        .max_by_key(|h| h.saved_at)
+                        .map(|h| (scope.account, h.room.clone()));
+                }
                 self.snapshot.conversations = rows;
                 self.snapshot.conversation_list = ConversationListState {
                     content: ContentState::Ready,
@@ -1120,6 +1196,42 @@ impl Accounts {
         }
     }
     pub(super) fn restore_cache_selection(&mut self) {
+        if self.snapshot.selected.is_none()
+            && let Some(scope) = self.snapshot.active_account
+            && self
+                .cache
+                .selection
+                .as_ref()
+                .is_some_and(|(id, _)| *id != scope.account)
+        {
+            self.cache.selection = self
+                .cache
+                .selections
+                .iter()
+                .find(|(id, _)| *id == scope.account)
+                .cloned();
+        }
+        // Hydration can finish before startup chooses its active account. Make
+        // the initial choice here, after activation, rather than only during
+        // the earlier one-shot hydration pass.
+        if self.cache.selection.is_none()
+            && self.snapshot.selected.is_none()
+            && let Some(scope) = self.snapshot.active_account
+            && let Some(snapshot) = self.cache.loaded(scope.account)
+        {
+            self.cache.selection = snapshot
+                .histories
+                .as_slice()
+                .iter()
+                .filter(|h| {
+                    !h.messages.as_slice().is_empty()
+                        && self.snapshot.conversations.as_slice().iter().any(|r| {
+                            r.context.account == scope && r.navigation_key.as_ref() == Some(&h.room)
+                        })
+                })
+                .max_by_key(|h| h.saved_at)
+                .map(|h| (scope.account, h.room.clone()));
+        }
         let Some((account, key)) = &self.cache.selection else {
             return;
         };
@@ -1428,6 +1540,7 @@ impl Accounts {
         }
         account.observed = true;
         let snapshot = account.snapshot.get_or_insert_with(|| DataSnapshot {
+            drafts: Page::empty(),
             thumbnails: Page::empty(),
             rooms: Page::empty(),
             histories: Page::empty(),
@@ -1435,6 +1548,14 @@ impl Accounts {
         });
         {
             snapshot.rooms = rooms.clone();
+            snapshot.drafts = page(
+                snapshot
+                    .drafts
+                    .as_slice()
+                    .iter()
+                    .filter(|d| rooms.as_slice().iter().any(|r| r.key == d.room))
+                    .cloned(),
+            );
             snapshot.histories = page(
                 snapshot
                     .histories
@@ -1568,6 +1689,14 @@ impl Accounts {
         let Some(snapshot) = account.snapshot.as_mut() else {
             return;
         };
+        snapshot.drafts = page(
+            snapshot
+                .drafts
+                .as_slice()
+                .iter()
+                .filter(|d| d.room != key)
+                .cloned(),
+        );
         snapshot.rooms = page(
             snapshot
                 .rooms
@@ -1643,10 +1772,133 @@ impl Accounts {
                 .collect();
             histories.push(cached.clone());
             histories.sort_by_key(|h| std::cmp::Reverse(h.saved_at));
-            snapshot.histories = page(histories.into_iter().take(8));
+            snapshot.histories = page(
+                histories
+                    .into_iter()
+                    .take(talk_adapters::identity::CACHE_HISTORY_LIMIT),
+            );
         }
         self.cache
             .enqueue(context.account.account, DataCommand::PutHistory(cached));
+    }
+}
+
+impl Accounts {
+    pub(super) fn composer_drafts(
+        &self,
+        context: ConversationRef,
+    ) -> Page<talk_core::ui::messaging::ComposerDraft, 32> {
+        let Some(key) = self.cache.stable_room(context) else {
+            return Page::empty();
+        };
+        page(
+            self.cache
+                .loaded(context.account.account)
+                .into_iter()
+                .flat_map(|s| s.drafts.as_slice())
+                .filter(|d| d.room == key)
+                .map(|d| talk_core::ui::messaging::ComposerDraft {
+                    thread: d.thread.map(u128::from),
+                    reply: d.reply.map(u128::from),
+                    body: d.text.clone(),
+                }),
+        )
+    }
+    pub(super) fn save_composer_draft(
+        &mut self,
+        context: ConversationRef,
+        draft: talk_core::ui::messaging::ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        use talk_adapters::identity::{CACHE_DRAFT_LIMIT, CacheDraft};
+        if !self.cache.persistable(context) {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyUnknown));
+        }
+        let key = self
+            .cache
+            .stable_room(context)
+            .ok_or(SubmitError::StaleScope)?;
+        let checked = |id| {
+            u64::try_from(id)
+                .ok()
+                .filter(|id| *id > 0)
+                .ok_or(SubmitError::StaleScope)
+        };
+        let draft = CacheDraft {
+            room: key,
+            thread: draft.thread.map(checked).transpose()?,
+            reply: draft.reply.map(checked).transpose()?,
+            text: draft.body,
+            saved_at: history::now_unix(),
+        };
+        let failed = self.cache.draft_failures.contains(&(
+            context.account.account,
+            draft.room.clone(),
+            draft.thread,
+        ));
+        let snapshot = self
+            .cache
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == context.account.account)
+            .and_then(|a| a.snapshot.as_mut())
+            .ok_or(SubmitError::Busy)?;
+        let old = snapshot
+            .drafts
+            .as_slice()
+            .iter()
+            .find(|d| d.room == draft.room && d.thread == draft.thread);
+        if old.is_some_and(|old| old.text == draft.text && old.reply == draft.reply)
+            || old.is_none() && draft.text.as_str().is_empty()
+        {
+            if failed
+                && self.cache.writes.len() < WRITES
+                && !self
+                    .cache
+                    .writes
+                    .iter()
+                    .chain(self.cache.in_flight.iter())
+                    .any(|w| {
+                        w.account == context.account.account
+                            && same_slot(&w.command, &DataCommand::PutDraft(draft.clone()))
+                    })
+            {
+                self.cache.enqueue(
+                    context.account.account,
+                    DataCommand::PutDraft(draft.clone()),
+                );
+            }
+            return if failed {
+                Err(SubmitError::Busy)
+            } else {
+                Ok(())
+            };
+        }
+        if old.is_none() && snapshot.drafts.as_slice().len() == CACHE_DRAFT_LIMIT {
+            return Err(SubmitError::Busy);
+        }
+        // Reserve a write slot before accepting a changed draft. Never evict an
+        // unsent draft to admit disposable history, preview or metadata work.
+        let command = DataCommand::PutDraft(draft.clone());
+        if self.cache.writes.len() >= WRITES
+            && !self
+                .cache
+                .writes
+                .iter()
+                .any(|w| w.account == context.account.account && same_slot(&w.command, &command))
+        {
+            return Err(SubmitError::Busy);
+        }
+        snapshot.drafts = page(
+            snapshot
+                .drafts
+                .as_slice()
+                .iter()
+                .filter(|d| d.room != draft.room || d.thread != draft.thread)
+                .cloned()
+                .chain((!draft.text.as_str().is_empty()).then_some(draft.clone())),
+        );
+        self.cache.enqueue(context.account.account, command);
+        Ok(())
     }
 }
 
@@ -1703,6 +1955,42 @@ mod tests {
         cached.kind = CachedRoomKind::Group;
         assert_eq!(row_at(&cached, context, 101).presence, Presence::Unknown);
     }
+    fn cached_history() -> CacheHistory {
+        use talk_adapters::identity::CachedMessage;
+        CacheHistory {
+            room: stable(),
+            messages: page([CachedMessage {
+                attachments: Page::empty(),
+                locations: Page::empty(),
+                id: 7,
+                author: text("Synthetic actor"),
+                actor_key: None,
+                text: text("Cached original"),
+                own: true,
+                timestamp: 1,
+                expires_at: None,
+                edited: false,
+                deleted: false,
+                system: false,
+                voice_message: false,
+                system_event: None,
+                pin_notice: false,
+                truncated: false,
+                replyable: true,
+                parent: None,
+                thread: None,
+                thread_replies: 0,
+                reactions: Page::empty(),
+            }]),
+            pins: Page::empty(),
+            pin_messages: Page::empty(),
+            threads: Page::empty(),
+            pins_loaded: false,
+            older: None,
+            latest: Some(7),
+            saved_at: history::now_unix(),
+        }
+    }
     fn install(model: &mut Accounts, scope: AccountScope) {
         model.cache.next_generation = 1;
         model.cache.accounts.push(Account {
@@ -1712,6 +2000,7 @@ mod tests {
             observed: false,
             loaded: true,
             snapshot: Some(DataSnapshot {
+                drafts: Page::empty(),
                 thumbnails: Page::empty(),
                 rooms: page([metadata()]),
                 histories: Page::empty(),
@@ -1911,7 +2200,6 @@ mod tests {
     }
     #[test]
     fn selected_cached_room_rebinds_after_its_synthetic_binding_has_been_retired() {
-        use talk_adapters::identity::{CacheHistory, CachedMessage};
         use talk_core::protocol::{
             Message, MessageId, MessageKind,
             messaging::{MessageDetails, MessagingResult},
@@ -1921,39 +2209,7 @@ mod tests {
         let scope = model.snapshot.active_account.unwrap();
         install(&mut model, scope);
         model.background.sync(&[scope], Instant::now());
-        let history = CacheHistory {
-            room: stable(),
-            messages: page([CachedMessage {
-                attachments: Page::empty(),
-                locations: Page::empty(),
-                id: 7,
-                author: text("Synthetic actor"),
-                actor_key: None,
-                text: text("Cached original"),
-                own: true,
-                timestamp: 1,
-                expires_at: None,
-                edited: false,
-                deleted: false,
-                system: false,
-                voice_message: false,
-                system_event: None,
-                pin_notice: false,
-                truncated: false,
-                replyable: true,
-                parent: None,
-                thread: None,
-                thread_replies: 0,
-                reactions: Page::empty(),
-            }]),
-            pins: Page::empty(),
-            pin_messages: Page::empty(),
-            threads: Page::empty(),
-            pins_loaded: false,
-            older: None,
-            latest: Some(7),
-            saved_at: history::now_unix(),
-        };
+        let history = cached_history();
         model.cache.accounts[0].snapshot.as_mut().unwrap().histories = page([history.clone()]);
         model.restore_cache_views();
         let cached = model.snapshot.conversations.as_slice()[0].context;
@@ -2205,6 +2461,7 @@ mod tests {
     }
     fn disk_snapshot() -> DataSnapshot {
         DataSnapshot {
+            drafts: Page::empty(),
             thumbnails: Page::empty(),
             rooms: page([metadata()]),
             histories: Page::empty(),
@@ -2384,5 +2641,85 @@ mod tests {
             !model.cache.revoked(scope.account, &stable()),
             "new runtime needs a new policy observation"
         );
+    }
+    #[test]
+    fn draft_writes_coalesce_keep_newer_text_and_retain_failed_storage_work() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let context = model.snapshot.selected.unwrap();
+        install(&mut model, context.account);
+        model.cache.accounts[0].bindings.push(Binding {
+            context,
+            key: metadata().key,
+            ordinary: true,
+            metadata_observed: false,
+        });
+        let draft = talk_core::ui::messaging::ComposerDraft {
+            thread: None,
+            reply: Some(7),
+            body: text("First"),
+        };
+        model.save_composer_draft(context, draft.clone()).unwrap();
+        model.save_composer_draft(context, draft.clone()).unwrap();
+        assert_eq!(model.cache.writes.len(), 1);
+        model.cache.in_flight = model.cache.writes.pop();
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Err(IdentityError::WorkerUnavailable),
+        );
+        assert_eq!(model.cache.writes.len(), 1);
+        assert_eq!(
+            model.save_composer_draft(context, draft.clone()),
+            Err(SubmitError::Busy)
+        );
+        let newer = talk_core::ui::messaging::ComposerDraft {
+            body: text("Newer"),
+            ..draft
+        };
+        model.save_composer_draft(context, newer.clone()).unwrap();
+        assert_eq!(model.cache.writes.len(), 1);
+        assert_eq!(model.composer_drafts(context).as_slice(), &[newer]);
+        model.cache.in_flight = model.cache.writes.pop();
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result: Ok(DataResult::Saved),
+            }),
+        );
+        assert!(model.cache.draft_failures.is_empty());
+        model.cache.accounts[0].bindings[0].ordinary = false;
+        assert!(
+            model
+                .save_composer_draft(
+                    context,
+                    talk_core::ui::messaging::ComposerDraft {
+                        thread: None,
+                        reply: None,
+                        body: text("Restricted")
+                    }
+                )
+                .is_err()
+        );
+    }
+    #[test]
+    fn startup_selects_retained_history_when_hydration_precedes_account_activation() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        install(&mut model, scope);
+        let mut cached = cached_history();
+        cached.saved_at = history::now_unix();
+        model.cache.accounts[0].snapshot.as_mut().unwrap().histories = page([cached]);
+        model.snapshot.active_account = None;
+        model.snapshot.selected = None;
+        model.cache.selection = None;
+        model.background.sync(&[scope], Instant::now());
+        model.restore_cache_views();
+        model.snapshot.active_account = Some(scope);
+        model.snapshot.conversations = model.background.account(scope).unwrap().rooms.clone();
+        model.restore_cache_selection();
+        assert!(model.snapshot.selected.is_some());
+        assert!(!model.snapshot.messages.as_slice().is_empty());
     }
 }

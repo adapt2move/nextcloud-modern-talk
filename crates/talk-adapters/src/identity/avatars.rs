@@ -119,7 +119,7 @@ impl AvatarStore for Store {
         Ok(())
     }
     fn retain_rooms(&mut self, allowed: &[String]) -> Result<(), ()> {
-        if allowed.len() > 100 {
+        if allowed.len() > super::data::CACHE_ROOM_LIMIT {
             return Err(());
         }
         let (_ledger, mut db) = self.connection()?;

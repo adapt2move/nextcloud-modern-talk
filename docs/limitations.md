@@ -110,6 +110,38 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
+- Favorite/archive, room notification-level and poll-vote changes now use the same
+  bounded optimistic outgoing queue as text, thread and reminder intents. Unknown
+  cached permission permits local staging only; dispatch requires fresh authority.
+- Each account has one executing REST operation and at most seven admitted
+  descriptors. User, visible-content and background lanes reserve admission and
+  select queued work in that order, with FIFO within each lane. User work can
+  interrupt disposable background reads; it cannot preempt mutations or call
+  control. The application additionally bounds ordinary HTTP concurrency to eight,
+  with separate call transport lanes. Two local data slots per account keep
+  required outgoing/draft commits independent of the network queue. Queue waits
+  expire after 30/20/15 seconds by lane; transfers retain their longer class limit.
+  After repeated transport failures a versioned, jittered circuit cooldown pauses
+  background avatars, link cards, presence and prefetch while foreground recovery
+  can proceed. Four likely ordinary rooms can be prefetched, one at a time, in a
+  60-second planning window; account changes cancel speculative work.
+- A resume gap over five seconds or a changed local route/source address interrupts
+  stale HTTP/HPB work and requests a fresh newest-page history snapshot before
+  resuming long polling. Retained history stays visible during revalidation;
+  old or failed completions cannot release the catch-up fence. A successful
+  authenticated history or room-list read clears transient reachability feedback,
+  without clearing an authentication failure or renewing permission. A bounded route observation runs every
+  two seconds outside GPUI. This detects source-address and Linux route changes;
+  a handover that preserves both is observed through transport failure/heartbeat,
+  not an OS-specific network API. Recovery never renews media or room authority.
+  Native physical-network and platform sleep/call continuity qualification remains
+  separate from the controlled lab interruption.
+- Account presence/custom-status changes are optimistic and retried within the
+  current authorized session, one per account for at most five minutes. Ambiguous
+  writes are read back before another change can be attempted. These ephemeral
+  status intents are not restored after restart. Uncertainty checks never rewrite
+  an already applied status or renew its expiry.
+
 - Marking unread from a message requires a live-proven preceding message or an
   exhausted live history page proving the first message; cached-only gaps do not
   establish adjacency. This message action requires a connection. Room-level
@@ -229,7 +261,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   Submission creates immediate session-local chat rows with inline upload
   progress; a reference-correlated own message replaces each row after sharing.
   Lost share acknowledgements are reconciled by reading history, never replaying
-  that share. These pending attachment intents are not durable across restart.
+  that share. Original bytes and local upload paths remain session-only. Once upload completes,
+  eligible publication intents transfer durably before the session owner releases
+  their caption. The existing-file workflow uses the same durable publication queue.
   Local raster previews use the same bounded decoder and stay out of disk caches.
   File-list and image paste and incoming file drops need native qualification on
   each platform; file-list paste and incoming file drops with captions have
@@ -243,8 +277,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   server's pagination support when available, and sorting applies to the current
   page. Search and recent results are limited to 200; other DAV responses are
   bounded to 1,000 entries and a response-size limit. A server that rejects DAV
-  search or favorites disables that section. Existing-file shares are staged and
-  reconciled in the session and are not queued across restart.
+  search or favorites disables that section. Eligible existing-file publications are staged durably and reconciled by
+  reference after restart; the browser listing itself remains session-only.
 - The media gallery and local video player are implemented but await native GUI,
   real-server and packaged-runtime qualification. The player accepts MP4
   H.264/H.265 with AAC on macOS and WebM VP8/VP9 with Opus, where native decoders
@@ -263,14 +297,24 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   macOS window closing keeps the application services alive; native close/reopen
   and notification reception with a hidden window still need Mac qualification.
   Explicit quit stops background reception.
+- A complete room listing and its eligible durable metadata are bounded to 256
+  rooms per account, including order and unread observations. Larger complete
+  server listings require a future paged-list contract; they are not silently
+  truncated. Inert call-action identities and avatar cleanup allowlists share
+  this bound; they do not increase active-call or media limits. Sidebar
+  customization placements remain separately bounded.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
-  durable accounts also restore up to eight ordinary-room histories, member
+  durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
   storage. Up to four recently opened 50-message thread windows per stored room
   share the existing cache size and eligibility limits; older windows are dropped
   first when the account cache is full. Restricted, unknown-policy and session-only
-  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
-  session-local. Small reencoded previews persist for up to seven days, with
+  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted ordinary-room main/thread drafts persist separately,
+  up to 32 entries and 128 KiB serialized per account, with a 30-day expiry.
+  Attachments and cross-room private replies remain session-local. Saving is
+  asynchronous: a sudden exit before a write/clear commits can restore older
+  text. Failed or ineligible saves show session-only retention; unsent text is
+  never evicted to admit another draft. Small reencoded previews persist for up to seven days, with
   at most 24 entries and 4 MiB per account; original attachments are not cached.
 - The outgoing queue is bounded to 64 intents and 512 KiB per account. It
   revalidates current server authority before dispatch. Read-only uncertainty
@@ -340,3 +384,7 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 Report reproducible problems without credentials, private server details or
 message contents. Security issues follow [SECURITY.md](../SECURITY.md).
+
+HTTP JSON ingress also has a 131,072-node structure budget, a 64-level depth bound and a 1 MiB response byte bound (previously 256 KiB). This accommodates complete 256-room metadata responses; typed endpoint bounds still reject oversized lists without granting reconciliation authority.
+
+A status change with a relative expiry whose acknowledgement is lost remains uncertain: matching status text alone cannot prove that the requested timer was installed. It is not automatically written again.

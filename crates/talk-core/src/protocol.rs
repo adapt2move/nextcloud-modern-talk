@@ -180,7 +180,7 @@ pub struct ConversationTags {
 pub struct ConversationList {
     pub scope: AccountScope,
     /// Full reconciliation only. An oversized list fails; it is never silently truncated.
-    pub rooms: Page<Conversation, 100>,
+    pub rooms: Page<Conversation, 256>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

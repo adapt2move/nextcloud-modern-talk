@@ -1394,3 +1394,69 @@ fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
             .any(|(_, event)| matches!(event, Event::PolicyChanged))
     );
 }
+
+#[tokio::test]
+async fn network_resume_hint_replaces_a_live_socket_and_resumes_without_a_second_join() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/signal", listener.local_addr().unwrap());
+    let (resumed, seen) = oneshot::channel();
+    let (stop, stopped) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, false).await;
+        join(&mut socket).await;
+        // The peer stays healthy: only the client's connectivity epoch changes.
+        let closed = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap();
+        assert!(closed.is_none() || matches!(closed, Some(Err(_)) | Some(Ok(Message::Close(_)))));
+        let mut socket = accept(&listener).await;
+        hello(&mut socket, true).await;
+        resumed.send(()).unwrap();
+        tokio::select! { _=stopped=>(), value=socket.next()=>panic!("resume sent an unsolicited command: {}",value.is_some()) }
+    });
+    let (_client, binding, runtime) = account();
+    let owner = Owner::start(binding, settings(&endpoint)).unwrap();
+    let handle = owner.handle();
+    let route = handle
+        .join(&context(&runtime, &handle.shared), room(), peer("talk-own"))
+        .await
+        .unwrap();
+    let start = std::time::Instant::now();
+    runtime.network_changed();
+    tokio::time::timeout(Duration::from_secs(3), seen)
+        .await
+        .unwrap()
+        .unwrap();
+    wait_for(&handle.shared, |state| {
+        state.room.as_ref().is_some_and(|room| {
+            room.signals
+                .iter()
+                .any(|(_, event)| matches!(event, Event::TransportResumed))
+        })
+    })
+    .await;
+    assert!(start.elapsed() < Duration::from_secs(3));
+    assert!(!route.is_closed());
+    let batch = route
+        .poll(&context(&runtime, &handle.shared))
+        .await
+        .unwrap();
+    let events = batch.into_events();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, Event::TransportInterrupted))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, Event::TransportResumed))
+            .count(),
+        1
+    );
+    stop.send(()).unwrap();
+    server.await.unwrap();
+}

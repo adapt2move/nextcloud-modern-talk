@@ -225,6 +225,36 @@ fn bind(client: &mut NextcloudClient) -> ConversationId {
 }
 
 #[tokio::test]
+async fn inert_call_identities_cover_the_full_room_bound_without_replacing_old_scopes() {
+    let mut client = client("http://127.0.0.1:47407/", runtime());
+    client.set_media_service(Some(crate::media::MediaService::new()));
+    let capabilities = wire::Capabilities::decode(&caps(35)).unwrap();
+    let mut first = None;
+    for number in 1..=256 {
+        let mut value = room();
+        value["id"] = json!(number);
+        value["token"] = json!(format!("room{number:04}"));
+        let id = client.bind_room(&value).unwrap();
+        let mut projected = wire::room(&value, id, &capabilities).unwrap();
+        client
+            .project_call(&mut projected, &value, &capabilities)
+            .unwrap();
+        let scope = projected.call_scope.expect("inert action identity");
+        first.get_or_insert((id, scope));
+    }
+    let (id, scope) = first.unwrap();
+    assert_eq!(client.call_scope_for(id).unwrap(), Some(scope));
+    assert_eq!(client.call_bindings.len(), 256);
+    let mut overflow = room();
+    overflow["token"] = json!("room0257");
+    assert_eq!(
+        client.bind_room(&overflow).unwrap_err().kind,
+        ErrorKind::Busy
+    );
+    assert_eq!(client.call_scope_for(id).unwrap(), Some(scope));
+}
+
+#[tokio::test]
 async fn favorite_mutation_returns_reconciled_server_data_without_replay() {
     for (major, favorite) in [(34, true), (35, false)] {
         let mut capabilities = caps(major);

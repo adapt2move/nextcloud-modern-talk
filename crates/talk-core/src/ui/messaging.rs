@@ -1,5 +1,6 @@
 //! Finite messaging projection. The composition owner reconciles canonical IDs.
 use super::conversation::{Availability, RemoteState};
+use super::markup::Prepared;
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{ClipboardImage, Decision, Page, Text, UnavailableReason};
 use crate::preferences::navigation::NavigationRoomKey;
@@ -100,6 +101,8 @@ pub enum SystemEvent {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MessageMetadata {
+    /// Background-prepared display data for this exact body, never persisted.
+    pub prepared: Option<Prepared>,
     /// Opaque correlation for the local outbox and a validated own-message
     /// reference. It never establishes identity from text or timestamps.
     pub local_operation: Option<u128>,
@@ -138,6 +141,7 @@ pub struct MessageMetadata {
 impl Default for MessageMetadata {
     fn default() -> Self {
         Self {
+            prepared: None,
             local_operation: None,
             local_order: None,
             author_key: None,
@@ -263,6 +267,7 @@ pub enum MessageActionError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailedDraftKind {
+    File,
     Send,
     Edit(u128),
     Schedule(u64),
@@ -448,6 +453,14 @@ pub struct ComposeTarget {
     pub new_thread: bool,
     pub silent: bool,
 }
+/// Unsubmitted ordinary-room text. Stable identifiers are resolved by the
+/// composition/cache owner; this value grants no mutation authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerDraft {
+    pub thread: Option<u128>,
+    pub reply: Option<u128>,
+    pub body: Text<4096>,
+}
 /// Displayed quote and durable lookup key; neither grants access to the source.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateReplyTarget {
@@ -458,6 +471,13 @@ pub struct PrivateReplyTarget {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    SetFavorite(bool),
+    SetArchived(bool),
+    SetNotificationLevel(u8),
+    VotePoll {
+        poll: u64,
+        options: Page<u16, 100>,
+    },
     RetryQueued(u128),
     DiscardQueued(u128),
     PickUpload,
