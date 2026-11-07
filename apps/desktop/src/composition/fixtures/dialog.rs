@@ -10,9 +10,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     let mut panel = ConversationPanel::new(context);
     panel.details = Some(RoomDetails {
         name: text("Produktteam"),
-        description: Some(text(
-            "Raum für gemeinsame Ideen und Projektabsprachen.",
-        )),
+        description: Some(text("Raum für gemeinsame Ideen und Projektabsprachen.")),
         read_only: Some(false),
         notifications: Some(NotificationLevel::Mention),
         call_notifications: Some(true),

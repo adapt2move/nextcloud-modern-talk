@@ -2725,11 +2725,7 @@ impl NativeDesktopPort for DevelopmentPort {
                         if !rows.iter().any(|row| row.local_id == id) {
                             rows.push(message(
                                 id,
-                                if own {
-                                    "Alex Sommer"
-                                } else {
-                                    "Mara Fischer"
-                                },
+                                if own { "Alex Sommer" } else { "Mara Fischer" },
                                 if own { "AS" } else { "MF" },
                                 "10:01",
                                 if own {
@@ -2761,8 +2757,7 @@ impl NativeDesktopPort for DevelopmentPort {
                         ),
                     ),
                     11 => {
-                        let mut event =
-                            message(37, "", "", "10:02", "Anruf beendet.", false);
+                        let mut event = message(37, "", "", "10:02", "Anruf beendet.", false);
                         event.metadata.system = true;
                         rows.push(event);
                     }

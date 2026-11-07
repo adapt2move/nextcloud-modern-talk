@@ -447,7 +447,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('composer plus exposes file sources and polls',
                ['Vom Computer hochladen', 'Aus NextCloud teilen', 'Umfrage erstellen'])
         key('Escape')
-        click('Nachricht', xmin=200, ymin=600)
+        click('Nachricht', xmin=200, ymin=600, inspected_point=(1280, 800, 480, 700))
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
                        input='file:///tmp/Beispiel.txt\r\n', text=True, env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
@@ -543,9 +543,13 @@ def exercise(scenario, env, xid, out, label, large=False):
                 log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
             raise AssertionError('Vote or confirmed close did not submit exactly once')
         run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        # The pin label now lives in the icon's tooltip. Confirm the icon is
+        # still present while the message is collapsed, then reopen it.
+        run(['xdotool', 'mousemove', '--window', xid, '292', '149'], env)
+        time.sleep(.4)
         expect('pinned strip collapses its message', ['Angeheftet'], ['Perfekt. Dann nehmen wir das so mit.'])
         run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
-        expect('pinned strip expands its message again', ['Angeheftet', 'Perfekt. Dann nehmen wir das so mit.'])
+        expect('pinned strip expands its message again', ['Perfekt. Dann nehmen wir das so mit.'])
     elif scenario == 'chat-voice':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
