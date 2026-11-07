@@ -1559,6 +1559,8 @@ mod action_tests {
             title: text("Synthetic call"),
             direct: false,
             wishes: MediaWishes::default(),
+            replacement_generation: false,
+            explicit_restart: false,
         });
         model.snapshot.call = Some(project(
             invitation(scope).call.as_ref().unwrap(),

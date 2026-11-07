@@ -267,7 +267,7 @@ impl Desktop {
                         .when(!selected, |d| d.child(self.hint(self.l("Bestätige zuerst die Zustimmung."))))
                         .child(div().flex().flex_wrap().justify_end().gap_3()
                             .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Quiet, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
-                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx).when(!selected, |d| d.bg(t.subtle).text_color(t.muted))));
+                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx).when(!selected, |d| d.bg(self.theme.subtle).text_color(self.theme.muted))));
                 }
                 body
             }
