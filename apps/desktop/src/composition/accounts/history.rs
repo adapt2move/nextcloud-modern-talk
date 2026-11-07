@@ -226,10 +226,21 @@ impl History {
             activity.recent_initials = page(recent);
             activity
         }));
-        if let Some((expires, _, capabilities)) = &self.capabilities
-            && Instant::now() < *expires
-        {
-            super::messaging::project_capabilities(panel, capabilities);
+        if let Some((expires, _, capabilities)) = &self.capabilities {
+            if Instant::now() < *expires {
+                super::messaging::project_capabilities(panel, capabilities);
+            } else if self.offline {
+                // The last capability bit is only a staging hint while offline.
+                // Discard grants; dispatch always obtains current server policy.
+                let mut prior = MessagePanel::new(self.context);
+                super::messaging::project_capabilities(&mut prior, capabilities);
+                let feature = talk_core::ui::messaging::MessageFeature::Threads;
+                let mut value = prior.availability(feature);
+                if value.allowed == Decision::Allowed {
+                    value.allowed = Decision::Unknown;
+                }
+                let _ = panel.features.try_push((feature, value));
+            }
         }
     }
     pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {

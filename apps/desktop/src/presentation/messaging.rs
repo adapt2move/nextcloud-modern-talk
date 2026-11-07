@@ -455,7 +455,13 @@ impl Desktop {
             && !self.thread_composer.read(cx).composing()
             && !self.thread_composer.read(cx).content.trim().is_empty()
             && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
-                panel.context == context && panel.availability(MessageFeature::Threads).enabled()
+                panel.context == context
+                    && thread_reply_feature_allowed(
+                        self.snapshot.content,
+                        panel.availability(MessageFeature::Threads),
+                        panel.queue_available,
+                        panel.thread_root == Some(root),
+                    )
             })
             && self.selected().is_some_and(|row| {
                 super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed
@@ -3020,6 +3026,21 @@ fn decision_allows_intent(decision: Decision, queue_available: bool) -> bool {
     decision == Decision::Allowed || queue_available && decision != Decision::Denied
 }
 
+fn thread_reply_feature_allowed(
+    content: ContentState,
+    value: talk_core::ui::conversation::Availability,
+    queue_available: bool,
+    observed_root: bool,
+) -> bool {
+    use talk_core::ui::presentation::FeatureSupport;
+    content == ContentState::Ready && value.enabled()
+        || content == ContentState::Offline
+            && queue_available
+            && observed_root
+            && value.server != FeatureSupport::Unsupported
+            && value.allowed != Decision::Denied
+}
+
 fn feature_allows_intent(
     content: ContentState,
     value: talk_core::ui::conversation::Availability,
@@ -3065,6 +3086,71 @@ fn message_mutation_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offline_thread_reply_stages_from_an_observed_root_without_stale_authority() {
+        use talk_core::ui::conversation::Availability;
+        use talk_core::ui::presentation::FeatureSupport;
+        let unknown = Availability::UNKNOWN;
+        assert!(thread_reply_feature_allowed(
+            ContentState::Offline,
+            unknown,
+            true,
+            true
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Offline,
+            unknown,
+            false,
+            true
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Offline,
+            unknown,
+            true,
+            false
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Denied,
+            unknown,
+            true,
+            true
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Offline,
+            Availability {
+                server: FeatureSupport::Unsupported,
+                ..unknown
+            },
+            true,
+            true
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Offline,
+            Availability {
+                allowed: Decision::Denied,
+                ..unknown
+            },
+            true,
+            true
+        ));
+        assert!(!thread_reply_feature_allowed(
+            ContentState::Ready,
+            unknown,
+            true,
+            true
+        ));
+        assert!(thread_reply_feature_allowed(
+            ContentState::Ready,
+            Availability {
+                implemented: true,
+                server: FeatureSupport::Supported,
+                allowed: Decision::Allowed,
+            },
+            false,
+            true
+        ));
+    }
 
     #[test]
     fn automatic_read_marker_never_rewinds_when_scrolling_back_or_repainting() {

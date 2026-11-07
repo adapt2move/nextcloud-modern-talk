@@ -1818,6 +1818,39 @@ impl NativeDesktopPort for DevelopmentPort {
             UiIntent::ReopenBrowser(_) | UiIntent::ChooseStorage { .. } => {
                 return Err(SubmitError::Unavailable(UnavailableReason::Unconfigured));
             }
+            UiIntent::Message {
+                request,
+                context,
+                action: talk_core::ui::messaging::MessageAction::Send { body, target },
+            } if self.snapshot.content == ContentState::Offline
+                && self.thread_fixture.is_some() =>
+            {
+                if self.snapshot.selected != Some(context) || self.snapshot.submission.is_some() {
+                    return Err(SubmitError::Busy);
+                }
+                let panel = self
+                    .snapshot
+                    .message_panel
+                    .as_mut()
+                    .ok_or(SubmitError::StaleScope)?;
+                let root = target
+                    .thread
+                    .filter(|root| panel.thread_root == Some(*root))
+                    .ok_or(SubmitError::StaleScope)?;
+                let mut reply = message(42, "Alex Sommer", "AS", "10:03", body.as_str(), true);
+                reply.metadata.thread = Some(root);
+                reply.delivery = DeliveryState::Queued;
+                panel
+                    .thread_messages
+                    .try_push(reply)
+                    .map_err(|_| SubmitError::Busy)?;
+                self.snapshot.submission = Some(SubmissionResult {
+                    request,
+                    context,
+                    result: Completion::Queued,
+                });
+                println!("UI_THREAD_FIXTURE offline_reply_queued=true no_backend=true");
+            }
             UiIntent::SendDraft {
                 request, context, ..
             }

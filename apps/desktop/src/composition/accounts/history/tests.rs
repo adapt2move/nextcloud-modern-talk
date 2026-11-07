@@ -67,6 +67,44 @@ fn thread_metadata_mutation_fences_old_reads_and_does_not_persist_authority() {
 }
 
 #[test]
+fn offline_thread_capability_hint_keeps_support_but_never_an_expired_grant() {
+    use talk_core::ui::messaging::MessageFeature;
+    use talk_core::ui::presentation::FeatureSupport;
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let mut result = with_capabilities(messages(key, [], None), Decision::Allowed);
+    if let MessagingResult::Messages {
+        capabilities: Some(caps),
+        ..
+    } = &mut result
+    {
+        caps.actions = page([(
+            protocol::messaging::MessagingFeature::Threads,
+            protocol::conversation::ActionAvailability {
+                implemented: true,
+                server: protocol::FeatureSupport::Supported,
+                allowed: Decision::Allowed,
+            },
+        )]);
+    } else {
+        panic!("capabilities fixture");
+    }
+    complete(&mut cache, key, 1, Work::History, result);
+    let history = cache.get_mut(key).unwrap();
+    history.offline = true;
+    history.capabilities.as_mut().unwrap().0 = Instant::now() - Duration::from_secs(1);
+    let mut panel = MessagePanel::new(key);
+    cache.get(key).unwrap().project(&mut panel);
+    let value = panel.availability(MessageFeature::Threads);
+    assert!(value.implemented);
+    assert_eq!(value.server, FeatureSupport::Supported);
+    assert_eq!(value.allowed, Decision::Unknown);
+    assert_eq!(panel.file_limit, 0);
+    assert_eq!(panel.pin_change, Decision::Unknown);
+}
+
+#[test]
 fn cached_thread_count_roundtrips_without_restoring_authority() {
     let key = context(1, 1, 1, 1);
     let mut detail = message(key, 7, "Thread root");

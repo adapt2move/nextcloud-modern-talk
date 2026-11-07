@@ -233,6 +233,15 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('folgen', xmin=800, ymin=100)
         expect('offline unfollow updates the visible subscription action',
                ['Thread folgen'], ['Thread nicht mehr folgen'])
+        click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1010,700))
+        type_text('OFFLINEREPLY')
+        key('Return')
+        expect('offline thread reply is staged and shown immediately', ['OFFLINEREPLY'])
+        log = (out / f'{label}.log').read_text()
+        if not re.search(r'UI_CHAT_UX send room=\d+ bytes=12 .*thread=Some\(1\)', log):
+            raise AssertionError('Offline Enter did not submit the draft to the scoped thread')
+        if 'UI_THREAD_FIXTURE offline_reply_queued=true' not in log:
+            raise AssertionError('The fixture did not acknowledge local thread staging')
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
