@@ -1,5 +1,6 @@
 //! Reminder and scheduled-send choices use the same bounded local-clock owner.
 use super::*;
+use crate::presentation::controls::BannerRole;
 use talk_core::preferences::time::{DeadlineChoice, LocalTimeError, RepeatedTime};
 
 impl Desktop {
@@ -370,8 +371,7 @@ impl Desktop {
                 )
                 .when_some(self.message_ui.time_error, |d, error| {
                     d.child(
-                        self.hint(self.l(error_label(error)))
-                            .text_color(self.theme.danger),
+                        self.banner(BannerRole::Error, self.l(error_label(error))),
                     )
                     .when(error == LocalTimeError::Repeated, |d| {
                         d.child(

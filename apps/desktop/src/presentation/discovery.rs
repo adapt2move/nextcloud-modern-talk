@@ -1,5 +1,8 @@
 //! Open-room browsing stays responsive while the account owner queries the server.
-use super::{ButtonStyle, Desktop, LocalAction, controls::Availability};
+use super::{
+    ButtonStyle, Desktop, LocalAction,
+    controls::{Availability, BannerRole},
+};
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*};
 use talk_core::ui::{
     Decision, Text,
@@ -114,19 +117,25 @@ impl Desktop {
                     )),
             );
         if !self.active_account_connected() {
-            body = body.child(self.hint(self.l("Das Verzeichnis benötigt eine Verbindung.")));
+            body = body.child(self.banner(
+                BannerRole::Warning,
+                self.l("Das Verzeichnis benötigt eine Verbindung."),
+            ));
         }
         let Some(panel) = panel else {
             return body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
         };
         if panel.uncertain {
-            body = body.child(self.hint(self.l("Der Beitritt wird überprüft.")));
+            body = body.child(self.loading_row(self.l("Der Beitritt wird überprüft.")));
         } else if matches!(panel.state, RemoteState::Failed(..)) {
-            body = body.child(self.hint(self.l(if unsupported {
-                "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar."
-            } else {
-                "Das Gesprächsverzeichnis ist derzeit nicht verfügbar."
-            })));
+            body = body.child(self.banner(
+                BannerRole::Error,
+                self.l(if unsupported {
+                    "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar."
+                } else {
+                    "Das Gesprächsverzeichnis ist derzeit nicht verfügbar."
+                }),
+            ));
         } else if panel.state.pending() && !panel.loaded {
             body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
         }
@@ -198,7 +207,7 @@ impl Desktop {
             );
         }
         if panel.loaded && shown == 0 && !panel.state.pending() {
-            body = body.child(self.hint(self.l("Keine offenen Gespräche gefunden.")));
+            body = body.child(self.empty_row(self.l("Keine offenen Gespräche gefunden.")));
         }
         body
     }

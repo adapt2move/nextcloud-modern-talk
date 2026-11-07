@@ -1,5 +1,5 @@
 //! Bounded, account-scoped quick-switcher projection and directory debounce.
-use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
+use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind, controls::BannerRole};
 use gpui::{Context, Div, FontWeight, Task, div, prelude::*};
 use std::time::Duration;
 use talk_core::ui::{
@@ -416,16 +416,19 @@ impl Desktop {
             && let Some(reason) = self.switcher.failure_reason
             && let Some(message) = directory_failure_message(reason)
         {
-            body = body.child(self.hint(self.l(message)));
+            body = body.child(self.banner(BannerRole::Error, self.l(message)));
         }
         if !self.active_account_connected() && !self.switcher.query.is_empty() {
-            body = body.child(self.hint(self.l("Personensuche benötigt eine Verbindung.")));
+            body = body.child(self.banner(
+                BannerRole::Warning,
+                self.l("Personensuche benötigt eine Verbindung."),
+            ));
         }
         if targets.is_empty()
             && (self.search_kind == SearchKind::Conversations
                 || self.switcher.failure_reason.is_none())
         {
-            body = body.child(self.hint(self.l("Keine passenden Gespräche oder Personen.")));
+            body = body.child(self.empty_row(self.l("Keine passenden Gespräche oder Personen.")));
         }
         body
     }

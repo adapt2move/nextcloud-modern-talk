@@ -1,7 +1,7 @@
 //! Current-account creation: directory selection or an explicit named group.
 use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
-    controls::{Availability, Skeleton},
+    controls::{Availability, BannerRole, Skeleton},
 };
 use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::ui::{
@@ -321,7 +321,7 @@ impl Desktop {
                     );
                 }
                 if panel.people_loaded && panel.people.as_slice().is_empty() {
-                    body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
+                    body = body.child(self.empty_row(self.l("Keine passenden Personen gefunden.")));
                 }
             }
         } else {
@@ -472,25 +472,26 @@ impl Desktop {
                     );
                 }
                 if panel.people_loaded && panel.people.as_slice().is_empty() {
-                    body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
+                    body = body.child(self.empty_row(self.l("Keine passenden Personen gefunden.")));
                 }
             } else {
-                body = body.child(self.hint(self.l("Beschreibung und Einladungen sind beim Erstellen auf diesem Server nicht verfügbar.")));
+                body = body.child(self.banner(BannerRole::Info, self.l("Beschreibung und Einladungen sind beim Erstellen auf diesem Server nicht verfügbar.")));
             }
             if panel.is_none_or(|p| {
                 matches!(p.group, Decision::Denied | Decision::Stale)
                     || (p.group != Decision::Allowed
                         && !matches!(p.state, RemoteState::Loading(_) | RemoteState::Saving(_)))
             }) {
-                body = body.child(self.hint(self.l(
-                    if panel.is_some_and(|p| p.group == Decision::Denied) {
+                body = body.child(self.banner(
+                    BannerRole::Warning,
+                    self.l(if panel.is_some_and(|p| p.group == Decision::Denied) {
                         "Du darfst auf diesem Server keine Gruppengespräche erstellen."
                     } else if panel.is_some_and(|p| p.group == Decision::Stale) {
                         "Berechtigungen müssen erneut geprüft werden."
                     } else {
                         "Die Berechtigung zum Erstellen ist nicht bekannt. Bitte neu laden."
-                    },
-                )));
+                    }),
+                ));
             }
         }
         if let Some(panel) = panel {
@@ -504,7 +505,14 @@ impl Desktop {
                 RemoteState::Idle | RemoteState::Loading(_) | RemoteState::Saving(_) => None,
             };
             if let Some(status) = status {
-                body = body.child(self.hint(self.l(status)));
+                body = body.child(self.banner(
+                    if matches!(panel.state, RemoteState::Failed(..)) {
+                        BannerRole::Error
+                    } else {
+                        BannerRole::Warning
+                    },
+                    self.l(status),
+                ));
             }
         }
         if panel.is_none_or(|p| {

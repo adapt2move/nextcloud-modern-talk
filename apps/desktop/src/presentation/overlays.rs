@@ -1,5 +1,5 @@
 use super::collection::CollectionState;
-use super::controls::{Availability, scoped_id};
+use super::controls::{Availability, BannerRole, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
@@ -51,27 +51,17 @@ impl Desktop {
             .child(
                 self.dialog_panel(
                     DialogSurface::Overlay(Overlay::Thread),
-                    div()
+                    self.dialog_shell_surface()
                         .size_full()
                         .min_h_0()
                         .flex()
                         .flex_col()
-                        .rounded(px(13.))
-                        .border_1()
-                        .border_color(t.border)
-                        .bg(t.surface)
                         .track_focus(&self.modal_focus)
                         .tab_group()
                         .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
+                            self.dialog_header()
                                 .gap_1()
-                                .px_4()
                                 .py_3()
-                                .border_b_1()
-                                .border_color(t.border)
                                 .child(self.thread_heading(cx))
                                 .child(
                                     self.icon_button(
@@ -253,7 +243,7 @@ impl Desktop {
             Overlay::CallChat => self.call_chat(cx),
             Overlay::ConfirmRecording => div().flex().flex_col().gap_4()
                 .child(self.hint(self.l("Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden werden informiert.")))
-                .child(div().flex().flex_wrap().justify_end().gap_3()
+                .child(self.dialog_actions().justify_end()
                     .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
                     .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
             Overlay::RecordingConsent => {
@@ -265,17 +255,17 @@ impl Desktop {
                         .child(self.switch("recording-consent-switch", "Ich stimme einer Aufzeichnung zu.", Some(selected), Availability::available(), LocalAction::ToggleRecordingConsent(call.scope), cx))
                         .child(div().flex_1().min_w_0().child(self.l("Ich stimme einer Aufzeichnung zu."))))
                         .when(!selected, |d| d.child(self.hint(self.l("Bestätige zuerst die Zustimmung."))))
-                        .child(div().flex().flex_wrap().justify_end().gap_3()
+                        .child(self.dialog_actions().justify_end()
                             .child(self.button("decline-recording-consent", "Nicht beitreten", ButtonStyle::Quiet, true, LocalAction::DeclineRecordingConsent(call.scope), cx))
-                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx).when(!selected, |d| d.bg(self.theme.subtle).text_color(self.theme.muted))));
+                            .child(self.button("confirm-recording-consent", "Zustimmen und beitreten", ButtonStyle::Primary, Availability::when(selected, "Bestätige zuerst die Zustimmung."), LocalAction::ConfirmRecordingConsent(call.scope), cx)));
                 }
                 body
             }
             Overlay::ConfirmEndCall => div().flex().flex_col().gap_4()
                 .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
-                .child(div().flex().flex_wrap().justify_end().gap_3()
+                .child(self.dialog_actions().justify_end()
                     .child(self.button("cancel-end-everyone", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
-                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx).bg(gpui::rgb(0x9e3e32)).text_color(gpui::white()))),
+                    .child(self.button("confirm-end-everyone", "Für alle beenden", ButtonStyle::Danger, true, LocalAction::ConfirmEndCall, cx))),
             Overlay::Thread => self.thread_body(cx),
             Overlay::Search => self.search_body(cx),
             Overlay::Create => self.creation_body(cx),
@@ -910,7 +900,10 @@ impl Desktop {
                 talk_core::ui::conversation::RemoteState::Failed(_, _)
             )
         }) {
-            body = body.child(self.hint(self.l("Thread-Anfang konnte nicht geladen werden.")));
+            body = body.child(self.banner(
+                BannerRole::Error,
+                self.l("Thread-Anfang konnte nicht geladen werden."),
+            ));
             body = body.child(self.button(
                 "thread-root-retry",
                 "Erneut versuchen",
@@ -925,7 +918,7 @@ impl Desktop {
                 cx,
             ));
         } else {
-            body = body.child(self.hint(self.l("Thread-Anfang wird geladen …")));
+            body = body.child(self.loading_row(self.l("Thread-Anfang wird geladen …")));
         }
         let collection = CollectionState::new(
             state,

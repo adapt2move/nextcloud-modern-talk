@@ -1,5 +1,5 @@
 //! Account-wide search form and bounded grouped results; all I/O is an intent.
-use super::{ButtonStyle, Desktop, LocalAction, input::TextInput};
+use super::{ButtonStyle, Desktop, LocalAction, controls::BannerRole, input::TextInput};
 use gpui::{Context, Div, Entity, FontWeight, HighlightStyle, StyledText, div, prelude::*};
 use talk_core::ui::{
     AccountScope, Text, UnavailableReason,
@@ -640,22 +640,34 @@ impl Desktop {
                 .account_search_filters(cx)
                 .is_err_and(|error| error == FilterError::Date)
         {
-            body = body.child(self.hint(self.l("Bitte gib einen gültigen Zeitraum ein.")));
+            body = body.child(self.banner(
+                BannerRole::Error,
+                self.l("Bitte gib einen gültigen Zeitraum ein."),
+            ));
         }
         if self
             .account_search_filters(cx)
             .is_err_and(|error| error == FilterError::Person)
         {
-            body = body.child(self.hint(self.l("Suche und wähle eine Person für den Filter.")));
+            body = body.child(self.banner(
+                BannerRole::Warning,
+                self.l("Suche und wähle eine Person für den Filter."),
+            ));
         }
         if self
             .account_search_filters(cx)
             .is_err_and(|error| error == FilterError::Timezone)
         {
-            body = body.child(self.hint(self.l("Die lokale Zeitzone ist noch nicht verfügbar.")));
+            body = body.child(self.banner(
+                BannerRole::Warning,
+                self.l("Die lokale Zeitzone ist noch nicht verfügbar."),
+            ));
         }
         if !self.active_account_connected() {
-            body = body.child(self.hint(self.l("Nachrichtensuche benötigt eine Verbindung.")));
+            body = body.child(self.banner(
+                BannerRole::Warning,
+                self.l("Nachrichtensuche benötigt eine Verbindung."),
+            ));
             let query = self.search.read(cx).content.trim().to_lowercase();
             if !query.is_empty()
                 && self.account_search_filters(cx).is_ok_and(|filters| {
@@ -708,7 +720,7 @@ impl Desktop {
             }
         }
         if unsupported {
-            body = body.child(self.hint(self.l(UNSUPPORTED_SEARCH)));
+            body = body.child(self.banner(BannerRole::Warning, self.l(UNSUPPORTED_SEARCH)));
         }
         body = body.child(
             self.button(
@@ -742,10 +754,10 @@ impl Desktop {
                 && reason != UnavailableReason::Unsupported
                 && let Some(message) = search_failure_message(reason)
             {
-                body = body.child(self.hint(self.l(message)));
+                body = body.child(self.banner(BannerRole::Error, self.l(message)));
             }
             if panel.loaded && panel.hits.as_slice().is_empty() {
-                body = body.child(self.hint(self.l("Keine Nachrichten gefunden.")));
+                body = body.child(self.empty_row(self.l("Keine Nachrichten gefunden.")));
             }
             let hits = self.account_search_hits();
             let selected = self

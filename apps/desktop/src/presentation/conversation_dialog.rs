@@ -2,7 +2,11 @@
 mod breakouts;
 mod members;
 
-use super::{ButtonStyle, Desktop, LocalAction, Overlay, controls::Availability, input::TextInput};
+use super::{
+    ButtonStyle, Desktop, LocalAction, Overlay,
+    controls::{Availability, BannerRole},
+    input::TextInput,
+};
 use gpui::{Context, Div, Entity, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::conversation::{
     self, ConversationAction, DirectorySource, MemberRole, RemoteState, RoomSetting,
@@ -1405,7 +1409,7 @@ impl Desktop {
                             .when(d.lobby == Some(true), |section| {
                                 let available = self.room_available(RoomSetting::Lobby);
                                 section
-                                    .when_some(d.lobby_timer.and_then(|at| self.settings_port.local_datetime(at)), |d, time| {
+                                    .when_some(d.lobby_timer.and_then(|at| self.settings_port.local_datetime(at)).and_then(|time| super::localization::local_datetime(self.locale, time.as_str())), |d, time| {
                                         d.child(self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])))
                                     })
                                     .child(self.room_field(
@@ -1423,7 +1427,7 @@ impl Desktop {
                                             LocalTimeError::Skipped => "Diese Uhrzeit wird bei der Zeitumstellung übersprungen. Bitte eine andere wählen.",
                                             LocalTimeError::Repeated => "Diese Uhrzeit kommt bei der Zeitumstellung zweimal vor. Welche möchtest du verwenden?",
                                         };
-                                        d.child(self.hint(self.l(label)).text_color(t.danger))
+                                        d.child(self.banner(BannerRole::Error, self.l(label)))
                                             .when(error == LocalTimeError::Repeated, |d| d.child(
                                                 div().flex().gap_2()
                                                     .child(self.button("lobby-first-time", "Erste Uhrzeit verwenden", ButtonStyle::Secondary, available, LocalAction::Room(Action::LobbyTime(RepeatedTime::First)), cx))

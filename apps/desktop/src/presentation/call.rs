@@ -1619,8 +1619,7 @@ impl Desktop {
                         .child(div().text_size(self.sp(20.)).font_weight(FontWeight::MEDIUM).child(self.l(if failed { "Verbindung fehlgeschlagen" } else { "Anruf beendet" })))
                         .child(div().text_size(self.sp(14.)).child(if failed { self.l("Der Anruf konnte nicht verbunden werden.").to_owned() } else { duration.unwrap_or_else(|| self.l("Du bist nicht mehr im Anruf.").to_owned()) }))
                         .child(self.button("rejoin-call", if call.direct { "Erneut anrufen" } else { "Erneut beitreten" }, ButtonStyle::Primary,
-                            Availability::when(rejoin_allowed, "Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."), LocalAction::Call, cx).w_full()
-                            .when(!rejoin_allowed, |button| button.bg(t.surface).text_color(t.muted)))
+                            Availability::when(rejoin_allowed, "Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."), LocalAction::Call, cx).w_full())
                         .when(!rejoin_allowed, |d| d.child(self.hint(self.l("Ein erneuter Anruf ist für dieses Gespräch derzeit nicht freigegeben."))))
                         .child(self.button("return-conversation", "Zurück zum Gespräch", ButtonStyle::Secondary, true, LocalAction::ReturnConversation, cx).w_full())
                         .when(self.local_feedback_visible(), |d| d.child(self.feedback_view(cx)))

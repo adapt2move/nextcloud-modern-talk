@@ -375,16 +375,11 @@ impl Desktop {
                     d.child(self.scaled_icon("check", 16., self.theme.accent))
                 }))
             };
-            let mut choices = div()
+            let mut choices = self
+                .context_menu_surface()
                 .flex_none()
-                .flex()
-                .flex_col()
                 .gap_1()
-                .p_1()
-                .rounded_lg()
-                .border_1()
                 .border_color(self.theme.input_border)
-                .bg(self.theme.surface)
                 .child(option(
                     ("device-default", kind as usize).into(),
                     self.l("Systemstandard").to_owned(),
@@ -421,7 +416,8 @@ impl Desktop {
         } else {
             &[DeviceKind::Camera]
         };
-        let mut list = div()
+        let mut list = self
+            .context_menu_surface()
             .id("call-device-popover")
             .absolute()
             .left(px(-32.))
@@ -430,12 +426,7 @@ impl Desktop {
             .max_h(px(360.))
             .overflow_y_scroll()
             .occlude()
-            .rounded(px(10.))
-            .border_1()
-            .border_color(self.theme.border)
-            .bg(self.theme.surface)
             .text_color(self.theme.text)
-            .shadow_lg()
             .p_3();
         for (index, &section) in kinds.iter().enumerate() {
             let chosen = match section {
