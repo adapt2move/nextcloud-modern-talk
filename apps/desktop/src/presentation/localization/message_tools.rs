@@ -16,6 +16,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "This link cannot be opened right now.",
         "Este enlace no se puede abrir ahora.",
     ),
+    (
+        "Erinnerung bearbeiten",
+        "Edit reminder",
+        "Editar recordatorio",
+    ),
     ("Geplant ({n})", "Scheduled ({n})", "Programados ({n})"),
     ("In 20 Minuten", "In 20 minutes", "Dentro de 20 minutos"),
     ("In 3 Stunden", "In 3 hours", "Dentro de 3 horas"),

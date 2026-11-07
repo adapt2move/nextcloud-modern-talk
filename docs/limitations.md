@@ -85,8 +85,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 - Validated location objects render from their geo identifiers and can open
   OpenStreetMap deliberately; the client does not create locations or fetch map
   tiles. Federated invitations, full breakout assignment/help/broadcast,
-  automatic lobby admission, and room-image upload remain incomplete. The lobby
-  start time is shown in the call gate only when room details have been loaded.
+  and room-image upload remain incomplete. Waiting calls recheck policy, but
+  automatic lobby admission needs real-server qualification. The lobby start
+  time is shown in the call gate only when room details have been loaded.
 
 ## Platforms
 

@@ -19,6 +19,7 @@ pub(crate) enum Choice {
     Pin,
     Unpin,
     Remind,
+    RemoveReminder,
     Forward,
     Thread,
     Back,
@@ -159,6 +160,7 @@ impl Choice {
             Self::Delete | Self::ConfirmDelete => "trash-2",
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
+            Self::RemoveReminder => "trash-2",
             Self::Forward => "arrow-right",
             Self::Thread => "chat",
             Self::Back => "arrow-left",
@@ -174,6 +176,7 @@ impl Choice {
             Self::Pin => 4,
             Self::Unpin => 10,
             Self::Remind => 5,
+            Self::RemoveReminder => 11,
             Self::Forward => 6,
             Self::Thread => 8,
             Self::Back => 9,
@@ -231,6 +234,14 @@ impl Desktop {
                     .iter()
                     .any(|m| m.local_id == target.message)
         });
+        let reminded = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == target.context
+                && panel
+                    .reminders
+                    .as_slice()
+                    .iter()
+                    .any(|reminder| reminder.message == target.message)
+        });
         let pin_change = feature(MessageFeature::Pins)
             && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                 decision_allows_intent(panel.pin_change, self.local_message_intents())
@@ -269,7 +280,11 @@ impl Desktop {
                     ),
                     Item::new(
                         Choice::Remind,
-                        "Später erinnern",
+                        if reminded {
+                            "Erinnerung bearbeiten"
+                        } else {
+                            "Später erinnern"
+                        },
                         feature(MessageFeature::Reminders),
                         "Erinnerungen sind derzeit nicht verfügbar.",
                     ),
@@ -280,6 +295,14 @@ impl Desktop {
                         "Weiterleiten ist derzeit nicht verfügbar.",
                     ),
                 ];
+                if reminded {
+                    items.push(Item::new(
+                        Choice::RemoveReminder,
+                        "Erinnerung löschen",
+                        feature(MessageFeature::Reminders),
+                        "Erinnerungen sind derzeit nicht verfügbar.",
+                    ));
+                }
                 if message.metadata.replyable {
                     items.push(Item::new(
                         Choice::Thread,
@@ -491,6 +514,12 @@ impl Desktop {
                     Choice::Remind => {
                         self.message_action(Action::Remind(target.message), window, cx);
                         self.message_ui.time_input.focus_handle(cx).focus(window);
+                    }
+                    Choice::RemoveReminder => {
+                        self.submit_message(MessageAction::Reminder {
+                            message: target.message,
+                            timestamp: None,
+                        });
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
