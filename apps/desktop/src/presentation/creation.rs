@@ -3,7 +3,7 @@ use super::{
     ButtonStyle, Desktop, LocalAction, Overlay,
     controls::{Availability, Skeleton},
 };
-use gpui::{Context, Div, div, prelude::*, px};
+use gpui::{Context, Div, FontWeight, div, prelude::*, px};
 use talk_core::ui::{
     AccountScope, Decision,
     conversation::{CreateAction, CreatePanel, RemoteState},
@@ -34,13 +34,22 @@ impl PeopleRequest {
     fn loading(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && panel.state == RemoteState::Loading(self.request)
     }
-    fn ready(&self, panel: &CreatePanel) -> bool {
+    fn is_request(&self, account: AccountScope, request: RequestId) -> bool {
+        self.account == account && self.request == request
+    }
+    pub(super) fn ready(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && self.ready && panel.people_loaded && !panel.state.pending()
     }
 }
 
 impl Desktop {
-    pub(super) fn find_search_people(&mut self, cx: &Context<Self>) {
+    fn creation_label(&self, text: &str) -> Div {
+        div()
+            .text_size(self.sp(14.))
+            .font_weight(FontWeight::MEDIUM)
+            .child(self.l(text).to_owned())
+    }
+    pub(super) fn find_search_people(&mut self, cx: &mut Context<Self>) {
         let Some(account) = self.snapshot.active_account else {
             return;
         };
@@ -48,13 +57,7 @@ impl Desktop {
         let Ok(bounded) = talk_core::ui::Text::new(query) else {
             return;
         };
-        if query.is_empty()
-            || self
-                .snapshot
-                .create_panel
-                .as_ref()
-                .is_some_and(|p| p.state.pending())
-        {
+        if query.is_empty() {
             return;
         }
         let requested = query.to_lowercase();
@@ -62,21 +65,52 @@ impl Desktop {
             return;
         };
         self.room_ui.request = request;
+        self.directory_query = Some((account, requested));
+        if self
+            .snapshot
+            .create_panel
+            .as_ref()
+            .is_some_and(|p| p.state.pending())
+        {
+            // A superseding query cannot reuse the prior search's confirmed rows,
+            // even when its own admission must wait for that request to settle.
+            self.room_ui.create_people_request = None;
+            self.switcher_directory_failed(
+                RequestId(request),
+                talk_core::ui::UnavailableReason::Busy,
+            );
+            self.schedule_switcher_directory(cx);
+            return;
+        }
         self.room_ui.create_people_request = Some(PeopleRequest::new(account, RequestId(request)));
-        if self.submit(UiIntent::Create {
+        match self.port.try_submit(UiIntent::Create {
             account,
             request: RequestId(request),
             action: CreateAction::FindPeople(bounded),
         }) {
-            self.directory_query = Some((account, requested));
+            Ok(()) => self.switcher_request_admitted(),
+            Err(error) => {
+                let reason = match error {
+                    talk_core::ui::SubmitError::Busy => talk_core::ui::UnavailableReason::Busy,
+                    talk_core::ui::SubmitError::StaleScope => {
+                        talk_core::ui::UnavailableReason::PolicyStale
+                    }
+                    talk_core::ui::SubmitError::Unavailable(reason) => reason,
+                };
+                self.switcher_directory_failed(RequestId(request), reason);
+                self.schedule_switcher_directory(cx);
+            }
         }
     }
     pub(super) fn open_creation(&mut self, cx: &mut Context<Self>) {
         if self.room_ui.create_account != self.snapshot.active_account {
             self.room_ui.create_account = self.snapshot.active_account;
             self.room_ui.create_people_request = None;
+            self.room_ui.create_public = false;
+            self.room_ui.create_preset = None;
             self.conversation_name.update(cx, |i, _| i.reset());
             self.room_ui.search.update(cx, |i, _| i.reset());
+            self.room_ui.description.update(cx, |i, _| i.reset());
         }
         self.submit_creation(CreateAction::Refresh);
     }
@@ -84,7 +118,7 @@ impl Desktop {
         let Some(account) = self.snapshot.active_account else {
             return;
         };
-        if matches!(action, CreateAction::Direct(_))
+        if matches!(action, CreateAction::Direct(_) | CreateAction::AddInvite(_))
             && !self.snapshot.create_panel.as_ref().is_some_and(|panel| {
                 panel.account == account
                     && self
@@ -121,23 +155,46 @@ impl Desktop {
         if let Some(request) = &mut self.room_ui.create_people_request {
             request.observe(panel);
         }
+        let failure = match panel.state {
+            RemoteState::Failed(request, reason)
+                if self
+                    .room_ui
+                    .create_people_request
+                    .as_ref()
+                    .is_some_and(|people| people.is_request(panel.account, request)) =>
+            {
+                Some((request, reason))
+            }
+            _ => None,
+        };
         if let Some(result) = panel.result
             && result.completion == Completion::ServerAccepted
         {
             let account = panel.account;
-            if result.conversation.is_some()
+            if let Some(context) = result.conversation
                 && Some(account) == self.snapshot.active_account
                 && matches!(self.overlay, Some(Overlay::Create | Overlay::Search))
             {
                 self.overlay = None;
                 self.conversation_name.update(cx, |i, _| i.reset());
                 self.room_ui.search.update(cx, |i, _| i.reset());
+                self.room_ui.description.update(cx, |i, _| i.reset());
+                self.room_ui.create_preset = None;
+                self.room_ui.create_public = false;
+                if result.incomplete_invitations {
+                    self.feedback = Some(super::feedback::Feedback::warning("Das Gespräch wurde erstellt, aber einige Personen konnten nicht eingeladen werden.")
+                        .in_conversation(context));
+                }
             }
             self.submit(UiIntent::AcknowledgeCreation {
                 account,
                 request: result.request,
             });
         }
+        if let Some((request, reason)) = failure {
+            self.switcher_directory_failed(request, reason);
+        }
+        self.schedule_switcher_directory(cx);
     }
     pub(super) fn creation_body(&self, cx: &Context<Self>) -> Div {
         let direct = self.room_ui.create_direct;
@@ -162,7 +219,7 @@ impl Desktop {
                 "Die Verfügbarkeit ist nicht bekannt. Bitte neu laden.",
             ),
         };
-        let mut body = div().flex().flex_col().gap_4().child(
+        let mut body = div().flex().flex_col().gap_3().child(
             div()
                 .flex()
                 .gap_2()
@@ -268,16 +325,158 @@ impl Desktop {
                 }
             }
         } else {
+            use talk_core::ui::presentation::FeatureSupport;
             body = body
-                .child(self.hint(
-                    self.l("Erstelle ein Gruppengespräch. Danach kannst du Personen einladen."),
-                ))
-                .child(self.title(self.l("Name des Gesprächs")))
+                .child(div().flex().gap_2()
+                    .child(self.button("create-private", "Privates Gespräch", if !self.room_ui.create_public { ButtonStyle::Primary } else { ButtonStyle::Secondary },
+                        Availability::when(panel.is_some_and(|p| p.private_allowed), "Die Servervorgaben erlauben diese Sichtbarkeit nicht."), LocalAction::CreatePublic(false), cx))
+                    .child(self.button("create-public", "Offenes Gespräch", if self.room_ui.create_public { ButtonStyle::Primary } else { ButtonStyle::Secondary },
+                        Availability::when(panel.is_some_and(|p| p.public == FeatureSupport::Supported && p.public_allowed), "Offene Gespräche sind auf diesem Server nicht verfügbar."), LocalAction::CreatePublic(true), cx)))
+                .child(self.hint(self.l(if self.room_ui.create_public { "Auf dem Server auffindbar; Personen mit Link können je nach Servereinstellung beitreten." } else { "Nur eingeladene Personen können dieses Gespräch finden." })))
+                .child(self.creation_label("Name des Gesprächs"))
                 .child(
                     self.input_surface(&self.conversation_name, cx)
                         .min_h(px(48.))
                         .child(self.conversation_name.clone()),
                 );
+            if let Some(panel) = panel.filter(|p| p.extended == FeatureSupport::Supported) {
+                body = body
+                    .child(self.creation_label("Beschreibung (optional)"))
+                    .child(
+                        self.input_surface(&self.room_ui.description, cx)
+                            .min_h(px(48.))
+                            .child(self.room_ui.description.clone()),
+                    );
+                if !panel.presets.as_slice().is_empty() {
+                    let mut presets = div().flex().flex_wrap().gap_2().child(self.button(
+                        "create-preset-default",
+                        "Standard",
+                        if self.room_ui.create_preset.is_none() {
+                            ButtonStyle::Primary
+                        } else {
+                            ButtonStyle::Secondary
+                        },
+                        availability,
+                        LocalAction::CreatePreset(None),
+                        cx,
+                    ));
+                    for (index, preset) in panel.presets.as_slice().iter().enumerate() {
+                        presets = presets.child(self.button(
+                            ("create-preset", index),
+                            preset.name.as_str().to_owned(),
+                            if self.room_ui.create_preset.as_ref() == Some(&preset.id) {
+                                ButtonStyle::Primary
+                            } else {
+                                ButtonStyle::Secondary
+                            },
+                            availability,
+                            LocalAction::CreatePreset(Some(preset.id.clone())),
+                            cx,
+                        ));
+                    }
+                    body = body.child(self.creation_label("Vorlage")).child(presets);
+                    if let Some(preset) = panel
+                        .presets
+                        .as_slice()
+                        .iter()
+                        .find(|p| self.room_ui.create_preset.as_ref() == Some(&p.id))
+                    {
+                        body = body.child(self.hint(preset.description.as_str()));
+                    }
+                }
+                body = body.child(self.creation_label("Personen einladen (optional)"));
+                if !panel.invites.as_slice().is_empty() {
+                    let mut invited = div().flex().flex_wrap().gap_2();
+                    for person in panel.invites.as_slice() {
+                        invited = invited.child(self.button(
+                            ("create-invite-remove", person.id.local as usize),
+                            format!("{} ×", person.name.as_str()),
+                            ButtonStyle::Secondary,
+                            availability,
+                            LocalAction::RemoveCreationInvite(person.id),
+                            cx,
+                        ));
+                    }
+                    body = body.child(invited);
+                }
+                body = body.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            self.input_surface(&self.room_ui.search, cx)
+                                .flex_1()
+                                .min_w_0()
+                                .child(self.room_ui.search.clone()),
+                        )
+                        .child(self.button(
+                            "create-invite-search",
+                            "Suchen",
+                            ButtonStyle::Secondary,
+                            availability,
+                            LocalAction::FindPeople,
+                            cx,
+                        )),
+                );
+                if self
+                    .room_ui
+                    .create_people_request
+                    .as_ref()
+                    .is_some_and(|r| r.loading(panel))
+                    && panel.people.as_slice().is_empty()
+                {
+                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                }
+                for person in panel.people.as_slice().iter().take(8) {
+                    let selected = panel.invites.as_slice().iter().any(|p| p.id == person.id);
+                    let can_add = !selected
+                        && panel.invites.as_slice().len() < 20
+                        && self
+                            .room_ui
+                            .create_people_request
+                            .as_ref()
+                            .is_some_and(|r| r.ready(panel));
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .py_1()
+                            .child(self.content_avatar(
+                                talk_core::ui::content::AssetTarget::PersonAvatar(person.id),
+                                "?",
+                                32.,
+                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(person.name.as_str().to_owned())
+                                    .child(self.hint(person.label.as_str())),
+                            )
+                            .child(self.button(
+                                ("create-invite-add", person.id.local as usize),
+                                if selected {
+                                    "Hinzugefügt"
+                                } else {
+                                    "Hinzufügen"
+                                },
+                                ButtonStyle::Secondary,
+                                Availability::when(
+                                    availability.is_enabled() && can_add,
+                                    "Suche erneut nach dieser Person.",
+                                ),
+                                LocalAction::AddCreationInvite(person.id),
+                                cx,
+                            )),
+                    );
+                }
+                if panel.people_loaded && panel.people.as_slice().is_empty() {
+                    body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
+                }
+            } else {
+                body = body.child(self.hint(self.l("Beschreibung und Einladungen sind beim Erstellen auf diesem Server nicht verfügbar.")));
+            }
             if panel.is_none_or(|p| {
                 matches!(p.group, Decision::Denied | Decision::Stale)
                     || (p.group != Decision::Allowed
@@ -334,6 +533,17 @@ impl Desktop {
                 && p.group == Decision::Allowed
                 && !p.state.pending()
                 && !p.uncertain
+                && if self.room_ui.create_public {
+                    p.public == talk_core::ui::presentation::FeatureSupport::Supported
+                        && p.public_allowed
+                } else {
+                    p.private_allowed
+                }
+                && self
+                    .room_ui
+                    .create_preset
+                    .as_ref()
+                    .is_none_or(|id| p.presets.as_slice().iter().any(|p| &p.id == id))
         }) && !self.conversation_name.read(cx).content.trim().is_empty();
         let availability = match panel {
             Some(p) if p.uncertain || matches!(p.state, RemoteState::Uncertain(_)) => {
@@ -379,9 +589,6 @@ impl Desktop {
                     .w_full(),
                 )
             })
-            .child(
-                self.hint(self.l("Weitere Vorlagen sind in diesem Client noch nicht verfügbar.")),
-            )
     }
 }
 
@@ -432,6 +639,7 @@ mod tests {
             request,
             completion: Completion::ServerAccepted,
             conversation: None,
+            incomplete_invitations: false,
         });
         panel.people_loaded = true;
         pending.observe(&panel);
@@ -450,6 +658,7 @@ mod tests {
             request,
             completion: Completion::ServerAccepted,
             conversation: None,
+            incomplete_invitations: false,
         });
         pending.observe(&panel);
         assert!(

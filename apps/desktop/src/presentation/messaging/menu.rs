@@ -19,6 +19,8 @@ pub(crate) enum Choice {
     Pin,
     Unpin,
     Remind,
+    RemoveReminder,
+    Translate,
     Forward,
     PrivateReply,
     MarkUnread,
@@ -177,6 +179,8 @@ impl Choice {
             Self::Delete | Self::ConfirmDelete => "trash-2",
             Self::Pin | Self::Unpin => "pin",
             Self::Remind => "clock",
+            Self::RemoveReminder => "trash-2",
+            Self::Translate => "globe",
             Self::Forward => "arrow-right",
             Self::PrivateReply => "reply",
             Self::MarkUnread => "inbox",
@@ -195,10 +199,12 @@ impl Choice {
             Self::Pin => 4,
             Self::Unpin => 10,
             Self::Remind => 5,
+            Self::RemoveReminder => 11,
+            Self::Translate => 12,
             Self::Forward => 6,
             Self::PrivateReply => 13,
-            Self::MarkUnread => 11,
-            Self::MarkUnreadFrom => 12,
+            Self::MarkUnread => 14,
+            Self::MarkUnreadFrom => 15,
             Self::Thread => 8,
             Self::Back => 9,
         }
@@ -265,6 +271,14 @@ impl Desktop {
                     .iter()
                     .any(|m| m.local_id == target.message)
         });
+        let reminded = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+            panel.context == target.context
+                && panel
+                    .reminders
+                    .as_slice()
+                    .iter()
+                    .any(|reminder| reminder.message == target.message)
+        });
         let pin_change = feature(MessageFeature::Pins)
             && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
                 decision_allows_intent(panel.pin_change, self.local_message_intents())
@@ -303,7 +317,11 @@ impl Desktop {
                     ),
                     Item::new(
                         Choice::Remind,
-                        "Später erinnern",
+                        if reminded {
+                            "Erinnerung bearbeiten"
+                        } else {
+                            "Später erinnern"
+                        },
                         feature(MessageFeature::Reminders),
                         "Erinnerungen sind derzeit nicht verfügbar.",
                     ),
@@ -340,6 +358,37 @@ impl Desktop {
                         "Ab hier ungelesen",
                         idle && message.metadata.unread_after.is_some(),
                         "Die vorherige Nachricht ist noch nicht geladen.",
+                    ));
+                }
+                if reminded {
+                    items.push(Item::new(
+                        Choice::RemoveReminder,
+                        "Erinnerung löschen",
+                        feature(MessageFeature::Reminders),
+                        "Erinnerungen sind derzeit nicht verfügbar.",
+                    ));
+                }
+                if self.translation_available(target.context, message) {
+                    let translated = self.current_translation(message).is_some();
+                    items.push(Item::new(
+                        Choice::Translate,
+                        if translated
+                            && self
+                                .message_ui
+                                .hidden_translations
+                                .contains(&message.local_id)
+                        {
+                            "Übersetzung anzeigen"
+                        } else if translated {
+                            "Original anzeigen"
+                        } else {
+                            "Übersetzen"
+                        },
+                        self.snapshot
+                            .message_panel
+                            .as_ref()
+                            .is_some_and(|panel| panel.translation_pending.is_none()),
+                        "Die Übersetzung wird bereits geladen.",
                     ));
                 }
                 if message.metadata.thread.is_some() || message.reply_count > 0 {
@@ -578,7 +627,15 @@ impl Desktop {
                     }
                     Choice::Remind => {
                         self.message_action(Action::Remind(target.message), window, cx);
-                        self.message_ui.time_input.focus_handle(cx).focus(window);
+                    }
+                    Choice::RemoveReminder => {
+                        self.submit_message(MessageAction::Reminder {
+                            message: target.message,
+                            timestamp: None,
+                        });
+                    }
+                    Choice::Translate => {
+                        self.message_action(Action::Translate(target.message), window, cx)
                     }
                     Choice::Thread => {
                         self.handle(LocalAction::Thread(target.context, thread), window, cx)
@@ -646,6 +703,7 @@ impl Desktop {
                 || self.update_restart_pending
                 || self.projection_blocked
                 || self.prejoin.is_some()
+                || self.waiting_in_lobby()
                 || self.incoming_visible()
                 || self.onboarding_open
                 || self.account_removal.confirming()

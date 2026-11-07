@@ -14,7 +14,8 @@ from capture import run, sha
 
 
 def normalized(value):
-    return ''.join(c for c in unicodedata.normalize('NFKD', value).casefold() if c.isalnum() or c.isspace())
+    text = ''.join(c for c in unicodedata.normalize('NFKD', value).casefold() if c.isalnum() or c.isspace())
+    return ' '.join(text.split())
 
 
 def exercise(scenario, env, xid, out, label, large=False):
@@ -52,6 +53,24 @@ def exercise(scenario, env, xid, out, label, large=False):
                     word['top'] = str(int(word['top']) // 3 + height - footer_height)
                     words.append(word)
         ocr_path.unlink()
+        if any(normalized(term).replace(' ', '') not in text.replace(' ', '') for term in required):
+            # Selected rows in dark overlays can be missed by whole-window OCR.
+            # Inspect the actual centered content at higher contrast before failing.
+            ocr_path=out/f'{label}-ocr-center.png'
+            crop=f'{width//2}x{height//2}+{width//4}+{height//4}'
+            run(['convert',str(path),'-crop',crop,'+repage','-resize','300%',
+                 '-colorspace','gray','-auto-level','-negate',str(ocr_path)],env)
+            text += ' ' + normalized(run(['tesseract',str(ocr_path),'stdout','--psm','6'],env).stdout)
+            ocr_path.unlink()
+        if any(normalized(term).replace(' ', '') not in text.replace(' ', '') for term in required):
+            # A wrapped sidebar hint can be interleaved with timeline text by
+            # whole-window OCR. Read the same visible column independently.
+            sidebar_path = out / f'{label}-ocr-sidebar.png'
+            run(['convert', str(path), '-crop', f'{min(width, 260)}x{height}+0+0',
+                 '+repage', '-resize', '300%', '-colorspace', 'gray', '-auto-level',
+                 str(sidebar_path)], env)
+            text += normalized(run(['tesseract', str(sidebar_path), 'stdout', '--psm', '6'], env).stdout)
+            sidebar_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -155,7 +174,24 @@ def exercise(scenario, env, xid, out, label, large=False):
             click('Auflegen',inspected_point=(720,580,360,470));expect('200% explicit leave returns to room',['Produktteam'])
         return checks
 
-    if scenario == 'server':
+    if scenario == 'chat-reminder-time':
+        # The fixture fixes the calendar at 15 January 2027. Sample the empty
+        # corners of adjacent day cells so the assertion measures the actual
+        # selected background, independently of text recognition.
+        before, _, _ = observe()
+        pixels = lambda image: run(['convert', str(image), '-format',
+            '%[pixel:p{466,512}]|%[pixel:p{506,512}]', 'info:'], env).stdout.split('|')
+        first = pixels(before)
+        if len(first) != 2 or first[0] == first[1]:
+            raise AssertionError('Calendar fixture does not show the expected selected day')
+        key('Right')
+        after, _, _ = observe()
+        second = pixels(after)
+        if second[0] != first[1] or second[1] != first[0]:
+            raise AssertionError('Right arrow did not move the selected calendar day')
+        checks.append({'check': 'calendar arrow navigation moves selection', 'result': 'pass',
+                       'image': after.name, 'sha256': sha(after)})
+    elif scenario == 'server':
         click('cloud.example.test')
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')
         key('BackSpace'); key('ctrl+v')
@@ -229,10 +265,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
         type_text('Workshop')
         time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
-        expect('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
+        expect_settled('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
         key('ctrl+a'); key('BackSpace')
         time.sleep(.7)
-        expect('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
+        expect_settled('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
         click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
@@ -244,7 +280,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('shift+Down')
         expect('shift and arrow extend the native file selection', ['2 ausgewählt'])
         key('Return')
-        expect('keyboard selection returns both cloud files to the composer',
+        expect_settled('keyboard selection returns both cloud files to the composer',
                ['Projektübersicht.pdf', 'Workshop.png', 'Bereit zum Senden'], ['NextCloud-Dateien'])
     elif scenario == 'chat-cloud-files-offline':
         expect('offline browser keeps its cached listing', ['Offline', 'gespeicherte Dateien', 'Projektübersicht.pdf'])
@@ -261,11 +297,11 @@ def exercise(scenario, env, xid, out, label, large=False):
                            input=value, text=True, env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, check=True, timeout=10)
             key('ctrl+v')
-            expect('poll field retains pasted text', [value])
+            expect_settled('poll field retains pasted text', [value])
         expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
-        expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+        expect_settled('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
         expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
         click('erstellen', inspected_point=(1280, 800, 540, 548))
@@ -322,7 +358,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario in ('chat', 'busy'):
         # Search is local to bounded room rows. Focus shortcut works from root.
         key('ctrl+k'); type_text('NO MATCH UI')
-        expect('local search filter reports no matching rows', ['Keine lokalen Treffer'])
+        expect('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         click('schreiben')
         type_text('DRAFTALPHA'); key('Return')
@@ -433,6 +469,53 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Offline Enter did not submit the draft to the scoped thread')
         if 'UI_THREAD_FIXTURE offline_reply_queued=true' not in log:
             raise AssertionError('The fixture did not acknowledge local thread staging')
+    elif scenario == 'search-navigation':
+        expect('switcher displays its initial matching conversation', ['Produktteam', 'Gruppengespräch'])
+        click('Produkt', xmin=300, ymin=300)
+        key('ctrl+a'); key('BackSpace')
+        expect_settled('empty switcher shows recent rooms', ['Mara Fischer', 'Weber'])
+        key('Down'); key('Down'); key('Return')
+        expect_settled('arrows and Enter open the selected conversation', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+        key('ctrl+k')
+        expect('keyboard shortcut reopens switcher', ['Mit Pfeiltasten auswählen'])
+        type_text('Jonas')
+        expect_settled('switcher matches a group participant as well as a direct room', ['Jonas Weber', 'Produktteam'])
+        key('Escape')
+        expect('Escape closes switcher', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
+    elif scenario == 'account-search':
+        expect('account search groups matching messages', ['Produktteam', 'Navigation', 'Mara Fischer'])
+        key('Return')
+        expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
+    elif scenario == 'discover':
+        expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
+        click('discovery-search-input', inspected_point=(1280, 800, 340, 320))
+        time.sleep(.25)
+        type_text('Design')
+        expect_settled('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
+        key('Escape')
+        expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
+    elif scenario == 'reference-preview':
+        expect('resolved reference card is shown with its source message', ['Ein ruhiger Ort', 'Studiokonzept'])
+        click('Vorschau verbergen', inspected_point=(1280, 800, 826, 352))
+        expect('reference card can be collapsed locally', ['Vorschau anzeigen'], ['Ein ruhiger Ort'])
+        click('Vorschau', xmin=300, ymin=250)
+        expect('collapsed reference card can be restored', ['Ein ruhiger Ort', 'Studiokonzept'])
+    elif scenario in ('create34', 'create35'):
+        expect('creation form shows the inline invitations and presets', ['Projekt Atlas', 'Mara Fischer', 'Jonas Weber', 'Webinar'])
+        click('Offenes', xmin=300)
+        expect('open conversation choice describes link access', ['Personen mit Link'])
+        click('Webinar', xmin=300)
+        expect('a preset explains its purpose', ['moderierte Veranstaltungen'])
+    elif scenario == 'sidebar-room-menu':
+        expect('conversation actions expose notification settings', ['Benachrichtigungen', 'Archivieren'])
+        click('Benachrichtigungen')
+        time.sleep(1)
+        expect('sidebar action opens the selected room notification controls', ['Alle Nachrichten', 'Nur Erwähnungen', 'Anrufbenachrichtigungen'])
+    elif scenario == 'search-filter':
+        click('Alle', ymin=190)
+        expect_settled('sidebar filters start with the loaded rooms', ['Produktteam', 'Designbesprechung', 'Erwähnungen'])
+        click('Erwähnungen')
+        expect_settled('mention filter keeps known mentions and explains unknown state', ['Produktteam', 'Erwähnungen sind noch nicht bekannt'], ['Designbesprechung'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
@@ -459,9 +542,26 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Escape closes the call participants panel', absent=['Nicht im Anruf'])
         checks.append({'check': 'H toggles the hand in the call participants panel', 'result': 'pass'})
     elif scenario == 'call-dock':
-        # The room row is visible in the fixed 1280x800 fictional dock fixture.
-        run(['xdotool', 'mousemove', '--window', xid, '150', '290'], env)
-        expect('Active room reveals its join action on hover', ['Beitreten'])
+        # Locate the room label so persisted filters and navigation entries can
+        # change the sidebar's vertical layout without moving the test target.
+        _, words, _ = observe()
+        rooms = [word for word in words if normalized(word['text']).startswith('teamk')
+                 and int(word['left']) < 240 and int(word['top']) < 600]
+        if rooms:
+            room = min(rooms, key=lambda word: int(word['top']))
+            x = int(room['left']) + int(room['width']) // 2
+            y = int(room['top']) + int(room['height']) // 2
+        else:
+            # The small label beside call avatars can evade OCR. This point was
+            # inspected in the exact 1280x800 fixture, after the sidebar filters.
+            path, _, _ = observe()
+            size = run(['identify', '-format', '%w %h', str(path)], env).stdout
+            if size.strip() != '1280 800':
+                raise AssertionError('Active call room label is missing from the sidebar')
+            x, y = 150, 367
+            print(f'Native active call room hover uses inspected ({x}, {y}) in {path.name}; OCR unavailable', flush=True)
+        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y)], env)
+        expect_settled('Active room reveals its join action on hover', ['Beitreten'])
         click('Beitreten', xmin=140, ymin=250)
         expect('Join action expands the owned call', ['Teamk', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):

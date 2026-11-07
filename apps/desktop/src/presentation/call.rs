@@ -14,6 +14,12 @@ use talk_core::ui::presentation::{
 const MAX_CALL_TILES: usize = 18;
 
 impl Desktop {
+    pub(super) fn waiting_in_lobby(&self) -> bool {
+        self.snapshot
+            .call
+            .as_ref()
+            .is_some_and(|call| call.stage == CallStage::Required(RequiredGate::Lobby))
+    }
     /// Resolve scoped stream frames through the authoritative snapshot metadata.
     pub fn set_call_images(
         &mut self,
@@ -260,7 +266,10 @@ impl Desktop {
         if matches!(call.stage, CallStage::Ended | CallStage::Failed) {
             return self.call_outcome(call.stage == CallStage::Failed, cx);
         }
-        let show_chat = super::docked_call_chat(wide, self.call_chat_open, self.overlay);
+        // Lobby authority does not include the room's participants or chat.
+        // Even a stale call snapshot must not paint them while admission waits.
+        let lobby = self.waiting_in_lobby();
+        let show_chat = !lobby && super::docked_call_chat(wide, self.call_chat_open, self.overlay);
         let (stage_height, feature_height, filmstrip_height) =
             stage_metrics(f32::from(window.viewport_size().height));
         let status = match call.stage {
@@ -336,8 +345,16 @@ impl Desktop {
                     .flex_none()
                     .p_4()
                     .rounded(px(10.))
-                    .bg(t.warning_bg)
-                    .text_color(t.warning)
+                    .bg(if gate == RequiredGate::Lobby {
+                        t.subtle
+                    } else {
+                        t.warning_bg
+                    })
+                    .text_color(if gate == RequiredGate::Lobby {
+                        t.text
+                    } else {
+                        t.warning
+                    })
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -345,30 +362,51 @@ impl Desktop {
                     .child(self.hint(self.l(
                         "Der Beitritt wird erst fortgesetzt, wenn diese Voraussetzung erfüllt ist.",
                     )))
-                    .child(self.button(
-                        "required-gate",
-                        if gate == RequiredGate::RecordingConsent {
-                            "Zustimmung prüfen"
-                        } else {
-                            "Freigabe prüfen"
-                        },
-                        ButtonStyle::Secondary,
-                        gate == RequiredGate::RecordingConsent,
-                        if gate == RequiredGate::RecordingConsent {
-                            LocalAction::Open(Overlay::RecordingConsent)
-                        } else {
-                            LocalAction::Intent(UiIntent::ResolveRequiredGate {
-                                call: call.scope,
-                                gate,
+                    .when(gate == RequiredGate::Lobby, |d| {
+                        let timer = self
+                            .snapshot
+                            .conversation_panel
+                            .as_ref()
+                            .filter(|p| {
+                                !p.details_stale
+                                    && p.context.account == call.scope.account
+                                    && p.context.conversation == call.scope.conversation
                             })
-                        },
-                        cx,
-                    )),
+                            .and_then(|p| p.details.as_ref())
+                            .and_then(|details| details.lobby_timer)
+                            .and_then(|at| self.settings_port.local_datetime(at));
+                        d.when_some(timer, |d, time| {
+                            d.child(
+                                self.hint(&self.lf("Beginn: {time}", &[("time", time.as_str())])),
+                            )
+                        })
+                    })
+                    .when(gate != RequiredGate::Lobby, |d| {
+                        d.child(self.button(
+                            "required-gate",
+                            if gate == RequiredGate::RecordingConsent {
+                                "Zustimmung prüfen"
+                            } else {
+                                "Freigabe prüfen"
+                            },
+                            ButtonStyle::Secondary,
+                            gate == RequiredGate::RecordingConsent,
+                            if gate == RequiredGate::RecordingConsent {
+                                LocalAction::Open(Overlay::RecordingConsent)
+                            } else {
+                                LocalAction::Intent(UiIntent::ResolveRequiredGate {
+                                    call: call.scope,
+                                    gate,
+                                })
+                            },
+                            cx,
+                        ))
+                    }),
             );
         }
         if let Some(screen) = call
             .screen_stage()
-            .filter(|screen| screen.tile.kind == CallTileKind::Screen)
+            .filter(|screen| !lobby && screen.tile.kind == CallTileKind::Screen)
         {
             let image = self
                 .call_images
@@ -674,18 +712,20 @@ impl Desktop {
                     .child(self.l("Teilnehmerdaten noch nicht verfügbar.")),
             );
         }
-        stage = if filmstrip {
-            stage.child(
-                div()
-                    .id("call-filmstrip")
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scroll()
-                    .child(tiles),
-            )
-        } else {
-            stage.child(tiles)
-        };
+        if !lobby {
+            stage = if filmstrip {
+                stage.child(
+                    div()
+                        .id("call-filmstrip")
+                        .w_full()
+                        .min_w_0()
+                        .overflow_x_scroll()
+                        .child(tiles),
+                )
+            } else {
+                stage.child(tiles)
+            };
+        }
         let body = div()
             .flex_1()
             .min_h_0()
@@ -767,7 +807,10 @@ impl Desktop {
                     UiIntent::ShareScreen(call.scope)
                 }),
             ),
-        ] {
+        ]
+        .into_iter()
+        .take(if lobby { 0 } else { 3 })
+        {
             let available = !call.end_pending
                 && matches!(
                     state,
@@ -830,7 +873,7 @@ impl Desktop {
             }
             primary_controls = primary_controls.child(group);
         }
-        if call.hand_supported {
+        if !lobby && call.hand_supported {
             primary_controls = primary_controls.child(
                 self.round_icon_button(
                     "call-hand",
@@ -856,7 +899,7 @@ impl Desktop {
                 .rounded_full(),
             );
         }
-        if !call.reactions.as_slice().is_empty() {
+        if !lobby && !call.reactions.as_slice().is_empty() {
             let mut reaction_control = div().relative().child(
                 self.round_icon_button(
                     "call-reactions",
@@ -927,7 +970,10 @@ impl Desktop {
                 LocalAction::Open(Overlay::CallParticipants),
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
-        ] {
+        ]
+        .into_iter()
+        .take(if lobby { 0 } else { 2 })
+        {
             primary_controls = primary_controls.child(
                 self.round_icon_button(
                     id,
@@ -1008,14 +1054,18 @@ impl Desktop {
                                         div()
                                             .text_size(self.sp(12.))
                                             .text_color(t.stage_muted)
-                                            .child(format!(
+                                            .child(if lobby {
+                                                self.l(status).to_owned()
+                                            } else {
+                                                format!(
                                                 "{} · {}",
                                                 self.l(status),
                                                 self.count(
                                                     super::localization::Count::VisibleParticipants,
                                                     call.participants.as_slice().len() as u64
                                                 )
-                                            )),
+                                            )
+                                            }),
                                     ),
                             )
                             .when(call.participants.as_slice().len() > 1, |header| {

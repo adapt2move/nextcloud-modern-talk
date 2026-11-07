@@ -58,12 +58,19 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   recovery waits for a valid replacement poll rather than claiming continuity
   from REST success alone.
 - Full HPB process replacement with an existing Talk 25.0.6 web peer currently
-  can fail automatic media recovery in the r35 lab. The web peer publishes under
-  a new signaling identity but also requests obsolete identities, and HPB denies
-  native subscription requests despite advertised in-call flags. The native
-  fresh admission remains blocked rather than bypassing that denial. An explicit
-  web-peer call leave/rejoin restores AV in the exercised case. This is separate
-  from the qualified interruption/resume of a surviving HPB session.
+  can fail automatic media recovery in the r35 lab. On a fresh hello the web
+  client's REST call join can precede its new HPB room acknowledgement. HPB
+  2.1.1 restores its subscription gate from backend in-call changes, separately
+  from the participant list it broadcasts. The new web session can therefore
+  appear in-call and publish while HPB still rejects subscriptions to it. The
+  native client waits for its room acknowledgement, makes a fresh admission,
+  publishes and requests offers using the current mapped peer identity; that
+  does not repair the other session's HPB gate. The web client can also retain
+  obsolete peer identities after its fresh hello. Native retries remain bounded
+  and do not bypass server denial or mutate another participant's call flags.
+  An explicit web-peer call leave/rejoin restores AV in the exercised case.
+  This is separate from the qualified interruption/resume of a surviving HPB
+  session; automatic replacement with this peer remains unqualified.
 - Guest/federated media and required call E2EE remain unavailable.
 - The call view has adaptive gallery, local focus and a speaking-level-based
   speaker view. The level is a short-lived indicator from received audio or
@@ -145,8 +152,6 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   markers, quotes, links and code with hidden syntax and canonical Markdown
   serialization. Arbitrary Notion blocks, tables and embedded content are absent.
   Native rich-editor/link/IME interaction still needs platform qualification.
-- Complete document viewers, account-wide content search and parts of moderation
-  remain incomplete. Documents can open in the Cloud web view.
 - Typing uses the active ordinary local room's internal or HPB signaling session
   only when typing privacy and current room policy permit it. Classified,
   channel, federated and unknown-policy rooms are excluded. Indicators are
@@ -178,6 +183,31 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   deterministic waveform placeholder supports pointer scrubbing and five-second
   arrow-key seeking; it is not derived from the audio. Native microphone, speaker,
   permission and mobile interoperability have not yet been qualified.
+- The quick switcher searches loaded conversation names, up to 16 observed
+  participant names per eligible room, and the server's user directory. Its
+  participant index is session-only and is filled gradually when permitted.
+  Sidebar unread and mention filters are stored per durable account. Eligible
+  cached rooms retain previously reported mention flags; missing or changed
+  observations remain unknown. Room notification edits are optimistic and
+  reconciled with the server. An uncertain write requires a fresh room read.
+- Open-conversation browsing requires `listable-rooms`. The Talk v4 listing
+  does not expose a reliable member count before joining; protected or unknown
+  password states cannot yet be joined through the directory.
+- Account-wide message search requires the server's Talk message provider and
+  supported filters. It shows at most two pages and only results for rooms in
+  the currently admitted room list; offline suggestions use the selected cached
+  history. Search dates use the local system timezone and locale formatting,
+  including daylight-saving changes; date filters wait for timezone discovery.
+  Complete document viewers and parts of moderation remain incomplete. Documents can
+  open in the Cloud web view.
+- Link cards resolve at most two HTTP(S) links per eligible message using the
+  NextCloud references endpoint. Up to 64 URLs are held in a session cache for
+  fifteen minutes; negative results expire sooner. Only installation-owned
+  reference-preview image routes are fetched, with bounded decoded image sizes.
+  Provider selection and arbitrary embedded web content are not implemented.
+- Conversation creation supports local-directory invitations and the returned
+  webinar, presentation and voice-room presets. Other special-purpose presets
+  and non-user invitation sources are not offered in the creation flow.
 - Native PDF preview on macOS renders the first page of files up to 4 MiB; it is
   not a complete PDF reader. Linux and Windows use server-provided document
   thumbnails. If the server's PDF preview provider is disabled, those platforms
@@ -243,8 +273,32 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   checks have finite windows, including the latest 200 messages for send/forward
   correlation. An unresolved effect stays retained and is never blindly replayed.
   Scheduled creation has no operation correlation and may remain uncertain.
-  The reminder backend uses server reminders; there is no standalone local OS
-  reminder fallback.
+  Reminders are server-owned; there is no standalone local OS reminder fallback.
+  The account-wide list and translated text are bounded session caches and do not
+  survive a restart. Talk 24/25 returns at most ten upcoming reminders without
+  pagination; a full result is marked potentially incomplete. A reminder for a
+  room absent from the bounded room list is omitted with the same indication. Notifications without
+  a structured message identifier are suppressed. Notification activation is
+  available on Linux notification daemons with action support and via the macOS
+  helper; native delivery and click-through still need platform qualification.
+  Translation requires a provider with source-language detection and a target
+  matching the interface locale; task-only translation providers are not used.
+  Summary generation requires a configured server assistant and the server's
+  unread threshold; provider availability varies.
+- Validated location objects render from their geo identifiers and can open
+  OpenStreetMap deliberately; the client does not create locations or fetch map
+  tiles. Incoming federation invitations and text chat use the server proxy;
+  federated calls, files and other room tools are unavailable, and multi-server
+  interoperability needs qualification. Breakout switching closes an active call
+  before moving; joining the target call uses the normal call flow. Clearing help
+  requests and restoring existing assignment selections are not implemented.
+  Breakout v1 assigns logged-in users; changing the room count or mode requires
+  removing the existing breakout rooms first.
+  Waiting calls recheck policy, but automatic lobby admission needs real-server
+  qualification. The lobby start time is shown only when room details were loaded.
+  Room-avatar uploads accept regular images up to 8 MiB and 16 million pixels,
+  crop to a centered square and send a bounded PNG. Avatar and federation
+  invitation changes require a connection; they are not queued across restarts.
 
 ## Platforms
 
@@ -262,6 +316,8 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   need platform qualification. Windows is compile-checked only.
 - Native credential storage may be unavailable or report cleanup pending.
   The explicitly selected private-file fallback is persistent but unencrypted.
+- Local preferences saved by this version use schema 8; older clients cannot open
+  those preferences.
 - macOS profiles upgraded to the persistent volume association cannot be opened
   by v0.0.8 and older builds. A legacy profile whose mount device value changed
   needs the explicit storage reassociation action. Copied or replaced directories

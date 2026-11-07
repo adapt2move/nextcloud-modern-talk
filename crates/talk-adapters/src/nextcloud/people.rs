@@ -5,6 +5,7 @@ use nextcloud_talk_api as api;
 use talk_core::policy::Moment;
 use talk_core::protocol::conversation::{Recipient, RecipientId, RecipientSource};
 
+#[derive(Clone)]
 pub(super) struct PersonBinding {
     pub(super) id: RecipientId,
     pub(super) actor_id: String,
@@ -85,7 +86,16 @@ impl NextcloudClient {
                     search: query.as_str().to_owned(),
                 },
             )
-            .await?;
+            .await;
+        if reply.as_ref().is_err_and(|error| {
+            matches!(
+                error.kind,
+                ErrorKind::PermissionDenied | ErrorKind::ReauthenticationRequired
+            )
+        }) {
+            self.creation_people.clear();
+        }
+        let reply = reply?;
         let api::Reply::Conversation(api::conversation::Response::Directory(entries)) = reply
         else {
             return Err(self.error(ErrorKind::Malformed));

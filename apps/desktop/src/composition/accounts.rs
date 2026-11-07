@@ -5,6 +5,8 @@ mod calls;
 pub(super) mod content;
 mod conversations;
 mod creation;
+mod discover;
+mod federation;
 pub(super) mod files;
 mod history;
 #[cfg(debug_assertions)]
@@ -14,10 +16,15 @@ mod notifications;
 mod outbox;
 mod preview;
 mod reads;
+mod references;
+mod reminders;
 mod removal;
+mod search;
 mod startup;
+mod summary;
 mod thread_change;
 mod threads;
+mod translation;
 mod typing;
 mod update;
 use crate::diagnostics::{
@@ -62,13 +69,28 @@ enum Purpose {
     Content(OperationId),
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
+    Search(RequestId, AccountScope, bool),
+    Discover(RequestId, AccountScope, Option<ConversationRef>),
+    DiscoverProbe(AccountScope, u64),
+    ParticipantIndex(ConversationRef, u64),
+    Reference(ConversationRef, u128, u16, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
     IncomingCalls(AccountScope),
     MessageNotifications(AccountScope),
+    AccountReminders(AccountScope, u64),
+    FederationInvitations(AccountScope, u64),
+    FederationChange(AccountScope, OperationId, u128),
     LiveEvents(AccountScope),
     Typing(ConversationRef, typing::Work),
     Call(talk_core::ids::CallScope),
+    BreakoutLeave(
+        talk_core::ids::CallScope,
+        RequestId,
+        ConversationRef,
+        ConversationRef,
+        bool,
+    ),
     Tags(AccountScope),
     TagMutation(RequestId, AccountScope),
     Login(RequestId, LoginWork),
@@ -150,6 +172,8 @@ pub struct Accounts {
     content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
     call_ui: Option<calls::CallUi>,
+    breakout_leave: Option<calls::BreakoutLeave>,
+    breakout_observation: Option<(ConversationRef, Page<protocol::Conversation, 20>)>,
     call_poll_at: Instant,
     call_events: calls::CallEvents,
     call_actions: std::sync::Arc<calls::CallActions>,
@@ -183,7 +207,17 @@ pub struct Accounts {
     outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
+    account_search: Option<protocol::search::Query>,
+    account_search_retry: Option<search::Retry>,
+    discover_probe: Option<discover::Probe>,
+    discover_probe_generation: u64,
+    discovery_retry: Option<discover::Retry>,
+    discovery_join: Option<discover::OptimisticJoin>,
+    reference_owner: references::Owner,
+    reference_generation: u64,
     notices: notifications::Notices,
+    reminders: reminders::Reminders,
+    federation: federation::Federation,
     background: background::Background,
     typing: typing::Typing,
     history: history::Cache,
@@ -192,11 +226,17 @@ pub struct Accounts {
     latency: latency::Metrics,
     picker: Option<files::Picker>,
     picker_open: bool,
+    avatar_picker: Option<(RequestId, ConversationRef)>,
+    avatar_dialog: Option<(RequestId, ConversationRef)>,
     csv_file_owner: files::CsvOwner,
     attachment_owner: files::Owner,
     message_poll_at: Instant,
     message_poll_request: u64,
     thread_refresh_due: Option<(AccountScope, u32, Instant)>,
+    scheduled_poll: Option<(ConversationRef, Instant)>,
+    translation: translation::Translations,
+    translation_poll: Option<(ConversationRef, Instant)>,
+    summary: summary::Summaries,
 }
 impl Accounts {
     pub fn start(media: std::sync::Arc<talk_adapters::media::MediaService>) -> Rc<RefCell<Self>> {
@@ -209,6 +249,8 @@ impl Accounts {
             ),
             media,
             call_ui: None,
+            breakout_leave: None,
+            breakout_observation: None,
             call_poll_at: Instant::now(),
             call_events: calls::CallEvents::new(),
             call_actions: std::sync::Arc::new(calls::CallActions::new()),
@@ -236,7 +278,17 @@ impl Accounts {
             outbox: outbox::Outbox::default(),
             room_invite: None,
             message_search: None,
+            account_search: None,
+            account_search_retry: None,
+            discover_probe: None,
+            discover_probe_generation: 0,
+            discovery_retry: None,
+            discovery_join: None,
+            reference_owner: references::Owner::default(),
+            reference_generation: 0,
             notices: notifications::Notices::default(),
+            reminders: reminders::Reminders::default(),
+            federation: federation::Federation::default(),
             background: background::Background::default(),
             typing: typing::Typing::default(),
             history: history::Cache::default(),
@@ -245,16 +297,30 @@ impl Accounts {
             latency: latency::Metrics::default(),
             picker: None,
             picker_open: false,
+            avatar_picker: None,
+            avatar_dialog: None,
             csv_file_owner: files::CsvOwner::default(),
             attachment_owner: files::Owner::default(),
             message_poll_at: Instant::now(),
             message_poll_request: 0,
             thread_refresh_due: None,
+            scheduled_poll: None,
+            translation: translation::Translations::default(),
+            summary: summary::Summaries::default(),
+            translation_poll: None,
         }))
     }
     pub fn shutdown(&mut self) {
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.kind, files::Kind::Avatar))
+        {
+            self.picker = None;
+        }
         self.stop_video();
         self.queued_send = None;
         self.queued_read.clear();
@@ -389,8 +455,12 @@ impl Accounts {
         self.dirty = true;
     }
     fn clear_content(&mut self) {
+        self.retire_references();
         self.clear_attachment_work();
         self.cancel_csv_file();
+        self.avatar_picker = None;
+        self.breakout_leave = None;
+        self.breakout_observation = None;
         self.queued_read.clear();
         self.clear_content_assets();
         self.picker = None;
@@ -414,6 +484,17 @@ impl Accounts {
             account: scope,
             ..Default::default()
         };
+        self.retire_references();
+        self.reference_owner = references::Owner::default();
+        self.account_search = None;
+        self.account_search_retry = None;
+        self.snapshot.search_panel = None;
+        self.snapshot.discover_panel = scope.map(discover::empty_panel);
+        self.discovery_retry = None;
+        self.discovery_join = None;
+        self.discover_probe_generation = self.discover_probe_generation.saturating_add(1);
+        self.discover_probe =
+            scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -433,6 +514,8 @@ impl Accounts {
         self.snapshot.tag_state = ContentState::Unconfigured;
         self.load_tags = None;
         self.clear_content();
+        self.project_account_reminders();
+        self.project_federation();
         self.load_rooms = scope;
         self.touch();
     }
@@ -641,12 +724,23 @@ impl Accounts {
         self.tick_queued_read(Instant::now());
         self.tick_content();
         self.tick_file_work();
+        self.tick_account_search();
+        self.tick_discovery_probe();
+        self.tick_discovery_retry();
         self.tick_background();
         self.tick_typing();
         self.tick_thread_refresh(Instant::now());
+        self.tick_account_reminders();
+        self.tick_notification_navigation();
+        self.tick_federation();
+        self.tick_translations();
+        self.tick_summary();
+        self.tick_breakout_leave();
         self.tick_calls();
         self.poll_messages();
         self.tick_prefetch();
+        self.tick_participant_index();
+        self.tick_references();
         if let Some(scope) = self.load_tags
             && self
                 .request(scope, ProtocolRequest::ReadTags, Purpose::Tags(scope))
@@ -762,6 +856,11 @@ impl Accounts {
             Purpose::Content(operation) => self.complete_content(operation, result),
             Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
+            Purpose::Search(request,account,append)=>self.complete_account_search(request,account,append,result),
+            Purpose::Discover(request,account,joining)=>self.complete_discovery(request,account,joining,result),
+            Purpose::DiscoverProbe(account,generation)=>self.complete_discovery_probe(account,generation,result),
+            Purpose::ParticipantIndex(context, generation)=>self.complete_participant_index(context,generation,result),
+            Purpose::Reference(context,message,ordinal,generation)=>self.complete_reference(context,message,ordinal,generation,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
                 self.complete_message((request, done.request.0), context, operation, work, result);
@@ -769,8 +868,12 @@ impl Accounts {
             },
             Purpose::Call(scope) => self.complete_call(scope, result),
             Purpose::Typing(context, work) => self.complete_typing(context, work, result),
+            Purpose::BreakoutLeave(scope, request, context, target, assigned) => self.complete_breakout_leave(scope, request, context, target, assigned, result),
             Purpose::IncomingCalls(scope) => self.complete_incoming(scope, result),
             Purpose::MessageNotifications(scope) => self.complete_message_notifications(scope, result),
+            Purpose::AccountReminders(scope, version) => self.complete_account_reminders(scope, version, result),
+            Purpose::FederationInvitations(scope, version) => self.complete_federation(scope, version, result),
+            Purpose::FederationChange(scope, operation, invitation) => self.complete_federation_change(scope, operation, invitation, result),
             Purpose::LiveEvents(scope) => {
                 if done.captured_scope != Some(scope) || done.cancel_requested || !done.scope_is_current {
                     return;
@@ -1113,6 +1216,19 @@ impl Accounts {
         });
     }
     fn open(&mut self, context: ConversationRef) -> Result<(), SubmitError> {
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            if self.snapshot.selected != Some(context) {
+                self.clear_content();
+                self.snapshot.selected = Some(context);
+                self.snapshot.content = ContentState::Loading;
+                self.touch();
+            }
+            return Ok(());
+        }
         if self.cache.is_presentation(context) {
             self.select_conversation(context)?;
             return Ok(());
@@ -1163,6 +1279,16 @@ impl Accounts {
             UiIntent::MarkRoomUnread { request, context } => {
                 self.queue_room_unread(request, context)?;
             }
+            UiIntent::Discover {
+                account,
+                request,
+                action,
+            } => self.submit_discovery(account, request, action)?,
+            UiIntent::AccountSearch {
+                account,
+                request,
+                action,
+            } => self.submit_account_search(account, request, action)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }
@@ -1173,6 +1299,14 @@ impl Accounts {
                 ordinal,
             } => {
                 self.open_message_link(context, message, source, ordinal)?;
+            }
+            UiIntent::OpenLocation {
+                context,
+                message,
+                placeholder,
+                id,
+            } => {
+                self.open_location(context, message, placeholder, id)?;
             }
             UiIntent::RemoveAccount {
                 request,
@@ -1478,12 +1612,50 @@ impl Accounts {
                 self.failures.retain(|(a, _)| *a != account);
             }
             UiIntent::SelectAccount(scope) => {
+                self.reminders.cancel_navigation();
                 if !self.cache.is_local(scope) {
                     self.current(scope)?;
                 }
                 self.select(Some(scope));
             }
-            UiIntent::OpenConversation(context) => self.open(context)?,
+            UiIntent::OpenConversation(context) => {
+                self.reminders.cancel_navigation();
+                self.open(context)?;
+            }
+            UiIntent::RefreshAccountReminders(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_account_reminders(scope);
+            }
+            UiIntent::RefreshFederationInvitations(scope) => {
+                if self.snapshot.active_account != Some(scope) {
+                    return Err(SubmitError::StaleScope);
+                }
+                self.refresh_federation(scope);
+            }
+            UiIntent::ChangeFederationInvitation {
+                scope,
+                invitation,
+                accept,
+            } => {
+                self.change_federation(scope, invitation, accept)?;
+            }
+            UiIntent::OpenReminder {
+                request,
+                context,
+                message,
+            } => {
+                self.reminders.cancel_navigation();
+                self.open_reminder(request, context, message)?;
+            }
+            UiIntent::OpenNotificationMessage {
+                request,
+                context,
+                message,
+            } => {
+                self.open_notification_message(request, context, message)?;
+            }
             UiIntent::Refresh(context) => {
                 self.current(context.account)?;
                 let already_selected = self.snapshot.selected == Some(context);
@@ -1814,6 +1986,9 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         unread: r.unread_messages.unwrap_or(0),
         unread_direct_mention: r.unread_direct_mention,
         last_read_message: r.last_read_message.map(u128::from),
+        unread_mention: r.unread_mention,
+        notification_muted: r.notification_muted,
+        last_activity: r.last_activity,
         favorite: r.favorite,
         tags: r.tag_ids.as_ref().map(|tags| {
             page(tags.as_slice().iter().map(|id| TagRef {
@@ -1853,6 +2028,7 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
             .as_ref()
             .and_then(|status| status.message.clone()),
         participants: None,
+        participant_names: Page::empty(),
         send: r.actions.send_message,
         attach: Decision::Unknown,
         draft_clipboard: if r.sensitive || r.classified || r.organization.classified == Some(true) {

@@ -10,7 +10,7 @@ use std::{
 };
 static LEASE: AtomicU64 = AtomicU64::new(1);
 
-fn hex(value: &str) -> String {
+pub(super) fn hex(value: &str) -> String {
     use std::fmt::Write;
     let mut result = String::with_capacity(value.len() * 2);
     for byte in value.bytes() {

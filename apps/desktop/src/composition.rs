@@ -218,17 +218,22 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let development = options.scenario.is_some();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
-        Some("details" | "poll-settings") => Some(Overlay::RoomInfo),
+        Some(
+            "details" | "poll-settings" | "room-avatar" | "lobby-settings" | "breakout-configure"
+            | "breakout-create" | "breakout-free" | "breakout-assigned" | "breakout-help",
+        ) => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("call-participants-raised") => Some(Overlay::CallParticipants),
         Some("call-end-confirm") => Some(Overlay::ConfirmEndCall),
         Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
         Some("files") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
-        Some("thread" | "thread-options" | "thread-offline" | "thread-paged") => {
-            Some(Overlay::Thread)
-        }
-        Some("search") => Some(Overlay::Search),
+        Some(
+            "thread" | "thread-options" | "thread-offline" | "thread-paged" | "thread-reference",
+        ) => Some(Overlay::Thread),
+        Some("search" | "search-navigation" | "account-search") => Some(Overlay::Search),
+        Some("account-reminders" | "account-reminders-partial") => Some(Overlay::Reminders),
+        Some("federation-invitations" | "federation-pending") => Some(Overlay::Federation),
         Some("create34" | "create35") => Some(Overlay::Create),
         Some("poll-dialog" | "poll-drafts") => Some(Overlay::CreatePoll),
         Some("poll-details") => Some(Overlay::PollDetails),
@@ -322,8 +327,15 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             }
         }
             cx.new(|cx|{
-                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref(), cx); }
+                match options.scenario.as_deref() {
+                    Some(name @ ("chat-message-tools" | "chat-reminder-time" | "chat-reminder-menu" | "chat-schedule-time" | "chat-schedule-edit")) => desktop.fixture_message_tools(name, window, cx),
+                    Some("room-avatar") => desktop.fixture_room_avatar(cx),
+                    Some("lobby-settings") => desktop.fixture_lobby_settings(cx),
+                    Some("breakout-configure" | "breakout-create" | "breakout-free" | "breakout-assigned" | "breakout-help") => desktop.fixture_breakouts(cx),
+                    _ => (),
+                }
                 desktop
             })
         });
@@ -415,7 +427,13 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                             Ok(surface) => surface,
                             Err(_) => break,
                         };
-                    preview_services.poll_notifications(background);
+                    if let Some(activation) = preview_services.poll_notifications(background) {
+                        let _ = window.update(cx, |view, window, cx| {
+                            view.activate_notification(activation, window, cx);
+                            window.activate_window();
+                        });
+                        let _ = cx.update(|cx| cx.activate(true));
+                    }
                     let _ = cx.update(|cx| {
                         lifecycle::refresh_menus(&preview_services, &mut menu_locale, cx);
                     });

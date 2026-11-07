@@ -88,6 +88,13 @@ pub enum OutboxIntent {
         root: u64,
         level: i8,
     },
+    EditScheduled {
+        id: u64,
+        #[serde(with = "codec::text")]
+        body: Text<4096>,
+        timestamp: u64,
+        silent: bool,
+    },
 }
 impl OutboxIntent {
     pub fn kind(&self) -> OutboxKind {
@@ -104,6 +111,7 @@ impl OutboxIntent {
             Self::MarkUnread => OutboxKind::MarkUnread,
             Self::RenameThread { .. } => OutboxKind::RenameThread,
             Self::ThreadNotifications { .. } => OutboxKind::ThreadNotifications,
+            Self::EditScheduled { .. } => OutboxKind::EditScheduled,
         }
     }
     fn valid(&self) -> bool {
@@ -137,6 +145,12 @@ impl OutboxIntent {
                     && options(o)
             }
             Self::Edit { message, body } => *message > 0 && !body.as_str().trim().is_empty(),
+            Self::EditScheduled {
+                id,
+                body,
+                timestamp,
+                ..
+            } => *id > 0 && *timestamp > 0 && !body.as_str().trim().is_empty(),
             Self::Reaction { message, emoji, .. } => {
                 *message > 0 && !emoji.as_str().trim().is_empty()
             }

@@ -63,6 +63,45 @@ fn message(scope: AccountScope, id: u64) -> NotificationKind {
 }
 
 #[test]
+fn reminder_activation_retains_the_target_and_rejects_retired_scopes() {
+    let account = scope(1, 1);
+    let room = call(account, 1).conversation;
+    let shared = Shared {
+        state: Mutex::new(State::new(NotificationPreferences::default())),
+        wake: Condvar::new(),
+    };
+    shared
+        .lock()
+        .update_sources(None, sources(account, 1))
+        .unwrap();
+    let reminder = event(
+        1,
+        NotificationKind::MessageReminder {
+            scope: account,
+            conversation: room,
+            id: NotificationId(3),
+            message: 7,
+        },
+    );
+    assert!(activation::activate(&shared, &reminder));
+    assert_eq!(
+        shared.lock().activations.pop_front(),
+        Some(NotificationActivation::OpenMessage {
+            scope: account,
+            conversation: room,
+            message: 7
+        })
+    );
+    shared.lock().retire_source(account).unwrap();
+    assert!(!activation::activate(&shared, &reminder));
+    shared
+        .lock()
+        .update_sources(None, sources(scope(1, 2), 1))
+        .unwrap();
+    assert!(!activation::activate(&shared, &reminder));
+}
+
+#[test]
 fn expired_alerts_and_foreground_messages_do_not_replay_after_a_busy_helper() {
     let now = Instant::now();
     let a = scope(1, 1);
@@ -372,6 +411,7 @@ fn duplicates_and_participation_bursts_do_not_swallow_personal_reminders() {
         scope: account,
         conversation: call(account, 1).conversation,
         id: NotificationId(2),
+        message: 2,
     };
     state.admit(event(5, reminder), now).unwrap();
     assert_eq!(finish_next(&mut state).kind, reminder);
@@ -526,6 +566,7 @@ fn linux_commands_keep_every_category_at_normal_focus_controlled_urgency() {
                 scope: account,
                 conversation: call(account, 1).conversation,
                 id: NotificationId(1),
+                message: 1,
             },
             "x-nextcloud-modern-talk.message.reminder",
             "--urgency=normal",
@@ -588,6 +629,7 @@ fn native_category_fixture() {
             scope: account,
             conversation: call(account, 1).conversation,
             id: NotificationId(1),
+            message: 1,
         },
         "incoming" => NotificationKind::IncomingCall {
             call: call(account, 1),
@@ -728,10 +770,10 @@ fn native_actions_require_current_call_and_real_dispatcher_capability() {
 fn linux_sound_only_does_not_escape_system_notification_focus_policy() {
     let mut policy = NotificationPreferences::default();
     policy.messages.banners = false;
-    let shared = Shared {
+    let shared = Arc::new(Shared {
         state: Mutex::new(State::new(policy)),
         wake: Condvar::new(),
-    };
+    });
     let event = test(1, NotificationCategory::Messages);
     shared.lock().admit(event.clone(), Instant::now()).unwrap();
     shared.lock().next().unwrap();

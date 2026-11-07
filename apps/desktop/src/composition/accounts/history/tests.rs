@@ -2923,6 +2923,7 @@ fn with_capabilities(mut result: MessagingResult, allowed: Decision) -> Messagin
         media_caption: true,
         read_receipts: Some(true),
         typing_status: Some(true),
+        summary_offer: None,
     });
     result
 }
@@ -3216,11 +3217,14 @@ fn reminder_changes_and_schedule_cancellation_preserve_other_confirmed_entries()
             timestamp: 200
         }]
     );
-    model.snapshot.message_panel.as_mut().unwrap().scheduled =
+    model.history.get_mut(key).unwrap().schedules =
         page([7, 8].map(|id| talk_core::ui::messaging::Scheduled {
             id,
             body: text("Scheduled"),
             timestamp: 100,
+            failed_original_timestamp: None,
+            editable: true,
+            silent: false,
         }));
     let work = Work::CancelScheduled(7);
     let operation = admit(&mut model.history, key, 3, work);
@@ -3254,6 +3258,53 @@ fn reminder_changes_and_schedule_cancellation_preserve_other_confirmed_entries()
             .id,
         8
     );
+}
+
+#[test]
+fn scheduled_refresh_cannot_recreate_a_cancelled_message() {
+    use talk_core::protocol::messaging::{ComposeOptions, ScheduledMessage};
+    let key = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(key);
+    let old_read = admit(&mut cache, key, 1, Work::ScheduledPoll);
+    let cancel = admit(&mut cache, key, 2, Work::CancelScheduled(7));
+    assert!(cache.complete(
+        key,
+        cancel,
+        Work::CancelScheduled(7),
+        RequestId(2),
+        &Ok(MessagingResult::Changed),
+        false
+    ));
+    let row = ScheduledMessage {
+        id: MessageId {
+            conversation: key.conversation,
+            sequence: 7,
+        },
+        text: text("Synthetic message"),
+        send_at: 200,
+        original_send_at: None,
+        options: ComposeOptions::default(),
+    };
+    assert!(cache.complete(
+        key,
+        old_read,
+        Work::ScheduledPoll,
+        RequestId(1),
+        &Ok(MessagingResult::Scheduled(page([row.clone()]))),
+        false
+    ));
+    assert!(cache.get(key).unwrap().schedules.as_slice().is_empty());
+    let new_read = admit(&mut cache, key, 3, Work::ScheduledPoll);
+    assert!(cache.complete(
+        key,
+        new_read,
+        Work::ScheduledPoll,
+        RequestId(3),
+        &Ok(MessagingResult::Scheduled(page([row]))),
+        false
+    ));
+    assert_eq!(cache.get(key).unwrap().schedules.as_slice()[0].id, 7);
 }
 
 #[test]
@@ -3621,4 +3672,33 @@ fn scrolling_older_history_keeps_receipts_when_the_header_is_absent_but_respects
     );
     complete(&mut cache, key, 4, Work::Older, receipt(None));
     assert_eq!(cache.get(key).unwrap().common_read, Some(0));
+}
+
+#[test]
+fn location_cache_round_trip_drops_deleted_objects() {
+    let mut row = crate::composition::fixtures::snapshot(Some("chat-message-tools"))
+        .messages
+        .as_slice()
+        .iter()
+        .find(|row| row.local_id == 45)
+        .unwrap()
+        .clone();
+    let cached = cached_message(&row).unwrap();
+    assert_eq!(cached.locations.as_slice().len(), 1);
+    assert_eq!(
+        restored_message(&cached).metadata.rich.as_slice()[0]
+            .id
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "geo:52.5450511,13.3741463"
+    );
+    row.metadata.deleted = true;
+    assert!(
+        cached_message(&row)
+            .unwrap()
+            .locations
+            .as_slice()
+            .is_empty()
+    );
 }

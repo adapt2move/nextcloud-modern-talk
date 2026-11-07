@@ -17,6 +17,7 @@ pub enum MessageFeature {
     Search,
     Pins,
     Reminders,
+    UpcomingReminders,
     Schedules,
     Forward,
     Files,
@@ -25,6 +26,8 @@ pub enum MessageFeature {
     ReadReceipts,
     MarkUnread,
     UnreadFrom,
+    Translation,
+    Summary,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reaction {
@@ -183,10 +186,22 @@ pub struct Reminder {
     pub timestamp: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Translation {
+    pub message: u128,
+    pub source: Text<4096>,
+    pub language: Text<64>,
+    pub text: Text<4096>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Scheduled {
     pub id: u128,
     pub body: Text<4096>,
     pub timestamp: u64,
+    /// A zero send time means Talk has stopped trying to send this message.
+    pub failed_original_timestamp: Option<u64>,
+    /// Editing is unavailable when the complete server text exceeds the editor limit.
+    pub editable: bool,
+    pub silent: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UploadedFile {
@@ -251,6 +266,7 @@ pub enum FailedDraftKind {
     Send,
     Edit(u128),
     Schedule(u64),
+    EditScheduled(u128),
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FailedDraft {
@@ -327,6 +343,12 @@ pub struct MessagePanel {
     pub typing: Page<TypingPerson, 16>,
     pub reminders: Page<Reminder, 100>,
     pub scheduled: Page<Scheduled, 100>,
+    /// Only targets for which the server can detect the source language.
+    pub translation_targets: Option<Page<Text<64>, 64>>,
+    pub translations: Page<Translation, 50>,
+    pub translation_pending: Option<u128>,
+    pub translation_failed: Option<u128>,
+    pub summary: Option<Summary>,
     pub result: Option<(RequestId, Completion)>,
 }
 impl MessagePanel {
@@ -384,6 +406,11 @@ impl MessagePanel {
             typing: Page::empty(),
             reminders: Page::empty(),
             scheduled: Page::empty(),
+            translation_targets: None,
+            translations: Page::empty(),
+            translation_pending: None,
+            translation_failed: None,
+            summary: None,
             result: None,
         }
     }
@@ -394,6 +421,23 @@ impl MessagePanel {
             .find(|(key, _)| *key == feature)
             .map_or(Availability::UNKNOWN, |(_, value)| *value)
     }
+}
+/// Bounded room-local summary state; generated text is never an authority grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Summary {
+    Offer {
+        from: u128,
+        unread: u32,
+    },
+    Pending {
+        parts: Page<Text<4096>, 4>,
+    },
+    Ready {
+        parts: Page<Text<4096>, 4>,
+        partial: bool,
+    },
+    Empty,
+    Failed,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ComposeTarget {
@@ -506,8 +550,21 @@ pub enum MessageAction {
         timestamp: u64,
         target: ComposeTarget,
     },
+    EditScheduled {
+        id: u128,
+        body: Text<4096>,
+        timestamp: u64,
+        silent: bool,
+    },
     Scheduled,
     CancelScheduled(u128),
+    Translate {
+        message: u128,
+        source: Text<4096>,
+        language: Text<64>,
+    },
+    Summarize,
+    DismissSummary,
     Forward {
         message: u128,
         destination: ConversationRef,

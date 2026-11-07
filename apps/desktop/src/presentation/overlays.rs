@@ -230,6 +230,8 @@ impl Desktop {
             Overlay::ContentPreview => ("Dateivorschau", 820.),
             Overlay::CreatePoll => ("Umfrage erstellen", 620.),
             Overlay::PollDetails => ("Umfragedetails", 620.),
+            Overlay::Reminders => ("Erinnerungen", 560.),
+            Overlay::Federation => ("Föderierte Einladungen", 620.),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!("settings handled above"),
         };
@@ -381,6 +383,8 @@ impl Desktop {
             Overlay::ContentPreview => unreachable!("media viewer handled above"),
             Overlay::CreatePoll => self.poll_creation_body(cx),
             Overlay::PollDetails => self.poll_details_body(cx),
+            Overlay::Reminders => self.account_reminders_body(cx),
+            Overlay::Federation => self.federation_body(cx),
             Overlay::Forward => unreachable!("forward dialog handled above"),
             _ => unreachable!(),
         };
@@ -419,14 +423,24 @@ impl Desktop {
                         .when(overlay == Overlay::Create, |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - 66.)
-                                .min(632.)))
+                                - 40.)
+                                .min(720.)))
                         })
                         .when(!side, |d| {
                             d.max_h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
-                                - 66.)
-                                .min(632.)))
+                                - if matches!(overlay, Overlay::Search | Overlay::Create) {
+                                    40.
+                                } else {
+                                    66.
+                                })
+                            .min(
+                                if matches!(overlay, Overlay::Search | Overlay::Create) {
+                                    720.
+                                } else {
+                                    632.
+                                },
+                            )))
                         })
                         .flex()
                         .flex_col()
@@ -1097,152 +1111,52 @@ impl Desktop {
     fn search_body(&self, cx: &Context<Self>) -> Div {
         let t = self.theme;
         let q = self.search.read(cx).content.trim().to_lowercase();
-        let mut body =
-            div()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .child(
-                    self.input_surface(&self.search, cx)
-                        .min_h(px(48.))
-                        .child(self.scaled_icon("search", 20., t.muted))
-                        .child(div().flex_1().min_w_0().child(self.search.clone()))
-                        .child(
-                            self.button(
-                                "search-people",
-                                "Personen suchen",
-                                ButtonStyle::Secondary,
-                                !q.is_empty()
-                                    && self.snapshot.active_account.is_some()
-                                    && self
-                                        .snapshot
-                                        .create_panel
-                                        .as_ref()
-                                        .is_none_or(|p| !p.state.pending()),
-                                LocalAction::FindSearchPeople,
-                                cx,
-                            ),
-                        ),
-                )
-                .child(self.hint(self.l(
-                    "Geladene Inhalte sofort filtern oder Personen im Serververzeichnis suchen.",
-                )))
-                .child(
-                    div().flex().flex_wrap().gap_3().children(
-                        [
-                            (SearchKind::All, "Alles"),
-                            (SearchKind::Messages, "Nachrichten"),
-                            (SearchKind::Files, "Dateien"),
-                            (SearchKind::Conversations, "Gespräche"),
-                            (SearchKind::People, "Personen"),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, (k, l))| {
-                            self.chip(
-                                ("search-tab", i),
-                                l,
-                                (self.search_kind == k, i, 5),
-                                LocalAction::SearchKind(k),
-                                cx,
-                            )
-                        }),
-                    ),
-                );
-        if q.is_empty() {
-            return body.child(self.state_note(
-                "search",
-                "Gespräche und Personen suchen",
-                "Gib einen Namen oder einen Suchbegriff ein.",
-            ));
-        }
-        let mut count = 0;
-        if matches!(self.search_kind, SearchKind::All | SearchKind::People) {
-            let requested = self
-                .directory_query
-                .as_ref()
-                .is_some_and(|(account, query)| {
-                    Some(*account) == self.snapshot.active_account && query == &q
-                });
-            if requested {
-                if let Some(panel) = self
-                    .snapshot
-                    .create_panel
-                    .as_ref()
-                    .filter(|p| Some(p.account) == self.snapshot.active_account)
-                {
-                    body = body.child(self.title(self.l("Personen")));
-                    for person in panel.people.as_slice() {
-                        count += 1;
-                        body = body.child(
-                            self.button(
-                                gpui::SharedString::from(format!(
-                                    "search-person-{}",
-                                    person.id.local
-                                )),
-                                "",
-                                ButtonStyle::Quiet,
-                                !panel.state.pending(),
-                                LocalAction::CreateDirect(person.id),
-                                cx,
-                            )
-                            .w_full()
-                            .justify_start()
-                            .gap_3()
-                            .child(self.content_avatar(
-                                talk_core::ui::content::AssetTarget::PersonAvatar(person.id),
-                                "?",
-                                32.,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(person.name.as_str().to_owned())
-                                    .child(self.hint(person.label.as_str())),
-                            ),
-                        );
-                    }
-                    if panel.state.pending() {
-                        body = body.child(self.hint(self.l("Personen werden gesucht …")));
-                    } else if matches!(
-                        panel.state,
-                        talk_core::ui::conversation::RemoteState::Failed(_, _)
-                    ) {
-                        body = body.child(
-                            self.hint(self.l("Personensuche fehlgeschlagen. Erneut versuchen.")),
-                        );
-                    } else if panel.people_loaded && panel.people.as_slice().is_empty() {
-                        body = body.child(self.hint(self.l("Keine passenden Personen gefunden.")));
-                    }
-                }
-            } else {
-                body = body.child(self.hint(
-                    self.l("Mit „Personen suchen“ das freigegebene Serververzeichnis durchsuchen."),
-                ));
-            }
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                self.input_surface(&self.search, cx)
+                    .min_h(px(48.))
+                    .child(self.scaled_icon("search", 20., t.muted))
+                    .child(div().flex_1().min_w_0().child(self.search.clone())),
+            )
+            .child(self.hint(self.l("Mit Pfeiltasten auswählen und mit Enter öffnen.")))
+            .child(
+                div().flex().flex_wrap().gap_3().children(
+                    [
+                        (SearchKind::All, "Alles"),
+                        (SearchKind::Messages, "Nachrichten"),
+                        (SearchKind::Files, "Dateien"),
+                        (SearchKind::Conversations, "Gespräche"),
+                        (SearchKind::People, "Personen"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (k, l))| {
+                        self.chip(
+                            ("search-tab", i),
+                            l,
+                            (self.search_kind == k, i, 5),
+                            LocalAction::SearchKind(k),
+                            cx,
+                        )
+                    }),
+                ),
+            );
+        if self.search_kind == SearchKind::Messages {
+            return body.child(self.account_search_body(cx));
         }
         if matches!(
             self.search_kind,
-            SearchKind::All | SearchKind::Conversations
+            SearchKind::All | SearchKind::Conversations | SearchKind::People
         ) {
-            for row in self
-                .snapshot
-                .conversations
-                .as_slice()
-                .iter()
-                .filter(|r| r.title.as_str().to_lowercase().contains(&q))
-            {
-                count += 1;
-                body = body.child(self.option_row(
-                    scoped_id("search-room", row.context, 0, 0),
-                    ("chat", row.title.as_str(), row.subtitle.as_str()),
-                    true,
-                    LocalAction::Navigate(row.context),
-                    cx,
-                ));
-            }
+            body = body.child(self.switcher_results(cx));
         }
+        if q.is_empty() {
+            return body;
+        }
+        let mut count = 0;
         if let Some(context) = self.snapshot.selected {
             if matches!(self.search_kind, SearchKind::All | SearchKind::Messages) {
                 for m in self
@@ -1295,16 +1209,10 @@ impl Desktop {
                 }
             }
         }
-        if count == 0 && self.search_kind != SearchKind::People {
+        if count == 0 && matches!(self.search_kind, SearchKind::Messages | SearchKind::Files) {
             body=body.child(self.state_note("search","Keine lokalen Treffer","In den geladenen Inhalten wurde nichts gefunden. Eine vollständige Serversuche ist hier noch nicht verfügbar."));
         }
         body
-    }
-    fn discover_body(&self, cx: &Context<Self>) -> Div {
-        div().flex().flex_col().gap_5().child(self.hint(self.l("Finde Gespräche, die für dich im Verzeichnis freigegeben sind.")))
-            .child(self.state_note("compass","Verzeichnis nicht verfügbar","Auffindbarkeit und Beitrittsrechte sind noch nicht bekannt. Ein Gastlink allein macht ein Gespräch nicht öffentlich auffindbar."))
-            .child(self.button_with_icon("discover-refresh",("Verzeichnis laden","refresh"),ButtonStyle::Secondary,Availability::when(false,"Das Gesprächsverzeichnis ist in diesem Client noch nicht verfügbar."),LocalAction::Notice(""),cx))
-            .child(self.button("discover-back","Zurück zu deinen Gesprächen",ButtonStyle::Quiet,true,LocalAction::Close,cx))
     }
 }
 

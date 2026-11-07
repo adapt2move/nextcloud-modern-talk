@@ -114,6 +114,13 @@ pub trait ComputerSettingsPort {
     > {
         Err(talk_core::preferences::time::LocalTimeError::Unavailable)
     }
+    fn search_date_boundary(
+        &self,
+        _local: talk_core::ui::Text<32>,
+        _end: bool,
+    ) -> Result<talk_core::ui::Text<32>, talk_core::preferences::time::LocalTimeError> {
+        Err(talk_core::preferences::time::LocalTimeError::Unavailable)
+    }
     fn local_datetime(&self, _timestamp: u64) -> Option<talk_core::ui::Text<32>> {
         None
     }
@@ -350,10 +357,13 @@ impl Desktop {
         self.appearance = snapshot.active.appearance;
         self.scale = snapshot.active.scale.percent();
         self.compact = snapshot.active.sidebar_density == SidebarDensity::Compact;
-        self.locale = match snapshot.active.locale {
+        let locale = match snapshot.active.locale {
             LocalePreference::System => self.settings_port.system_locale(),
             preference => preference.resolve(&[]),
         };
+        self.account_search_ui
+            .reformat_dates(self.locale, locale, cx);
+        self.locale = locale;
         self.preferences = snapshot;
         self.apply_device_preferences();
         // Labels change without replacing editor entities, drafts or scoped handles.

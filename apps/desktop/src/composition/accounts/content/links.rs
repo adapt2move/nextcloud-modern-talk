@@ -6,9 +6,19 @@ use talk_core::ui::presentation::PresentationSnapshot;
 pub(super) struct Pending {
     context: ConversationRef,
     message: u128,
-    source: Text<4096>,
-    ordinal: u16,
+    target: Target,
     expires: Instant,
+}
+
+enum Target {
+    Message {
+        source: Text<4096>,
+        ordinal: u16,
+    },
+    Location {
+        placeholder: Text<128>,
+        id: Text<1024>,
+    },
 }
 
 fn destination(
@@ -19,6 +29,49 @@ fn destination(
     ordinal: u16,
     now: u64,
 ) -> Result<Text<2048>, SubmitError> {
+    let row = accessible_message(snapshot, context, message, now)?;
+    if row.body != *source {
+        return Err(SubmitError::StaleScope);
+    }
+    talk_core::ui::markup::parse(source.as_str())
+        .links
+        .as_slice()
+        .get(usize::from(ordinal))
+        .map(|link| link.destination.clone())
+        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))
+}
+
+fn location_destination(
+    snapshot: &PresentationSnapshot,
+    context: ConversationRef,
+    message: u128,
+    placeholder: &Text<128>,
+    id: &Text<1024>,
+    now: u64,
+) -> Result<Text<2048>, SubmitError> {
+    let row = accessible_message(snapshot, context, message, now)?;
+    let current = row.metadata.rich.as_slice().iter().any(|object| {
+        object.kind.as_str() == "geo-location"
+            && object.placeholder == *placeholder
+            && object.id.as_ref() == Some(id)
+    });
+    if !current {
+        return Err(SubmitError::StaleScope);
+    }
+    let (lat, lon) = talk_core::ui::markup::location_coordinates(id.as_str())
+        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+    Text::new(&format!(
+        "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"
+    ))
+    .map_err(|_| SubmitError::Unavailable(UnavailableReason::Unsupported))
+}
+
+fn accessible_message(
+    snapshot: &PresentationSnapshot,
+    context: ConversationRef,
+    message: u128,
+    now: u64,
+) -> Result<&talk_core::ui::presentation::MessageView, SubmitError> {
     if snapshot.active_account != Some(context.account)
         || snapshot.selected != Some(context)
         || snapshot.content != ContentState::Ready
@@ -51,13 +104,13 @@ fn destination(
                         .as_slice()
                         .iter()
                         .chain(p.thread_messages.as_slice())
+                        .chain(p.thread_root_message.iter())
                         .chain(p.pinned_messages.as_slice())
                 }),
         )
         .find(|row| row.local_id == message)
         .ok_or(SubmitError::StaleScope)?;
     if row.metadata.deleted
-        || row.body != *source
         || row
             .metadata
             .expires_at
@@ -65,12 +118,7 @@ fn destination(
     {
         return Err(SubmitError::StaleScope);
     }
-    talk_core::ui::markup::parse(source.as_str())
-        .links
-        .as_slice()
-        .get(usize::from(ordinal))
-        .map(|link| link.destination.clone())
-        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    Ok(row)
 }
 
 impl Accounts {
@@ -101,8 +149,40 @@ impl Accounts {
         self.content_owner.message_link = Some(Pending {
             context,
             message,
-            source,
-            ordinal,
+            target: Target::Message { source, ordinal },
+            expires: Instant::now() + Duration::from_secs(2),
+        });
+        Ok(())
+    }
+
+    pub(crate) fn open_location(
+        &mut self,
+        context: ConversationRef,
+        message: u128,
+        placeholder: Text<128>,
+        id: Text<1024>,
+    ) -> Result<(), SubmitError> {
+        self.current(context.account)?;
+        if self
+            .content_owner
+            .message_link
+            .as_ref()
+            .is_some_and(|p| p.expires > Instant::now())
+        {
+            return Err(SubmitError::Busy);
+        }
+        location_destination(
+            &self.snapshot,
+            context,
+            message,
+            &placeholder,
+            &id,
+            history::now_unix(),
+        )?;
+        self.content_owner.message_link = Some(Pending {
+            context,
+            message,
+            target: Target::Location { placeholder, id },
             expires: Instant::now() + Duration::from_secs(2),
         });
         Ok(())
@@ -113,14 +193,24 @@ impl Accounts {
         if pending.expires <= Instant::now() || self.current(pending.context.account).is_err() {
             return None;
         }
-        destination(
-            &self.snapshot,
-            pending.context,
-            pending.message,
-            &pending.source,
-            pending.ordinal,
-            history::now_unix(),
-        )
+        match pending.target {
+            Target::Message { source, ordinal } => destination(
+                &self.snapshot,
+                pending.context,
+                pending.message,
+                &source,
+                ordinal,
+                history::now_unix(),
+            ),
+            Target::Location { placeholder, id } => location_destination(
+                &self.snapshot,
+                pending.context,
+                pending.message,
+                &placeholder,
+                &id,
+                history::now_unix(),
+            ),
+        }
         .ok()
     }
 }
@@ -172,6 +262,33 @@ mod tests {
         edited.body = text("https://example.invalid/changed");
         state.messages = page([edited]);
         assert!(destination(&state, context, 77, &source, 0, 100).is_err());
+    }
+
+    #[test]
+    fn location_handoff_revalidates_object_and_never_uses_a_server_url() {
+        let (mut state, context, _) = snapshot();
+        let mut row = state.messages.as_slice()[0].clone();
+        let placeholder = text("place");
+        let id = text("geo:52.5,13.4");
+        row.metadata.rich = page([talk_core::ui::messaging::RichObject {
+            placeholder: placeholder.clone(),
+            kind: text("geo-location"),
+            name: text("Fixture"),
+            id: Some(id.clone()),
+            mime_type: None,
+            size: None,
+            link: Some(text("https://evil.invalid/")),
+        }]);
+        state.messages = page([row.clone()]);
+        assert_eq!(
+            location_destination(&state, context, 77, &placeholder, &id, 100)
+                .unwrap()
+                .as_str(),
+            "https://www.openstreetmap.org/?mlat=52.5&mlon=13.4#map=16/52.5/13.4"
+        );
+        row.metadata.rich = Page::empty();
+        state.messages = page([row]);
+        assert!(location_destination(&state, context, 77, &placeholder, &id, 100).is_err());
     }
 
     #[test]

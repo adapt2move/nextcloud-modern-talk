@@ -190,7 +190,6 @@ impl Desktop {
         .into_any_element()
     }
 
-    /// All result rows share one admission while retaining distinct element IDs.
     pub(super) fn poll_result_reveal(&self, poll: u64, option: u16, element: Div) -> AnyElement {
         let trigger: ElementId = ("poll-results", poll as usize).into();
         let admitted = self
@@ -206,6 +205,21 @@ impl Desktop {
                 .into(),
             element,
             admitted,
+            !self.reduced_motion,
+            self.motion_frame_counter(),
+        )
+        .into_any_element()
+    }
+    pub(super) fn reveal_observation(
+        &self,
+        id: ElementId,
+        element: Div,
+        observed: Option<Instant>,
+    ) -> AnyElement {
+        reveal::ActionReveal::new(
+            id,
+            element,
+            observed,
             !self.reduced_motion,
             self.motion_frame_counter(),
         )

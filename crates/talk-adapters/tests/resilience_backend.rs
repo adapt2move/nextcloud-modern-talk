@@ -147,19 +147,24 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
             )
             .await
             .unwrap();
-        let ProtocolReply::Messaging { result, .. } = reply else {
+        let operation = OperationId::from_local(200 + index as u128);
+        let ProtocolReply::Messaging {
+            operation: actual,
+            result,
+            ..
+        } = reply
+        else {
             panic!("typed send result");
         };
+        assert_eq!(actual, operation);
         let message = match result {
             MessagingResult::Message(message) => {
                 assert!(message.own);
-                assert_eq!(
-                    message.message.own_operation,
-                    Some(OperationId::from_local(200 + index as u128))
-                );
+                assert_eq!(message.message.own_operation, Some(operation));
                 message.message.id
             }
             MessagingResult::Send(receipt) => {
+                assert_eq!(receipt.operation, operation);
                 let SendState::ServerAccepted(message) = receipt.state else {
                     panic!("server acceptance");
                 };
@@ -167,6 +172,8 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
             }
             _ => panic!("typed send receipt"),
         };
+        assert_eq!(message.conversation, room);
+        assert!(message.sequence > 0);
         accepted.push(message);
         let reply = client
             .request(context(), history(300 + index as u128))

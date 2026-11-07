@@ -384,6 +384,7 @@ mod tests {
                     family: protocol::ServerFamily::Nextcloud35,
                     talk_available: true,
                     group_creation: talk_core::policy::Decision::Unknown,
+                    listable_rooms: protocol::FeatureSupport::Unknown,
                     message_limit: None,
                     reference_correlation: true,
                     channel_semantics: false,

@@ -1,6 +1,7 @@
 //! Composition owns bounded cache projections and admission, never file I/O.
 //! Local runtime/host zero is a read-only presentation identity: only a freshly
 //! restored account and room observation can authorize protocol dispatch.
+pub(super) mod mentions;
 use super::*;
 use talk_adapters::identity::{
     CACHE_THUMBNAIL_BYTES, CACHE_THUMBNAIL_LIFETIME, CACHE_THUMBNAIL_LIMIT, CacheHistory,
@@ -592,6 +593,14 @@ fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationV
         unread: room.unread,
         unread_direct_mention: room.unread_direct_mention,
         last_read_message: room.last_read_message.map(u128::from),
+        unread_mention: room.unread_mention,
+        notification_muted: room
+            .observation
+            .as_ref()
+            .filter(|observation| fresh_metadata(observation.observed_at, history::now_unix()))
+            .and_then(|observation| observation.notifications)
+            .map(|level| level == CachedNotificationLevel::Never),
+        last_activity: None,
         favorite: room.favorite,
         tags: None,
         organization: ConversationOrganization {
@@ -614,6 +623,7 @@ fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationV
         status_icon: status.and_then(|status| status.icon.clone()),
         status_message: status.and_then(|status| status.message.clone()),
         participants: room.participant_count.and_then(|n| u16::try_from(n).ok()),
+        participant_names: Page::empty(),
         send: Decision::Unknown,
         attach: Decision::Unknown,
         draft_clipboard: Decision::Unknown,
@@ -1233,8 +1243,13 @@ impl Accounts {
             server_default_permissions: None,
             effective_permissions: None,
             lobby: o.lobby,
+            lobby_timer: None,
             has_password: None,
             participant_count: room.participant_count,
+            breakout_mode: None,
+            breakout_started: None,
+            breakout_child: false,
+            breakout_supported: false,
             guest_access: o.guest_access,
             leave: Decision::Unknown,
             controls: Page::empty(),
@@ -1413,6 +1428,12 @@ impl Accounts {
                 unread: room.unread_messages.unwrap_or(0),
                 unread_direct_mention: room.unread_direct_mention,
                 last_read_message: room.last_read_message,
+                unread_mention: mentions::merge(
+                    room.unread_mention,
+                    room.unread_messages,
+                    room.last_activity,
+                    old.map(|r| (r.unread_mention, r.unread, r.last_activity)),
+                ),
                 participant_count: count,
                 participant_count_at: old.and_then(|r| r.participant_count_at),
                 last_activity: room.last_activity,
@@ -1483,6 +1504,44 @@ impl Accounts {
         }
         self.cache
             .enqueue(scope.account, DataCommand::PutRooms(rooms));
+    }
+    pub(super) fn remember_cached_unread_state(&mut self, context: ConversationRef, read: bool) {
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().cloned().map(|mut row| {
+                if row.context == context {
+                    row.unread = if read { 0 } else { row.unread.max(1) };
+                    row.unread_mention = if read { Some(false) } else { None };
+                }
+                row
+            }));
+        }
+        if !self.cache.persistable(context) {
+            return;
+        }
+        let Some(key) = self.cache.stable_room(context) else {
+            return;
+        };
+        let Some(account) = self
+            .cache
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == context.account.account && a.scope == Some(context.account))
+        else {
+            return;
+        };
+        let Some(snapshot) = account.snapshot.as_mut() else {
+            return;
+        };
+        snapshot.rooms = page(snapshot.rooms.as_slice().iter().cloned().map(|mut room| {
+            if room.key == key {
+                room.unread = if read { 0 } else { room.unread.max(1) };
+                room.unread_mention = if read { Some(false) } else { None };
+            }
+            room
+        }));
+        let rooms = snapshot.rooms.clone();
+        self.cache
+            .enqueue(context.account.account, DataCommand::PutRooms(rooms));
     }
     pub(super) fn remember_cached_member_count(&mut self, context: ConversationRef, count: u16) {
         if !self.cache.persistable(context) {
@@ -1792,6 +1851,7 @@ mod tests {
             unread: 3,
             unread_direct_mention: Some(true),
             last_read_message: Some(1),
+            unread_mention: None,
             participant_count: Some(7),
             participant_count_at: Some(history::now_unix()),
             last_activity: Some(1),
@@ -1929,6 +1989,8 @@ mod tests {
             unread_messages: Some(1),
             unread_direct_mention: Some(true),
             last_read_message: Some(1),
+            unread_mention: None,
+            notification_muted: None,
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,
@@ -1962,6 +2024,74 @@ mod tests {
         );
     }
     #[test]
+    fn cached_mentions_restore_and_only_survive_unchanged_live_room_metadata() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let scope = model.snapshot.active_account.unwrap();
+        install(&mut model, scope);
+        model.cache.accounts[0].snapshot.as_mut().unwrap().rooms = page([CacheRoom {
+            unread_mention: Some(true),
+            ..metadata()
+        }]);
+        model.background.sync(&[scope], Instant::now());
+        model.restore_cache_views();
+        assert_eq!(
+            model.snapshot.conversations.as_slice()[0].unread_mention,
+            Some(true)
+        );
+        let mut room = observed(scope);
+        room.unread_messages = Some(3);
+        model.apply_room_refresh(
+            scope,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(
+                protocol::ConversationList {
+                    scope,
+                    rooms: page([room.clone()]),
+                },
+            ))),
+        );
+        let live = ConversationRef {
+            account: scope,
+            conversation: room.id,
+        };
+        assert_eq!(
+            model.snapshot.conversations.as_slice()[0].unread_mention,
+            Some(true)
+        );
+        assert_eq!(
+            model.cache.accounts[0]
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .rooms
+                .as_slice()[0]
+                .unread_mention,
+            Some(true)
+        );
+        room.unread_messages = Some(2);
+        model.apply_room_refresh(
+            scope,
+            Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(
+                protocol::ConversationList {
+                    scope,
+                    rooms: page([room]),
+                },
+            ))),
+        );
+        assert_eq!(
+            model.snapshot.conversations.as_slice()[0].unread_mention,
+            None
+        );
+        model.remember_cached_unread_state(live, true);
+        let stored = &model.cache.accounts[0]
+            .snapshot
+            .as_ref()
+            .unwrap()
+            .rooms
+            .as_slice()[0];
+        assert_eq!((stored.unread, stored.unread_mention), (0, Some(false)));
+    }
+    #[test]
     fn selected_cached_room_rebinds_after_its_synthetic_binding_has_been_retired() {
         use talk_adapters::identity::{CacheHistory, CachedMessage};
         use talk_core::protocol::{
@@ -1977,6 +2107,7 @@ mod tests {
             room: stable(),
             messages: page([CachedMessage {
                 attachments: Page::empty(),
+                locations: Page::empty(),
                 id: 7,
                 author: text("Synthetic actor"),
                 actor_key: None,

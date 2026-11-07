@@ -12,6 +12,11 @@ pub(super) struct MemberBinding {
     pub attendee: u64,
     pub actor_type: String,
     pub actor_id: String,
+    pub role: Role,
+}
+pub(super) struct BreakoutBinding {
+    parent: ConversationId,
+    room: ConversationId,
 }
 /// A refreshed participant is the same UI target only while its complete
 /// account/runtime/host/room/attendee/actor binding is unchanged. The current
@@ -240,6 +245,7 @@ fn feature(setting: Setting) -> &'static str {
         Setting::Avatar => "avatar",
         Setting::ReadOnly => "read-only-rooms",
         Setting::Notifications => "notification-levels",
+        Setting::CallNotifications => "notification-calls",
         Setting::Important => "important-conversations",
         Setting::Sensitive => "sensitive-conversations",
         Setting::Expiration => "message-expiration",
@@ -292,6 +298,13 @@ pub(super) fn control(
     data: &Value,
     caps: &Capabilities,
 ) -> ActionAvailability {
+    if wire::is_federated(data) {
+        return ActionAvailability {
+            implemented: false,
+            server: FeatureSupport::Unsupported,
+            allowed: Decision::Denied,
+        };
+    }
     if setting == Setting::CsvImport {
         let invite = control(Setting::Invite, room, data, caps);
         let csv = caps.feature("email-csv-import");
@@ -322,7 +335,10 @@ pub(super) fn control(
         Decision::Unknown
     } else if (matches!(
         setting,
-        Setting::Notifications | Setting::Important | Setting::Sensitive
+        Setting::Notifications
+            | Setting::CallNotifications
+            | Setting::Important
+            | Setting::Sensitive
     ) || moderator(room))
     {
         Decision::Allowed
@@ -379,6 +395,7 @@ pub(super) fn control(
                 | Setting::CsvImport
                 | Setting::RecordingConsent
                 | Setting::Sensitive
+                | Setting::Breakouts
         )
     {
         allowed = Decision::Denied
@@ -412,6 +429,9 @@ pub(super) fn control(
         } else {
             Decision::Unknown
         }
+    }
+    if setting == Setting::Breakouts && room.kind != RoomKind::Group {
+        allowed = Decision::Denied;
     }
     ActionAvailability {
         implemented: true,
@@ -493,6 +513,7 @@ impl NextcloudClient {
             Setting::Avatar,
             Setting::ReadOnly,
             Setting::Notifications,
+            Setting::CallNotifications,
             Setting::Important,
             Setting::Sensitive,
             Setting::Expiration,
@@ -529,6 +550,14 @@ impl NextcloudClient {
                 .filter(|p| p & !511 == 0)
                 .and_then(|p| u16::try_from(p).ok())
         };
+        let breakout_supported = caps.has("breakout-rooms-v1")
+            && caps.breakouts_enabled == Some(true)
+            && !wire::is_federated(data)
+            && room.kind == RoomKind::Group
+            && wire::integer(data.get("breakoutRoomMode")).is_some_and(|mode| mode <= 3)
+            && !room.unknown_restrictions
+            && !room.classified
+            && !room.channel;
         Ok(ConversationDetails {
             conversation: room,
             description: data
@@ -565,6 +594,15 @@ impl NextcloudClient {
             recording_consent: state("recordingConsent"),
             has_password: data.get("hasPassword").and_then(Value::as_bool),
             participant_count: None,
+            breakout_mode: match wire::integer(data.get("breakoutRoomMode")) {
+                Some(1) => Some(BreakoutMode::Automatic),
+                Some(2) => Some(BreakoutMode::Manual),
+                Some(3) => Some(BreakoutMode::Free),
+                _ => None,
+            },
+            breakout_started: state("breakoutRoomStatus"),
+            breakout_child: data.get("objectType").and_then(Value::as_str) == Some("room"),
+            breakout_supported,
             controls,
         })
     }
@@ -580,6 +618,28 @@ impl NextcloudClient {
             .iter()
             .find(|m| m.id == id)
             .ok_or_else(|| self.error(ErrorKind::NotFound))
+    }
+    fn breakout_assignments(
+        &self,
+        parent: ConversationId,
+        assignments: &Page<BreakoutAssignment, 100>,
+        amount: u8,
+    ) -> Result<Vec<(u64, u8)>, PortError> {
+        let mut output = Vec::with_capacity(assignments.as_slice().len());
+        for assignment in assignments.as_slice() {
+            let member = self.member_binding(assignment.member, parent)?;
+            if member.actor_type != "users"
+                || member.role != Role::Member
+                || assignment.room >= amount
+                || output
+                    .iter()
+                    .any(|(attendee, _)| *attendee == member.attendee)
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            output.push((member.attendee, assignment.room));
+        }
+        Ok(output)
     }
     fn integration(
         &self,
@@ -672,6 +732,7 @@ impl NextcloudClient {
                 attendee,
                 actor_type,
                 actor_id,
+                role,
             });
         }
         self.members = bindings;
@@ -724,11 +785,54 @@ impl NextcloudClient {
     ) -> Result<ConversationResult, PortError> {
         use ConversationCommand as C;
         let data = self.room_data(c, id).await?;
+        if wire::is_federated(&data) {
+            if command != C::Read {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            let remote = self
+                .federation_capabilities_for_room(c, id, caps, false)
+                .await?;
+            return Ok(ConversationResult::Details(Box::new(
+                self.conversation_details(id, &data, &remote)?,
+            )));
+        }
         let room = wire::room(&data, id, caps).map_err(|k| self.error(k))?;
         if command == C::Read {
             return Ok(ConversationResult::Details(Box::new(
                 self.conversation_details(id, &data, caps)?,
             )));
+        }
+        if let C::SetImageAvatar { local_path } = &command {
+            self.setting_allowed(Setting::Avatar, &room, &data, caps)?;
+            let path = std::path::PathBuf::from(local_path.as_str());
+            // Decoding is bounded but can be expensive; never perform it on the
+            // account runtime. Re-observe authority after the worker finishes.
+            let png = tokio::task::spawn_blocking(move || super::avatar_upload::prepare(&path))
+                .await
+                .map_err(|_| self.error(ErrorKind::Transport))?
+                .map_err(|kind| self.error(kind))?;
+            let fresh = self.capabilities(c).await?;
+            self.supported(&fresh)?;
+            let data = self.room_data(c, id).await?;
+            let room = wire::room(&data, id, &fresh).map_err(|kind| self.error(kind))?;
+            self.setting_allowed(Setting::Avatar, &room, &data, &fresh)?;
+            let token = api::models::RoomToken::parse(self.check_room(id)?)
+                .map_err(|kind| self.error(transport::kind(kind)))?;
+            self.admit_action(id, operation)?;
+            let result = self
+                .transport
+                .api_request(c, api::Request::UploadRoomAvatar { room: token, png })
+                .await;
+            let result = match result {
+                Ok(api::Reply::Room(value)) => self
+                    .conversation_details(id, &value.project(), &fresh)
+                    .map(|details| ConversationResult::Details(Box::new(details)))
+                    .map_err(|_| self.error(ErrorKind::Uncertain)),
+                Ok(_) => Err(self.error(ErrorKind::Uncertain)),
+                Err(error) => Err(error),
+            };
+            self.settle_action(operation, result.as_ref().err());
+            return result;
         }
         if command == C::Leave {
             self.allowed(room.actions.leave_conversation)?;
@@ -757,7 +861,8 @@ impl NextcloudClient {
             C::SetName(_) | C::SetDescription(_) => Setting::Metadata,
             C::SetEmojiAvatar { .. } | C::RemoveAvatar => Setting::Avatar,
             C::SetReadOnly(_) => Setting::ReadOnly,
-            C::SetNotifications(_) | C::SetCallNotifications(_) => Setting::Notifications,
+            C::SetNotifications(_) => Setting::Notifications,
+            C::SetCallNotifications(_) => Setting::CallNotifications,
             C::SetImportant(_) => Setting::Important,
             C::SetSensitive(_) => Setting::Sensitive,
             C::SetExpiration(_) => Setting::Expiration,
@@ -780,7 +885,33 @@ impl NextcloudClient {
             C::Bans | C::Ban { .. } | C::Unban(_) => Setting::Bans,
             _ => Setting::Breakouts,
         };
-        self.setting_allowed(setting, &room, &data, caps)?;
+        let participant_breakout = matches!(
+            command,
+            C::BreakoutRooms | C::SwitchBreakout(_) | C::RequestBreakoutAssistance
+        );
+        if matches!(command, C::ConfigureBreakouts { .. })
+            && (room.kind != RoomKind::Group
+                || data.get("objectType").and_then(Value::as_str) == Some("room")
+                || wire::integer(data.get("breakoutRoomMode")) != Some(0))
+        {
+            return Err(self.error(ErrorKind::Conflict));
+        }
+        if participant_breakout {
+            if caps.feature("breakout-rooms-v1") != FeatureSupport::Supported
+                || caps.breakouts_enabled != Some(true)
+            {
+                return Err(self.error(ErrorKind::Unsupported));
+            }
+            if room.unknown_restrictions
+                || room.classified
+                || room.channel
+                || room.actions.read_messages != Decision::Allowed
+            {
+                return Err(self.error(ErrorKind::PermissionDenied));
+            }
+        } else {
+            self.setting_allowed(setting, &room, &data, caps)?;
+        }
         if command == C::Members {
             return self.members(c, id, caps).await;
         }
@@ -808,6 +939,13 @@ impl NextcloudClient {
         let delete = command == C::Delete;
         let clear = command == C::ClearHistory;
         let keep = command == C::Keep;
+        let switching = matches!(command, C::SwitchBreakout(_));
+        if matches!(&command, C::ConfigureBreakouts { assignments, .. } if !assignments.as_slice().is_empty())
+            || matches!(&command, C::AssignBreakouts(assignments) if !assignments.as_slice().is_empty())
+        {
+            // Re-observe participant identities and roles before submitting a map.
+            self.members(c, id).await?;
+        }
         let wire = match command {
             C::SetName(v) => WireCommand::Rename(v.as_str().into()),
             C::SetDescription(v) => WireCommand::Description(v.as_str().into()),
@@ -933,8 +1071,60 @@ impl NextcloudClient {
                     .transpose()?,
             ),
             C::BreakoutRooms => WireCommand::BreakoutRooms,
-            C::ConfigureBreakouts { amount, automatic } => {
-                WireCommand::ConfigureBreakouts { amount, automatic }
+            C::ConfigureBreakouts {
+                amount,
+                mode,
+                assignments,
+            } => {
+                if mode != BreakoutMode::Manual && !assignments.as_slice().is_empty() {
+                    return Err(self.error(ErrorKind::Malformed));
+                }
+                WireCommand::ConfigureBreakouts {
+                    amount,
+                    mode: match mode {
+                        BreakoutMode::Automatic => 1,
+                        BreakoutMode::Manual => 2,
+                        BreakoutMode::Free => 3,
+                    },
+                    assignments: self.breakout_assignments(id, &assignments, amount)?,
+                }
+            }
+            C::AssignBreakouts(assignments) => {
+                let count = self
+                    .breakout_rooms
+                    .iter()
+                    .filter(|entry| entry.parent == id)
+                    .count();
+                let amount = u8::try_from(count)
+                    .ok()
+                    .filter(|n| *n > 0 && *n <= 20)
+                    .ok_or_else(|| self.error(ErrorKind::WrongScope))?;
+                WireCommand::AssignBreakouts(self.breakout_assignments(id, &assignments, amount)?)
+            }
+            C::BroadcastBreakouts(message) => {
+                WireCommand::BroadcastBreakouts(message.as_str().to_owned())
+            }
+            C::RequestBreakoutAssistance => {
+                if data.get("objectType").and_then(Value::as_str) != Some("room") {
+                    return Err(self.error(ErrorKind::WrongScope));
+                }
+                WireCommand::RequestBreakoutAssistance
+            }
+            C::SwitchBreakout(target) => {
+                if moderator(&room)
+                    || wire::integer(data.get("breakoutRoomMode")) != Some(3)
+                    || wire::integer(data.get("breakoutRoomStatus")) != Some(1)
+                    || !self
+                        .breakout_rooms
+                        .iter()
+                        .any(|binding| binding.parent == id && binding.room == target)
+                {
+                    return Err(self.error(ErrorKind::PermissionDenied));
+                }
+                WireCommand::SwitchBreakout(
+                    api::models::RoomToken::parse(self.check_room(target)?)
+                        .map_err(|kind| self.error(transport::kind(kind)))?,
+                )
             }
             C::StartBreakouts => WireCommand::StartBreakouts,
             C::StopBreakouts => WireCommand::StopBreakouts,
@@ -1015,20 +1205,59 @@ impl NextcloudClient {
                 }
                 Ok(ConversationResult::Bans(out))
             }
-            api::Reply::Rooms(rooms) => {
-                if rooms.len() > 20 {
+            api::Reply::Rooms(mut rooms) => {
+                if rooms.len() > 21 {
                     return Err(self.error(ErrorKind::TooLarge));
                 }
+                let parent_token = self.check_room(id)?.to_owned();
+                rooms.retain(|room| room.token != parent_token);
+                if rooms.len() > 20
+                    || rooms.iter().any(|room| {
+                        room.server_id.is_none()
+                            || room.object_type.as_deref() != Some("room")
+                            || room.object_id.as_deref() != Some(parent_token.as_str())
+                    })
+                {
+                    return Err(self.error(ErrorKind::WrongScope));
+                }
+                rooms.sort_by_key(|room| room.server_id);
+                if rooms
+                    .windows(2)
+                    .any(|pair| pair[0].server_id == pair[1].server_id)
+                {
+                    return Err(self.error(ErrorKind::Malformed));
+                }
+                // Only the most recently observed parent owns switch/assignment
+                // handles; this keeps the journal bounded to twenty children.
+                self.breakout_rooms.clear();
                 let mut out = Page::empty();
                 for room in rooms {
                     let data = room.project();
                     let rid = self.bind_room(&data)?;
+                    self.breakout_rooms.push(BreakoutBinding {
+                        parent: id,
+                        room: rid,
+                    });
                     let mut room = wire::room(&data, rid, caps).map_err(|k| self.error(k))?;
                     self.project_call(&mut room, &data, caps)?;
                     out.try_push(room)
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
                 Ok(ConversationResult::BreakoutRooms(out))
+            }
+            api::Reply::Room(room) if switching => {
+                let data = room.project();
+                let target = self.bind_room(&data)?;
+                if !self
+                    .breakout_rooms
+                    .iter()
+                    .any(|entry| entry.parent == id && entry.room == target)
+                {
+                    return Err(self.error(ErrorKind::Uncertain));
+                }
+                let mut room = wire::room(&data, target, caps).map_err(|kind| self.error(kind))?;
+                self.project_call(&mut room, &data, caps)?;
+                Ok(ConversationResult::BreakoutSwitched(Box::new(room)))
             }
             _ if delete => {
                 self.rooms.retain(|r| r.id != id);

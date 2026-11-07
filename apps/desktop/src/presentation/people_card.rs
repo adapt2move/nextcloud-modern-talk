@@ -895,6 +895,7 @@ mod tests {
             request: RequestId(4),
             completion: Completion::ServerAccepted,
             conversation: Some(target),
+            incomplete_invitations: false,
         });
         snapshot.create_panel = Some(panel);
         assert_eq!(pending.advance(&snapshot, now), CallProgress::Wait);

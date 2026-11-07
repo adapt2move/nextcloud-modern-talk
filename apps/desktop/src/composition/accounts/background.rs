@@ -17,6 +17,9 @@ struct MemberCount {
     count: Option<u16>,
     observed: Option<Instant>,
     requested: Option<Instant>,
+    names: Page<Text<256>, 16>,
+    names_observed: Option<Instant>,
+    names_requested: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +79,7 @@ pub(super) struct Account {
     transport_failures: u8,
     background_paused_until: Option<Instant>,
     member_counts: Vec<MemberCount>,
+    names_next: Instant,
     pub(super) metadata: conversations::Metadata,
     pub(super) rooms: Page<ConversationView, 100>,
     pub(super) state: ConversationListState,
@@ -104,6 +108,7 @@ impl Background {
                     transport_failures: 0,
                     background_paused_until: None,
                     member_counts: Vec::new(),
+                    names_next: now,
                     metadata: conversations::Metadata::default(),
                     rooms: Page::empty(),
                     state: ConversationListState {
@@ -170,6 +175,56 @@ impl Background {
             slot.requested = Some(now);
         }
     }
+    fn names_need_refresh(&self, context: ConversationRef, now: Instant) -> bool {
+        self.account(context.account)
+            .and_then(|a| a.member_counts.iter().find(|m| m.context == context))
+            .is_none_or(|m| {
+                !m.names_observed
+                    .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_LIFETIME)
+                    && !m
+                        .names_requested
+                        .is_some_and(|at| now.saturating_duration_since(at) < MEMBER_COUNT_RETRY)
+            })
+    }
+    pub(super) fn remember_member_names(
+        &mut self,
+        context: ConversationRef,
+        names: Page<Text<256>, 16>,
+        now: Instant,
+    ) {
+        if let Some(slot) = self.member_slot(context) {
+            slot.names = names.clone();
+            slot.names_observed = Some(now);
+        }
+        if let Some(account) = self.account_mut(context.account) {
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = names.clone();
+                }
+                row
+            }));
+        }
+    }
+    pub(super) fn forget_member_names(&mut self, context: ConversationRef) {
+        if let Some(account) = self.account_mut(context.account) {
+            if let Some(slot) = account
+                .member_counts
+                .iter_mut()
+                .find(|m| m.context == context)
+            {
+                slot.names = Page::empty();
+                slot.names_observed = None;
+            }
+            account.rooms = page(account.rooms.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = Page::empty();
+                }
+                row
+            }));
+        }
+    }
     pub(super) fn remember_member_count(
         &mut self,
         context: ConversationRef,
@@ -208,6 +263,7 @@ impl Background {
                 let mut row = row.clone();
                 if row.context == context {
                     row.participants = None;
+                    row.participant_names = Page::empty();
                 }
                 row
             }));
@@ -236,6 +292,9 @@ impl Background {
                 count: None,
                 observed: None,
                 requested: None,
+                names: Page::empty(),
+                names_observed: None,
+                names_requested: None,
             });
             account.member_counts.len() - 1
         };
@@ -435,7 +494,9 @@ impl Purpose {
     }
     pub(super) fn room(self) -> Option<ConversationRef> {
         match self {
-            Self::Room(_, c, _, _)
+            Self::ParticipantIndex(c, _)
+            | Self::Reference(c, _, _, _)
+            | Self::Room(_, c, _, _)
             | Self::Message(_, c, _, _)
             | Self::Mutation(_, c)
             | Self::Send(_, c, _)
@@ -450,8 +511,14 @@ impl Purpose {
     pub(super) fn account(self) -> Option<AccountScope> {
         self.room().map(|c| c.account).or(match self {
             Self::Create(_, s, _)
+            | Self::Search(_, s, _)
+            | Self::Discover(_, s, _)
+            | Self::DiscoverProbe(s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
+            | Self::AccountReminders(s, _)
+            | Self::FederationInvitations(s, _)
+            | Self::FederationChange(s, _, _)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
             | Self::Threads(s, _)
@@ -609,6 +676,117 @@ impl Accounts {
             account.prefetch.remove(0);
         }
     }
+    /// Populate the session-only switcher index opportunistically. One read at
+    /// a time, one attempt per second, and a bounded retry interval keep this
+    /// subordinate to explicit navigation and message work.
+    pub(super) fn tick_participant_index(&mut self) {
+        let now = Instant::now();
+        if self.pending.len() >= 8
+            || self
+                .pending
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::ParticipantIndex(..)))
+        {
+            return;
+        }
+        let Some(scope) = self.snapshot.active_account else {
+            return;
+        };
+        if !self
+            .snapshot
+            .accounts
+            .as_slice()
+            .iter()
+            .any(|a| a.scope == scope && a.connection == AccountConnectionState::Connected)
+            || self.pending.iter().any(|p| {
+                p.purpose.account() == Some(scope) && !matches!(p.purpose, Purpose::LiveEvents(_))
+            })
+        {
+            return;
+        }
+        let Some(account) = self
+            .background
+            .account(scope)
+            .filter(|a| now >= a.names_next)
+        else {
+            return;
+        };
+        let next = account
+            .rooms
+            .as_slice()
+            .iter()
+            .filter(|room| {
+                matches!(
+                    room.kind,
+                    ConversationKind::Group | ConversationKind::GuestAccessible
+                )
+            })
+            .filter_map(|room| {
+                account
+                    .metadata
+                    .participant_index_ticket(room.context)
+                    .map(|ticket| (room.context, ticket))
+            })
+            .find(|(context, _)| self.background.names_need_refresh(*context, now));
+        let Some((context, ticket)) = next else {
+            return;
+        };
+        if let Some(slot) = self.background.member_slot(context) {
+            slot.names_requested = Some(now);
+        }
+        if let Some(account) = self.background.account_mut(scope) {
+            account.names_next = now + Duration::from_secs(1);
+        }
+        let _ = self.request(
+            scope,
+            ProtocolRequest::Participants(context.conversation),
+            Purpose::ParticipantIndex(context, ticket),
+        );
+    }
+
+    pub(super) fn complete_participant_index(
+        &mut self,
+        context: ConversationRef,
+        ticket: u64,
+        result: Result<RuntimeReply, IdentityError>,
+    ) {
+        if self.current(context.account).is_err()
+            || self.snapshot.active_account != Some(context.account)
+            || self
+                .background
+                .account(context.account)
+                .and_then(|a| a.metadata.participant_index_ticket(context))
+                != Some(ticket)
+        {
+            return;
+        }
+        let Ok(RuntimeReply::Protocol(ProtocolReply::Participants(people))) = result else {
+            return;
+        };
+        if people.conversation != context.conversation {
+            return;
+        }
+        let names = page(
+            people
+                .people
+                .as_slice()
+                .iter()
+                .filter(|p| !p.is_self && !p.display_name.as_str().trim().is_empty())
+                .take(16)
+                .map(|p| p.display_name.clone()),
+        );
+        self.background
+            .remember_member_names(context, names.clone(), Instant::now());
+        self.snapshot.conversations =
+            page(self.snapshot.conversations.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = names.clone();
+                }
+                row
+            }));
+        self.touch();
+    }
     pub(super) fn sync_background(&mut self) {
         let scopes: Vec<_> = self
             .snapshot
@@ -628,6 +806,10 @@ impl Accounts {
         self.background.sync(&scopes, Instant::now());
         self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
+        self.reminders.retain_accounts(&scopes);
+        self.federation.retain_accounts(&scopes);
+        self.translation.retain_accounts(&scopes);
+        self.summary.retain_accounts(&scopes);
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if pending
@@ -780,6 +962,11 @@ impl Accounts {
             Err(error) => Err(content_error(error)),
             _ => Err(ContentState::Failed),
         };
+        let cached_rooms = self
+            .cache
+            .loaded(scope.account)
+            .map(|snapshot| snapshot.rooms.clone())
+            .unwrap_or_else(Page::empty);
         let Some(cache) = self.background.account_mut(scope) else {
             return;
         };
@@ -788,6 +975,31 @@ impl Accounts {
                 let retired = cache.metadata.reconcile(scope, &list);
                 let rows = page(list.rooms.as_slice().iter().map(|r| {
                     let mut row = conversation(r, scope);
+                    if r.actions.read_messages == Decision::Allowed
+                        && !r.sensitive
+                        && !r.classified
+                        && !r.unknown_restrictions
+                    {
+                        let live = cache
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .find(|old| old.context == row.context && old.unread_mention.is_some())
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        let disk = r
+                            .navigation_key
+                            .as_ref()
+                            .and_then(|key| {
+                                cached_rooms.as_slice().iter().find(|old| &old.key == key)
+                            })
+                            .map(|old| (old.unread_mention, old.unread, old.last_activity));
+                        row.unread_mention = super::cache::mentions::merge(
+                            r.unread_mention,
+                            r.unread_messages,
+                            r.last_activity,
+                            live.or(disk),
+                        );
+                    }
                     if r.actions.read_messages == Decision::Allowed {
                         row.participants = cache
                             .member_counts
@@ -796,12 +1008,27 @@ impl Accounts {
                             .and_then(|m| m.count)
                             .or(row.participants);
                     }
+                    if cache
+                        .metadata
+                        .participant_index_ticket(row.context)
+                        .is_some()
+                        && let Some(observed) = cache
+                            .member_counts
+                            .iter()
+                            .find(|m| m.context == row.context)
+                    {
+                        row.participant_names = observed.names.clone();
+                    }
                     row
                 }));
                 cache.member_counts.retain(|m| {
                     list.rooms.as_slice().iter().any(|r| {
                         r.id == m.context.conversation
                             && r.actions.read_messages == Decision::Allowed
+                            && r.actions.list_participants == Decision::Allowed
+                            && !r.classified
+                            && !r.sensitive
+                            && !r.unknown_restrictions
                     })
                 });
                 let removed: Vec<_> = cache
@@ -862,8 +1089,54 @@ impl Accounts {
                     );
                 }
                 if self.snapshot.active_account == Some(scope) {
+                    if let Some(panel) = self
+                        .snapshot
+                        .discover_panel
+                        .as_mut()
+                        .filter(|panel| panel.account == scope && panel.uncertain)
+                        && let Some(context) = panel.joining
+                        && list
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .any(|room| room.id == context.conversation)
+                    {
+                        panel.uncertain = false;
+                        panel.joining = None;
+                        panel.state = talk_core::ui::conversation::RemoteState::Idle;
+                        panel.rooms = page(
+                            panel
+                                .rooms
+                                .as_slice()
+                                .iter()
+                                .filter(|room| room.context != context)
+                                .cloned(),
+                        );
+                    }
+                    if let Some(panel) = self
+                        .snapshot
+                        .search_panel
+                        .as_mut()
+                        .filter(|p| p.account == scope)
+                    {
+                        panel.hits = page(
+                            panel
+                                .hits
+                                .as_slice()
+                                .iter()
+                                .filter(|hit| {
+                                    list.rooms.as_slice().iter().any(|room| {
+                                        room.id == hit.context.conversation
+                                            && room.actions.read_messages == Decision::Allowed
+                                    })
+                                })
+                                .cloned(),
+                        );
+                    }
                     self.snapshot.conversations = rows;
                     self.snapshot.conversation_list = state;
+                    self.restore_optimistic_join(scope);
+                    self.restore_pending_notifications(scope);
                     self.restore_cache_selection();
                     if list
                         .rooms
@@ -1424,6 +1697,8 @@ mod tests {
             unread_messages: Some(4),
             unread_direct_mention: Some(false),
             last_read_message: Some(3),
+            unread_mention: None,
+            notification_muted: None,
             last_activity: Some(1),
             call_active: Some(false),
             sensitive: false,

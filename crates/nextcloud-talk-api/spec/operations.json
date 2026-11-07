@@ -1,12 +1,39 @@
 {
   "source_sha256": "779a04a9c14f041c4a5a19f4a9ca8fcd59a2a938284990a1de219b7cfb4a70cb",
   "counts": {
-    "implemented": 94,
-    "missing": 55,
+    "implemented": 107,
+    "missing": 43,
     "not-client": 23,
-    "partial": 19
+    "partial": 18
   },
   "external_operations": [
+    {
+      "operation_id": "nextcloud-search-providers",
+      "method": "GET",
+      "path": "/ocs/v2.php/search/providers",
+      "status": "implemented",
+      "api": "Request::SearchProviders",
+      "source": "https://github.com/nextcloud/server/blob/v35.0.2/core/Controller/UnifiedSearchController.php",
+      "scope": "Bounded discovery of the talk-message provider and advertised filters; no third-party provider is queried."
+    },
+    {
+      "operation_id": "nextcloud-search-talk-message",
+      "method": "GET",
+      "path": "/ocs/v2.php/search/providers/talk-message/search",
+      "status": "implemented",
+      "api": "Request::SearchMessages",
+      "source": "https://github.com/nextcloud/spreed/blob/eed360d176edcb6888dad60965cb694e6bf62ae3/lib/Search/MessageSearch.php",
+      "scope": "Bounded account-wide message results and cursor, with provider-advertised filters and owner-scoped identities."
+    },
+    {
+      "operation_id": "nextcloud-reference-resolve",
+      "method": "GET",
+      "path": "/ocs/v2.php/references/resolve",
+      "status": "implemented",
+      "api": "Request::ResolveReference",
+      "source": "https://docs.nextcloud.com/server/35/developer_manual/digging_deeper/reference.html#api-to-resolve-links",
+      "scope": "Single bounded reference resolution; only installation-owned preview routes may supply image bytes."
+    },
     {
       "method": "WEBSOCKET",
       "path": "/spreed",
@@ -56,6 +83,30 @@
       "api": "Client::set_own_user_status",
       "capability": "user_status.enabled",
       "source": "https://github.com/nextcloud/server/blob/v35.0.2/apps/user_status/lib/Controller/UserStatusController.php"
+    },
+    {
+      "operation_id": "core-translation-languages",
+      "method": "GET",
+      "path": "/ocs/v2.php/translation/languages",
+      "api": "Request::TranslationLanguages",
+      "provenance": "https://docs.nextcloud.com/server/35/developer_manual/client_apis/OCS/ocs-translation-api.html#get-available-translation-options",
+      "scope": "Nextcloud core API outside the pinned Talk OpenAPI count; source-language detection and bounded target pairs are checked before enabling translation."
+    },
+    {
+      "operation_id": "core-translation-translate",
+      "method": "POST",
+      "path": "/ocs/v2.php/translation/translate",
+      "api": "Request::Translate",
+      "provenance": "https://docs.nextcloud.com/server/35/developer_manual/client_apis/OCS/ocs-translation-api.html#translate-a-string",
+      "scope": "Nextcloud core API outside the pinned Talk OpenAPI count; no source language is sent unless the provider advertises detection."
+    },
+    {
+      "operation_id": "core-task-processing-get",
+      "method": "GET",
+      "path": "/ocs/v2.php/taskprocessing/task/{id}",
+      "api": "Request::TaskProcessing",
+      "provenance": "https://github.com/nextcloud/server/blob/v35.0.2/core/Controller/TaskProcessingApiController.php",
+      "scope": "Authenticated core task status outside the pinned Talk OpenAPI count; the adapter validates the task owner, app, type and room binding."
     }
   ],
   "operations": [
@@ -63,9 +114,10 @@
       "operation_id": "avatar-upload-avatar",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/avatar",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::UploadRoomAvatar",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/AvatarController.php",
+      "scope": "Bounded multipart PNG upload; the adapter centers and crops a locally selected image and rechecks moderator authority."
     },
     {
       "operation_id": "avatar-get-avatar",
@@ -151,9 +203,10 @@
       "operation_id": "breakout_room-configure-breakout-rooms",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}",
-      "status": "partial",
+      "status": "implemented",
       "api": "Request::Conversation / conversation::Command::ConfigureBreakouts",
-      "scope": "Automatic/manual bounded creation supported; custom attendee mapping and switch/assistance/broadcast workflow remain missing."
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Automatic, manual and free modes with a bounded attendee map; the adapter refreshes participant authority."
     },
     {
       "operation_id": "breakout_room-remove-breakout-rooms",
@@ -167,25 +220,28 @@
       "operation_id": "breakout_room-broadcast-chat-message",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/broadcast",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::BroadcastBreakouts",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Bounded moderator broadcast to breakout rooms."
     },
     {
       "operation_id": "breakout_room-apply-attendee-map",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/attendees",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::AssignBreakouts",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Bounded attendee assignment with fresh, room-scoped participant identities."
     },
     {
       "operation_id": "breakout_room-request-assistance",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/request-assistance",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::RequestBreakoutAssistance",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Participant assistance request from an observed breakout child room."
     },
     {
       "operation_id": "breakout_room-reset-request-for-assistance",
@@ -215,9 +271,10 @@
       "operation_id": "breakout_room-switch-breakout-room",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/breakout-rooms/{token}/switch",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::Conversation / conversation::Command::SwitchBreakout",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/BreakoutRoomController.php",
+      "scope": "Free-mode switching to an observed child of the current parent."
     },
     {
       "operation_id": "calendar_integration-get-dashboard-events",
@@ -399,9 +456,10 @@
       "operation_id": "chat-summarize-chat",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}/summarize",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "chat::Command::Summarize",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/ChatController.php",
+      "scope": "Provider-gated summary task for the selected room; task status is read using Nextcloud core TaskProcessing."
     },
     {
       "operation_id": "chat-get-message-context",
@@ -775,9 +833,9 @@
       "operation_id": "preset-get-presets",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/presets/room",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::CreationPresets",
+      "scope": "Bounded Talk 24/25 preset list; see nextcloud/spreed lib/Controller/PresetController.php and lib/RoomPresets/Parameter.php. The application merges default, selected, user and forced values."
     },
     {
       "operation_id": "public_share_auth-create-room",
@@ -856,16 +914,16 @@
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room",
       "status": "partial",
-      "api": "Request::CreateGroup | Request::CreateDirect",
-      "scope": "Basic group creation and local-user direct rooms. Other creation modes and extended parameters remain unsupported."
+      "api": "Request::CreateGroup | Request::CreateDirect | Request::CreateConversation",
+      "scope": "Bounded group, public and local-user direct creation with optional parameters and participants; see nextcloud/spreed lib/Controller/RoomController.php. Status 202 retains partial-invitation information."
     },
     {
       "operation_id": "room-get-listed-rooms",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/listed-room",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::ListedRooms",
+      "scope": "Bounded listable-room search; application checks the listable-rooms capability and scopes join tickets."
     },
     {
       "operation_id": "room-get-breakout-rooms",
@@ -1231,9 +1289,10 @@
       "operation_id": "room-get-capabilities",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/room/{token}/capabilities",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::FederatedRoomCapabilities",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/RoomController.php",
+      "scope": "Bounded room-scoped remote capabilities are intersected with the current local capabilities before basic federated chat. Other federated features remain gated."
     },
     {
       "operation_id": "room-schedule-meeting",
@@ -1369,25 +1428,28 @@
       "operation_id": "federation-accept-share",
       "method": "POST",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::AcceptFederationInvitation",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "federation-reject-share",
       "method": "DELETE",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation/{id}",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::DeclineFederationInvitation",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "federation-get-shares",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/federation/invitation",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::FederationInvitations",
+      "provenance": "https://github.com/nextcloud/spreed/blob/v25.0.6/lib/Controller/FederationController.php",
+      "scope": "Account-scoped local-server invitation endpoint; remote IDs and tokens remain in the adapter."
     },
     {
       "operation_id": "room-join-federated-room",

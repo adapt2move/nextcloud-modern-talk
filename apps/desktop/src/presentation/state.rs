@@ -712,10 +712,104 @@ pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
     {
         return false;
     }
+    if snapshot
+        .reference_previews
+        .as_slice()
+        .iter()
+        .any(|preview| {
+            Some(preview.context) != snapshot.selected
+                || Some(preview.context.account) != snapshot.active_account
+                || !preview.context.is_consistent()
+                || preview.message == 0
+                || preview.ordinal >= 32
+                || !snapshot
+                    .messages
+                    .as_slice()
+                    .iter()
+                    .chain(
+                        snapshot
+                            .message_panel
+                            .as_ref()
+                            .filter(|panel| panel.context == preview.context)
+                            .into_iter()
+                            .flat_map(|panel| {
+                                panel
+                                    .thread_root_message
+                                    .iter()
+                                    .chain(panel.thread_messages.as_slice())
+                            }),
+                    )
+                    .any(|message| message.local_id == preview.message && !message.metadata.deleted)
+        })
+    {
+        return false;
+    }
+    if snapshot.discover_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .rooms
+                .as_slice()
+                .iter()
+                .any(|room| room.context.account != panel.account || !room.context.is_consistent())
+            || panel.joining.is_some_and(|context| {
+                context.account != panel.account
+                    || !context.is_consistent()
+                    || !panel
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == context)
+            })
+    }) {
+        return false;
+    }
+    if snapshot.search_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .filters
+                .conversation
+                .is_some_and(|c| c.account != panel.account || !c.is_consistent())
+            || panel
+                .filters
+                .person
+                .is_some_and(|p| p.account != panel.account)
+            || panel.hits.as_slice().iter().any(|hit| {
+                hit.context.account != panel.account
+                    || !hit.context.is_consistent()
+                    || hit.message == 0
+                    || !snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .any(|r| r.context == hit.context)
+            })
+    }) {
+        return false;
+    }
+    if snapshot
+        .federation_invitations
+        .as_ref()
+        .is_some_and(|view| Some(view.scope) != snapshot.active_account)
+    {
+        return false;
+    }
+    if snapshot.account_reminders.as_ref().is_some_and(|view| {
+        Some(view.scope) != snapshot.active_account
+            || view.reminders.as_slice().iter().any(|reminder| {
+                reminder.context.account != view.scope || !reminder.context.is_consistent()
+            })
+    }) {
+        return false;
+    }
     if snapshot.create_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
                 .people
+                .as_slice()
+                .iter()
+                .any(|person| person.id.account != panel.account)
+            || panel
+                .invites
                 .as_slice()
                 .iter()
                 .any(|person| person.id.account != panel.account)
@@ -904,6 +998,9 @@ pub(super) mod tests {
             unread: 0,
             unread_direct_mention: None,
             last_read_message: None,
+            unread_mention: None,
+            notification_muted: None,
+            last_activity: None,
             favorite: None,
             tags: None,
             organization: Default::default(),
@@ -913,6 +1010,7 @@ pub(super) mod tests {
             status_icon: None,
             status_message: None,
             participants: None,
+            participant_names: Page::empty(),
             send: Decision::Unknown,
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,
@@ -924,6 +1022,9 @@ pub(super) mod tests {
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            discover_panel: None,
+            search_panel: None,
+            reference_previews: Page::empty(),
             revision: 1,
             login: LoginView {
                 phase: LoginPhase::EnterServer,
@@ -958,6 +1059,8 @@ pub(super) mod tests {
             tags: Page::empty(),
             tag_state: ContentState::Ready,
             organization_result: None,
+            account_reminders: None,
+            federation_invitations: None,
             selected: Some(context),
             content: ContentState::Ready,
             messages: Page::empty(),
@@ -1993,6 +2096,9 @@ pub(super) mod tests {
             unread: 0,
             unread_direct_mention: None,
             last_read_message: None,
+            unread_mention: None,
+            notification_muted: None,
+            last_activity: None,
             favorite: None,
             organization: Default::default(),
             archived: None,
@@ -2001,6 +2107,7 @@ pub(super) mod tests {
             status_icon: None,
             status_message: None,
             participants: None,
+            participant_names: Page::empty(),
             send: Decision::Unknown,
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,

@@ -44,6 +44,14 @@ impl Client {
         }
         Ok(bytes)
     }
+    /// Only an installation-owned `/core/references/preview/` route is accepted.
+    pub async fn reference_thumbnail(
+        &mut self,
+        c: &OperationContext,
+        url: &str,
+    ) -> Result<Vec<u8>, Error> {
+        self.transport.reference_thumbnail(c, url).await
+    }
     /// Only known server routes are accepted; no arbitrary authenticated URL entry point.
     pub async fn image(
         &mut self,

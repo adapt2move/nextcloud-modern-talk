@@ -10,10 +10,12 @@ use std::ops::Range;
 use crate::bounded::{Page, Text};
 
 mod links;
+mod location;
 mod render;
 mod source;
 
 pub use links::web_destination;
+pub use location::location_coordinates;
 
 pub const MAX_SOURCE_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 8192;

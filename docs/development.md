@@ -147,6 +147,11 @@ fictional offline/restart presentation. The capture tool waits through the norma
 five-second grace period for connection scenarios. These fixtures perform no server
 request and do not establish cache restoration, replay or native performance.
 
+Use `chat-message-tools` for fictional location, reminder and scheduled-message
+rows; `chat-reminder-menu`, `chat-reminder-time` and `chat-schedule-time`
+show the message menu and date/time choosers; `lobby-settings` shows the
+moderator lobby timer. These scenarios do not contact a server.
+
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
 
 Use `chat-busy` to inspect rejected automatic read receipts and explicit sends under fictional local backpressure. Automatic requests remain quiet; a rejected send keeps its draft and shows a scoped notice for at most eight seconds. This fixture performs no server request.
@@ -173,6 +178,7 @@ Use `call-gallery`, `call-speaker`, `call-screen-stage`, `call-dock`,
 These fixtures do not connect screen streams or prove signaling, media, operating
 system integration or accessibility. The screen stage keeps camera and screen
 identities separate; the production media owner supplies scoped screen frames through the same stream metadata.
+Use `search-navigation` for the fictional quick switcher, `account-search` for grouped message results and filters, `discover` for open-conversation browsing, and `search-filter` for the sidebar filters and muted-room indicator. These previews do not query a directory or establish server behavior.
 
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 

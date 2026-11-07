@@ -117,6 +117,11 @@ async def run(args,report):
        if await page.get_by_role('button',name='Leave call',exact=True).count():break
        join=await press(page,['Start call','Join call','Join the call','Join']);await page.wait_for_timeout(1000)
       peer_rejoined=True;report['explicit_browser_rejoin_fixture']={'leave':leave,'join':join,'joined':bool(await page.get_by_role('button',name='Leave call',exact=True).count())}
+     if args.refresh_web_peer_flags_after_replacement and network_cut and not peer_rejoined and progress.get('automatic_new_call_generation'):
+      # Diagnostic intervention in the owned peer, never automatic native
+      # recovery. Reassert only the synthetic web participant's own AV flags.
+      status=await page.evaluate("""async url => (await fetch(url,{method:'PUT',headers:{'OCS-APIRequest':'true','Accept':'application/json','requesttoken':OC.requestToken,'Content-Type':'application/x-www-form-urlencoded'},body:'flags=7'})).status""",m['client_url']+'/ocs/v2.php/apps/spreed/api/v4/call/'+token)
+      peer_rejoined=True;report['explicit_browser_flags_refresh_fixture']={'status':status,'no_leave_or_rejoin':True}
      if args.scenario in ('web-screen','web-screen-resume') and not screen_started and (elapsed is not None and elapsed>=5 if args.scenario=='web-screen-resume' else time.monotonic()-start>=5):
       report['screen_start_action']=await press(page,['Enable screensharing','Share screen','Start screen sharing','Share screen (S)']);screen_started=True
       report['screen_buttons']=[x[:80] for x in await page.locator('button').all_text_contents()][:40]
@@ -142,6 +147,7 @@ async def run(args,report):
      if extra_page:checks['third_party_media_resumed']=resumed_browser(extra_samples)
      if args.scenario=='web-screen-resume':checks['screen_flow_after_recovery']=recovery['screen_flow_after_recovery']
     if args.rejoin_web_peer_after_replacement:checks['explicit_browser_rejoin_complete']=report.get('explicit_browser_rejoin_fixture',{}).get('joined',False)
+    if args.refresh_web_peer_flags_after_replacement:checks['explicit_browser_flags_refresh_complete']=report.get('explicit_browser_flags_refresh_fixture',{}).get('status')==200
     if extra_page:checks['third_party_av']=all(media_checks(extra_samples).values());report['third_party_samples']=extra_samples
     report['browser_checks']=checks;report['result']='pass' if (all(checks.values()) or args.scenario=='incoming-decline') and report['native'].get('result')=='pass' else 'fail'
     if policy_changed:await asyncio.to_thread(room.request,'PUT','/'+token+'/read-only',{'state':0})
@@ -161,9 +167,10 @@ async def run(args,report):
     await context.close();await browser.close();report['room_cleanup']=await room.close();report['private_fixture_removed']=True
     if report['room_cleanup']!='absence_confirmed':report['result']='fail'
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
- if args.rejoin_web_peer_after_replacement and (args.scenario!='session-replaced' or not args.hpb_target):p.error('web peer rejoin requires session-replaced with an owned HPB target')
- report={'workflow':'normal-talk-browser','result':'fail','harness_sha256':digest(__file__),'physical_devices':False,'scenario':args.scenario,'order':args.order}
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--manifest',type=Path,required=True);p.add_argument('--executable',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--scenario',choices=['media','reconnect','policy-loss','incoming-accept','incoming-decline','native-screen','native-static-screen','portal-screen','web-screen','network-resume','session-replaced','web-screen-resume'],default='media');p.add_argument('--participants',type=int,choices=[2,3],default=2);p.add_argument('--hpb-target');p.add_argument('--lab-state',type=Path);p.add_argument('--rejoin-web-peer-after-replacement',action='store_true',help='Qualification only: explicitly leave/rejoin the web peer after HPB replacement');p.add_argument('--refresh-web-peer-flags-after-replacement',action='store_true',help='Diagnostic only: reassert the owned web peer call flags after native fresh admission');p.add_argument('--order',choices=['browser-first','native-first'],default='browser-first');args=p.parse_args()
+ if (args.rejoin_web_peer_after_replacement or args.refresh_web_peer_flags_after_replacement) and (args.scenario!='session-replaced' or not args.hpb_target):p.error('web peer intervention requires session-replaced with an owned HPB target')
+ if args.rejoin_web_peer_after_replacement and args.refresh_web_peer_flags_after_replacement:p.error('choose only one web peer intervention')
+ report={'workflow':'normal-talk-browser','result':'fail','harness_sha256':digest(__file__),'physical_devices':False,'scenario':args.scenario,'order':args.order,'automatic_recovery_fixture':not (args.rejoin_web_peer_after_replacement or args.refresh_web_peer_flags_after_replacement)}
  try:asyncio.run(run(args,report))
  except Exception as error:
   report['failure_type']=type(error).__name__

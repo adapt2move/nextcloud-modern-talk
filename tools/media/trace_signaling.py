@@ -8,7 +8,10 @@ import asyncio,contextvars,hashlib,json,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path.cwd()/'tools/media'))
 import normal_talk
+from signaling_metadata import Requests
 from talk_browser import LoopbackForward
+script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+http_observer_sha256=hashlib.sha256(Path(__file__).with_name('signaling_metadata.py').read_bytes()).hexdigest()
 started=time.monotonic();trace=[];connection=contextvars.ContextVar('connection');counter=0;roles={}
 def tag(v):
  return hashlib.sha256(v.encode()).hexdigest()[:10] if isinstance(v,str) and v else None
@@ -68,7 +71,13 @@ class Inspect(LoopbackForward):
   try:await super().accept(reader,writer)
   finally:connection.reset(token)
  async def pipe(self,reader,writer):
-  if self.target_port!=8080:return await super().pipe(reader,writer)
+  if self.target_port!=8080:
+   if writer.get_extra_info('peername')[1]!=self.target_port:return await super().pipe(reader,writer)
+   requests=Requests(connection.get(),trace,started)
+   while True:
+    data=await asyncio.wait_for(reader.read(65536),45)
+    if not data:return
+    requests.feed(data);writer.write(data);await asyncio.wait_for(writer.drain(),10)
   direction='out' if writer.get_extra_info('peername')[1]==8080 else 'in'
   frames=Frames(connection.get(),direction)
   while True:
@@ -78,4 +87,4 @@ class Inspect(LoopbackForward):
 normal_talk.LoopbackForward=Inspect
 output=Path(sys.argv[sys.argv.index('--output')+1])
 try:normal_talk.main()
-finally:output.with_name(output.stem+'-wire.json').write_text(json.dumps({'script_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'trace':trace},indent=2)+'\n')
+finally:output.with_name(output.stem+'-wire.json').write_text(json.dumps({'script_sha256':script_sha256,'http_observer_sha256':http_observer_sha256,'trace':trace},indent=2)+'\n')

@@ -18,6 +18,17 @@ pub(super) fn encode(values: &NavigationPreferences, output: &mut String) {
             layout.account().as_str(),
             collapsed
         );
+        let filter = match layout.filter() {
+            SidebarFilter::All => "all",
+            SidebarFilter::Unread => "unread",
+            SidebarFilter::Mentions => "mentions",
+        };
+        let _ = writeln!(
+            output,
+            "layout_filter={}|{}",
+            layout.account().as_str(),
+            filter
+        );
         for group in layout.groups() {
             let _ = write!(
                 output,
@@ -93,6 +104,24 @@ pub(super) fn decode_row(
     }
     if values.account(&account).is_none() {
         return Err(invalid());
+    }
+    if key == "layout_filter" {
+        let filter = match parts.next() {
+            Some("all") => SidebarFilter::All,
+            Some("unread") => SidebarFilter::Unread,
+            Some("mentions") => SidebarFilter::Mentions,
+            _ => return Err(invalid()),
+        };
+        if parts.next().is_some() {
+            return Err(invalid());
+        }
+        return values
+            .apply(
+                account,
+                RemoteNavigationSupport::Unsupported,
+                NavigationEdit::SetFilter(filter),
+            )
+            .map_err(|_| invalid());
     }
     let item = parts.next().ok_or_else(invalid)?;
     let third = parts.next().ok_or_else(invalid)?;

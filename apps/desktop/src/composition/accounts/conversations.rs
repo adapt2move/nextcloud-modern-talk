@@ -1,4 +1,4 @@
-//! Account-owned settings bridge. No speculative mutation is projected as confirmed state.
+//! Account-owned settings bridge. Pending notification edits are reconciled after writes.
 use super::*;
 use talk_core::protocol::conversation as wire;
 use talk_core::ui::conversation as view;
@@ -23,17 +23,21 @@ struct RoomObservation {
     dirty: bool,
     operation: Option<OperationId>,
     reading_details: bool,
+    index_generation: u64,
 }
 #[derive(Default)]
 pub(super) struct Metadata {
     rooms: Vec<RoomObservation>,
     hinted: bool,
+    index_generation: u64,
 }
 fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     let mut identity = room.clone();
     identity.unread_messages = None;
     identity.unread_direct_mention = None;
     identity.last_read_message = None;
+    identity.unread_mention = None;
+    identity.notification_muted = None;
     identity.last_activity = None;
     identity.call_active = None;
     identity.call_scope = None;
@@ -42,11 +46,31 @@ fn metadata_identity(room: &protocol::Conversation) -> protocol::Conversation {
     identity
 }
 impl Metadata {
+    pub(super) fn readable(&self, context: ConversationRef) -> bool {
+        self.rooms.iter().any(|room| {
+            room.context == context && room.listed.actions.read_messages == Decision::Allowed
+        })
+    }
+    pub(super) fn participant_index_ticket(&self, context: ConversationRef) -> Option<u64> {
+        self.rooms
+            .iter()
+            .find(|room| {
+                room.context == context
+                    && room.listed.actions.read_messages == Decision::Allowed
+                    && room.listed.actions.list_participants == Decision::Allowed
+                    && !room.listed.classified
+                    && !room.listed.sensitive
+                    && !room.listed.unknown_restrictions
+            })
+            .map(|room| room.index_generation)
+    }
     pub(super) fn hint(&mut self) -> Vec<ConversationRef> {
         self.hinted = true;
+        self.index_generation = self.index_generation.saturating_add(1);
         let mut retired = Vec::new();
         for room in &mut self.rooms {
             room.dirty = true;
+            room.index_generation = self.index_generation;
             if room.reading_details && room.operation.take().is_some() {
                 retired.push(room.context);
             }
@@ -59,6 +83,8 @@ impl Metadata {
         list: &protocol::ConversationList,
     ) -> Vec<(ConversationRef, bool)> {
         let mut retired = Vec::new();
+        self.index_generation = self.index_generation.saturating_add(1);
+        let index_generation = self.index_generation;
         self.rooms.retain(|old| {
             old.context.account == scope
                 && list
@@ -75,6 +101,7 @@ impl Metadata {
             let listed = metadata_identity(room);
             if let Some(old) = self.rooms.iter_mut().find(|r| r.context == context) {
                 if self.hinted || old.listed != listed {
+                    old.index_generation = index_generation;
                     let policy_changed = old.listed.role != listed.role
                         || old.listed.actions != listed.actions
                         || old.listed.sensitive != listed.sensitive
@@ -100,6 +127,7 @@ impl Metadata {
                     dirty: true,
                     operation: None,
                     reading_details: false,
+                    index_generation,
                 });
             }
         }
@@ -173,7 +201,9 @@ impl Metadata {
             .flatten()
     }
     pub(super) fn revoke(&mut self, context: ConversationRef) {
+        self.index_generation = self.index_generation.saturating_add(1);
         if let Some(room) = self.rooms.iter_mut().find(|r| r.context == context) {
+            room.index_generation = self.index_generation;
             room.details = None;
             room.observed_at = None;
             room.observed = None;
@@ -187,6 +217,10 @@ fn readonly_details(mut details: view::RoomDetails) -> view::RoomDetails {
     details.default_permissions = None;
     details.server_default_permissions = None;
     details.effective_permissions = None;
+    details.breakout_mode = None;
+    details.breakout_started = None;
+    details.breakout_child = false;
+    details.breakout_supported = false;
     details.has_password = None;
     details
 }
@@ -203,6 +237,20 @@ pub(super) enum Work {
     Csv,
     Bots,
     BotChange { bot: view::PersonRef, enabled: bool },
+    Notification(NotificationChange),
+    BreakoutSwitch,
+}
+#[derive(Clone, Copy)]
+pub(super) enum NotificationChange {
+    Messages {
+        desired: view::NotificationLevel,
+        previous: Option<view::NotificationLevel>,
+        previous_muted: Option<bool>,
+    },
+    Calls {
+        desired: bool,
+        previous: Option<bool>,
+    },
 }
 impl Work {
     fn for_action(action: &view::ConversationAction) -> Self {
@@ -215,6 +263,7 @@ impl Work {
                 enabled: *enabled,
             },
             view::ConversationAction::Read => Self::Read,
+            view::ConversationAction::SwitchBreakout(_) => Self::BreakoutSwitch,
             action if action.reads() => Self::OtherRead,
             _ => Self::Write,
         }
@@ -360,9 +409,21 @@ impl Accounts {
         context: ConversationRef,
         reason: UnavailableReason,
     ) {
+        if self.snapshot.selected == Some(context) {
+            self.retire_references();
+        }
         if let Some(account) = self.background.account_mut(context.account) {
             account.metadata.revoke(context);
         }
+        self.background.forget_member_names(context);
+        self.snapshot.conversations =
+            page(self.snapshot.conversations.as_slice().iter().map(|row| {
+                let mut row = row.clone();
+                if row.context == context {
+                    row.participant_names = Page::empty();
+                }
+                row
+            }));
         if let Ok(connection) = &mut self.connection {
             for pending in &self.pending {
                 if matches!(pending.purpose, Purpose::Room(_, c, _, _) if c == context) {
@@ -403,6 +464,13 @@ impl Accounts {
     }
     pub(super) fn operation(&self, context: ConversationRef) -> Result<OperationId, SubmitError> {
         self.current(context.account)?;
+        if self
+            .discovery_join
+            .as_ref()
+            .is_some_and(|join| join.context == context)
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyUnknown));
+        }
         if self.snapshot.selected != Some(context) {
             return Err(SubmitError::StaleScope);
         }
@@ -428,6 +496,9 @@ impl Accounts {
         automatic: bool,
     ) -> Result<(), SubmitError> {
         match action {
+            view::ConversationAction::PickAvatar => {
+                return self.queue_picker(request, context, super::files::Kind::Avatar);
+            }
             view::ConversationAction::PickCsv { edit_generation } => {
                 return self.queue_csv_picker(request, context, edit_generation);
             }
@@ -440,7 +511,60 @@ impl Accounts {
         if self.cache.is_presentation(context) {
             return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
         }
+        if let view::ConversationAction::OpenAssignedBreakout(target) = action {
+            if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                !matches!(
+                    call.stage,
+                    talk_core::ui::presentation::CallStage::Ended
+                        | talk_core::ui::presentation::CallStage::Failed
+                )
+            }) {
+                return self.leave_for_breakout(request, context, target, call.scope, true);
+            }
+            return self.open_assigned_breakout(context, target);
+        }
+        if let view::ConversationAction::SwitchBreakout(target) = action
+            && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                !matches!(
+                    call.stage,
+                    talk_core::ui::presentation::CallStage::Ended
+                        | talk_core::ui::presentation::CallStage::Failed
+                )
+            })
+        {
+            return self.leave_for_breakout(request, context, target, call.scope, false);
+        }
         let mut work = Work::for_action(&action);
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_ref())
+        {
+            work = match action {
+                view::ConversationAction::SetNotifications(desired) => {
+                    Work::Notification(NotificationChange::Messages {
+                        desired,
+                        previous: details.notifications,
+                        previous_muted: self
+                            .snapshot
+                            .conversations
+                            .as_slice()
+                            .iter()
+                            .find(|r| r.context == context)
+                            .and_then(|r| r.notification_muted),
+                    })
+                }
+                view::ConversationAction::SetCallNotifications(desired) => {
+                    Work::Notification(NotificationChange::Calls {
+                        desired,
+                        previous: details.call_notifications,
+                    })
+                }
+                _ => work,
+            };
+        }
         if automatic && matches!(action, view::ConversationAction::Members) {
             work = Work::MemberCount;
         }
@@ -509,7 +633,107 @@ impl Accounts {
             .conversation_panel
             .get_or_insert_with(|| view::ConversationPanel::new(context));
         begin_room(panel, request, work);
+        if let Work::Notification(change) = work {
+            self.project_notification_change(context, change, true);
+        }
         self.touch();
+        Ok(())
+    }
+    pub(super) fn start_avatar_upload(
+        &mut self,
+        request: RequestId,
+        context: ConversationRef,
+        path: std::path::PathBuf,
+    ) -> Result<(), SubmitError> {
+        if self.cache.is_presentation(context)
+            || self
+                .pending
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Room(_, c, _, _) if c == context))
+            || self.snapshot.conversation_panel.as_ref().is_none_or(|p| {
+                p.context != context
+                    || p.details_stale
+                    || !p
+                        .details
+                        .as_ref()
+                        .is_some_and(|d| d.availability(view::RoomSetting::Avatar).enabled())
+                    || matches!(p.state, view::RemoteState::Uncertain(_))
+            })
+        {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
+        }
+        let local_path = path
+            .to_str()
+            .and_then(|p| Text::new(p).ok())
+            .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+        let operation = self.operation(context)?;
+        self.request(
+            context.account,
+            ProtocolRequest::ConversationSettings {
+                conversation: context.conversation,
+                operation,
+                command: wire::ConversationCommand::SetImageAvatar { local_path },
+            },
+            Purpose::Room(request, context, operation, Work::Write),
+        )?;
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.metadata.admitted(context, operation, false);
+        }
+        if let Some(panel) = self.snapshot.conversation_panel.as_mut() {
+            begin_room(panel, request, Work::Write);
+        }
+        self.touch();
+        Ok(())
+    }
+    fn open_assigned_breakout(
+        &mut self,
+        context: ConversationRef,
+        target: ConversationRef,
+    ) -> Result<(), SubmitError> {
+        self.current(context.account)?;
+        if self.snapshot.selected != Some(context) || target.account != context.account {
+            return Err(SubmitError::StaleScope);
+        }
+        let allowed = self
+            .snapshot
+            .conversation_panel
+            .as_ref()
+            .is_some_and(|panel| {
+                panel.context == context
+                    && !panel.details_stale
+                    && panel.breakout_loaded
+                    && panel.details.as_ref().is_some_and(|details| {
+                        details.breakout_supported
+                            && details.breakout_started == Some(true)
+                            && matches!(
+                                details.breakout_mode,
+                                Some(view::BreakoutMode::Automatic | view::BreakoutMode::Manual)
+                            )
+                    })
+                    && panel
+                        .breakout_rooms
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == target && room.assigned)
+            });
+        let room = self
+            .breakout_observation
+            .as_ref()
+            .filter(|(parent, _)| *parent == context)
+            .and_then(|(_, rooms)| {
+                rooms.as_slice().iter().find(|room| {
+                    room.id == target.conversation
+                        && room.actions.read_messages == Decision::Allowed
+                        && !room.unknown_restrictions
+                        && !room.classified
+                })
+            })
+            .cloned();
+        if !allowed {
+            return Err(SubmitError::StaleScope);
+        }
+        let room = room.ok_or(SubmitError::StaleScope)?;
+        self.open_breakout_room(context, room);
         Ok(())
     }
     pub(super) fn complete_room(
@@ -524,10 +748,7 @@ impl Accounts {
             .background
             .account_mut(context.account)
             .is_some_and(|a| a.metadata.complete(context, operation));
-        if !current
-            || self.snapshot.selected != Some(context)
-            || self.current(context.account).is_err()
-        {
+        if !current || self.current(context.account).is_err() {
             return;
         }
         let result = match reply {
@@ -539,6 +760,14 @@ impl Accounts {
             Err(error) => Err(completion_error(error)),
             _ => Err(Completion::Failed(UnavailableReason::PolicyStale)),
         };
+        if self.snapshot.selected != Some(context) {
+            if let Work::Notification(change) = work {
+                self.project_notification_change(context, change, result.is_ok());
+                self.load_rooms = Some(context.account);
+                self.touch();
+            }
+            return;
+        }
         self.apply_room_result(request, context, work, result);
     }
     /// Projects an already scoped operation result, including explicit read
@@ -550,6 +779,18 @@ impl Accounts {
         work: Work,
         result: Result<wire::ConversationResult, Completion>,
     ) {
+        if let Work::Notification(change) = work
+            && result.is_err()
+            && self
+                .snapshot
+                .conversation_panel
+                .as_ref()
+                .is_some_and(|panel| {
+                    panel.context == context && panel.state == view::RemoteState::Saving(request)
+                })
+        {
+            self.project_notification_change(context, change, false);
+        }
         let read = work.read();
         let Some(panel) = self
             .snapshot
@@ -593,10 +834,19 @@ impl Accounts {
         let mut invalidate_cache = false;
         let mut observed_members = None;
         let mut observed_details = None;
+        let mut observed_breakouts = None;
+        let mut clear_breakouts = false;
+        let mut switched = None;
         let completion = match result {
             Ok(result) => {
                 match result {
                     wire::ConversationResult::Details(details) => {
+                        clear_breakouts =
+                            details.breakout_mode.is_none() && !details.breakout_child;
+                        if clear_breakouts {
+                            panel.breakout_rooms = Page::empty();
+                            panel.breakout_loaded = false;
+                        }
                         if !details.controls.as_slice().iter().any(|(setting, value)| {
                             *setting == wire::Setting::Members
                                 && value.implemented
@@ -698,6 +948,25 @@ impl Accounts {
                         panel.details_stale = false;
                     }
                     wire::ConversationResult::Members(people) => {
+                        let names: Page<Text<256>, 16> = page(
+                            people
+                                .as_slice()
+                                .iter()
+                                .filter(|m| !m.is_self && !m.name.as_str().trim().is_empty())
+                                .take(16)
+                                .map(|m| m.name.clone()),
+                        );
+                        let names_allowed =
+                            self.background.account(context.account).is_some_and(|a| {
+                                a.metadata.participant_index_ticket(context).is_some()
+                            });
+                        if names_allowed {
+                            self.background.remember_member_names(
+                                context,
+                                names.clone(),
+                                Instant::now(),
+                            );
+                        }
                         panel.members = page(people.as_slice().iter().map(|m| view::Member {
                             id: person(context, m.id.local),
                             name: m.name.clone(),
@@ -724,6 +993,11 @@ impl Accounts {
                                 let mut row = row.clone();
                                 if row.context == context {
                                     row.participants = count;
+                                    row.participant_names = if names_allowed {
+                                        names.clone()
+                                    } else {
+                                        Page::empty()
+                                    };
                                 }
                                 row
                             }));
@@ -781,7 +1055,21 @@ impl Accounts {
                         reload = true;
                         panel.bans_loaded = false;
                     }
-                    wire::ConversationResult::BreakoutRooms(_) => (),
+                    wire::ConversationResult::BreakoutRooms(rooms) => {
+                        panel.breakout_rooms =
+                            page(rooms.as_slice().iter().map(|room| view::BreakoutRoom {
+                                context: ConversationRef {
+                                    account: context.account,
+                                    conversation: room.id,
+                                },
+                                name: room.name.clone(),
+                                assigned: room.actions.read_messages == Decision::Allowed,
+                            }));
+                        observed_breakouts = Some(rooms);
+                        panel.breakout_loaded = true;
+                        reload = !read;
+                    }
+                    wire::ConversationResult::BreakoutSwitched(room) => switched = Some(*room),
                     wire::ConversationResult::GuestLink(link) => panel.guest_link = Some(link),
                 }
                 Completion::ServerAccepted
@@ -887,6 +1175,11 @@ impl Accounts {
                 self.remember_cached_room_details(context, &details);
             }
         }
+        if let Some(rooms) = observed_breakouts {
+            self.breakout_observation = Some((context, rooms));
+        } else if clear_breakouts {
+            self.breakout_observation = None;
+        }
         if let Some(members) = observed_members.as_ref() {
             self.observe_member_avatar_identities(context, members);
         }
@@ -915,7 +1208,132 @@ impl Accounts {
             let _ =
                 self.room_action_inner(request, context, view::ConversationAction::Members, true);
         }
+        if let Some(room) = switched {
+            self.open_breakout_room(context, room);
+        }
         self.touch();
+    }
+    fn open_breakout_room(&mut self, context: ConversationRef, room: protocol::Conversation) {
+        self.observe_created_room(context.account, room.clone());
+        let target = ConversationRef {
+            account: context.account,
+            conversation: room.id,
+        };
+        let row = conversation(&room, context.account);
+        self.snapshot.conversations = page(
+            std::iter::once(row.clone()).chain(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .filter(|existing| existing.context != target)
+                    .take(99)
+                    .cloned(),
+            ),
+        );
+        if let Some(account) = self.background.account_mut(context.account) {
+            account.rooms = page(
+                std::iter::once(row).chain(
+                    account
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .filter(|existing| existing.context != target)
+                        .take(99)
+                        .cloned(),
+                ),
+            );
+        }
+        if self.snapshot.call.as_ref().is_none_or(|call| {
+            matches!(
+                call.stage,
+                talk_core::ui::presentation::CallStage::Ended
+                    | talk_core::ui::presentation::CallStage::Failed
+            )
+        }) {
+            // The user explicitly chose the new room after the call owner
+            // confirmed it had ended. Retire its terminal screen so the
+            // navigation is actually visible.
+            self.snapshot.call = None;
+            self.call_ui = None;
+            let _ = self.open(target);
+        }
+        self.load_rooms = Some(context.account);
+        self.touch();
+    }
+    fn project_notification_change(
+        &mut self,
+        context: ConversationRef,
+        change: NotificationChange,
+        pending_or_accepted: bool,
+    ) {
+        if let Some(details) = self
+            .snapshot
+            .conversation_panel
+            .as_mut()
+            .filter(|p| p.context == context)
+            .and_then(|p| p.details.as_mut())
+        {
+            match change {
+                NotificationChange::Messages {
+                    desired, previous, ..
+                } => {
+                    details.notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+                NotificationChange::Calls { desired, previous } => {
+                    details.call_notifications = if pending_or_accepted {
+                        Some(desired)
+                    } else {
+                        previous
+                    }
+                }
+            }
+        }
+        if let NotificationChange::Messages {
+            desired,
+            previous_muted,
+            ..
+        } = change
+        {
+            self.snapshot.conversations = page(
+                self.snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .cloned()
+                    .map(|mut row| {
+                        if row.context == context {
+                            row.notification_muted = if pending_or_accepted {
+                                Some(desired == view::NotificationLevel::Never)
+                            } else {
+                                previous_muted
+                            };
+                        }
+                        row
+                    }),
+            );
+        }
+    }
+    pub(super) fn restore_pending_notifications(&mut self, account: AccountScope) {
+        let pending: Vec<_> = self
+            .pending
+            .iter()
+            .filter_map(|p| match p.purpose {
+                Purpose::Room(_, context, _, Work::Notification(change))
+                    if context.account == account =>
+                {
+                    Some((context, change))
+                }
+                _ => None,
+            })
+            .collect();
+        for (context, change) in pending {
+            self.project_notification_change(context, change, true);
+        }
     }
 }
 fn begin_room(panel: &mut view::ConversationPanel, request: RequestId, work: Work) {
@@ -1004,7 +1422,12 @@ fn command(
     use view::ConversationAction as V;
     use wire::ConversationCommand as W;
     Ok(match action {
-        V::PickCsv { .. } | V::CancelCsvPick { .. } => return Err(SubmitError::StaleScope),
+        V::PickAvatar
+        | V::OpenAssignedBreakout(_)
+        | V::PickCsv { .. }
+        | V::CancelCsvPick { .. } => {
+            return Err(SubmitError::StaleScope);
+        }
         V::Read => W::Read,
         V::SetName(v) => W::SetName(v),
         V::SetDescription(v) => W::SetDescription(v),
@@ -1031,6 +1454,10 @@ fn command(
         V::SetLobby(enabled) => W::SetLobby {
             enabled,
             timer: None,
+        },
+        V::SetLobbyTimer(timer) => W::SetLobby {
+            enabled: true,
+            timer: Some(timer),
         },
         V::Delete => W::Delete,
         V::ClearHistory => W::ClearHistory,
@@ -1060,8 +1487,53 @@ fn command(
         V::Bans => W::Bans,
         V::Unban(id) => W::Unban(integration(context, id)?),
         V::PreviewCsv(csv) => W::PreviewEmailCsv(csv),
-        V::ConfigureBreakouts { amount, automatic } => W::ConfigureBreakouts { amount, automatic },
+        V::ConfigureBreakouts {
+            amount,
+            mode,
+            assignments,
+        } => W::ConfigureBreakouts {
+            amount,
+            mode: breakout_mode(mode),
+            assignments: breakout_assignments(context, assignments)?,
+        },
+        V::BreakoutRooms => W::BreakoutRooms,
+        V::AssignBreakouts(assignments) => {
+            W::AssignBreakouts(breakout_assignments(context, assignments)?)
+        }
+        V::StartBreakouts => W::StartBreakouts,
+        V::StopBreakouts => W::StopBreakouts,
+        V::RemoveBreakouts => W::RemoveBreakouts,
+        V::BroadcastBreakouts(message) => W::BroadcastBreakouts(message),
+        V::SwitchBreakout(target) => {
+            if target.account != context.account || !target.is_consistent() {
+                return Err(SubmitError::StaleScope);
+            }
+            W::SwitchBreakout(target.conversation)
+        }
+        V::RequestBreakoutAssistance => W::RequestBreakoutAssistance,
     })
+}
+fn breakout_mode(mode: view::BreakoutMode) -> wire::BreakoutMode {
+    match mode {
+        view::BreakoutMode::Automatic => wire::BreakoutMode::Automatic,
+        view::BreakoutMode::Manual => wire::BreakoutMode::Manual,
+        view::BreakoutMode::Free => wire::BreakoutMode::Free,
+    }
+}
+fn breakout_assignments(
+    context: ConversationRef,
+    items: Page<view::BreakoutAssignment, 100>,
+) -> Result<Page<wire::BreakoutAssignment, 100>, SubmitError> {
+    let mut result = Page::empty();
+    for item in items.as_slice() {
+        result
+            .try_push(wire::BreakoutAssignment {
+                member: member(context, item.member)?,
+                room: item.room,
+            })
+            .map_err(|_| SubmitError::Busy)?;
+    }
+    Ok(result)
 }
 pub(super) fn availability(a: wire::ActionAvailability) -> view::Availability {
     view::Availability {
@@ -1091,8 +1563,17 @@ fn details_view(d: wire::ConversationDetails) -> view::RoomDetails {
         server_default_permissions: d.server_default_permissions,
         effective_permissions: d.effective_permissions,
         lobby: d.lobby,
+        lobby_timer: d.lobby_timer,
         has_password: d.has_password,
         participant_count: d.participant_count,
+        breakout_mode: d.breakout_mode.map(|mode| match mode {
+            wire::BreakoutMode::Automatic => view::BreakoutMode::Automatic,
+            wire::BreakoutMode::Manual => view::BreakoutMode::Manual,
+            wire::BreakoutMode::Free => view::BreakoutMode::Free,
+        }),
+        breakout_started: d.breakout_started,
+        breakout_child: d.breakout_child,
+        breakout_supported: d.breakout_supported,
         guest_access: Some(d.conversation.kind == RoomKind::Public),
         leave: d.conversation.actions.leave_conversation,
         controls: page(
@@ -1111,6 +1592,7 @@ fn setting(s: wire::Setting) -> view::RoomSetting {
         W::Avatar => V::Avatar,
         W::ReadOnly => V::ReadOnly,
         W::Notifications => V::Notifications,
+        W::CallNotifications => V::CallNotifications,
         W::Important => V::Important,
         W::Sensitive => V::Sensitive,
         W::Expiration => V::Expiration,

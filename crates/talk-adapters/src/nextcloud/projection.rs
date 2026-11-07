@@ -16,7 +16,11 @@ impl Project for Room {
         value["status"] = json!(self.status);
         value["statusIcon"] = json!(self.status_icon);
         value["statusMessage"] = json!(self.status_message);
+        value["unreadMention"] = json!(self.unread_mention);
+        value["breakoutRoomMode"] = json!(self.breakout_mode);
+        value["breakoutRoomStatus"] = json!(self.breakout_status);
         value["lastReadMessage"] = json!(self.last_read);
+        value["summaryOffset"] = json!(self.summary_offset);
         value["lastCommonReadMessage"] = json!(self.common_read);
         value
     }
@@ -43,7 +47,7 @@ impl Project for Tag {
 }
 impl Project for Capabilities {
     fn project(self) -> Value {
-        json!({"version":{"major":self.server_major},"capabilities":{"user_status":{"enabled":self.user_status_enabled,"supports_emoji":self.user_status_emoji},"spreed":{"features":self.features,"config":{"chat":{"read-privacy":self.read_privacy,"typing-privacy":self.typing_privacy,"max-length":self.message_limit},"attachments":{"folder":self.attachment_folder,"allowed":self.attachments_allowed,"conversation-subfolders":self.conversation_subfolders},"conversations":{"can-create":self.can_create},"permissions":{"default":self.server_default_permissions},"call":{"enabled":self.call_enabled,"recording":self.recording_enabled,"breakout-rooms":self.breakouts_enabled,"grid-limit":self.grid_limit,"grid-limit-enforced":self.grid_limit_enforced,"recording-consent":self.recording_consent,"end-to-end-encryption":self.encryption_required}}}}})
+        json!({"version":{"major":self.server_major},"capabilities":{"user_status":{"enabled":self.user_status_enabled,"supports_emoji":self.user_status_emoji},"spreed":{"features":self.features,"config":{"chat":{"read-privacy":self.read_privacy,"typing-privacy":self.typing_privacy,"max-length":self.message_limit,"has-translation-providers":self.translation_providers,"summary-threshold":self.summary_threshold},"federation":{"enabled":self.federation_enabled,"incoming-enabled":self.federation_incoming},"attachments":{"folder":self.attachment_folder,"allowed":self.attachments_allowed,"conversation-subfolders":self.conversation_subfolders},"conversations":{"can-create":self.can_create},"permissions":{"default":self.server_default_permissions},"call":{"enabled":self.call_enabled,"recording":self.recording_enabled,"breakout-rooms":self.breakouts_enabled,"grid-limit":self.grid_limit,"grid-limit-enforced":self.grid_limit_enforced,"recording-consent":self.recording_consent,"end-to-end-encryption":self.encryption_required}}}}})
     }
 }
 impl Project for SignalingSettings {
