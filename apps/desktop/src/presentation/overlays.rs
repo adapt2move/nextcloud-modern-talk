@@ -185,6 +185,10 @@ impl Desktop {
         };
         let content = if overlay == Overlay::CallChat {
             div().flex_1().min_h_0().child(body).into_any_element()
+        } else if matches!(overlay, Overlay::ConfirmRecording | Overlay::ConfirmEndCall) {
+            // These compact confirmations have no independently scrolling
+            // content. Let their natural height include the action-row padding.
+            div().flex_none().p_6().child(body).into_any_element()
         } else {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
@@ -247,6 +251,13 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .text_size(self.sp(if side { 18. } else { 24. }))
+                                        .when(
+                                            matches!(
+                                                overlay,
+                                                Overlay::ConfirmRecording | Overlay::ConfirmEndCall
+                                            ),
+                                            |title| title.line_height(self.sp(30.)),
+                                        )
                                         .font_weight(FontWeight::BOLD)
                                         .child(self.l(title)),
                                 )
