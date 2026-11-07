@@ -8,6 +8,9 @@ use talk_core::ui::presentation::{
     CallStage, CallTileId, CallTileKind, MediaState, RequiredGate, UiIntent,
 };
 
+// Sixteen remote cameras, the local camera, and one screen stage may coexist.
+const MAX_CALL_TILES: usize = 18;
+
 impl Desktop {
     /// Existing camera-frame producer. Screen producers can pass typed tile
     /// identities to `set_call_tiles` once their scoped snapshot is connected.
@@ -76,7 +79,7 @@ impl Desktop {
             }
         }
         if let Some(scope) = scope {
-            for (tile, image) in images.into_iter().take(17) {
+            for (tile, image) in images.into_iter().take(MAX_CALL_TILES) {
                 if !valid(tile) {
                     continue;
                 }
@@ -90,7 +93,7 @@ impl Desktop {
                         cx.drop_image(old, None);
                     }
                 }
-                if self.call_images.len() < 17 {
+                if self.call_images.len() < MAX_CALL_TILES {
                     self.call_images
                         .push((scope, tile, std::time::Instant::now(), image));
                     changed = true;
