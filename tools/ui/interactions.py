@@ -404,7 +404,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Enter did not submit the draft to the scoped thread')
         checks.append({'check': 'thread Enter submits the scoped draft', 'result': 'pass'})
         key('Escape')
-        expect('Escape closes the thread pane and returns to the room',
+        expect_settled('Escape closes the thread pane and returns to the room',
                ['Designteam'], ['Design review', 'THREADDRAFT'])
     elif scenario == 'thread-options':
         expect('thread options expose subscription and rename controls',
