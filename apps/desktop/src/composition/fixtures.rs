@@ -1184,6 +1184,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.members = page([("Mara Fischer", 11), ("Jonas Weber", 12)].map(
                 |(name, local)| Member {
                     id: PersonRef { context, local },
+                    author_key: None,
+                    presence: Presence::Unknown,
+                    status_icon: None,
+                    status_message: None,
                     name: text(name),
                     role: MemberRole::Member,
                     source: DirectorySource::User,
