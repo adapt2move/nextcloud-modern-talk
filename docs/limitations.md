@@ -31,8 +31,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   are shown only when the server supplies them; avatar initials are local fallbacks.
   Recently viewed poll results are retained in memory for up to five minutes
   across four rooms, subject to room policy; they do not survive restart and
-  cannot authorize voting or closure. Native semantic accessibility and full
-  platform behavior remain unqualified.
+  cannot authorize voting or closure. Poll publication and draft changes require
+  a connection and await server confirmation; they are not queued across restart.
+  Native semantic accessibility and full platform behavior remain unqualified.
 - Voice recording is explicitly started, limited to two minutes, and encoded as
   16 kHz mono PCM WAV in memory. An unsent recording remains available during
   a temporary disconnection, but retires on scope or permission loss and does
