@@ -145,7 +145,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('erstellen', inspected_point=(1280, 800, 540, 548))
         expect('settings opens the scoped poll dialog', ['Frage', 'Mehrere Antworten erlauben'])
         key('Escape')
-        expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Schreibgeschützt'])
+        expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Nachrichten'])
     elif scenario == 'chat-polls':
         click('Abstimmen', inspected_point=(1280, 800, 390, 578))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
