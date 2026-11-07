@@ -469,7 +469,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
     elif scenario == 'reference-preview':
         expect('resolved reference card is shown with its source message', ['Ein ruhiger Ort', 'Studiokonzept'])
-        click('Vorschau verbergen', inspected_point=(1280, 800, 826, 400))
+        click('Vorschau verbergen', inspected_point=(1280, 800, 826, 352))
         expect('reference card can be collapsed locally', ['Vorschau anzeigen'], ['Ein ruhiger Ort'])
         click('Vorschau', xmin=300, ymin=250)
         expect('collapsed reference card can be restored', ['Ein ruhiger Ort', 'Studiokonzept'])
@@ -515,9 +515,18 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Escape closes the call participants panel', absent=['Nicht im Anruf'])
         checks.append({'check': 'H toggles the hand in the call participants panel', 'result': 'pass'})
     elif scenario == 'call-dock':
-        # The room row is visible in the fixed 1280x800 fictional dock fixture.
-        run(['xdotool', 'mousemove', '--window', xid, '150', '290'], env)
-        expect('Active room reveals its join action on hover', ['Beitreten'])
+        # Locate the room label so persisted filters and navigation entries can
+        # change the sidebar's vertical layout without moving the test target.
+        _, words, _ = observe()
+        rooms = [word for word in words if normalized(word['text']).startswith('teamk')
+                 and int(word['left']) < 240 and int(word['top']) < 600]
+        if not rooms:
+            raise AssertionError('Active call room label is missing from the sidebar')
+        room = min(rooms, key=lambda word: int(word['top']))
+        x = int(room['left']) + int(room['width']) // 2
+        y = int(room['top']) + int(room['height']) // 2
+        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y)], env)
+        expect_settled('Active room reveals its join action on hover', ['Beitreten'])
         click('Beitreten', xmin=140, ymin=250)
         expect('Join action expands the owned call', ['Teamk', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):
