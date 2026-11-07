@@ -792,12 +792,7 @@ impl Desktop {
                                             LocalAction::Content(super::content::Action::Menu),
                                             cx,
                                         )
-                                        .when(
-                                            !thread,
-                                            |button| {
-                                                button.child(self.composer_menu_anchor(row.context))
-                                            },
-                                        ),
+                                        .child(self.composer_menu_anchor(row.context)),
                                     )
                                     .child(self.icon_button(
                                         emoji_id,
@@ -820,7 +815,6 @@ impl Desktop {
                                     .when(
                                         input.read(cx).content.is_empty()
                                             && !attached
-                                            && !thread
                                             && !self.drafts.target(row.context).new_thread
                                             && self.message_feature_enabled(MessageFeature::Voice),
                                         |d| {
