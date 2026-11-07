@@ -14,7 +14,8 @@ from capture import run, sha
 
 
 def normalized(value):
-    return ''.join(c for c in unicodedata.normalize('NFKD', value).casefold() if c.isalnum() or c.isspace())
+    text = ''.join(c for c in unicodedata.normalize('NFKD', value).casefold() if c.isalnum() or c.isspace())
+    return ' '.join(text.split())
 
 
 def exercise(scenario, env, xid, out, label, large=False):
