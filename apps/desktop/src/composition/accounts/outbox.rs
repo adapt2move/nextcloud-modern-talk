@@ -1945,6 +1945,36 @@ fn overlay(
             }
         }
         Intent::Send { body, options } => {
+            if options.thread.is_some()
+                && messages
+                    .as_slice()
+                    .iter()
+                    .chain(panel.thread_messages.as_slice())
+                    .any(|message| {
+                        message.own
+                            && message.local_id <= u128::from(u64::MAX)
+                            && message.metadata.local_operation
+                                == Some(entry.record.operation.as_local())
+                    })
+            {
+                // A live poll may observe the correlated server row before the
+                // send receipt. Keep the confirmed row and do not project a duplicate.
+                return;
+            }
+            if let Some(root) = options.thread.map(u128::from) {
+                *messages = page(messages.as_slice().iter().cloned().map(|mut message| {
+                    if message.local_id == root && !message.metadata.deleted {
+                        message.reply_count = message.reply_count.saturating_add(1);
+                    }
+                    message
+                }));
+                if let Some(message) = panel.thread_root_message.as_mut()
+                    && message.local_id == root
+                    && !message.metadata.deleted
+                {
+                    message.reply_count = message.reply_count.saturating_add(1);
+                }
+            }
             let mut row = MessageView {
                 local_id: pending_id,
                 author: text(author),
@@ -1989,12 +2019,14 @@ fn overlay(
                             unavailable: m.metadata.deleted,
                         })
                 });
-            if options.thread.is_some() && panel.thread_root == options.thread.map(u128::from) {
-                if panel.thread_messages.as_slice().len() == 50 {
-                    panel.thread_messages =
-                        page(panel.thread_messages.as_slice().iter().skip(1).cloned());
+            if let Some(root) = options.thread.map(u128::from) {
+                if panel.thread_root == Some(root) {
+                    if panel.thread_messages.as_slice().len() == 50 {
+                        panel.thread_messages =
+                            page(panel.thread_messages.as_slice().iter().skip(1).cloned());
+                    }
+                    let _ = panel.thread_messages.try_push(row);
                 }
-                let _ = panel.thread_messages.try_push(row);
             } else {
                 if messages.as_slice().len() == 100 {
                     *messages = page(messages.as_slice().iter().skip(1).cloned());

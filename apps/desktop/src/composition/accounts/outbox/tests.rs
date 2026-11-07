@@ -348,6 +348,232 @@ fn confirmed_thread_changes_update_the_account_page_without_waiting_for_refresh(
 }
 
 #[test]
+fn thread_overlays_replay_once_and_rejections_restore_the_latest_server_page() {
+    let (mut model, context, room) = model();
+    let mut root = details(context, 7, "Root");
+    root.thread = Some(root.message.id);
+    root.thread_replies = Some(2);
+    observe(&mut model, context, 1, [root]);
+    let mut reply = details(context, 8, "Before");
+    reply.thread = Some(MessageId {
+        conversation: context.conversation,
+        sequence: 7,
+    });
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([messaging::message_view(&reply)]);
+    model.outbox.load(
+        context.account.account,
+        &page([
+            stored(
+                1,
+                room.clone(),
+                Intent::Send {
+                    body: text("Queued reply"),
+                    options: OutboxOptions {
+                        thread: Some(7),
+                        ..Default::default()
+                    },
+                },
+                OutboxPhase::Queued,
+                1,
+            ),
+            stored(
+                2,
+                room.clone(),
+                Intent::Edit {
+                    message: 8,
+                    body: text("Optimistic edit"),
+                },
+                OutboxPhase::Queued,
+                2,
+            ),
+            stored(
+                3,
+                room,
+                Intent::Reaction {
+                    message: 8,
+                    emoji: text("👍"),
+                    add: true,
+                },
+                OutboxPhase::Queued,
+                3,
+            ),
+        ]),
+    );
+    for _ in 0..3 {
+        model.project_history(context);
+        let panel = model.snapshot.message_panel.as_ref().unwrap();
+        assert_eq!(panel.thread_messages.as_slice().len(), 2);
+        assert_eq!(
+            panel
+                .thread_messages
+                .as_slice()
+                .iter()
+                .filter(|row| row.body.as_str() == "Queued reply")
+                .count(),
+            1
+        );
+        let original = panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .find(|row| row.local_id == 8)
+            .unwrap();
+        assert_eq!(original.body.as_str(), "Optimistic edit");
+        assert_eq!(original.metadata.reactions.as_slice()[0].count, 1);
+        assert_eq!(
+            model
+                .snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 7)
+                .unwrap()
+                .reply_count,
+            3
+        );
+    }
+
+    let operation = OperationId::from_local(901);
+    model
+        .history
+        .admitted(context, operation, messaging::Work::Poll, RequestId(2), 2);
+    reply.message.text = text("Newer server text");
+    model.apply_message(
+        RequestId(2),
+        context,
+        operation,
+        messaging::Work::Poll,
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Messages {
+                capabilities: None,
+                messages: page([reply]),
+                cursor: None,
+                common_read: None,
+            },
+        })),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .find(|row| row.local_id == 8)
+            .unwrap()
+            .body
+            .as_str(),
+        "Optimistic edit"
+    );
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    let cached = model.history.get(context).unwrap().thread(7).unwrap();
+    assert!(
+        cached.as_slice().iter().all(
+            |row| row.body.as_str() != "Queued reply" && row.body.as_str() != "Optimistic edit"
+        )
+    );
+
+    for id in [2, 3] {
+        model.outbox_result(
+            OperationId::from_local(id),
+            &Err(Completion::Failed(UnavailableReason::PermissionDenied)),
+        );
+    }
+    model.project_history(context);
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    let original = panel
+        .thread_messages
+        .as_slice()
+        .iter()
+        .find(|row| row.local_id == 8)
+        .unwrap();
+    assert_eq!(original.body.as_str(), "Newer server text");
+    assert!(original.metadata.reactions.as_slice().is_empty());
+    assert_eq!(
+        panel
+            .thread_messages
+            .as_slice()
+            .iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    model.outbox.entries[0].state = State::Running;
+    model.outbox.entries[0].record.phase = OutboxPhase::Dispatched;
+    let operation = OperationId::from_local(902);
+    model
+        .history
+        .admitted(context, operation, messaging::Work::Poll, RequestId(3), 3);
+    let mut accepted = details(context, 9, "Queued reply");
+    accepted.thread = Some(MessageId {
+        conversation: context.conversation,
+        sequence: 7,
+    });
+    accepted.message.own_operation = Some(OperationId::from_local(1));
+    model.apply_message(
+        RequestId(3),
+        context,
+        operation,
+        messaging::Work::Poll,
+        Ok(RuntimeReply::Protocol(ProtocolReply::Messaging {
+            conversation: context.conversation,
+            operation,
+            result: wire::MessagingResult::Messages {
+                capabilities: None,
+                messages: page([accepted]),
+                cursor: None,
+                common_read: None,
+            },
+        })),
+    );
+    let rows = model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .thread_messages
+        .as_slice();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.body.as_str() == "Queued reply")
+            .count(),
+        1
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.local_id == 9 && row.body.as_str() == "Queued reply")
+    );
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(9);
+    panel.thread_messages = Page::empty();
+    model.project_history(context);
+    assert!(model.snapshot.messages.as_slice().iter().all(|row| {
+        row.body.as_str() != "Queued reply" || row.local_id <= u128::from(u64::MAX)
+    }));
+    assert!(
+        model
+            .snapshot
+            .message_panel
+            .as_ref()
+            .unwrap()
+            .thread_messages
+            .as_slice()
+            .is_empty()
+    );
+}
+
+#[test]
 fn thread_admission_rejects_wrong_root_and_known_denial() {
     let (mut model, context, _) = model();
     let panel = model.snapshot.message_panel.as_mut().unwrap();

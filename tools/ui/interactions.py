@@ -238,7 +238,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Return')
         time.sleep(1.5)
         run(['xdotool', 'mousemove', '--window', xid, '1100', '550', 'click', '--repeat', '5', '5'], env)
-        expect('offline thread reply is staged and shown immediately', ['OFFLINEREPLY'])
+        expect('offline thread reply and count update immediately', ['OFFLINEREPLY', '3 Antworten'])
         log = (out / f'{label}.log').read_text()
         if not re.search(r'UI_CHAT_UX send room=\d+ bytes=12 .*thread=Some\(1\)', log):
             raise AssertionError('Offline Enter did not submit the draft to the scoped thread')

@@ -1844,6 +1844,19 @@ impl NativeDesktopPort for DevelopmentPort {
                     .thread_messages
                     .try_push(reply)
                     .map_err(|_| SubmitError::Busy)?;
+                self.snapshot.messages = page(
+                    self.snapshot
+                        .messages
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .map(|mut message| {
+                            if message.local_id == root {
+                                message.reply_count = message.reply_count.saturating_add(1);
+                            }
+                            message
+                        }),
+                );
                 self.snapshot.submission = Some(SubmissionResult {
                     request,
                     context,
@@ -2293,6 +2306,16 @@ mod tests {
         assert_eq!(row.body.as_str(), "Offline reply");
         assert_eq!(row.metadata.thread, Some(1));
         assert_eq!(row.delivery, DeliveryState::Queued);
+        assert_eq!(
+            snapshot
+                .messages
+                .as_slice()
+                .iter()
+                .find(|row| row.local_id == 1)
+                .unwrap()
+                .reply_count,
+            3
+        );
     }
     #[test]
     fn reaction_fixture_reconciles_counts_and_keeps_pending_and_denied_distinct() {

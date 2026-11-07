@@ -297,6 +297,14 @@ impl Accounts {
         if self.snapshot.selected != Some(context) {
             return;
         }
+        if let Some(panel) = self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .filter(|panel| panel.context == context)
+        {
+            self.history.ensure_open_thread(context, panel);
+        }
         if let Some(history) = self.history.get(context) {
             // Pin activity remains canonical for cursors/read state, while its
             // already visible banner and marker replace redundant chat prose.
@@ -1342,6 +1350,11 @@ impl Accounts {
         self.history.expire(history::now_unix());
         self.observed_deliberate_read(context, work, result.is_ok());
         self.project_history(context);
+        let canonical_messages = self
+            .history
+            .get(context)
+            .map(|history| history.visible_messages())
+            .unwrap_or_else(|| self.snapshot.messages.clone());
         let changed: Vec<u128> = match &result {
             Ok(wire::MessagingResult::Messages { messages, .. })
                 if matches!(
@@ -1378,6 +1391,11 @@ impl Accounts {
         else {
             return;
         };
+        // Apply observations to the canonical thread window, then replay all
+        // queued intents. This also keeps failed overlays out of cached pages.
+        if let Some(history) = self.history.get(context) {
+            history.project_open_thread(panel);
+        }
         let mut reload = false;
         let mut thread_changed = false;
         let completion = match result {
@@ -1773,7 +1791,14 @@ impl Accounts {
                 result: completion,
             });
         }
-        reconcile_related(panel, &self.snapshot.messages, &changed);
+        reconcile_related(panel, &canonical_messages, &changed);
+        let open_thread = panel.thread_root.map(|root| {
+            (
+                root,
+                panel.thread_messages.clone(),
+                panel.thread_root_message.clone(),
+            )
+        });
         let thread_cache = if completion == Completion::ServerAccepted
             && !panel.thread_has_newer
             && (thread_changed || !changed.is_empty())
@@ -1785,8 +1810,7 @@ impl Accounts {
                     .filter(|message| message.local_id == root)
                     .cloned()
                     .or_else(|| {
-                        self.snapshot
-                            .messages
+                        canonical_messages
                             .as_slice()
                             .iter()
                             .find(|message| message.local_id == root)
@@ -1797,10 +1821,16 @@ impl Accounts {
         } else {
             None
         };
+        if let Some((root, rows, root_message)) = open_thread {
+            self.history
+                .remember_open_thread(context, root, rows, root_message);
+        }
         if let Some((root, rows, root_message)) = thread_cache {
             self.history
                 .remember_thread(context, root, rows, root_message);
         }
+        self.snapshot.messages = canonical_messages;
+        self.project_outbox(context);
         if matches!(work, Work::ThreadChange(_) | Work::ThreadQueued(_))
             && completion == Completion::ServerAccepted
             && self.refresh_threads(context.account).is_err()

@@ -48,6 +48,12 @@ struct ThreadObservation {
     expires: Instant,
 }
 
+struct OpenThread {
+    root: u128,
+    rows: Page<MessageView, 50>,
+    root_message: Option<MessageView>,
+}
+
 pub(super) struct History {
     context: ConversationRef,
     opened: bool,
@@ -81,6 +87,9 @@ pub(super) struct History {
     reaction_snapshots: Vec<ReactionSnapshot>,
     // Four recently opened threads per scoped room; no permission is cached.
     threads: Vec<(u128, Page<MessageView, 50>, Option<MessageView>)>,
+    // Canonical current page, including older pages that are not the cached tail.
+    // Optimistic rows are projected only after this bounded baseline is restored.
+    open_thread: Option<OpenThread>,
     // Current-runtime observations only; disk never restores rename authority.
     thread_details: Vec<ThreadObservation>,
     thread_activity: Page<talk_core::ui::messaging::ThreadActivity, 50>,
@@ -118,6 +127,7 @@ impl History {
             metadata_probe: None,
             reaction_snapshots: Vec::new(),
             threads: Vec::new(),
+            open_thread: None,
             thread_details: Vec::new(),
             thread_activity: Page::empty(),
             thread_activity_version: Version(0, false),
@@ -135,6 +145,7 @@ impl History {
         panel.older = self.older;
         panel.latest = self.latest;
         panel.common_read = self.common_read;
+        self.project_open_thread(panel);
         if panel.thread_change_prior.is_none()
             && let Some(observed) = panel.thread_root.and_then(|root| {
                 self.thread_details
@@ -252,6 +263,16 @@ impl History {
                     }
                 }
             }
+        }
+    }
+    pub(super) fn project_open_thread(&self, panel: &mut MessagePanel) {
+        if let Some(thread) = self
+            .open_thread
+            .as_ref()
+            .filter(|thread| panel.thread_root == Some(thread.root))
+        {
+            panel.thread_messages = thread.rows.clone();
+            panel.thread_root_message = thread.root_message.clone();
         }
     }
     pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {
@@ -528,6 +549,13 @@ impl History {
                     .iter()
                     .flat_map(|(_, rows, root)| rows.as_slice().iter().chain(root.iter())),
             )
+            .chain(self.open_thread.iter().flat_map(|thread| {
+                thread
+                    .rows
+                    .as_slice()
+                    .iter()
+                    .chain(thread.root_message.iter())
+            }))
             .filter(|m| m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
             .map(|m| m.local_id)
             .collect();
@@ -553,6 +581,10 @@ impl History {
         for (_, rows, root) in &mut self.threads {
             *rows = page(rows.as_slice().iter().filter_map(retain));
             *root = root.as_ref().and_then(retain);
+        }
+        if let Some(thread) = self.open_thread.as_mut() {
+            thread.rows = page(thread.rows.as_slice().iter().filter_map(retain));
+            thread.root_message = thread.root_message.as_ref().and_then(retain);
         }
         self.versions.retain(|(id, _)| !expired.contains(id));
         self.read_edges
@@ -594,6 +626,15 @@ impl History {
                 redact(root);
             }
         }
+        if let Some(thread) = self.open_thread.as_mut() {
+            thread.rows = page(thread.rows.as_slice().iter().cloned().map(|mut message| {
+                redact(&mut message);
+                message
+            }));
+            if let Some(root) = thread.root_message.as_mut() {
+                redact(root);
+            }
+        }
     }
 }
 
@@ -604,6 +645,56 @@ pub(super) struct Cache {
     last_admission: u64,
 }
 impl Cache {
+    pub(super) fn ensure_open_thread(&mut self, context: ConversationRef, panel: &MessagePanel) {
+        let Some(room) = self.get_mut(context) else {
+            return;
+        };
+        let Some(root) = panel.thread_root else {
+            room.open_thread = None;
+            return;
+        };
+        if room
+            .open_thread
+            .as_ref()
+            .is_some_and(|thread| thread.root == root)
+        {
+            return;
+        }
+        room.open_thread = Some(OpenThread {
+            root,
+            // Locally staged IDs occupy the upper half of u128; server IDs are
+            // u64. A reopened baseline must never adopt projected intents.
+            rows: page(
+                panel
+                    .thread_messages
+                    .as_slice()
+                    .iter()
+                    .filter(|row| row.local_id <= u128::from(u64::MAX))
+                    .cloned(),
+            ),
+            root_message: panel.thread_root_message.clone(),
+        });
+    }
+    pub(super) fn remember_open_thread(
+        &mut self,
+        context: ConversationRef,
+        root: u128,
+        rows: Page<MessageView, 50>,
+        root_message: Option<MessageView>,
+    ) {
+        if let Some(room) = self.get_mut(context)
+            && room
+                .open_thread
+                .as_ref()
+                .is_some_and(|thread| thread.root == root)
+        {
+            room.open_thread = Some(OpenThread {
+                root,
+                rows,
+                root_message,
+            });
+        }
+    }
     pub(super) fn remember_thread(
         &mut self,
         context: ConversationRef,
