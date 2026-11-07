@@ -33,6 +33,7 @@ def source_manifest(root):
 
 def capture(args, before_runtime_cleanup=None):
     root = Path(__file__).resolve().parents[2]
+    source_root = Path(getattr(args, "source_root", None) or root).resolve()
     binary = Path(args.binary).resolve()
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -40,7 +41,8 @@ def capture(args, before_runtime_cleanup=None):
         "media_engine_attached": False, "media_frames": False, "platform_qualified": False,
         "preference_scope": "fresh private XDG configuration/data per scenario",
         "material_preview_override": os.environ.get("TALK_UI_MATERIAL_PREVIEW") == "1",
-        "binary_sha256": sha(binary), "source_files": source_manifest(root), "captures": []}
+        "binary_sha256": sha(binary), "capture_tool_sha256": sha(Path(__file__)),
+        "source_files": source_manifest(source_root), "captures": []}
     manifest["source_manifest_sha256"] = hashlib.sha256(json.dumps(manifest["source_files"], sort_keys=True).encode()).hexdigest()
     env = os.environ.copy()
     env.pop("WAYLAND_DISPLAY", None)
@@ -175,6 +177,7 @@ def capture(args, before_runtime_cleanup=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="target/debug/talk-desktop")
+    parser.add_argument("--source-root", help="source tree used to build the captured binary")
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenarios", default="server,browser,storage,expired,chat,chat:dark,settings,settings:dark:sage,incoming,prejoin,call,direct-call,voice,gate,offline,denied")
     parser.add_argument("--width", type=int, default=1200)
