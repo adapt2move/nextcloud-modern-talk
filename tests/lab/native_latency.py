@@ -177,7 +177,7 @@ async def process_run(binary, profile, env, mode, output, warm=False, performanc
             recovered=None
             while time.monotonic()<end:
                 await act("status")
-                if status and status[-1]['sentinels']==2 and not status[-1]['visible'] and status[-1]['outgoing']==0:
+                if status and status[-1]['sentinels']==2 and not status[-1]['visible'] and status[-1]['outgoing']==0 and status[-1]['queued']==0:
                     recovered=status[-1];break
                 await asyncio.sleep(.1)
             recovery_us=(time.monotonic_ns()-resumed)//1000
