@@ -170,6 +170,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('outside click dismisses the person card', absent=['Abwesend'])
         click('Mara', xmin=300, ymin=180)
         key('Tab'); key('Tab'); key('Return')
+        time.sleep(1.)  # Direct-room resolution and call entry cross owner ticks.
         expect('keyboard activation resolves the fictional direct call', ['Verbindung wird aufgebaut'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
@@ -182,7 +183,8 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'chat-content':
         # The plus control is a native icon; this point was inspected at 1280x800.
         run(['xdotool', 'mousemove', '--window', xid, '314', '742', 'click', '1'], env)
-        expect('composer plus exposes both file sources', ['Vom Computer hochladen', 'Aus NextCloud teilen'])
+        expect('composer plus exposes file sources and polls',
+               ['Vom Computer hochladen', 'Aus NextCloud teilen', 'Umfrage erstellen'])
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
@@ -231,10 +233,16 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'poll-dialog':
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
-        type_text('Team lunch')
-        click('Antwortoption'); type_text('Garden')
-        click('Antwortoption'); type_text('Studio')
-        expect('completed poll keeps both distinct choices', ['Team lunch', 'Garden', 'Studio'],
+        # Exercise plain-text paste in each poll input independently.
+        for value, question in [('TEAM LUNCH', True), ('GARDEN', False), ('STUDIO', False)]:
+            if not question:
+                click('Antwortoption')
+            subprocess.run(['xclip', '-selection', 'clipboard', '-i'],
+                           input=value, text=True, env=env, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, check=True, timeout=10)
+            key('ctrl+v')
+            expect('poll field retains pasted text', [value])
+        expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
@@ -245,7 +253,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('closing the poll dialog restores conversation settings', ['Allgemein', 'Nachrichten'])
     elif scenario == 'chat-polls':
-        click('Abstimmen', inspected_point=(1280, 800, 390, 578))
+        click('Abstimmen', inspected_point=(1280, 800, 390, 552))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
         click('beenden')
         expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])
@@ -261,9 +269,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
         if (width, height) != (1280, 800):
             raise AssertionError('Voice waveform interaction requires the inspected 1280x800 fixture')
-        # The compact fictional waveform occupies x=382..565, y=610..644 in
+        # The compact fictional waveform occupies x=382..565, y=584..618 in
         # this fixed fixture. Verify the resulting scoped intents, not dispatch.
-        run(['xdotool', 'mousemove', '--window', xid, '475', '627', 'click', '1'], env)
+        run(['xdotool', 'mousemove', '--window', xid, '475', '601', 'click', '1'], env)
         time.sleep(.4)
         log = out / f'{label}.log'
         first = re.findall(r'UI_VOICE_FIXTURE seek_ms=(\d+)', log.read_text())
