@@ -84,6 +84,7 @@ pub(super) struct MessageUi {
     last_located: Option<RequestId>,
     time_target: Option<Option<u128>>,
     show_scheduled: bool,
+    fixture_menu_pending: bool,
     pub time_input: Entity<TextInput>,
     time_error: Option<talk_core::preferences::time::LocalTimeError>,
     pub search: Entity<TextInput>,
@@ -259,6 +260,7 @@ impl MessageUi {
             last_located: None,
             time_target: None,
             show_scheduled: false,
+            fixture_menu_pending: false,
             time_input: cx.new(|cx| TextInput::new("JJJJ-MM-TT HH:MM", 32, theme, cx)),
             time_error: None,
             search: cx.new(|cx| TextInput::new("Im Gespräch suchen …", 256, theme, cx)),
@@ -284,7 +286,7 @@ impl Desktop {
         }
         match surface {
             "chat-reminder-time" => self.open_message_deadline(Some(45), window, cx),
-            "chat-reminder-menu" => self.message_action(Action::Menu(45), window, cx),
+            "chat-reminder-menu" => self.message_ui.fixture_menu_pending = true,
             "chat-schedule-time" => {
                 self.composer.update(cx, |input, cx| {
                     input.set_context_value("Fiktive Nachricht für morgen.");
@@ -294,6 +296,23 @@ impl Desktop {
             }
             _ => self.message_ui.show_scheduled = true,
         }
+    }
+    pub(super) fn prepare_message_tool_fixture(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.development || !self.message_ui.fixture_menu_pending || !window.is_window_active()
+        {
+            return;
+        }
+        self.message_ui.fixture_menu_pending = false;
+        let view = cx.weak_entity();
+        window.on_next_frame(move |window, cx| {
+            let _ = view.update(cx, |this, cx| {
+                this.message_action(Action::Menu(45), window, cx)
+            });
+        });
     }
     /// Reuse the composition owner's finite refresh tick for one debounced
     /// mention query. No per-keystroke task or unbounded request queue.

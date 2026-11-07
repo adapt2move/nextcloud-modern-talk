@@ -1984,6 +1984,7 @@ impl Render for Desktop {
         self.composer_active =
             window.is_window_active() && self.composer_focus.contains_focused(window, cx);
         self.prepare_message_motion(window);
+        self.prepare_message_tool_fixture(window, cx);
         self.prepare_pin_motion(window, cx);
         self.prepare_message_menu(window, cx);
         self.prepare_composer_menu(window, cx);
