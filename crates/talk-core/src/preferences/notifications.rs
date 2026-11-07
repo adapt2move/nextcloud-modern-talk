@@ -62,7 +62,9 @@ pub enum NotificationKind {
     MessageReminder {
         scope: AccountScope,
         conversation: ConversationId,
+        /// Server notification identity; repeated reminders may target one message.
         id: NotificationId,
+        message: u64,
     },
     IncomingCall {
         call: CallScope,

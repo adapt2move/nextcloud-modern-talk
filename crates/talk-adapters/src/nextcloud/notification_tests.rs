@@ -452,3 +452,49 @@ async fn complete_lists_keep_metadata_and_stable_ids_but_partial_or_oversized_li
     );
     assert_eq!(c.rooms.len(), 1);
 }
+
+#[tokio::test]
+async fn personal_reminders_accept_old_own_messages_and_distinct_server_events_without_reads() {
+    let (stamp, datetime) = wall_time();
+    let reminder = |id| {
+        json!({"notification_id":id,"app":"spreed","user":"fixture_user",
+        "object_type":"reminder","object_id":"testroom","shouldNotify":true,"datetime":datetime,
+        "subject":"Untrusted", "subjectRichParameters":{"message":{"id":"42","type":"highlight","name":"fixture"}}})
+    };
+    let mut data = room();
+    data["notificationLevel"] = json!(3);
+    let mut target = message(42, stamp.saturating_sub(3600));
+    target["actorId"] = json!("fixture_user");
+    let mut replies = notifications(json!([]), "online");
+    for id in [101, 102] {
+        replies.extend(notifications(json!([reminder(id)]), "online"));
+        replies.push(Reply::data(notification_caps()));
+        replies.push(Reply::data(data.clone()));
+        replies.push(Reply::data(json!([target.clone()])));
+    }
+    let server = Server::start(replies).await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    assert!(
+        poll(&mut client, &runtime)
+            .await
+            .notices
+            .as_slice()
+            .is_empty()
+    );
+    for id in [101, 102] {
+        let result = poll(&mut client, &runtime).await;
+        let [value] = result.notices.as_slice() else {
+            panic!("expected reminder")
+        };
+        assert!(value.reminder);
+        assert_eq!((value.notification_id, value.message), (id, 42));
+    }
+    for request in server.seen.lock().unwrap().iter() {
+        let request = String::from_utf8_lossy(request);
+        assert!(request.starts_with("GET "));
+        assert!(
+            !request.contains("setReadMarker=1") && !request.contains("markNotificationsAsRead=1")
+        );
+    }
+}

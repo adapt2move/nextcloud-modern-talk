@@ -7,6 +7,8 @@ use serde_json::Value;
 #[derive(Clone, Debug)]
 pub struct MessageNotification {
     pub id: u64,
+    /// The server's typed object, never inferred from translated subject text.
+    pub reminder: bool,
     pub room: RoomToken,
     /// Sensitive notifications deliberately omit the message identifier.
     pub message: Option<u64>,
@@ -71,7 +73,12 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
             return Err(ErrorKind::Malformed);
         }
         ids.push(id);
-        if row["app"].as_str() != Some("spreed") || row["object_type"].as_str() != Some("chat") {
+        let reminder = match row["object_type"].as_str() {
+            Some("chat") => false,
+            Some("reminder") => true,
+            _ => continue,
+        };
+        if row["app"].as_str() != Some("spreed") {
             continue;
         }
         if row["user"].as_str() != Some(user) {
@@ -79,7 +86,7 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
         }
         // Talk 24/25 also use `chat` for reactions. Their structured parameter
         // distinguishes them; the localized subject does not.
-        if row["subjectRichParameters"].get("reaction").is_some() {
+        if !reminder && row["subjectRichParameters"].get("reaction").is_some() {
             continue;
         }
         let object = row["object_id"].as_str().ok_or(ErrorKind::Malformed)?;
@@ -91,16 +98,31 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
                 .filter(|id| *id > 0)
                 .ok_or(ErrorKind::Malformed)
         };
-        let message = parts.next().map(positive).transpose()?;
-        if let Some(thread) = parts.next() {
-            positive(thread)?;
-        }
-        if parts.next().is_some() {
-            return Err(ErrorKind::Malformed);
-        }
+        let message = if reminder {
+            if parts.next().is_some() {
+                return Err(ErrorKind::Malformed);
+            }
+            // The Notifications endpoint only exposes the parsed rich subject.
+            // If privacy settings omit the structured message target, do not
+            // infer it from localized text, an action URL, or another message.
+            let Some(id) = row["subjectRichParameters"]["message"]["id"].as_str() else {
+                continue;
+            };
+            Some(positive(id)?)
+        } else {
+            let message = parts.next().map(positive).transpose()?;
+            if let Some(thread) = parts.next() {
+                positive(thread)?;
+            }
+            if parts.next().is_some() {
+                return Err(ErrorKind::Malformed);
+            }
+            message
+        };
         let timestamp = timestamp(row["datetime"].as_str().ok_or(ErrorKind::Malformed)?)?;
         messages.push(MessageNotification {
             id,
+            reminder,
             room,
             message,
             timestamp,
@@ -189,6 +211,23 @@ mod tests {
                 .is_empty()
         );
     }
+    #[test]
+    fn reminders_require_a_structured_message_id_and_ignore_translated_text_and_urls() {
+        let mut reminder = row(11, "testroom");
+        reminder["object_type"] = json!("reminder");
+        assert!(
+            decode(&json!([reminder.clone()]), "alice", true)
+                .unwrap()
+                .messages
+                .is_empty()
+        );
+        reminder["subjectRichParameters"] =
+            json!({"message":{"type":"highlight", "id":"42", "name":"Private text"}});
+        let parsed = decode(&json!([reminder]), "alice", true).unwrap();
+        assert!(parsed.messages[0].reminder);
+        assert_eq!(parsed.messages[0].message, Some(42));
+    }
+
     #[test]
     fn notification_lists_reject_partial_oversized_duplicate_and_invalid_targets() {
         assert!(matches!(

@@ -372,6 +372,7 @@ fn duplicates_and_participation_bursts_do_not_swallow_personal_reminders() {
         scope: account,
         conversation: call(account, 1).conversation,
         id: NotificationId(2),
+        message: 2,
     };
     state.admit(event(5, reminder), now).unwrap();
     assert_eq!(finish_next(&mut state).kind, reminder);
@@ -526,6 +527,7 @@ fn linux_commands_keep_every_category_at_normal_focus_controlled_urgency() {
                 scope: account,
                 conversation: call(account, 1).conversation,
                 id: NotificationId(1),
+                message: 1,
             },
             "x-nextcloud-modern-talk.message.reminder",
             "--urgency=normal",
@@ -588,6 +590,7 @@ fn native_category_fixture() {
             scope: account,
             conversation: call(account, 1).conversation,
             id: NotificationId(1),
+            message: 1,
         },
         "incoming" => NotificationKind::IncomingCall {
             call: call(account, 1),

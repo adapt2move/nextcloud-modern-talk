@@ -76,7 +76,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   Scheduled creation has no operation correlation and may remain uncertain.
   The reminder backend uses server reminders; there is no standalone local OS
   reminder fallback. Reminder badges use the currently loaded room list;
-  cross-room reminder navigation and real reminder event delivery remain incomplete.
+  cross-room reminder navigation and notification activation remain incomplete.
+  Reminder notifications without a structured message identifier are suppressed;
+  native notification activation does not yet jump to the target message.
   Scheduled-message counts require an explicit list refresh, and scheduled
   messages cannot yet be edited or rescheduled in the UI. Translation and chat
   summaries are unavailable until provider-aware integration is implemented.

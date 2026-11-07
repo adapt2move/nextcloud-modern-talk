@@ -144,6 +144,8 @@ pub struct ConversationList {
 pub struct MessageNotice {
     pub conversation: ConversationId,
     pub message: u64,
+    pub notification_id: u64,
+    pub reminder: bool,
     pub title: Text<128>,
     pub body: Text<512>,
     pub redacted: bool,

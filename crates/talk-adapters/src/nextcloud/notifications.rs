@@ -109,7 +109,9 @@ impl NextcloudClient {
             // Existing message IDs remain silent even if the server later assigns
             // a different notification ID to the same message.
             for notice in &list.messages {
-                if let Some(message) = notice.message {
+                if !notice.reminder
+                    && let Some(message) = notice.message
+                {
                     self.message_notifications
                         .consume_message(notice.room.clone(), message);
                 }
@@ -137,7 +139,9 @@ impl NextcloudClient {
             let observed = self.message_notice(context, &caps, &notice).await;
             match observed {
                 Ok(Some(value)) => {
-                    if observed_state.consume_message(notice.room.clone(), value.message) {
+                    if notice.reminder
+                        || observed_state.consume_message(notice.room.clone(), value.message)
+                    {
                         result
                             .notices
                             .try_push(value)
@@ -148,7 +152,9 @@ impl NextcloudClient {
                 Err(e) if matches!(e.kind, ErrorKind::NotFound | ErrorKind::PermissionDenied) => {}
                 Err(e) => return Err(e),
             }
-            if let Some(message) = notice.message {
+            if !notice.reminder
+                && let Some(message) = notice.message
+            {
                 observed_state.consume_message(notice.room.clone(), message);
             }
             observed_state.cursor = Some(notice.id);
@@ -187,7 +193,7 @@ impl NextcloudClient {
         let room = wire::room(&data, id, caps).map_err(|k| self.error(k))?;
         if room.unknown_restrictions
             || room.actions.read_messages != Decision::Allowed
-            || !matches!(data["notificationLevel"].as_i64(), Some(0..=2))
+            || (!notice.reminder && !matches!(data["notificationLevel"].as_i64(), Some(0..=2)))
         {
             return Ok(None);
         }
@@ -216,9 +222,13 @@ impl NextcloudClient {
                 && notice.message.is_none_or(|id| m.id == id)
                 // Sensitive rows hide their message ID. Only an actual new comment
                 // at the notification's time can qualify; an old context cannot.
-                && m.timestamp <= notice.timestamp
-                && notice.timestamp.saturating_sub(m.timestamp) <= if notice.message.is_some() { 30 } else { 0 }
-                && eligible_message(m, &room, &data, self.transport.user())
+                && if notice.reminder {
+                    eligible_reminder_target(m, &room)
+                } else {
+                    m.timestamp <= notice.timestamp
+                        && notice.timestamp.saturating_sub(m.timestamp) <= if notice.message.is_some() { 30 } else { 0 }
+                        && eligible_message(m, &room, &data, self.transport.user())
+                }
         }).max_by_key(|m| m.id);
         let Some(message) = message else {
             return Ok(None);
@@ -227,6 +237,8 @@ impl NextcloudClient {
         Ok(Some(talk_core::protocol::MessageNotice {
             conversation: id,
             message: message.id,
+            notification_id: notice.id,
+            reminder: notice.reminder,
             redacted,
             // Protected strings never enter the UI queue, even when previews are enabled.
             title: if redacted {
@@ -245,6 +257,17 @@ impl NextcloudClient {
             },
         }))
     }
+}
+
+fn eligible_reminder_target(message: &api::models::Message, room: &Conversation) -> bool {
+    message.kind.as_deref() == Some("comment")
+        && message.system.as_deref() == Some("")
+        && message.update.is_none()
+        && !message
+            .expires
+            .is_some_and(|at| at > 0 && at <= unix_seconds())
+        && !room.unknown_restrictions
+        && room.actions.read_messages == Decision::Allowed
 }
 
 fn eligible_message(
