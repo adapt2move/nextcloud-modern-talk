@@ -339,12 +339,10 @@ pub(super) fn room(
         },
         actions,
         unread_messages: integer(data.get("unreadMessages")).and_then(|n| u32::try_from(n).ok()),
-        unread_mention: caps
-            .has("mention-flag")
+        unread_mention: (caps.feature("mention-flag") == FeatureSupport::Supported)
             .then(|| data.get("unreadMention").and_then(Value::as_bool))
             .flatten(),
-        notification_muted: caps
-            .has("notification-levels")
+        notification_muted: (caps.feature("notification-levels") == FeatureSupport::Supported)
             .then(
                 || match data.get("notificationLevel").and_then(Value::as_i64) {
                     Some(0..=2) => Some(false),

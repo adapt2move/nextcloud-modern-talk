@@ -862,6 +862,44 @@ fn navigation_roundtrip_capacity_and_partial_page_never_evict() {
 }
 
 #[test]
+fn schema_seven_navigation_migrates_with_default_filter() {
+    use talk_core::preferences::navigation::*;
+    let account = NavigationAccountKey::new(&format!("a1:{:032x}:{:032x}", 1, 2)).unwrap();
+    let mut original = LocalPreferences::default();
+    original
+        .navigation
+        .apply(
+            account.clone(),
+            RemoteNavigationSupport::Unsupported,
+            NavigationEdit::SetSectionCollapsed {
+                section: NavigationSection::Personal,
+                collapsed: true,
+            },
+        )
+        .unwrap();
+    let current = storage::encode(&original);
+    let old = current
+        .lines()
+        .filter(|line| !line.starts_with("layout_filter="))
+        .map(|line| {
+            line.replace(
+                "nextcloud-modern-talk-preferences 8",
+                "nextcloud-modern-talk-preferences 7",
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let (loaded, state) = storage::decode(old.as_bytes()).unwrap();
+    assert_eq!(state, LoadState::Migrated);
+    assert_eq!(loaded, original);
+    assert_eq!(
+        loaded.navigation.account(&account).unwrap().filter(),
+        SidebarFilter::All
+    );
+}
+
+#[test]
 fn schema_three_migrates_without_activating_quick_switch_or_losing_choices() {
     use talk_core::preferences::QuickSwitcherPreference;
     let values = LocalPreferences {

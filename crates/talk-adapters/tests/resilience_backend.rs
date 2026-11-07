@@ -98,15 +98,24 @@ async fn history_recovers_after_gateway_failures_without_losing_the_session() {
             )
             .await
             .unwrap();
-        let ProtocolReply::Messaging {
-            result: MessagingResult::Send(receipt),
-            ..
-        } = reply
-        else {
-            panic!("typed send receipt");
+        let operation = OperationId::from_local(200 + index as u128);
+        let ProtocolReply::Messaging { result, .. } = reply else {
+            panic!("typed send result");
         };
-        let SendState::ServerAccepted(message) = receipt.state else {
-            panic!("server acceptance");
+        let message = match result {
+            MessagingResult::Send(receipt) => {
+                assert_eq!(receipt.operation, operation);
+                let SendState::ServerAccepted(message) = receipt.state else {
+                    panic!("server acceptance");
+                };
+                message
+            }
+            MessagingResult::Message(message) => {
+                assert!(message.own);
+                assert_eq!(message.message.own_operation, Some(operation));
+                message.message.id
+            }
+            _ => panic!("send did not yield canonical acceptance"),
         };
         accepted.push(message);
         let reply = client

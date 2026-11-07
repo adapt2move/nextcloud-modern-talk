@@ -55,11 +55,16 @@ fn score(name: &str, query: &str) -> Option<usize> {
 }
 
 fn retryable(reason: talk_core::ui::UnavailableReason) -> bool {
-    use talk_core::ui::{UnavailableReason as U, presentation::ConnectionFailure as C};
+    use talk_core::ui::{UnavailableReason, presentation::ConnectionFailure};
     matches!(
         reason,
-        U::Busy
-            | U::Connection(C::Unreachable | C::TimedOut | C::ServerUnavailable | C::RateLimited)
+        UnavailableReason::Busy
+            | UnavailableReason::Connection(
+                ConnectionFailure::Unreachable
+                    | ConnectionFailure::TimedOut
+                    | ConnectionFailure::ServerUnavailable
+                    | ConnectionFailure::RateLimited
+            )
     )
 }
 
@@ -141,7 +146,12 @@ impl Desktop {
         if matches!(
             self.search_kind,
             SearchKind::All | SearchKind::Conversations
-        ) {
+        ) && super::collection::CollectionState::new(
+            self.snapshot.conversation_list.content,
+            !self.snapshot.conversations.as_slice().is_empty(),
+        )
+        .shows_content()
+        {
             let mut rooms: Vec<_> = self
                 .snapshot
                 .conversations
@@ -168,6 +178,7 @@ impl Desktop {
             );
         }
         if !query.is_empty()
+            && self.active_account_connected()
             && matches!(self.search_kind, SearchKind::All | SearchKind::People)
             && self.directory_query.as_ref().is_some_and(|(account, q)| {
                 Some(*account) == self.snapshot.active_account && q == query
@@ -216,11 +227,10 @@ impl Desktop {
 
     pub(super) fn switcher_action(&self) -> Option<LocalAction> {
         let targets = self.switcher_targets();
-        let target = self
-            .switcher
-            .selected
-            .filter(|target| targets.contains(target))
-            .or_else(|| targets.first().copied())?;
+        let target = match self.switcher.selected {
+            Some(target) => targets.contains(&target).then_some(target),
+            None => targets.first().copied(),
+        }?;
         match target {
             Target::Room(id) => Some(LocalAction::Navigate(id)),
             Target::Person(id) => Some(LocalAction::CreateDirect(id)),
@@ -242,11 +252,10 @@ impl Desktop {
     pub(super) fn switcher_results(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_1();
         let targets = self.switcher_targets();
-        let selected = self
-            .switcher
-            .selected
-            .and_then(|target| targets.iter().position(|item| *item == target))
-            .unwrap_or(0);
+        let selected = match self.switcher.selected {
+            Some(target) => targets.iter().position(|item| *item == target),
+            None => (!targets.is_empty()).then_some(0),
+        };
         for (index, target) in targets.iter().enumerate() {
             match target {
                 Target::Room(id) => {
@@ -278,7 +287,7 @@ impl Desktop {
                             .gap_3()
                             .px_3()
                             .py_2()
-                            .when(index == selected, |d| d.bg(self.theme.selected))
+                            .when(Some(index) == selected, |d| d.bg(self.theme.selected))
                             .child(self.content_avatar(
                                 talk_core::ui::content::AssetTarget::ConversationAvatar(*id),
                                 room.initials.as_str(),
@@ -340,7 +349,7 @@ impl Desktop {
                             .gap_3()
                             .px_3()
                             .py_2()
-                            .when(index == selected, |d| d.bg(self.theme.selected))
+                            .when(Some(index) == selected, |d| d.bg(self.theme.selected))
                             .child(self.content_avatar(
                                 talk_core::ui::content::AssetTarget::PersonAvatar(*id),
                                 "?",

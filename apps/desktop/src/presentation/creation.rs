@@ -34,6 +34,9 @@ impl PeopleRequest {
     fn loading(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && panel.state == RemoteState::Loading(self.request)
     }
+    fn is_request(&self, account: AccountScope, request: RequestId) -> bool {
+        self.account == account && self.request == request
+    }
     pub(super) fn ready(&self, panel: &CreatePanel) -> bool {
         panel.account == self.account && self.ready && panel.people_loaded && !panel.state.pending()
     }
@@ -122,7 +125,15 @@ impl Desktop {
             request.observe(panel);
         }
         let failure = match panel.state {
-            RemoteState::Failed(request, reason) => Some((request, reason)),
+            RemoteState::Failed(request, reason)
+                if self
+                    .room_ui
+                    .create_people_request
+                    .as_ref()
+                    .is_some_and(|people| people.is_request(panel.account, request)) =>
+            {
+                Some((request, reason))
+            }
             _ => None,
         };
         if let Some(result) = panel.result
