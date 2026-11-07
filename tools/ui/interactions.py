@@ -105,6 +105,14 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(['xdotool', 'key', '--clearmodifiers', value], env)
 
     def type_text(value):
+        # Xvfb has no window manager to synchronize activation with a click.
+        # Confirm the native target, then observe a frame before injecting text;
+        # this does not change which GPUI editor owns focus inside the window.
+        run(['xdotool', 'windowfocus', '--sync', xid], env)
+        focused = run(['xdotool', 'getwindowfocus'], env).stdout.strip()
+        if focused != str(xid):
+            raise AssertionError(f'Native text target {focused} differs from captured window {xid}')
+        observe()
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
 
     def expect_settled(*args, **kwargs):
@@ -210,9 +218,6 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('anzeigen', xmin=950, ymin=300)
         expect('thread translation can return to its original', ['That works for me.'], ['Das passt'])
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
-        # The native text-input handler follows the focused frame. Observe it
-        # before sending keys, including under concurrent software rendering.
-        observe()
         type_text('THREADTOOLS')
         expect_settled('thread tools preserve an unsent reply', ['THREADTOOLS'])
         run(['xdotool', 'mousemove', '--window', xid, '1100', '322'], env)
@@ -232,17 +237,14 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect_settled('unavailable fixture clock reports failure and retains the thread draft',
                        ['Systemzeitzone', 'THREADTOOLS'], footer_height=500)
         key('Escape')
-        observe()
         type_text('X')
         expect_settled('thread reminder cancellation restores its draft focus', ['THREADTOOLSX'], ['Später erinnern'])
         click('Nachricht', xmin=280, ymin=650, inspected_point=(1280,800,400,700))
-        observe()
         type_text('MAINCALENDAR')
         expect_settled('main and thread composers retain independent drafts', ['MAINCALENDAR', 'THREADTOOLSX'])
         click('send-later', inspected_point=(1280,800,768,742))
         expect('main send-later stays beside the open thread', ['Nachricht planen', 'Design review', 'THREADTOOLSX'])
         key('Escape')
-        observe()
         type_text('X')
         expect_settled('main calendar cancellation preserves the thread and restores main focus',
                        ['MAINCALENDARX', 'Design review', 'THREADTOOLSX'], ['Nachricht planen'])
