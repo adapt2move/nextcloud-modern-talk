@@ -548,16 +548,19 @@ impl Desktop {
         for room in &rows {
             let selected = approval.destination == Some(room.context);
             list = list.child(
-                self.control(
-                    destination_id(target, room.context),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    action(Action::Select(target, room.context)),
-                    cx,
+                self.style_list_row(
+                    self.control(
+                        destination_id(target, room.context),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        action(Action::Select(target, room.context)),
+                        cx,
+                    ),
+                    crate::presentation::controls::RowSize::Detailed,
                 )
                 .w_full()
                 .justify_start()
-                .min_h(self.sp(44.))
+                .min_h(self.sp(44.).max(px(48.)))
                 .gap_3()
                 .bg(self.selected_row_color(selected, t.surface))
                 .child(self.scaled_icon("chat", 18., t.muted))

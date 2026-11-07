@@ -695,18 +695,21 @@ impl Desktop {
                 }
                 for message in local {
                     body = body.child(
-                        self.button(
-                            super::controls::scoped_id(
-                                "account-search-local",
-                                context,
-                                message.local_id,
-                                0,
+                        self.style_list_row(
+                            self.button(
+                                super::controls::scoped_id(
+                                    "account-search-local",
+                                    context,
+                                    message.local_id,
+                                    0,
+                                ),
+                                "",
+                                ButtonStyle::Quiet,
+                                true,
+                                LocalAction::LocateMessage(context, message.local_id),
+                                cx,
                             ),
-                            "",
-                            ButtonStyle::Quiet,
-                            true,
-                            LocalAction::LocateMessage(context, message.local_id),
-                            cx,
+                            super::controls::RowSize::Detailed,
                         )
                         .w_full()
                         .justify_start()
@@ -788,18 +791,21 @@ impl Desktop {
                 }
                 let target = (hit.context, hit.message);
                 body = body.child(
-                    self.button(
-                        super::controls::scoped_id(
-                            "account-search-hit",
-                            hit.context,
-                            hit.message,
-                            0,
+                    self.style_list_row(
+                        self.button(
+                            super::controls::scoped_id(
+                                "account-search-hit",
+                                hit.context,
+                                hit.message,
+                                0,
+                            ),
+                            "",
+                            ButtonStyle::Quiet,
+                            true,
+                            LocalAction::AccountSearchHit(hit.context, hit.message),
+                            cx,
                         ),
-                        "",
-                        ButtonStyle::Quiet,
-                        true,
-                        LocalAction::AccountSearchHit(hit.context, hit.message),
-                        cx,
+                        super::controls::RowSize::Detailed,
                     )
                     .w_full()
                     .justify_start()

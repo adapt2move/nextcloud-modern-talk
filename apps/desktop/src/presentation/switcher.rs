@@ -363,13 +363,19 @@ impl Desktop {
                         .and_then(|p| p.people.as_slice().iter().find(|p| p.id == *id))
                     {
                         body = body.child(
-                            self.button(
-                                gpui::SharedString::from(format!("switcher-person-{}", id.local)),
-                                "",
-                                ButtonStyle::Quiet,
-                                true,
-                                LocalAction::CreateDirect(*id),
-                                cx,
+                            self.style_list_row(
+                                self.button(
+                                    gpui::SharedString::from(format!(
+                                        "switcher-person-{}",
+                                        id.local
+                                    )),
+                                    "",
+                                    ButtonStyle::Quiet,
+                                    true,
+                                    LocalAction::CreateDirect(*id),
+                                    cx,
+                                ),
+                                super::controls::RowSize::Detailed,
                             )
                             .w_full()
                             .justify_start()
