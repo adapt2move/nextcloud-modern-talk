@@ -155,6 +155,19 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'thread':
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
+        expect('thread hover keeps reply text readable', ["I'll update the final details."])
+        run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
+        words = expect('reply to own thread message opens a quote', ['Alex Sommer', 'Im Thread antworten'])
+        if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
+                   and int(word['top']) > 590 for word in words):
+            raise AssertionError('The own-message quote did not appear beside the thread composer')
+        run(['xdotool', 'mousemove', '--window', xid, '1218', '635', 'click', '1'], env)
+        _, words, _ = observe()
+        if any(normalized(word['text']) == 'alex' and int(word['left']) > 900
+               and int(word['top']) > 590 for word in words):
+            raise AssertionError('The own-message quote did not close')
+        checks.append({'check': 'own-message quote can be dismissed', 'result': 'pass'})
         before = next(int(word['left']) for word in words
                       if normalized(word['text']).startswith('design')
                       and int(word['top']) < 120 and int(word['left']) > 700)

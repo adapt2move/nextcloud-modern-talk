@@ -616,20 +616,27 @@ impl Desktop {
                         d.child(
                         div()
                             .absolute()
-                            .when(!m.own, |d| d.top(px(8.)))
-                            .when(m.own, |d| {
+                            // Narrow thread rows keep the actions over the header,
+                            // with an opaque surface so the message body remains readable.
+                            .when(thread, |d| {
+                                d.top_0().right_2().rounded(px(8.))
+                                    .group_hover(action_group.clone(), |s| {
+                                        s.bg(t.surface).border_1().border_color(t.border).shadow_sm()
+                                    })
+                                    .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
+                                        d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
+                                    })
+                            })
+                            .when(!thread && !m.own, |d| d.top(px(8.)).right(px(8.)))
+                            .when(!thread && m.own, |d| {
                                 // Centre the 34 px action beside the 20 sp status.
                                 d.bottom(
                                     px(if continuation { 3. } else { 12. }) + self.sp(10.)
                                         - px(17.),
                                 )
-                            })
-                            // Own-message status keeps the far-right column even
-                            // on compact continuations; actions sit to its left.
-                            .right(if m.own {
-                                px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
-                            } else {
-                                px(8.)
+                                // Own-message status keeps the far-right column even
+                                // on compact continuations; actions sit to its left.
+                                .right(px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. }))
                             })
                             .flex()
                             .gap_1()
