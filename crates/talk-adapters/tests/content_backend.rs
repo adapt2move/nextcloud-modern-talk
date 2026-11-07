@@ -38,6 +38,23 @@ fn context(runtime: &NetworkRuntime, scope: AccountScope) -> OperationContext {
 fn text<const N: usize>(value: &str) -> Text<N> {
     Text::new(value).unwrap()
 }
+fn accepted_message(result: MR, operation: OperationId) -> talk_core::protocol::MessageId {
+    match result {
+        MR::Message(message) => {
+            assert!(message.own);
+            assert_eq!(message.message.own_operation, Some(operation));
+            message.message.id
+        }
+        MR::Send(receipt) => {
+            assert_eq!(receipt.operation, operation);
+            let talk_core::protocol::SendState::ServerAccepted(id) = receipt.state else {
+                panic!("fixture message was not confirmed");
+            };
+            id
+        }
+        _ => panic!("fixture message returned no correlated acceptance"),
+    }
+}
 fn page<T, const N: usize>(values: impl IntoIterator<Item = T>) -> Page<T, N> {
     let mut page = Page::empty();
     for value in values {
@@ -280,24 +297,7 @@ async fn released_server_file_listing_and_existing_share() {
     )
     .await
     .unwrap();
-    let parent = match reply_target {
-        MR::Message(message) => {
-            assert!(message.own);
-            assert_eq!(
-                message.message.own_operation,
-                Some(OperationId::from_local(sequence))
-            );
-            message.message.id
-        }
-        MR::Send(receipt) => {
-            assert_eq!(receipt.operation, OperationId::from_local(sequence));
-            let talk_core::protocol::SendState::ServerAccepted(id) = receipt.state else {
-                panic!("reply target was not confirmed");
-            };
-            id
-        }
-        _ => panic!("reply target returned no correlated acceptance"),
-    };
+    let parent = accepted_message(reply_target, OperationId::from_local(sequence));
     let shared = message(
         &mut client,
         &runtime,
@@ -370,6 +370,65 @@ async fn released_server_file_listing_and_existing_share() {
                     .is_some_and(|reply| reply.id == parent)
         }),
         "history must retain the share's reply target"
+    );
+    let thread_root = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::Send {
+            text: text("Fixture thread root"),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                thread_title: Some(text("Fixture thread")),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let thread = accepted_message(thread_root, OperationId::from_local(sequence));
+    let shared = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::ShareExistingFile {
+            path: text("/nmt-files-thread.txt"),
+            caption: text("Fixture thread caption"),
+            options: talk_core::protocol::messaging::ComposeOptions {
+                thread: Some(thread),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let thread_share = OperationId::from_local(sequence);
+    assert!(matches!(shared, MR::Changed));
+    let MR::Messages { messages, .. } = message(
+        &mut client,
+        &runtime,
+        account,
+        &mut sequence,
+        room,
+        M::History {
+            before: None,
+            thread: Some(thread),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("thread history reply");
+    };
+    assert!(
+        messages.as_slice().iter().any(|message| {
+            message.message.own_operation == Some(thread_share)
+                && message.message.text.as_str() == "Fixture thread caption"
+                && message.thread == Some(thread)
+        }),
+        "thread history must retain the share and its caption"
     );
     println!("files-backend directory-and-existing-share: pass");
 }

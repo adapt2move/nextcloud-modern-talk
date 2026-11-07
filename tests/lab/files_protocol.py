@@ -36,11 +36,13 @@ async def run(state, output):
         env = dict(os.environ, NMT_FIXTURE_DIR=str(directory), RUST_BACKTRACE="0")
         env["PATH"] = "/root/.cargo/bin:" + env.get("PATH", "")
         file_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-fixture.txt"
+        thread_file_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-thread.txt"
         folder_url = lab.base + "/remote.php/dav/files/lab_alice/nmt-files-pages"
         auth = base64.b64encode(("lab_alice:" + lab.passwords["lab_alice"]).encode()).decode()
         headers = {"Authorization": "Basic " + auth, "Host": lab.http_host, "If-None-Match": "*"}
         target = Path(output)
         file_created = False
+        thread_file_created = False
         folder_created = False
         try:
             target.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -48,6 +50,10 @@ async def run(state, output):
                 if response.status != 201:
                     raise RuntimeError("Could not create the disposable DAV fixture")
                 file_created = True
+            with lab.clients["lab_alice"].open(urllib.request.Request(thread_file_url, data=b"Fictional thread fixture\n", headers=headers, method="PUT"), timeout=20) as response:
+                if response.status != 201:
+                    raise RuntimeError("Could not create the disposable thread fixture")
+                thread_file_created = True
             with lab.clients["lab_alice"].open(urllib.request.Request(folder_url, headers=headers, method="MKCOL"), timeout=20) as response:
                 if response.status != 201:
                     raise RuntimeError("Could not create the disposable DAV folder")
@@ -70,6 +76,20 @@ async def run(state, output):
                         process.kill()
                         await process.wait()
                         raise
+            if code == 0:
+                capabilities = lab.request("lab_alice", "GET", "/ocs/v2.php/cloud/capabilities",
+                                           name="files-share-capabilities")
+                features = capabilities["capabilities"]["spreed"]["features"]
+                if "silent-send-state" in features:
+                    history = lab.request("lab_alice", "GET", "/ocs/v2.php/apps/spreed/api/v1/chat/" + room["token"],
+                                          query={"lookIntoFuture": 0, "limit": 50, "setReadMarker": 0},
+                                          name="files-share-history")
+                    if not any(item.get("message") == "Fixture caption" and item.get("silent") is True
+                               for item in history):
+                        raise RuntimeError("The server did not retain the fixture share's silent state")
+                    print("files-backend silent-share-state: pass", flush=True)
+                else:
+                    print("files-backend silent-share-state: unavailable on this server", flush=True)
             print(json.dumps({"profile": record["development"]["profile"], "exit_code": code}), flush=True)
             return code
         finally:
@@ -87,8 +107,14 @@ async def run(state, output):
                             if response.status not in (200, 204):
                                 raise RuntimeError("Could not delete the disposable DAV fixture")
                 finally:
-                    lab.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"],
-                                expected=(200, 404), name="files-cleanup-room")
+                    try:
+                        if thread_file_created:
+                            with lab.clients["lab_alice"].open(urllib.request.Request(thread_file_url, headers=cleanup_headers, method="DELETE"), timeout=20) as response:
+                                if response.status not in (200, 204):
+                                    raise RuntimeError("Could not delete the disposable thread fixture")
+                    finally:
+                        lab.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"],
+                                    expected=(200, 404), name="files-cleanup-room")
 
 
 if __name__ == "__main__":
