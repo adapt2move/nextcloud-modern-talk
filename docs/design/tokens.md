@@ -8,19 +8,17 @@
 | --- | --- | --- | --- |
 | `text.primary` | `#26354B` | `#252E2E` | Main text and headings |
 | `text.secondary` | `#596B85` | `#566358` | Readable secondary text on light surfaces |
-| `surface.content` | `#FFFEFB` | `#FFFEFB` | Conversation and form content |
+| `surface.content` | `#FFFFFF` | `#FFFFFF` | Conversation and form content |
 | `surface.subtle` | `#F6F8FC` | `#F6F7F4` | Grouping and inset areas |
 | `action.primary` | `#356FC1` | `#354F41` | Primary button, selection indicator; white button text |
 | `selection.surface` | `#EAF1FB` | `#EDF2E9` | Selected content with a distinct outline/label |
-| `chrome.start` | `#EDE9E2` | `#EDECE0` | Window/sidebar paper tone |
-| `chrome.end` | `#E4E1DA` | `#E4E8DC` | Gradient end when transparency effects are allowed |
+| `chrome.start` | `#E3EDFB` | `#E9E7BF` | Schematic window/sidebar tint |
+| `chrome.end` | `#CBDCED` | `#C6D6DF` | Schematic gradient end |
 | `border.decorative` | `#E6ECF4` | `#E9ECE8` | Nonessential separators only |
 | `stage.background` | `#1C293B` | `#202725` | Call stage |
 | `stage.text` | `#EAF0F8` | `#E9EEEA` | Text on the dark stage |
 
-The blue dark canvas is `#14171C` and its content surface is `#1C222B`; the sage dark palette keeps its green undertone. The shared content surface uses a subtle vertical wash to `#FBF9F4` in light blue and `#1B2029` in dark blue when effects are allowed. The content card has a 16 pt radius, a fine edge, and two soft shadows; menus use 12 pt and dialogs 16 pt. Controls use 8 pt, chips 6 pt, and avatars use a radius of 28% of their size. Input fields remain flat and clean. The scrim is warm dark in light mode and neutral dark in dark mode.
-
-Reduce Transparency is observed by the existing settings worker on macOS and Windows. Linux and unknown observations fall back to flat opaque fills. Native title bars and increased-contrast appearances follow the platform. Do not depend on a decorative separator to identify an input or a selected control. Text and functional state colors must still meet the measured contrast targets on their actual surfaces.
+Gradients are visual exploration. Native title bars and increased-contrast appearances follow the platform. Do not depend on a decorative separator to identify an input or a selected control.
 
 | Semantic role | Foreground / light background | Required accompanying cue |
 | --- | --- | --- |

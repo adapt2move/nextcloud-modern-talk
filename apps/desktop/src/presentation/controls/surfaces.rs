@@ -95,7 +95,7 @@ impl Desktop {
         let color = if self.theme.dark {
             gpui::black()
         } else {
-            rgb(0x281e0a).into()
+            rgb(0x26354b).into()
         };
         div()
             .relative()
@@ -106,7 +106,7 @@ impl Desktop {
             .border_color(if self.theme.dark {
                 gpui::rgba(0xffffff10)
             } else {
-                gpui::rgba(0x46371e14)
+                gpui::rgba(0x26354b14)
             })
             .shadow(vec![
                 BoxShadow {

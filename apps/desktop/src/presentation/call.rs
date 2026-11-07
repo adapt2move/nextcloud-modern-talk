@@ -344,7 +344,7 @@ impl Desktop {
                     self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        BannerRole::Warning.foreground(self.theme.dark),
+                        BannerRole::Warning.foreground(),
                     ),
                 )
                 .flex_none()
