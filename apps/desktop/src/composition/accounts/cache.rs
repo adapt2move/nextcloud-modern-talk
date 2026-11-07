@@ -606,6 +606,7 @@ fn row_at(room: &CacheRoom, context: ConversationRef, now: u64) -> ConversationV
         attach: Decision::Unknown,
         draft_clipboard: Decision::Unknown,
         call: Decision::Unknown,
+        call_active: None,
         call_scope: None,
     }
 }

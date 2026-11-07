@@ -13,6 +13,51 @@ use talk_core::ui::{
     RuntimeGeneration, SubmitError, Text, UnavailableReason, UserIntent,
 };
 
+/// A deterministic device inventory for the call-device scenario. It contains
+/// no physical device labels or capture handles.
+pub(super) fn call_devices() -> talk_core::preferences::devices::DeviceSnapshot {
+    use talk_core::preferences::{Revision, RuntimeState, devices::*};
+    let mut devices = Page::empty();
+    for (id, label, kind) in [
+        (
+            "fixture-mic-studio",
+            "Studio microphone",
+            DeviceKind::Microphone,
+        ),
+        (
+            "fixture-mic-laptop",
+            "Laptop microphone",
+            DeviceKind::Microphone,
+        ),
+        ("fixture-camera", "Laptop camera", DeviceKind::Camera),
+    ] {
+        if let Ok(id) = DeviceId::new(id) {
+            let _ = devices.try_push(DeviceInfo {
+                id,
+                label: text(label),
+                kind,
+                is_default: false,
+            });
+        }
+    }
+    DeviceSnapshot {
+        runtime: RuntimeState::Running,
+        session: None,
+        inventory_revision: Revision(1),
+        devices,
+        microphone_permission: PermissionState::Unknown,
+        camera_permission: PermissionState::Unknown,
+        microphone: SelectionState::Unknown,
+        speaker: SelectionState::Unknown,
+        camera: SelectionState::Unknown,
+        microphone_level: None,
+        speaker_level: None,
+        microphone_preview: PreviewState::Stopped,
+        camera_preview: PreviewState::Stopped,
+        speaker_test: PreviewState::Stopped,
+    }
+}
+
 pub const SCENARIOS: &[&str] = &[
     "server",
     "validating",
@@ -103,6 +148,7 @@ pub const SCENARIOS: &[&str] = &[
     "gate-mic",
     "gate-camera",
     "gate-recording",
+    "gate-recording-direct",
     "gate-lobby",
     "connecting",
     "reconnecting",
@@ -110,6 +156,17 @@ pub const SCENARIOS: &[&str] = &[
     "call-error",
     "call-error-unknown",
     "call-controls",
+    "call-gallery",
+    "call-participants-raised",
+    "call-dock",
+    "call-devices",
+    "call-speaker",
+    "call-screen-stage",
+    "call-recording",
+    "call-recording-confirm",
+    "call-recording-failed",
+    "call-end-confirm",
+    "call-reactions",
     "call-active",
     "call-requested",
     "sharing",
@@ -174,6 +231,11 @@ fn participant(id: u128, name: &str, initials: &str, me: bool) -> ParticipantVie
         role_label: text(if me { "Du" } else { "Teilnehmend" }),
         presence: Presence::Available,
         self_user: me,
+        raised_hand: false,
+        speaking: false,
+        call_can_mute: false,
+        call_microphone: None,
+        call_camera: None,
     }
 }
 fn participants() -> [ParticipantView; 4] {
@@ -852,6 +914,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 } else {
                     Decision::Allowed
                 },
+                call_active: Some(id == 2 && matches!(scenario, "call-dock" | "chat-ux-call")),
                 call_scope: if kind == ConversationKind::NoteToSelf {
                     None
                 } else {
@@ -906,6 +969,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "gate-mic"
             | "gate-camera"
             | "gate-recording"
+            | "gate-recording-direct"
             | "gate-lobby"
             | "connecting"
             | "reconnecting"
@@ -913,15 +977,29 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-error"
             | "call-error-unknown"
             | "call-controls"
+            | "call-gallery"
+            | "call-participants-raised"
+            | "call-dock"
+            | "call-devices"
+            | "call-speaker"
+            | "call-screen-stage"
+            | "call-recording"
+            | "call-recording-confirm"
+            | "call-recording-failed"
+            | "call-end-confirm"
+            | "call-reactions"
             | "sharing"
             | "call-denied"
             | "call-active"
             | "call-requested"
     ) {
-        let direct = matches!(scenario, "incoming" | "outgoing" | "direct-call");
+        let direct = matches!(
+            scenario,
+            "incoming" | "outgoing" | "direct-call" | "gate-recording-direct"
+        );
         let id = if direct {
             3
-        } else if scenario == "voice" {
+        } else if matches!(scenario, "voice" | "call-dock") {
             2
         } else {
             1
@@ -944,7 +1022,9 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "gate" => CallStage::Required(RequiredGate::SecurityPolicy),
                 "gate-mic" => CallStage::Required(RequiredGate::MicrophonePermission),
                 "gate-camera" => CallStage::Required(RequiredGate::CameraPermission),
-                "gate-recording" => CallStage::Required(RequiredGate::RecordingConsent),
+                "gate-recording" | "gate-recording-direct" => {
+                    CallStage::Required(RequiredGate::RecordingConsent)
+                }
                 "gate-lobby" => CallStage::Required(RequiredGate::Lobby),
                 "connecting" => CallStage::Connecting,
                 "reconnecting" => CallStage::Reconnecting,
@@ -982,12 +1062,131 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 MediaState::Unavailable
             },
-            participants: page(if direct || id == 2 {
-                vec![participants()[0].clone(), participants()[2].clone()]
+            sharing: if scenario == "sharing" {
+                ScreenShareState::Sharing
             } else {
-                participants().to_vec()
-            }),
+                ScreenShareState::Idle
+            },
+            streams: Page::empty(),
+            recording: match scenario {
+                "call-recording" => talk_core::ui::presentation::CallRecordingState::Active,
+                "call-recording-failed" => talk_core::ui::presentation::CallRecordingState::Failed,
+                _ => talk_core::ui::presentation::CallRecordingState::Unknown,
+            },
+            recording_control: match scenario {
+                "call-participants-raised" | "call-recording-confirm" => Some(true),
+                "call-recording" => Some(false),
+                _ => None,
+            },
+            recording_pending: false,
+            recording_uncertain: false,
+            hand_supported: matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ),
+            hand_raised: false,
+            reactions: if matches!(
+                scenario,
+                "call-gallery" | "call-participants-raised" | "call-speaker" | "call-reactions"
+            ) {
+                page([text("👍"), text("🎉"), text("❤️")])
+            } else {
+                Page::empty()
+            },
+            latest_reaction: if scenario == "call-reactions" {
+                Some(talk_core::ui::presentation::CallReactionView {
+                    sequence: 1,
+                    participant: Some(1),
+                    emoji: text("🎉"),
+                })
+            } else {
+                None
+            },
+            invitees_loaded: scenario == "call-participants-raised",
+            invitees: if scenario == "call-participants-raised" {
+                page([
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1001,
+                        ring_allowed: true,
+                        name: text("Robin Winter"),
+                        initials: text("RW"),
+                    },
+                    talk_core::ui::presentation::CallInviteeView {
+                        local_id: 1002,
+                        ring_allowed: false,
+                        name: text("Mina Roth"),
+                        initials: text("MR"),
+                    },
+                ])
+            } else {
+                Page::empty()
+            },
+            ring_status: None,
+            mute_status: None,
+            can_end_everyone: matches!(scenario, "call-end-confirm" | "call-participants-raised"),
+            end_pending: false,
+            end_failed: false,
+            participants: page(
+                if matches!(
+                    scenario,
+                    "call-gallery"
+                        | "call-participants-raised"
+                        | "call-screen-stage"
+                        | "call-speaker"
+                        | "call-reactions"
+                ) {
+                    let mut people = participants().to_vec();
+                    people[0].raised_hand = true;
+                    people[0].call_microphone = Some(false);
+                    people[0].call_camera = Some(false);
+                    people[1].call_microphone = Some(true);
+                    people[1].speaking = true;
+                    people[1].call_can_mute = scenario == "call-participants-raised";
+                    people[1].call_camera = Some(false);
+                    people[3].raised_hand = true;
+                    if scenario != "call-participants-raised" {
+                        people.extend([
+                            participant(5, "Nora Beck", "NB", false),
+                            participant(6, "Emil Hartmann", "EH", false),
+                            participant(7, "Samira Wolf", "SW", false),
+                            participant(8, "Luis Berger", "LB", false),
+                        ]);
+                    }
+                    people
+                } else if direct || id == 2 {
+                    vec![participants()[0].clone(), participants()[2].clone()]
+                } else {
+                    participants().to_vec()
+                },
+            ),
         });
+    }
+    if let Some(call) = s.call.as_mut() {
+        call.streams =
+            page(
+                call.participants
+                    .as_slice()
+                    .iter()
+                    .take(15)
+                    .map(|person| CallStreamView {
+                        local_id: person.local_id,
+                        participant: person.local_id,
+                        participant_name: person.name.clone(),
+                        kind: CallTileKind::Camera,
+                        dimensions: None,
+                        flowing: false,
+                    }),
+            );
+        if scenario == "call-screen-stage" {
+            let _ = call.streams.try_push(CallStreamView {
+                local_id: 9001,
+                participant: 1,
+                participant_name: text("Mara Fischer"),
+                kind: CallTileKind::Screen,
+                dimensions: Some((1280, 720)),
+                flowing: false,
+            });
+        }
     }
     if scenario == "call-error-unknown" {
         let mut rows = s.conversations.as_slice().to_vec();
@@ -1272,6 +1471,8 @@ pub struct DevelopmentPort {
     pending: bool,
     intents: u8,
     chat_ux_send_diagnostics: u8,
+    hand_diagnostics: u8,
+    consent_diagnostics: u8,
     busy_read_diagnostics: u8,
     account_probe: bool,
     focus_probe: Option<bool>, // false: rooms; true: files
@@ -1355,6 +1556,8 @@ impl DevelopmentPort {
             ),
             intents: 0,
             chat_ux_send_diagnostics: 0,
+            hand_diagnostics: 0,
+            consent_diagnostics: 0,
             busy_read_diagnostics: 0,
         }
     }
@@ -1420,6 +1623,30 @@ impl NativeDesktopPort for DevelopmentPort {
                 }
                 _ => (),
             }
+        }
+        // Background fixture dispatches can exhaust the general quota before
+        // the native call-panel keyboard probe runs. This remains bounded and
+        // records only a local room identity and the explicit hand state.
+        if self.hand_diagnostics < 8
+            && let UiIntent::SetCallHand { call, raised } = &intent
+        {
+            self.hand_diagnostics += 1;
+            println!(
+                "UI_INTENT hand room={} raised={raised}",
+                call.conversation.local
+            );
+        }
+        if self.consent_diagnostics < 4
+            && let UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } = &intent
+        {
+            self.consent_diagnostics += 1;
+            println!(
+                "UI_INTENT recording-consent room={}",
+                call.conversation.local
+            );
         }
         // Content probes can exhaust the general quota before a user sends.
         // Reserve four send diagnostics for the explicit chat interaction fixture.
@@ -2047,11 +2274,130 @@ impl NativeDesktopPort for DevelopmentPort {
                     share: MediaState::Unavailable,
                     sharing: ScreenShareState::Idle,
                     streams: Page::empty(),
+                    recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+                    recording_control: None,
+                    recording_pending: false,
+                    recording_uncertain: false,
+                    hand_supported: false,
+                    hand_raised: false,
+                    reactions: Page::empty(),
+                    latest_reaction: None,
+                    invitees_loaded: false,
+                    invitees: Page::empty(),
+                    ring_status: None,
+                    mute_status: None,
+                    can_end_everyone: false,
+                    end_pending: false,
+                    end_failed: false,
                     participants: if direct || call.conversation.local == 2 {
                         page([participants()[0].clone(), participants()[2].clone()])
                     } else {
                         page(participants())
                     },
+                });
+            }
+            UiIntent::SetCallRecording { call, start } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.recording_control == Some(start)
+                            && !view.recording_pending
+                            && !view.recording_uncertain
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.recording_pending = true;
+            }
+            UiIntent::EndCallForEveryone(call) => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.can_end_everyone)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.end_pending = true;
+            }
+            UiIntent::MuteCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .participants
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.call_can_mute)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.mute_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
+                });
+            }
+            UiIntent::RingCallParticipant { call, target } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view
+                                .invitees
+                                .as_slice()
+                                .iter()
+                                .any(|person| person.local_id == target && person.ring_allowed)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                view.ring_status = Some(talk_core::ui::presentation::CallRingStatus {
+                    target,
+                    outcome: talk_core::ui::presentation::CallRingOutcome::Pending,
+                });
+            }
+            UiIntent::ResolveRequiredGate {
+                call,
+                gate: RequiredGate::RecordingConsent,
+            } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| {
+                        view.scope == call
+                            && view.stage == CallStage::Required(RequiredGate::RecordingConsent)
+                    })
+                    .ok_or(SubmitError::StaleScope)?;
+                // A fixture may advance to connecting; it never grants media.
+                view.stage = CallStage::Connecting;
+            }
+            UiIntent::SetCallHand { call, raised } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.hand_supported)
+                    .ok_or(SubmitError::StaleScope)?;
+                view.hand_raised = raised;
+            }
+            UiIntent::SendCallReaction { call, emoji } => {
+                let view = self
+                    .snapshot
+                    .call
+                    .as_mut()
+                    .filter(|view| view.scope == call && view.reactions.as_slice().contains(&emoji))
+                    .ok_or(SubmitError::StaleScope)?;
+                let sequence = view
+                    .latest_reaction
+                    .as_ref()
+                    .map_or(Some(1), |reaction| reaction.sequence.checked_add(1))
+                    .ok_or(SubmitError::Busy)?;
+                view.latest_reaction = Some(talk_core::ui::presentation::CallReactionView {
+                    sequence,
+                    participant: None,
+                    emoji,
                 });
             }
             UiIntent::Legacy(UserIntent::Leave(call)) | UiIntent::DeclineDirect(call) => {

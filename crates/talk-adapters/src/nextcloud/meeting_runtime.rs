@@ -1,5 +1,9 @@
 //! Autonomous normal-call owner. Signaling polling, policy/HTTP writes and media
 //! have separate bounded lanes; none is driven by GPUI rendering or chat polling.
+mod activity;
+mod moderation;
+mod outgoing;
+mod speaking;
 mod status;
 
 use super::{
@@ -35,7 +39,7 @@ use talk_core::{
     lifecycle::Cancellation,
     policy::{Observed, RecordingState},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 const OBSERVATIONS: [Observation; 6] = [
     Observation::Account,
     Observation::Capabilities,
@@ -71,12 +75,18 @@ struct PolicyUpdate {
     bundle: Bundle,
     after: u64,
 }
+struct RecordingPending {
+    start: bool,
+    requested: Instant,
+    accepted: bool,
+}
 struct Peer {
     stream: StreamKind,
     dimensions: Option<(u32, u32)>,
     last_frame: Option<Instant>,
     local: u128,
     status: StatusSnapshot,
+    speaking: speaking::Speaking,
     session: PeerSession,
     negotiation: Option<Negotiation>,
     engine: NativePeer,
@@ -155,11 +165,18 @@ impl LiveCall {
                 }
             }
             Command::Observe(_) | Command::StartScreenShare(_) | Command::StopScreenShare(_) => {}
-            _ => self.session.suspend(),
+            Command::Consent(_) | Command::Reconnect(_) => self.session.suspend(),
+            _ => {}
         }
-        self.control
+        let end_for_everyone = matches!(command, Command::EndEveryone(_));
+        let result = self
+            .control
             .try_send((command, self.session.screen_epoch()))
-            .map_err(|_| api::ErrorKind::Busy)
+            .map_err(|_| api::ErrorKind::Busy);
+        if end_for_everyone && result.is_ok() {
+            self.session.suspend();
+        }
+        result
     }
     #[allow(
         clippy::too_many_arguments,
@@ -170,7 +187,7 @@ impl LiveCall {
         mut call: CallSession,
         initial: Bundle,
         reader: MeetingReader,
-        writer: MeetingWriter,
+        mut writer: MeetingWriter,
         stop: MeetingStop,
         network: NetworkRuntime,
         cancel: Cancellation,
@@ -194,11 +211,26 @@ impl LiveCall {
             participants: talk_core::bounded::Page::empty(),
             phase: Phase::Connecting,
             microphone: DeviceState::Off,
+            local_speaking: false,
             camera: DeviceState::Off,
             screen: DeviceState::Unavailable,
             sharing: talk_core::calls::SharingState::Idle,
             peers: 0,
             recording: RecordingState::Unknown,
+            recording_control: None,
+            recording_pending: false,
+            recording_uncertain: false,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: talk_core::bounded::Page::empty(),
+            latest_reaction: None,
+            invitees_loaded: false,
+            invitees: talk_core::bounded::Page::empty(),
+            ring_status: None,
+            mute_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             counters: MediaCounters::default(),
             revision: 0,
         };
@@ -210,6 +242,32 @@ impl LiveCall {
         let (signals_tx, signals) = mpsc::channel(2);
         let (write_tx, write_rx) = mpsc::channel(64);
         let (policy_tx, policy) = mpsc::channel(2);
+        let (hand_tx, hands) = watch::channel(None);
+        let (reaction_tx, reactions) = mpsc::channel(4);
+        let (ring_tx, ring_requests) = mpsc::channel(1);
+        let (ring_result_tx, ring_results) = mpsc::channel(2);
+        let moderation_writer = writer
+            .take_moderation_writer()
+            .ok_or(api::ErrorKind::Uncertain)?;
+        tokio::spawn(moderation::run(
+            moderation_writer,
+            ring_requests,
+            ring_result_tx,
+            session.clone(),
+            network.clone(),
+            cancel.clone(),
+        ));
+        let activity_writer = writer
+            .take_activity_writer()
+            .ok_or(api::ErrorKind::Uncertain)?;
+        tokio::spawn(outgoing::run(
+            activity_writer,
+            hands,
+            reactions,
+            session.clone(),
+            network.clone(),
+            cancel.clone(),
+        ));
         let own = writer.own_session()?;
         let topology = writer.topology();
         tokio::spawn(read_loop(
@@ -236,6 +294,10 @@ impl LiveCall {
             signals,
             write_tx,
             policy,
+            hand_tx,
+            reaction_tx,
+            ring_tx,
+            ring_results,
             session.clone(),
             network,
             cancel,
@@ -519,6 +581,25 @@ fn camera_guards(engine: &mut NativePeer, session: &Arc<Session>) {
         source.upgrade().is_some_and(|s| s.publication().microphone)
     }));
 }
+fn reconcile_participants(
+    participants: &mut activity::Participants,
+    bundle: &Bundle,
+    invitees: &[(u64, u128)],
+) -> Result<(), ()> {
+    let sessions: Vec<_> = bundle
+        .peers
+        .iter()
+        .map(|peer| peer.session.clone())
+        .collect();
+    let reserved: Vec<_> = invitees.iter().map(|(_, local)| *local).collect();
+    participants.reconcile(&sessions, &reserved, || {
+        let mut bytes = [0; 16];
+        getrandom::fill(&mut bytes).map_err(|_| ())?;
+        Ok(u128::from_le_bytes(bytes))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn reconcile(
     peers: &mut Vec<Peer>,
     bundle: &Bundle,
@@ -527,6 +608,7 @@ async fn reconcile(
     session: &Arc<Session>,
     topology: Topology,
     sfu_members: &[PeerSession],
+    participants: &activity::Participants,
 ) -> Result<(), ()> {
     let wishes = session.publication();
     let local_media = wishes.microphone || wishes.camera;
@@ -586,6 +668,7 @@ async fn reconcile(
             last_frame: None,
             local: 0,
             status: StatusSnapshot::default(),
+            speaking: speaking::Speaking::default(),
             session: own.clone(),
             negotiation: Some(negotiation),
             engine,
@@ -660,8 +743,12 @@ async fn reconcile(
             }
             None
         };
-        let mut identity = [0; 16];
-        getrandom::fill(&mut identity).map_err(|_| ())?;
+        let local = participants
+            .0
+            .iter()
+            .find(|person| person.session == incoming.session)
+            .ok_or(())?
+            .local;
         peers.push(Peer {
             screen_announced: Vec::with_capacity(16),
             share_epoch: 0,
@@ -671,8 +758,9 @@ async fn reconcile(
             stream: StreamKind::Camera,
             dimensions: None,
             last_frame: None,
-            local: u128::from_le_bytes(identity),
+            local,
             status: StatusSnapshot::default(),
+            speaking: speaking::Speaking::default(),
             session: incoming.session.clone(),
             negotiation,
             engine,
@@ -694,6 +782,10 @@ async fn media_loop(
     mut signals: mpsc::Receiver<SignalBatch>,
     writes: mpsc::Sender<Write>,
     mut policies: mpsc::Receiver<PolicyUpdate>,
+    hand_tx: watch::Sender<Option<outgoing::Message>>,
+    reaction_tx: mpsc::Sender<outgoing::Message>,
+    ring_tx: mpsc::Sender<moderation::Request>,
+    mut ring_results: mpsc::Receiver<moderation::Result>,
     session: Arc<Session>,
     network: NetworkRuntime,
     cancel: Cancellation,
@@ -703,7 +795,11 @@ async fn media_loop(
     let scope = call.scope();
     let started = Instant::now();
     let mut peers: Vec<Peer> = Vec::with_capacity(17);
+    let mut participants = activity::Participants::default();
     let mut sfu_members = Vec::with_capacity(100);
+    // Opaque identities live only for this call generation and are retired as
+    // soon as the authoritative attendee leaves the bounded projection.
+    let mut invitee_ids: Vec<(u64, u128)> = Vec::with_capacity(100);
     let mut transport_ready = true;
     let mut pending_screen_stops = Vec::with_capacity(4);
     let mut retired_screens = Vec::with_capacity(32);
@@ -714,15 +810,30 @@ async fn media_loop(
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_flags = call.wishes();
+    let mut local_speaking = speaking::Speaking::default();
+    let mut hand_raised = false;
+    let mut hand_timestamp = 0u64;
+    let mut announced_refresh = 0u64;
+    let mut hand_announcements = activity::HandAnnouncements::default();
+    let mut reaction_sequence = 0u64;
+    let mut latest_reaction: Option<calls::CallReaction> = None;
+    let mut last_reaction: Option<Instant> = None;
+    let mut ring_status: Option<calls::CallRingStatus> = None;
+    let mut mute_status: Option<calls::CallRingStatus> = None;
+    let mut end_pending = false;
+    let mut end_failed = false;
+    let mut recording_pending: Option<RecordingPending> = None;
+    let mut recording_uncertain = false;
     let mut refreshes = 1u64;
     let mut stage = "initial peer reconciliation";
     let result: Result<(), ()> = async {
+        reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
         while session.live() && !stop.is_closed() && !cancel.is_cancelled() {
             tick.tick().await;
             let mut refresh_needed = false;
             while let Ok((command, screen_epoch)) = control.try_recv() {
                 match command {
-                    Command::Change { wishes, .. } => {
+                    Command::Change { wishes, .. } if !end_pending => {
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
                     }
                     Command::StartScreenShare(_) => {
@@ -736,7 +847,82 @@ async fn media_loop(
                         call.set_wishes(scope, wishes).map_err(|_| ())?;
                         // Already retired synchronously by command admission.
                     }
+                    Command::MuteParticipant { target, .. } if transport_ready && received_policy >= required_policy && bundle.mute_supported
+                        && call.phase() == Phase::Active && !end_pending
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if let Some(person) = participants.0.iter().find(|person| person.local == target)
+                            && bundle.peers.iter().any(|source| source.session == person.session && source.microphone) {
+                            let outcome = if ring_tx.try_send(moderation::Request::Mute { target, peer: person.session.clone() }).is_ok() {
+                                calls::RingOutcome::Pending
+                            } else { calls::RingOutcome::Failed };
+                            mute_status = Some(calls::CallRingStatus { target, outcome });
+                        }
+                    }
+                    Command::Ring { target, .. } if transport_ready && received_policy >= required_policy && bundle.ring_supported
+                        && call.phase() == Phase::Active && !end_pending
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if let Some((attendee, _)) = invitee_ids.iter().find(|(_, local)| *local == target)
+                            && bundle.invitees.iter().any(|person| person.attendee == *attendee && person.ring_eligible) {
+                            let outcome = if ring_tx.try_send(moderation::Request::Ring { target, attendee: *attendee }).is_ok() {
+                                calls::RingOutcome::Pending
+                            } else { calls::RingOutcome::Failed };
+                            ring_status = Some(calls::CallRingStatus { target, outcome });
+                        }
+                    }
+                    Command::SetRecording { start, .. } if transport_ready && received_policy >= required_policy
+                        && call.phase() == Phase::Active && !end_pending && !recording_uncertain
+                        && recording_pending.is_none() && bundle.recording_control == Some(start)
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending) => {
+                        if ring_tx.try_send(moderation::Request::Recording { start }).is_ok() {
+                            recording_pending = Some(RecordingPending { start, requested: Instant::now(), accepted: false });
+                        } else {
+                            recording_uncertain = true;
+                        }
+                    }
+                    Command::EndEveryone(_) => {
+                        // Confirmation always stops local publication. A stale or
+                        // refused moderator action cannot silently restore it.
+                        call.set_wishes(scope, MediaWishes::default()).map_err(|_| ())?;
+                        session.suspend();
+                        if transport_ready && received_policy >= required_policy && bundle.end_supported
+                            && call.phase() == Phase::Active && !end_pending
+                            && ring_tx.try_send(moderation::Request::EndEveryone).is_ok() {
+                            end_pending = true;
+                            end_failed = false;
+                        } else if !end_pending {
+                            end_failed = true;
+                        }
+                    }
                     Command::Consent(_) => { call.consent(scope).map_err(|_| ())?; }
+                    Command::SetHand { raised, .. } if transport_ready && received_policy >= required_policy && bundle.hand_supported && call.phase() == Phase::Active => {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |time| u64::try_from(time.as_millis()).unwrap_or(u64::MAX));
+                        if let Some(next) = hand_timestamp.checked_add(1) {
+                            hand_timestamp = now.max(next);
+                            hand_raised = raised;
+                            let peers: Vec<_> = bundle.peers.iter().map(|p| p.session.clone()).collect();
+                            hand_announcements.changed(&peers);
+                            let message = outgoing::Message { peers,
+                                activity: api::signaling::activity::Activity::RaisedHand { state: raised, timestamp: hand_timestamp }, created: Instant::now() };
+                            let _ = hand_tx.send(Some(message));
+                        }
+                    }
+                    Command::React { emoji, .. } if transport_ready && received_policy >= required_policy && call.phase() == Phase::Active
+                        && bundle.reactions.as_slice().contains(&emoji)
+                        && last_reaction.is_none_or(|at| at.elapsed() >= Duration::from_secs(2)) => {
+                        let message = outgoing::Message { peers: bundle.peers.iter().map(|p| p.session.clone()).collect(),
+                            activity: api::signaling::activity::Activity::Reaction(emoji.as_str().to_owned()), created: Instant::now() };
+                        if reaction_tx.try_send(message).is_ok() {
+                            last_reaction = Some(Instant::now());
+                            if let Some(next) = reaction_sequence.checked_add(1) {
+                                reaction_sequence = next;
+                                latest_reaction = Some(calls::CallReaction { sequence: next, participant: None, emoji });
+                            }
+                        }
+                    }
                     Command::Reconnect(_) => {
                         // A new explicit call generation owns a replacement
                         // publisher/subscriber set. Never reuse retired SIDs.
@@ -745,6 +931,39 @@ async fn media_loop(
                     }
                     Command::Stop(_) => { session.close(); break; }
                     _ => {}
+                }
+            }
+            while let Ok(result) = ring_results.try_recv() {
+                match result {
+                    moderation::Result::Ring { target, accepted } => {
+                        if ring_status.is_some_and(|status| status.target == target && status.outcome == calls::RingOutcome::Pending) {
+                            ring_status = Some(calls::CallRingStatus { target,
+                                outcome: if accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
+                        }
+                    }
+                    moderation::Result::Mute { target, accepted } => {
+                        if mute_status.is_some_and(|status| status.target == target && status.outcome == calls::RingOutcome::Pending) {
+                            mute_status = Some(calls::CallRingStatus { target,
+                                outcome: if accepted { calls::RingOutcome::Requested } else { calls::RingOutcome::Failed } });
+                        }
+                    }
+                    moderation::Result::EndEveryone { accepted } if end_pending => {
+                        end_pending = false;
+                        if accepted { session.close(); stop.close(); }
+                        else { end_failed = true; }
+                    }
+                    moderation::Result::EndEveryone { .. } => {}
+                    moderation::Result::Recording { start, accepted } => {
+                        if let Some(pending) = recording_pending.as_mut().filter(|pending| pending.start == start) {
+                            if accepted {
+                                pending.accepted = true;
+                            } else {
+                                recording_pending = None;
+                                recording_uncertain = true;
+                            }
+                            refresh_needed = true;
+                        }
+                    }
                 }
             }
             stage = "remote signaling";
@@ -841,6 +1060,7 @@ async fn media_loop(
                                 }
                             }
                             session.stop_screen();
+                            latest_reaction = None;
                             call.disconnected(scope).map_err(|_| ())?;
                             refresh_needed = true;
                         }
@@ -854,6 +1074,16 @@ async fn media_loop(
                                 peer.connected = false;
                                 peer.recovery.get_or_insert_with(Instant::now);
                                 peer.restart_pending = true;
+                            }
+                        }
+                        SignalEvent::ForceMuteBy { from } => {
+                            // Stopping publication is safe even before a policy refresh;
+                            // an unknown sender cannot create a participant or authority.
+                            if bundle.peers.iter().any(|peer| peer.session == from) {
+                                let mut wishes = call.wishes();
+                                wishes.microphone = false;
+                                call.set_wishes(scope, wishes).map_err(|_| ())?;
+                                session.suspend();
                                 refresh_needed = true;
                             }
                         }
@@ -862,6 +1092,21 @@ async fn media_loop(
                             wishes.microphone = false;
                             call.set_wishes(scope, wishes).map_err(|_| ())?;
                             refresh_needed = true;
+                        }
+                        // Membership reconciliation owns peer identity; unsolicited activity
+                        // cannot create a peer or change media authority.
+                        SignalEvent::Activity { from, activity } => {
+                            if let Some(person) = participants.0.iter_mut().find(|person| person.session == from) {
+                                match activity {
+                                    api::signaling::activity::Activity::RaisedHand { state, timestamp } => person.hand.update(state, timestamp),
+                                    api::signaling::activity::Activity::Reaction(value) => {
+                                        if let (Ok(emoji), Some(next)) = (talk_core::bounded::Text::new(&value), reaction_sequence.checked_add(1)) {
+                                            reaction_sequence = next;
+                                            latest_reaction = Some(calls::CallReaction { sequence: next, participant: Some(person.local), emoji });
+                                        }
+                                    }
+                                }
+                            }
                         }
                         SignalEvent::PolicyChanged | SignalEvent::Hint { .. } => { refresh_needed = true; }
                     }
@@ -880,9 +1125,39 @@ async fn media_loop(
                     refreshes = refreshes.saturating_add(1);
                     received_policy = next.after;
                     bundle = next.bundle;
+                    reconcile_participants(&mut participants, &bundle, &invitee_ids)?;
                 }
             }
             let policy_ready = transport_ready && received_policy >= required_policy;
+            let recording = moderation::current_recording(
+                match bundle.inputs.room {
+                    Observed::Known { value, lease } => Observed::Known { value: value.recording, lease },
+                    Observed::Unknown => Observed::Unknown,
+                },
+                scope, network.now(), policy_ready,
+            );
+            if let Some(pending) = recording_pending.as_ref() {
+                match moderation::recording_resolution(
+                    pending.start, pending.accepted, recording != RecordingState::Unknown, recording,
+                    pending.requested.elapsed() >= Duration::from_secs(20),
+                ) {
+                    moderation::RecordingResolution::Pending => {}
+                    moderation::RecordingResolution::Confirmed => { recording_pending = None; }
+                    moderation::RecordingResolution::Uncertain => {
+                        recording_pending = None;
+                        recording_uncertain = true;
+                    }
+                }
+            }
+            if policy_ready && bundle.hand_supported && announced_refresh != refreshes {
+                announced_refresh = refreshes;
+                let peers: Vec<_> = bundle.peers.iter().map(|p| p.session.clone()).collect();
+                if let Some((activity, targets)) = hand_announcements.refresh(&peers, hand_raised, hand_timestamp) {
+                    let _ = hand_tx.send(Some(outgoing::Message { peers: targets, activity, created: Instant::now() }));
+                }
+            }
+            let clear_hand = !policy_ready && { hand_tx.borrow().is_some() };
+            if clear_hand { let _ = hand_tx.send(None); }
             stage = "policy grant";
             let video_limit = if policy_ready {
                 let grant = call.advance(&bundle.inputs, bundle.exists, SUPPORT, DEVICES, network.now()).map_err(|_| ())?;
@@ -897,7 +1172,7 @@ async fn media_loop(
                 }
                 reconcile(&mut peers, &bundle, &own, &writes,
                     &session,
-                    topology, &sfu_members).await?;
+                    topology, &sfu_members, &participants).await?;
                 limit
             } else {
                 session.suspend();
@@ -918,6 +1193,13 @@ async fn media_loop(
             stage = "media exchange";
             let wishes = session.publication();
             let audio = session.take_audio();
+            if policy_ready && wishes.microphone {
+                if let Some(samples) = &audio {
+                    local_speaking.observe(samples, Instant::now());
+                }
+            } else {
+                local_speaking = speaking::Speaking::default();
+            }
             let video = session.take_video();
             if let Some(frame) = session.take_screen() { latest_screen = Some(frame); }
             if !session.screen_capture_active() || latest_screen.as_ref().is_some_and(|(epoch, _)| *epoch != session.screen_epoch()) { latest_screen = None; }
@@ -1098,6 +1380,7 @@ async fn media_loop(
                 }
                 if receives {
                     if let Some(frame) = peer.engine.take_audio() && frame.data.len() == 480 {
+                        peer.speaking.observe(&frame.data, Instant::now());
                         for (output, input) in mix.iter_mut().zip(frame.data.iter()) { *output += i32::from(*input); }
                         mixed = true;
                     }
@@ -1133,17 +1416,55 @@ async fn media_loop(
                     send(&writes, Write::Remove(peer.session, peer.stream))?;
                 } else { retired += 1; }
             }
-            let mut participants = talk_core::bounded::Page::empty();
-            for peer in peers.iter().filter(|p| p.stream == StreamKind::Camera && p.role != Role::Publisher).take(15)
-                .chain(peers.iter().filter(|p| p.stream == StreamKind::Screen && p.role == Role::Subscriber).take(1)) {
-                if let Some(source) = bundle.peers.iter().find(|p| p.session == peer.session) {
-                    participants.try_push(calls::Participant {
-                        local: peer.local, participant: peers.iter().find(|p| p.session == peer.session && p.stream == StreamKind::Camera).map_or(peer.local, |p| p.local), name: source.name.clone(), microphone: source.microphone, camera: source.camera,
-                        kind: if peer.stream == StreamKind::Screen { calls::StreamKind::Screen } else { calls::StreamKind::Camera },
-                        dimensions: peer.dimensions,
-                        flowing: peer.last_frame.is_some_and(|last| last.elapsed() < Duration::from_secs(3)),
+            let mut participant_snapshot = talk_core::bounded::Page::empty();
+            let screen = peers.iter().find(|peer| peer.stream == StreamKind::Screen && peer.role == Role::Subscriber);
+            for person in participants.0.iter().take(if screen.is_some() { 15 } else { 16 }) {
+                if let Some(source) = bundle.peers.iter().find(|p| p.session == person.session) {
+                    let speaking = policy_ready && peers.iter().find(|peer| peer.role != Role::Publisher && peer.session == person.session)
+                        .is_some_and(|peer| peer.speaking.active(Instant::now()));
+                    participant_snapshot.try_push(calls::Participant {
+                        local: person.local, participant: person.local, kind: calls::StreamKind::Camera,
+                        dimensions: peers.iter().find(|peer| peer.session == person.session && peer.stream == StreamKind::Camera).and_then(|peer| peer.dimensions),
+                        flowing: peers.iter().find(|peer| peer.session == person.session && peer.stream == StreamKind::Camera).is_some_and(|peer| peer.last_frame.is_some_and(|at| at.elapsed() < Duration::from_secs(3))),
+                        name: source.name.clone(), microphone: source.microphone, camera: source.camera, raised_hand: person.hand.raised(), speaking,
+                        can_mute: policy_ready && bundle.mute_supported && source.microphone && !end_pending
+                            && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                            && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending),
                     }).map_err(|_| ())?;
                 }
+            }
+            if let Some(peer) = screen
+                && let Some(source) = bundle.peers.iter().find(|source| source.session == peer.session)
+                && let Some(person) = participants.0.iter().find(|person| person.session == peer.session) {
+                participant_snapshot.try_push(calls::Participant {
+                    local: peer.local, participant: person.local, name: source.name.clone(),
+                    kind: calls::StreamKind::Screen, dimensions: peer.dimensions,
+                    flowing: peer.last_frame.is_some_and(|at| at.elapsed() < Duration::from_secs(3)),
+                    microphone: source.microphone, camera: source.camera,
+                    raised_hand: person.hand.raised(), speaking: false, can_mute: false,
+                }).map_err(|_| ())?;
+            }
+            let mut invitees = talk_core::bounded::Page::empty();
+            if policy_ready {
+                invitee_ids.retain(|(id, _)| bundle.invitees.iter().any(|person| person.attendee == *id));
+                for person in &bundle.invitees {
+                    let local = if let Some((_, local)) = invitee_ids.iter().find(|(id, _)| *id == person.attendee) {
+                        *local
+                    } else {
+                        let mut bytes = [0u8; 16];
+                        if getrandom::fill(&mut bytes).is_err() { continue; }
+                        let local = u128::from_le_bytes(bytes);
+                        if local == 0 || invitee_ids.iter().any(|(_, existing)| *existing == local)
+                            || participants.0.iter().any(|person| person.local == local) { continue; }
+                        invitee_ids.push((person.attendee, local));
+                        local
+                    };
+                    let _ = invitees.try_push(calls::CallInvitee { local, ring_allowed: bundle.ring_supported && person.ring_eligible && !end_pending
+                        && !mute_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending)
+                        && !ring_status.is_some_and(|status| status.outcome == calls::RingOutcome::Pending), name: person.name.clone() });
+                }
+            } else {
+                invitee_ids.clear();
             }
             session.retain_video(&peers.iter().filter(|p| p.role != Role::Publisher && p.stream == StreamKind::Camera).take(camera_limit)
                 .chain(peers.iter().filter(|p| p.role == Role::Subscriber && p.stream == StreamKind::Screen).take(usize::from(video_limit > 0)))
@@ -1168,11 +1489,28 @@ async fn media_loop(
                 snapshot.phase = if recovering || !transport_ready || session.control_degraded() { Phase::Reconnecting } else { call.phase() };
                 snapshot.wishes = call.wishes();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
+                snapshot.local_speaking = policy_ready && mic && local_speaking.active(Instant::now());
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
-                snapshot.peers = peers.iter().filter(|p| p.role != Role::Publisher && !(p.stream == StreamKind::Screen && p.role == Role::Direct)).count() as u16;
-                snapshot.participants = participants;
+                snapshot.peers = participants.0.len() as u16;
+                snapshot.participants = participant_snapshot;
+                snapshot.hand_supported = policy_ready && bundle.hand_supported && call.phase() == Phase::Active;
+                snapshot.hand_raised = hand_raised;
+                snapshot.reactions = if policy_ready && call.phase() == Phase::Active { bundle.reactions.clone() } else { talk_core::bounded::Page::empty() };
+                snapshot.latest_reaction = latest_reaction.clone();
+                snapshot.invitees_loaded = policy_ready;
+                snapshot.invitees = invitees;
+                snapshot.ring_status = ring_status;
+                snapshot.mute_status = mute_status;
+                snapshot.can_end_everyone = policy_ready && bundle.end_supported && call.phase() == Phase::Active && !end_failed;
+                snapshot.end_pending = end_pending;
+                snapshot.end_failed = end_failed;
                 snapshot.counters = totals;
-                snapshot.recording = match bundle.inputs.room { Observed::Known { value, .. } => value.recording, _ => RecordingState::Unknown };
+                snapshot.recording = recording;
+                snapshot.recording_control = if recording != RecordingState::Unknown && call.phase() == Phase::Active && !end_pending {
+                    bundle.recording_control
+                } else { None };
+                snapshot.recording_pending = recording_pending.is_some();
+                snapshot.recording_uncertain = recording_uncertain;
                 snapshot.revision = snapshot.revision.saturating_add(1);
             }
         }

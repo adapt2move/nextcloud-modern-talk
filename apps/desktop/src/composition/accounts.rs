@@ -1723,7 +1723,8 @@ fn conversation(r: &protocol::Conversation, scope: AccountScope) -> Conversation
         } else {
             Decision::Unknown
         },
-        call: Decision::Unknown,
+        call: r.actions.join_call,
+        call_active: r.call_active,
         call_scope: r.call_scope,
     }
 }

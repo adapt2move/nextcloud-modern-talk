@@ -325,6 +325,51 @@ async fn connected(
                             if let Err(error) = sent { let _ = reply.send(Err(error)); return Err(error); }
                             pending = Some(PendingJoin { id, generation, deadline: end, cancel, reply });
                         }
+                        Command::ForceMute { generation, peer, target, deadline: end, cancel, reply } => {
+                            let value = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() || cancel.is_cancelled() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                let Some(recipient) = room.members.iter().find(|member| member.talk == peer && peer != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                let Some(subject) = room.members.iter().find(|member| member.talk == target && target != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                json!({"type":"message","message":{"recipient":{"type":"session","sessionid":recipient.sfu.0.as_str()},"data":{"to":recipient.sfu.0.as_str(),"roomType":"video","type":"control","payload":{"action":"forceMute","peerId":subject.sfu.0.as_str()}}}})
+                            };
+                            let mut value = value;
+                            value["id"] = json!(next_id(counter)?);
+                            let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            let failed = sent.as_ref().err().copied();
+                            let _ = reply.send(sent);
+                            if let Some(error) = failed { return Err(error); }
+                        }
+                        Command::Activity { generation, peer, activity, deadline: end, cancel, reply } => {
+                            let value = {
+                                let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;
+                                let Some(room) = &state.room else { let _ = reply.send(Err(ErrorKind::WrongScope)); continue; };
+                                if room.generation != generation || !room.joined || room.cancellation.is_cancelled() || reply.is_closed() || cancel.is_cancelled() {
+                                    let _ = reply.send(Err(ErrorKind::Cancelled)); continue;
+                                }
+                                let Some(member) = room.members.iter().find(|member| member.talk == peer && peer != room.own) else {
+                                    let _ = reply.send(Err(ErrorKind::WrongScope)); continue;
+                                };
+                                let (kind, payload) = match activity.encode() {
+                                    Ok(value) => value,
+                                    Err(error) => { let _ = reply.send(Err(error)); continue; }
+                                };
+                                json!({"type":"message","message":{"recipient":{"type":"session","sessionid":member.sfu.0.as_str()},"data":{"to":member.sfu.0.as_str(),"roomType":"video","type":kind,"payload":payload}}})
+                            };
+                            let mut value = value;
+                            value["id"] = json!(next_id(counter)?);
+                            let sent = until(shared, end, &cancel, write(socket, value)).await;
+                            let failed = sent.as_ref().err().copied();
+                            let _ = reply.send(sent);
+                            if let Some(error) = failed { return Err(error); }
+                        }
                         Command::Typing { generation, started, deadline: end, cancel, reply } => {
                             let peers = {
                                 let state = shared.state.lock().map_err(|_| ErrorKind::Uncertain)?;

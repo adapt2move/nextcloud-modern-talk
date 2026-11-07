@@ -494,6 +494,21 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
         assert_eq!(answer["message"]["recipient"]["sessionid"], "hpb-other");
         assert_eq!(answer["message"]["data"]["sid"], "sfu-created-sid");
         assert_eq!(answer["message"]["data"]["type"], "answer");
+        let activity = receive(&mut socket).await;
+        assert_eq!(activity["message"]["recipient"]["sessionid"], "hpb-other");
+        assert_eq!(activity["message"]["data"]["type"], "raiseHand");
+        assert_eq!(activity["message"]["data"]["payload"]["state"], true);
+        assert!(activity["message"]["data"].get("sid").is_none());
+        let force_mute = receive(&mut socket).await;
+        assert_eq!(force_mute["message"]["recipient"]["sessionid"], "hpb-other");
+        assert_eq!(
+            force_mute["message"]["data"]["payload"]["action"],
+            "forceMute"
+        );
+        assert_eq!(
+            force_mute["message"]["data"]["payload"]["peerId"],
+            "hpb-other"
+        );
         let bye = receive(&mut socket).await;
         assert_eq!(bye["type"], "bye");
         send(&mut socket, json!({"id":bye["id"],"type":"bye","bye":{}})).await;
@@ -535,6 +550,35 @@ async fn authenticated_session_routes_subscriber_answer_and_confirms_retirement(
                 )
                 .unwrap(),
             )),
+        )
+        .await
+        .unwrap();
+    route
+        .send_activity(
+            &context(&runtime, &handle.shared),
+            &peer("talk-other"),
+            crate::signaling::activity::Activity::RaisedHand {
+                state: true,
+                timestamp: 42,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        route
+            .send_activity(
+                &context(&runtime, &handle.shared),
+                &peer("unknown"),
+                crate::signaling::activity::Activity::Reaction("👍".into()),
+            )
+            .await,
+        Err(ErrorKind::WrongScope)
+    );
+    route
+        .send_force_mute(
+            &context(&runtime, &handle.shared),
+            &peer("talk-other"),
+            &peer("talk-other"),
         )
         .await
         .unwrap();
@@ -1006,5 +1050,61 @@ async fn stopped_camera_subscription_can_readmit_a_current_member_without_old_si
             .as_ref()
             .unwrap()
             .matches(&Negotiation::parse("fresh").unwrap())
+    );
+}
+#[test]
+fn call_activity_requires_a_mapped_sender_and_never_crowds_out_policy() {
+    use crate::signaling::activity::Activity;
+    let (_client, binding, _) = account();
+    let shared = state(binding);
+    let message = |sender: &str, state: bool, timestamp: u64| {
+        json!({
+            "type":"message", "message": {
+                "sender":{"type":"session", "sessionid":sender},
+                "data":{"type":"raiseHand", "roomType":"video", "payload":{"state":state,"timestamp":timestamp}}
+            }
+        })
+    };
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    assert!(
+        shared
+            .state
+            .lock()
+            .unwrap()
+            .room
+            .as_ref()
+            .unwrap()
+            .signals
+            .is_empty()
+    );
+    shared.incoming(&json!({"type":"event","event":{"target":"room","type":"join","join":[{"sessionid":"hpb-other","roomsessionid":"talk-other"}]}})).unwrap();
+    shared.incoming(&json!({"type":"message","message":{"sender":{"type":"session","sessionid":"hpb-other"},"data":{"type":"control","roomType":"video","payload":{"action":"forceMute","peerId":"hpb-own"}}}})).unwrap();
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    shared.incoming(&message("hpb-other", false, 2)).unwrap();
+    shared.incoming(&message("hpb-other", true, 1)).unwrap();
+    let mut locked = shared.state.lock().unwrap();
+    let room = locked.room.as_mut().unwrap();
+    assert!(
+        room.signals
+            .iter()
+            .any(|(_, event)| matches!(event, Event::Activity {
+        from, activity: Activity::RaisedHand { state: false, timestamp: 2 }
+    } if from == &peer("talk-other")))
+    );
+    assert!(room.signals.iter().any(
+        |(_, event)| matches!(event, Event::ForceMuteBy { from } if from == &peer("talk-other"))
+    ));
+    // Fill the queue with transient activity, then retain a mandatory update.
+    for i in 0..20 {
+        room.push_activity(peer(&format!("peer-{i}")), Activity::Reaction("👍".into()));
+    }
+    for _ in 0..82 {
+        room.push(Event::PolicyChanged).unwrap();
+    }
+    assert!(!room.cancellation.is_cancelled());
+    assert!(
+        room.signals
+            .iter()
+            .any(|(_, event)| matches!(event, Event::PolicyChanged))
     );
 }

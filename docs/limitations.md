@@ -65,6 +65,27 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   web-peer call leave/rejoin restores AV in the exercised case. This is separate
   from the qualified interruption/resume of a surviving HPB session.
 - Guest/federated media and required call E2EE remain unavailable.
+- The call view has adaptive gallery, local focus and a speaking-level-based
+  speaker view. The level is a short-lived indicator from received audio or
+  authorized local microphone samples, not speech recognition or a
+  connection-quality measurement. The dock is inside
+  the main window; it is not a separate always-on-top window. Sidebar avatars
+  come from the current call; other active rooms show the call badge until
+  participant identities are available.
+- The screen stage consumes the media owner’s scoped stream identities and frames.
+  Raised hands and reactions are scoped to
+  projected participants and require advertised server support; their signaling
+  interoperability needs further validation.
+- Moderator mute, end-for-everyone and local-user re-ring requests check current
+  policy and session identity; call-only removal and federated re-ring are not
+  offered. A request receipt does not establish that another client acted on it.
+  Server recording controls require a configured backend, a fresh moderator
+  grant and an ordinary room. They start video recording; audio-only selection
+  and recording-file workflows are not implemented. A configured recorder has
+  not been exercised. Selecting a different capture device stops its current
+  publication and requires the user to enable it again. These controls and
+  automatic speaker selection require native and server interoperability
+  validation.
 
 ## Messages and background activity
 

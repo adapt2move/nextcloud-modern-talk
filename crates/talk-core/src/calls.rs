@@ -437,6 +437,27 @@ pub enum Command {
         call: CallScope,
         wishes: MediaWishes,
     },
+    SetHand {
+        call: CallScope,
+        raised: bool,
+    },
+    React {
+        call: CallScope,
+        emoji: crate::bounded::Text<64>,
+    },
+    Ring {
+        call: CallScope,
+        target: u128,
+    },
+    MuteParticipant {
+        call: CallScope,
+        target: u128,
+    },
+    EndEveryone(CallScope),
+    SetRecording {
+        call: CallScope,
+        start: bool,
+    },
     Consent(CallScope),
     Reconnect(CallScope),
     Stop(CallScope),
@@ -447,8 +468,15 @@ pub enum Command {
 impl Command {
     pub fn scope(&self) -> CallScope {
         match self {
-            Self::Start { call, .. } | Self::Change { call, .. } => *call,
+            Self::Start { call, .. }
+            | Self::Change { call, .. }
+            | Self::SetHand { call, .. }
+            | Self::React { call, .. }
+            | Self::Ring { call, .. }
+            | Self::MuteParticipant { call, .. }
+            | Self::SetRecording { call, .. } => *call,
             Self::Consent(call)
+            | Self::EndEveryone(call)
             | Self::Reconnect(call)
             | Self::Stop(call)
             | Self::Observe(call)
@@ -484,11 +512,28 @@ pub struct Snapshot {
     pub participants: crate::bounded::Page<Participant, 16>,
     pub phase: Phase,
     pub microphone: DeviceState,
+    /// Short-lived level indication from already authorized local audio.
+    pub local_speaking: bool,
     pub camera: DeviceState,
     pub screen: DeviceState,
     pub sharing: SharingState,
     pub peers: u16,
     pub recording: RecordingState,
+    /// Some(true) starts, Some(false) stops; None means unavailable.
+    pub recording_control: Option<bool>,
+    pub recording_pending: bool,
+    pub recording_uncertain: bool,
+    pub hand_supported: bool,
+    pub hand_raised: bool,
+    pub reactions: crate::bounded::Page<crate::bounded::Text<64>, 32>,
+    pub latest_reaction: Option<CallReaction>,
+    pub invitees_loaded: bool,
+    pub invitees: crate::bounded::Page<CallInvitee, 100>,
+    pub ring_status: Option<CallRingStatus>,
+    pub mute_status: Option<CallRingStatus>,
+    pub can_end_everyone: bool,
+    pub end_pending: bool,
+    pub end_failed: bool,
     pub counters: MediaCounters,
     pub revision: u64,
 }
@@ -520,6 +565,34 @@ pub enum StreamKind {
     Screen,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallReaction {
+    pub sequence: u64,
+    /// None identifies the local sender; other IDs are call-scoped peers.
+    pub participant: Option<u128>,
+    pub emoji: crate::bounded::Text<64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RingOutcome {
+    Pending,
+    Requested,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallRingStatus {
+    pub target: u128,
+    pub outcome: RingOutcome,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallInvitee {
+    pub local: u128,
+    pub ring_allowed: bool,
+    pub name: crate::bounded::Text<256>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Participant {
     pub participant: u128,
     pub kind: StreamKind,
@@ -529,6 +602,9 @@ pub struct Participant {
     pub name: crate::bounded::Text<256>,
     pub microphone: bool,
     pub camera: bool,
+    pub raised_hand: bool,
+    pub speaking: bool,
+    pub can_mute: bool,
 }
 
 #[cfg(test)]

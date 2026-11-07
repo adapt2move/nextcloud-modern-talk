@@ -220,6 +220,9 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         Some("settings") => Some(Overlay::Settings),
         Some("details" | "poll-settings") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
+        Some("call-participants-raised") => Some(Overlay::CallParticipants),
+        Some("call-end-confirm") => Some(Overlay::ConfirmEndCall),
+        Some("call-recording-confirm") => Some(Overlay::ConfirmRecording),
         Some("files") => Some(Overlay::Files),
         Some("chat-cloud-files" | "chat-cloud-files-offline") => Some(Overlay::CloudFiles),
         Some("thread") => Some(Overlay::Thread),
@@ -280,6 +283,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
                 level: 600,
             }),
         ),
+        fixture_call_devices: options.scenario.as_deref() == Some("call-devices"),
         permission_cursor: 0,
         notification_request: None,
         notification_result: talk_core::preferences::notifications::NotificationState::Idle,
@@ -316,7 +320,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             }
         }
             cx.new(|cx|{
-                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref(), cx); }
                 desktop
             })

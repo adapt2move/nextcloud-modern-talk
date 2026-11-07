@@ -163,6 +163,12 @@ in the sidebar and header. `status-picker` opens a fictional account-status
 menu, and `status-message` opens its fictional status-message editor. These
 fixtures do not query a server.
 
+Use `call-gallery`, `call-speaker`, `call-screen-stage`, `call-dock`,
+`call-participants-raised` and `call-recording` for fictional call presentation.
+These fixtures do not connect screen streams or prove signaling, media, operating
+system integration or accessibility. The screen stage keeps camera and screen
+identities separate; the production media owner supplies scoped screen frames through the same stream metadata.
+
 Use `chat-ux` and `chat-ux-call` for the header, search, reply and tooltip fixtures. They use fictional conversations and do not authorize a server send or call. Short transitions respect the observed system Reduce Motion preference; an unknown preference suppresses decorative motion. On Linux, observation uses the desktop's GNOME or KDE settings. The emoji action uses the system character palette on macOS, the Windows emoji picker, or an available Linux desktop picker. Linux picker selection may require an explicit copy and paste.
 
 Update development builds are not treated as installable packages. For installation checks use the private fixture in [tools/updates](../tools/updates/install_probe.py), which creates a disposable package and never overwrites a system installation. The PackageKit fixture uses a private D-Bus service, not the system package manager. Runtime checks and package-layout fixtures do not qualify native macOS or Windows installation.

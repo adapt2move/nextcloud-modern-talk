@@ -101,6 +101,12 @@ impl Desktop {
                 .flex()
                 .flex_col()
                 .gap_2()
+                .when(
+                    !sidebar_visible
+                        && self.docked_call()
+                        && !matches!(self.overlay, Some(Overlay::Settings | Overlay::Accounts)),
+                    |content| content.child(self.call_dock(cx)),
+                )
                 .child(div().tab_group().tab_index(1).flex_1().min_h_0().child(
                     if self.destination == super::SidebarDestination::Inbox {
                         self.inbox(cx)
@@ -397,6 +403,16 @@ impl Desktop {
                     cx,
                 ))
             })
+            .when(row.kind == ConversationKind::Direct, |d| {
+                d.child(self.icon_button(
+                    "call-video",
+                    ("video", "Mit Video anrufen"),
+                    ButtonStyle::Quiet,
+                    call_availability.explained_elsewhere(),
+                    LocalAction::StartDirectWithVideo,
+                    cx,
+                ))
+            })
             .child(self.icon_button(
                 "room-info",
                 ("settings", "Gesprächseinstellungen"),
@@ -418,6 +434,14 @@ impl Desktop {
                         "call".into(),
                         call_availability.below_control(),
                         Some(call_name),
+                        cx,
+                    ))
+                })
+                .when(row.kind == ConversationKind::Direct, |d| {
+                    d.child(self.reason_tip(
+                        "call-video".into(),
+                        call_availability.below_control(),
+                        Some("Mit Video anrufen"),
                         cx,
                     ))
                 })
@@ -857,10 +881,11 @@ impl Desktop {
                     .child(self.avatar(call.participants.as_slice().iter().find(|p|!p.self_user).map_or("?",|p|p.initials.as_str()),true))
                     .child(self.title(call.title.as_str()))
                     .child(self.hint(&self.lf("Persönliches Gespräch · {account}",&[("account",account)])))
-                    .child(self.hint(self.l("Bis zur Annahme bleiben Mikrofon und Kamera aus.\nBeim Annehmen: Mikrofon an, Kamera aus — nach Freigabe.")))
+                    .child(self.hint(self.l("Bis zur Annahme bleiben Mikrofon und Kamera aus. Die Geräte werden erst nach Freigabe aktiviert.")))
                     .child(div().flex().justify_center().gap_8().py_3()
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("decline",("phone-down","Ablehnen"),ButtonStyle::Danger,Availability::available().labelled(),LocalAction::Intent(UiIntent::DeclineDirect(call.scope)),cx)).child(self.l("Ablehnen")))
-                        .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx)).child(self.l("Annehmen"))))
+                        .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx)).child(self.l("Annehmen")))
+                        .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept-video",("video","Mit Video annehmen"),ButtonStyle::Secondary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::AcceptCallWithVideo,cx)).child(self.l("Mit Video annehmen"))))
                     .child(self.button("dismiss","Später ansehen",ButtonStyle::Quiet,true,LocalAction::DismissIncoming,cx))))
     }
 }

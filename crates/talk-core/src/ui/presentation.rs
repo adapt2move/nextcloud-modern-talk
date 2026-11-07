@@ -366,6 +366,8 @@ pub struct ConversationView {
     /// Classified/unknown restrictions MUST project Denied/Unknown; never infer from send.
     pub draft_clipboard: Decision,
     pub call: Decision,
+    /// Server observation; unknown does not imply that a call is active.
+    pub call_active: Option<bool>,
     /// Allocated/revalidated by the call owner; a row click never creates a call.
     pub call_scope: Option<CallScope>,
 }
@@ -411,6 +413,13 @@ pub struct ParticipantView {
     pub role_label: Text<64>,
     pub presence: Presence,
     pub self_user: bool,
+    pub raised_hand: bool,
+    /// Recent decoded audio exceeds the local indication threshold.
+    pub speaking: bool,
+    pub call_can_mute: bool,
+    /// Last observed call flags, absent outside the call projection.
+    pub call_microphone: Option<bool>,
+    pub call_camera: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -446,7 +455,7 @@ pub enum MediaState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CallStreamKind {
+pub enum CallTileKind {
     Camera,
     Screen,
 }
@@ -474,10 +483,62 @@ pub struct CallStreamView {
     pub local_id: u128,
     pub participant: u128,
     pub participant_name: Text<128>,
-    pub kind: CallStreamKind,
+    pub kind: CallTileKind,
     pub dimensions: Option<(u32, u32)>,
     pub flowing: bool,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallTileId {
+    pub local_id: u128,
+    pub kind: CallTileKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallScreenStage {
+    pub tile: CallTileId,
+    pub name: Text<128>,
+    pub dimensions: Option<(u32, u32)>,
+    pub flowing: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRecordingState {
+    Inactive,
+    Starting,
+    Active,
+    Stopping,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallReactionView {
+    pub sequence: u64,
+    pub participant: Option<u128>,
+    pub emoji: Text<64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallInviteeView {
+    pub local_id: u128,
+    pub ring_allowed: bool,
+    pub name: Text<128>,
+    pub initials: Text<16>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRingOutcome {
+    Pending,
+    Requested,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallRingStatus {
+    pub target: u128,
+    pub outcome: CallRingOutcome,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CallView {
     pub scope: CallScope,
@@ -490,7 +551,44 @@ pub struct CallView {
     pub share: MediaState,
     pub sharing: ScreenShareState,
     pub streams: Page<CallStreamView, 16>,
-    pub participants: Page<ParticipantView, 16>,
+    pub recording: CallRecordingState,
+    /// Some(true) starts, Some(false) stops; None hides unsupported controls.
+    pub recording_control: Option<bool>,
+    pub recording_pending: bool,
+    pub recording_uncertain: bool,
+    pub hand_supported: bool,
+    pub hand_raised: bool,
+    pub reactions: Page<Text<64>, 32>,
+    pub latest_reaction: Option<CallReactionView>,
+    pub invitees_loaded: bool,
+    pub invitees: Page<CallInviteeView, 100>,
+    pub ring_status: Option<CallRingStatus>,
+    pub mute_status: Option<CallRingStatus>,
+    pub can_end_everyone: bool,
+    pub end_pending: bool,
+    pub end_failed: bool,
+    /// Up to sixteen remote participants plus the local call participant.
+    pub participants: Page<ParticipantView, 17>,
+}
+
+impl CallView {
+    /// A presentation projection of the admitted stream; never separate authority.
+    pub fn screen_stage(&self) -> Option<CallScreenStage> {
+        let stream = self
+            .streams
+            .as_slice()
+            .iter()
+            .find(|s| s.kind == CallTileKind::Screen)?;
+        Some(CallScreenStage {
+            tile: CallTileId {
+                local_id: stream.local_id,
+                kind: stream.kind,
+            },
+            name: stream.participant_name.clone(),
+            dimensions: stream.dimensions,
+            flowing: stream.flowing,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -732,6 +830,27 @@ pub enum UiIntent {
     SetCamera {
         call: CallScope,
         enabled: bool,
+    },
+    EndCallForEveryone(CallScope),
+    SetCallRecording {
+        call: CallScope,
+        start: bool,
+    },
+    MuteCallParticipant {
+        call: CallScope,
+        target: u128,
+    },
+    RingCallParticipant {
+        call: CallScope,
+        target: u128,
+    },
+    SetCallHand {
+        call: CallScope,
+        raised: bool,
+    },
+    SendCallReaction {
+        call: CallScope,
+        emoji: Text<64>,
     },
     ShareScreen(CallScope),
     StopScreen(CallScope),

@@ -16,6 +16,18 @@ pub(crate) struct Bundle {
     pub exists: Observed<bool>,
     pub settings: SignalingSettings,
     pub peers: Vec<Peer>,
+    pub invitees: Vec<Invitee>,
+    pub hand_supported: bool,
+    pub reactions: talk_core::bounded::Page<talk_core::bounded::Text<64>, 32>,
+    pub ring_supported: bool,
+    pub end_supported: bool,
+    pub mute_supported: bool,
+    pub recording_control: Option<bool>,
+}
+pub(crate) struct Invitee {
+    pub attendee: u64,
+    pub ring_eligible: bool,
+    pub name: talk_core::bounded::Text<256>,
 }
 pub(crate) struct Peer {
     pub session: PeerSession,
@@ -99,6 +111,15 @@ impl Sources {
             return Err(unknown);
         }
         let has = |name: &str| c.features.iter().any(|f| f == name);
+        let hand_supported = has("raise-hand");
+        let mut reactions = talk_core::bounded::Page::empty();
+        for reaction in c.call_reactions.as_deref().unwrap_or_default() {
+            let value = talk_core::bounded::Text::new(reaction).map_err(|_| unknown)?;
+            if !reactions.as_slice().contains(&value) {
+                reactions.try_push(value).map_err(|_| unknown)?;
+            }
+        }
+
         let attributes = r.attributes.ok_or(unknown)?;
         if attributes & !31 != 0 {
             return Err(unknown);
@@ -194,6 +215,39 @@ impl Sources {
             SignalingMode::External => SignalingProfile::External,
             _ => return Err(unknown),
         };
+        let mut invitees = Vec::with_capacity(people.len().min(100));
+        for person in &people {
+            if person.in_call != Some(0) {
+                continue;
+            }
+            let (Some(attendee), Some(name)) = (
+                person.attendee_id.filter(|id| *id > 0),
+                person.display_name.as_deref(),
+            ) else {
+                continue;
+            };
+            if person.actor_type.as_deref() == Some("users")
+                && person.actor_id.as_deref() == Some(a.id.as_str())
+            {
+                continue;
+            }
+            if invitees
+                .iter()
+                .any(|existing: &Invitee| existing.attendee == attendee)
+            {
+                continue;
+            }
+            let Ok(name) = talk_core::bounded::Text::new(name) else {
+                continue;
+            };
+            let ring_eligible = person.actor_type.as_deref() == Some("users")
+                && person.actor_id.as_deref().is_some_and(|id| !id.is_empty());
+            invitees.push(Invitee {
+                attendee,
+                ring_eligible,
+                name,
+            });
+        }
         let mut peers = Vec::with_capacity(16);
         let mut connected = own_connected;
         if let Some(value) = self.peers {
@@ -281,6 +335,36 @@ impl Sources {
             },
             settings,
             peers,
+            invitees,
+            mute_supported: has("force-mute")
+                && matches!(r.participant_type, Some(1 | 2))
+                && r.has_call == Some(true)
+                && connected,
+            end_supported: matches!(r.participant_type, Some(1 | 2 | 6))
+                && r.object_type.as_deref() != Some("room")
+                && r.has_call == Some(true)
+                && connected,
+            ring_supported: has("send-call-notification")
+                && permissions & 2 != 0
+                && r.has_call == Some(true)
+                && connected,
+            recording_control: if has("recording-v1")
+                && c.recording_enabled == Some(true)
+                && matches!(r.participant_type, Some(1 | 2))
+                && attributes & 4 == 0
+                && r.has_call == Some(true)
+                && connected
+            {
+                match recording {
+                    RecordingState::Inactive => Some(true),
+                    RecordingState::Active => Some(false),
+                    _ => None,
+                }
+            } else {
+                None
+            },
+            hand_supported,
+            reactions,
         })
     }
 }

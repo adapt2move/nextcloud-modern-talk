@@ -1,4 +1,5 @@
 //! Engine-neutral, bounded SDP/ICE values. No devices, codecs, IPC or peer connection.
+pub mod activity;
 use std::{fmt, io};
 pub const SDP_MAX: usize = 65536;
 pub const CANDIDATE_MAX: usize = 2048;
@@ -203,6 +204,10 @@ pub enum Event {
         from: PeerSession,
         negotiation: Option<Negotiation>,
     },
+    /// A peer asks this call session to stop microphone publication.
+    ForceMuteBy {
+        from: PeerSession,
+    },
     Signal {
         stream: StreamKind,
         from: PeerSession,
@@ -210,6 +215,11 @@ pub enum Event {
         signal: Signal,
     },
     Membership(Vec<Member>),
+    /// Transient peer activity, scoped to this signaling session.
+    Activity {
+        from: PeerSession,
+        activity: activity::Activity,
+    },
     /// Scoped hints are represented explicitly and never become media commands.
     Hint {
         from: PeerSession,
@@ -379,8 +389,8 @@ pub(crate) fn parse_batch(
         return Err(ErrorKind::TooLarge);
     }
     let mut events = Vec::with_capacity(rows.len());
-    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut retained) =
-        (0, 0, 0, 0, 0usize);
+    let (mut descriptions, mut candidates, mut snapshots, mut hints, mut activities, mut retained) =
+        (0, 0, 0, 0, 0, 0usize);
     for row in rows {
         match row["type"].as_str() {
             Some("usersInRoom") => {
@@ -455,7 +465,21 @@ pub(crate) fn parse_batch(
                     events.push(Event::ScreenStopped { from, negotiation });
                     continue;
                 }
-                if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
+                if kind == "control" {
+                    // Unknown controls cannot grant authority or terminate the call.
+                    if data["payload"]["action"].as_str() == Some("forceMute")
+                        && data["payload"]["peerId"].as_str() == Some(local)
+                    {
+                        events.push(Event::ForceMuteBy { from });
+                    }
+                } else if matches!(kind, "raiseHand" | "reaction") {
+                    activities += 1;
+                    if activities <= 16
+                        && let Ok(activity) = activity::Activity::decode(kind, &data["payload"])
+                    {
+                        events.push(Event::Activity { from, activity });
+                    }
+                } else if matches!(kind, "mute" | "unmute" | "endOfCandidates") {
                     hints += 1;
                     if hints > 16 {
                         return Err(ErrorKind::TooLarge);

@@ -591,6 +591,15 @@ impl NextcloudClient {
                             }
                             prepare = true;
                         }
+                        Command::SetHand { .. }
+                        | Command::React { .. }
+                        | Command::Ring { .. }
+                        | Command::MuteParticipant { .. }
+                        | Command::EndEveryone(_)
+                        | Command::SetRecording { .. } => {
+                            self.meeting_owner = Some(CallOwner::Pending { call, last });
+                            return Err(self.error(ErrorKind::PermissionDenied));
+                        }
                         Command::Observe(_)
                             if call.accepted() && last.elapsed() >= Duration::from_secs(2) =>
                         {
@@ -666,6 +675,22 @@ impl NextcloudClient {
                     cleanup,
                     mut restart,
                 } => {
+                    if matches!(
+                        command,
+                        Command::SetHand { .. }
+                            | Command::React { .. }
+                            | Command::Ring { .. }
+                            | Command::MuteParticipant { .. }
+                            | Command::EndEveryone(_)
+                            | Command::SetRecording { .. }
+                    ) {
+                        self.meeting_owner = Some(CallOwner::Ended {
+                            snapshot,
+                            cleanup,
+                            restart,
+                        });
+                        return Err(self.error(ErrorKind::NotFound));
+                    }
                     if matches!(command, Command::Reconnect(_)) {
                         restart = Some(Restart {
                             wishes: MediaWishes::default(),
@@ -750,11 +775,26 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         participants: talk_core::bounded::Page::empty(),
         phase: call.phase(),
         microphone: DeviceState::Off,
+        local_speaking: false,
         camera: DeviceState::Off,
         screen: DeviceState::Unavailable,
         sharing: talk_core::calls::SharingState::Idle,
         peers: 0,
         recording: RecordingState::Unknown,
+        recording_control: None,
+        recording_pending: false,
+        recording_uncertain: false,
+        hand_supported: false,
+        hand_raised: false,
+        reactions: talk_core::bounded::Page::empty(),
+        latest_reaction: None,
+        invitees_loaded: false,
+        invitees: talk_core::bounded::Page::empty(),
+        ring_status: None,
+        mute_status: None,
+        can_end_everyone: false,
+        end_pending: false,
+        end_failed: false,
         counters: MediaCounters::default(),
         revision: 0,
     }

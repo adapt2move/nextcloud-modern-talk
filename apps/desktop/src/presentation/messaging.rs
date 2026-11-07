@@ -1264,7 +1264,10 @@ impl Desktop {
         div().flex_none().child(body)
     }
     pub(super) fn message_timeline(&self, constrained: bool, cx: &Context<Self>) -> Div {
-        self.message_timeline_with_header(constrained, None, cx)
+        self.message_timeline_with_header(constrained, None, false, cx)
+    }
+    pub(super) fn call_message_timeline(&self, cx: &Context<Self>) -> Div {
+        self.message_timeline_with_header(false, None, true, cx)
     }
     pub(super) fn conversation_timeline(
         &self,
@@ -1278,7 +1281,7 @@ impl Desktop {
         )
         .shows_content()
         {
-            self.message_timeline_with_header(constrained, Some(header), cx)
+            self.message_timeline_with_header(constrained, Some(header), false, cx)
         } else {
             div()
                 .flex_1()
@@ -1294,6 +1297,7 @@ impl Desktop {
         &self,
         constrained: bool,
         mut header: Option<Div>,
+        compact: bool,
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
@@ -1333,12 +1337,12 @@ impl Desktop {
                     header,
                     constrained,
                     cx.processor(move |this, inset, _, cx| {
-                        this.in_surface(inert, |this| this.message_history(inset, cx))
+                        this.in_surface(inert, |this| this.message_history(inset, compact, cx))
                     }),
                 )
                 .into_any_element()
             } else {
-                self.message_history(px(0.), cx).into_any_element()
+                self.message_history(px(0.), compact, cx).into_any_element()
             });
         } else if state.confirmed_empty() && !context_pending {
             let has_older = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -1446,7 +1450,12 @@ impl Desktop {
         }
         body
     }
-    fn message_history(&self, header_inset: gpui::Pixels, cx: &Context<Self>) -> Div {
+    fn message_history(
+        &self,
+        header_inset: gpui::Pixels,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> Div {
         let previous = self.message_ui.geometry.borrow().header_inset;
         let boundary_inset = self.sp(32.);
         if previous != header_inset
@@ -1636,7 +1645,7 @@ impl Desktop {
                                                     )
                                                 })
                                         });
-                                    let mut bubble = this.message_row(m, continuation, cx);
+                                    let mut bubble = this.message_row(m, continuation, compact, cx);
                                     if let Some(progress) = progress {
                                         // Paint-only rise: a relative offset inside the
                                         // measured wrapper leaves row height, list

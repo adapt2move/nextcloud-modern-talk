@@ -136,13 +136,53 @@ impl Room {
             } => c.candidate().len() + c.mid().len(),
             _ => 1024,
         };
-        if self.signals.len() == 84 || self.signal_bytes + bytes > 192 * 1024 {
+        // Ephemeral activity never displaces a required media or policy event.
+        while self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
+            let Some(index) = self
+                .signals
+                .iter()
+                .position(|(_, event)| matches!(event, Event::Activity { .. }))
+            else {
+                break;
+            };
+            if let Some((size, _)) = self.signals.remove(index) {
+                self.signal_bytes -= size;
+            }
+        }
+        if self.signals.len() >= 84 || self.signal_bytes + bytes > 192 * 1024 {
             self.cancellation.cancel();
             return Err(ErrorKind::Busy);
         }
         self.signal_bytes += bytes;
         self.signals.push_back((bytes, event));
         Ok(())
+    }
+    fn push_activity(&mut self, from: PeerSession, activity: crate::signaling::activity::Activity) {
+        use crate::signaling::activity::Activity;
+        // Coalesce each hand so a delayed raise cannot replace a later lower.
+        if let Activity::RaisedHand { timestamp, .. } = &activity
+            && let Some((_, event)) = self.signals.iter_mut().find(|(_, event)| {
+                matches!(event, Event::Activity { from: sender, activity: Activity::RaisedHand { .. } } if sender == &from)
+            })
+        {
+            if let Event::Activity { activity: Activity::RaisedHand { timestamp: previous, .. }, .. } = event
+                && *timestamp > *previous
+            {
+                *event = Event::Activity { from, activity };
+            }
+            return;
+        }
+        let count = self
+            .signals
+            .iter()
+            .filter(|(_, event)| matches!(event, Event::Activity { .. }))
+            .count();
+        if count >= 16 || self.signals.len() >= 84 || self.signal_bytes + 1024 > 192 * 1024 {
+            return;
+        }
+        self.signal_bytes += 1024;
+        self.signals
+            .push_back((1024, Event::Activity { from, activity }));
     }
 }
 pub(crate) struct Owner {
@@ -167,6 +207,22 @@ enum Command {
         cancel: Cancellation,
         reply: oneshot::Sender<Result<(), ErrorKind>>,
     },
+    ForceMute {
+        generation: u64,
+        peer: PeerSession,
+        target: PeerSession,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
+    Activity {
+        generation: u64,
+        peer: PeerSession,
+        activity: crate::signaling::activity::Activity,
+        deadline: Moment,
+        cancel: Cancellation,
+        reply: oneshot::Sender<Result<(), ErrorKind>>,
+    },
     Send {
         generation: u64,
         stream: StreamKind,
@@ -181,7 +237,11 @@ enum Command {
 impl Command {
     fn reject(self, error: ErrorKind) {
         match self {
-            Self::Join { reply, .. } | Self::Typing { reply, .. } | Self::Send { reply, .. } => {
+            Self::Join { reply, .. }
+            | Self::Typing { reply, .. }
+            | Self::Send { reply, .. }
+            | Self::Activity { reply, .. }
+            | Self::ForceMute { reply, .. } => {
                 let _ = reply.send(Err(error));
             }
         }
@@ -662,6 +722,88 @@ impl Route {
             return Err(ErrorKind::Cancelled);
         }
         drop(guard.disarm());
+        Ok(())
+    }
+    pub(crate) async fn send_force_mute(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        target: &PeerSession,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        self.with_room(|room, _| {
+            if peer == &room.own
+                || target == &room.own
+                || !room.members.iter().any(|member| &member.talk == peer)
+                || !room.members.iter().any(|member| &member.talk == target)
+            {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::ForceMute {
+                generation: self.generation,
+                peer: peer.clone(),
+                target: target.clone(),
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
+        Ok(())
+    }
+
+    /// Activity is ephemeral and never grants media authority. An abandoned
+    /// command is dropped by the socket owner instead of retiring the call.
+    pub(crate) async fn send_activity(
+        &self,
+        context: &OperationContext,
+        peer: &PeerSession,
+        activity: crate::signaling::activity::Activity,
+    ) -> Result<(), ErrorKind> {
+        self.handle.shared.validate(context)?;
+        activity.encode()?;
+        self.with_room(|room, _| {
+            if peer == &room.own || !room.members.iter().any(|member| &member.talk == peer) {
+                return Err(ErrorKind::WrongScope);
+            }
+            Ok(())
+        })?;
+        let (reply, receive) = oneshot::channel();
+        self.handle
+            .commands
+            .try_send(Command::Activity {
+                generation: self.generation,
+                peer: peer.clone(),
+                activity,
+                deadline: context.deadline,
+                cancel: context.cancellation.clone(),
+                reply,
+            })
+            .map_err(|_| ErrorKind::Busy)?;
+        until(
+            &self.handle.shared,
+            context.deadline,
+            &context.cancellation,
+            async { receive.await.map_err(|_| ErrorKind::Transport)? },
+        )
+        .await?;
+        if self.is_closed() {
+            return Err(ErrorKind::Cancelled);
+        }
         Ok(())
     }
     pub(crate) async fn poll(&self, context: &OperationContext) -> Result<SignalBatch, ErrorKind> {

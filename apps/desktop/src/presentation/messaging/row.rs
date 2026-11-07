@@ -36,6 +36,7 @@ impl Desktop {
         &self,
         m: &MessageView,
         continuation: bool,
+        compact: bool,
         cx: &Context<Self>,
     ) -> Div {
         let t = self.theme;
@@ -118,7 +119,7 @@ impl Desktop {
                         .min_w_0()
                         .items_center()
                         .gap_2()
-                        .pr(px(76.))
+                        .pr(px(if compact { 0. } else { 76. }))
                         .child(
                             self.person_trigger(
                                 crate::presentation::people_card::Source::Message(
@@ -159,17 +160,22 @@ impl Desktop {
         } else if !self.bare_attachment_body(m) && (upload.is_none() || !m.body.as_str().is_empty())
         {
             content = content.child(
-                div().flex().items_start().gap_2().pr(px(76.)).child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(self.message_text(m, cx))
-                        .when(continuation && m.metadata.edited, |d| {
-                            d.child(self.hint(self.l("Bearbeitet")))
-                        }),
-                ),
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .pr(px(if compact { 0. } else { 76. }))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(self.message_text(m, cx))
+                            .when(continuation && m.metadata.edited, |d| {
+                                d.child(self.hint(self.l("Bearbeitet")))
+                            }),
+                    ),
             );
         }
         if let Some(upload) = upload {
@@ -290,7 +296,7 @@ impl Desktop {
                 .id(scoped_id("message", context, m.local_id, 0))
                 .group(action_group.clone())
                 .relative()
-                .px_6()
+                .px(px(if compact { 12. } else { 24. }))
                 .py(px(if continuation { 3. } else { 12. }))
                 .when(m.own, |d| d.min_h(px(34.)))
                 .flex()

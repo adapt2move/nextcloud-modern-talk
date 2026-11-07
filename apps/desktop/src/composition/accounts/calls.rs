@@ -9,7 +9,7 @@ use talk_core::preferences::notifications::{
 };
 use talk_core::ui::MediaIntent;
 use talk_core::ui::presentation::{
-    CallStage, CallStreamKind, CallView, MediaState, ParticipantView, RequiredGate,
+    CallStage, CallTileKind, CallView, MediaState, ParticipantView, RequiredGate,
     ScreenShareFailure, ScreenShareState,
 };
 
@@ -281,7 +281,13 @@ impl Accounts {
                 self.call_events.event = None;
             }
             self.call_actions.admit(call.call, cancellation);
-            self.snapshot.call = Some(project(&call, &title, true));
+            let account = self
+                .snapshot
+                .accounts
+                .as_slice()
+                .iter()
+                .find(|account| account.scope == call.call.account);
+            self.snapshot.call = Some(project(&call, &title, true, account));
             self.call_ui = Some(CallUi {
                 scope: call.call,
                 title: title.clone(),
@@ -384,6 +390,36 @@ impl Accounts {
                     )?;
                     return Ok(());
                 }
+                UiIntent::Legacy(UserIntent::PrepareConference(call)) => {
+                    let row = self
+                        .snapshot
+                        .conversations
+                        .as_slice()
+                        .iter()
+                        .find(|row| {
+                            row.call_scope == Some(*call)
+                                && self.snapshot.selected == Some(row.context)
+                        })
+                        .ok_or(SubmitError::StaleScope)?;
+                    if row.call != Decision::Allowed
+                        || !matches!(
+                            row.organization.category,
+                            talk_core::ui::presentation::ConversationCategory::Conference(_)
+                        )
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    if self.call_ui.as_ref().is_some_and(|ui| ui.scope != *call)
+                        && self.snapshot.call.as_ref().is_some_and(|active| {
+                            !matches!(active.stage, CallStage::Ended | CallStage::Failed)
+                        })
+                    {
+                        return Err(SubmitError::Busy);
+                    }
+                    return Ok(());
+                }
                 UiIntent::Legacy(UserIntent::AcceptDirect { call, media }) => {
                     self.start_call(*call, Entry::IncomingDirect, wishes(*media), true)?;
                     return Ok(());
@@ -414,6 +450,119 @@ impl Accounts {
                     Command::Change {
                         call: *call,
                         wishes: ui.wishes,
+                    }
+                }
+                UiIntent::MuteCallParticipant { call, target } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || !view
+                            .participants
+                            .as_slice()
+                            .iter()
+                            .any(|person| person.local_id == *target && person.call_can_mute)
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::MuteParticipant {
+                        call: *call,
+                        target: *target,
+                    }
+                }
+                UiIntent::SetCallRecording { call, start } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || view.recording_control != Some(*start)
+                        || view.recording_pending
+                        || view.recording_uncertain
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::SetRecording {
+                        call: *call,
+                        start: *start,
+                    }
+                }
+                UiIntent::EndCallForEveryone(call) => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active || !view.can_end_everyone || view.end_pending
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::EndEveryone(*call)
+                }
+                UiIntent::RingCallParticipant { call, target } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active
+                        || !view
+                            .invitees
+                            .as_slice()
+                            .iter()
+                            .any(|person| person.local_id == *target && person.ring_allowed)
+                    {
+                        return Err(SubmitError::Unavailable(
+                            UnavailableReason::PermissionDenied,
+                        ));
+                    }
+                    Command::Ring {
+                        call: *call,
+                        target: *target,
+                    }
+                }
+                UiIntent::SetCallHand { call, raised } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if !view.hand_supported || view.stage != CallStage::Active {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    Command::SetHand {
+                        call: *call,
+                        raised: *raised,
+                    }
+                }
+                UiIntent::SendCallReaction { call, emoji } => {
+                    let view = self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .filter(|view| view.scope == *call)
+                        .ok_or(SubmitError::StaleScope)?;
+                    if view.stage != CallStage::Active || !view.reactions.as_slice().contains(emoji)
+                    {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    Command::React {
+                        call: *call,
+                        emoji: emoji.clone(),
                     }
                 }
                 UiIntent::ShareScreen(call) => {
@@ -496,12 +645,19 @@ impl Accounts {
                 | UiIntent::DeclineDirect(_)
                 | UiIntent::SetMicrophone { .. }
                 | UiIntent::SetCamera { .. }
+                | UiIntent::MuteCallParticipant { .. }
+                | UiIntent::EndCallForEveryone(_)
+                | UiIntent::SetCallRecording { .. }
+                | UiIntent::RingCallParticipant { .. }
+                | UiIntent::SetCallHand { .. }
+                | UiIntent::SendCallReaction { .. }
                 | UiIntent::ShareScreen(_)
                 | UiIntent::StopScreen(_)
                 | UiIntent::ReconnectCall(_)
                 | UiIntent::ResolveRequiredGate { .. }
                 | UiIntent::Legacy(
-                    UserIntent::AcceptDirect { .. }
+                    UserIntent::PrepareConference(_)
+                        | UserIntent::AcceptDirect { .. }
                         | UserIntent::JoinPrepared { .. }
                         | UserIntent::Leave(_)
                 )
@@ -585,6 +741,21 @@ impl Accounts {
             share: MediaState::Unavailable,
             sharing: ScreenShareState::Idle,
             streams: Page::empty(),
+            recording: talk_core::ui::presentation::CallRecordingState::Unknown,
+            recording_control: None,
+            recording_pending: false,
+            recording_uncertain: false,
+            hand_supported: false,
+            hand_raised: false,
+            reactions: Page::empty(),
+            latest_reaction: None,
+            invitees_loaded: false,
+            invitees: Page::empty(),
+            ring_status: None,
+            mute_status: None,
+            can_end_everyone: false,
+            end_pending: false,
+            end_failed: false,
             participants: Page::empty(),
         });
         self.call_poll_at = Instant::now();
@@ -669,7 +840,13 @@ impl Accounts {
             {
                 ui.scope = value.call;
                 ui.wishes = value.wishes;
-                self.snapshot.call = Some(project(&value, &ui.title, ui.direct));
+                let account = self
+                    .snapshot
+                    .accounts
+                    .as_slice()
+                    .iter()
+                    .find(|account| account.scope == value.call.account);
+                self.snapshot.call = Some(project(&value, &ui.title, ui.direct, account));
                 self.snapshot.conversations =
                     page(self.snapshot.conversations.as_slice().iter().map(|row| {
                         let mut row = row.clone();
@@ -713,7 +890,19 @@ fn device(state: DeviceState) -> MediaState {
         DeviceState::Unavailable => MediaState::Unavailable,
     }
 }
-fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
+fn local_device_state(state: DeviceState) -> Option<bool> {
+    match state {
+        DeviceState::Active => Some(true),
+        DeviceState::Off => Some(false),
+        DeviceState::Requested | DeviceState::Unavailable => None,
+    }
+}
+fn project(
+    value: &Snapshot,
+    title: &Text<256>,
+    direct: bool,
+    account: Option<&AccountView>,
+) -> CallView {
     let stage = match value.phase {
         Phase::Ringing => CallStage::Incoming,
         Phase::Preparing | Phase::Connecting => CallStage::Connecting,
@@ -768,28 +957,134 @@ fn project(value: &Snapshot, title: &Text<256>, direct: bool) -> CallView {
                 participant: p.participant,
                 participant_name: text(p.name.as_str()),
                 kind: if p.kind == talk_core::calls::StreamKind::Screen {
-                    CallStreamKind::Screen
+                    CallTileKind::Screen
                 } else {
-                    CallStreamKind::Camera
+                    CallTileKind::Camera
                 },
                 dimensions: p.dimensions,
                 flowing: p.flowing,
             }
         })),
+        recording: match value.recording {
+            talk_core::policy::RecordingState::Inactive => {
+                talk_core::ui::presentation::CallRecordingState::Inactive
+            }
+            talk_core::policy::RecordingState::Starting => {
+                talk_core::ui::presentation::CallRecordingState::Starting
+            }
+            talk_core::policy::RecordingState::Active => {
+                talk_core::ui::presentation::CallRecordingState::Active
+            }
+            talk_core::policy::RecordingState::Stopping => {
+                talk_core::ui::presentation::CallRecordingState::Stopping
+            }
+            talk_core::policy::RecordingState::Failed => {
+                talk_core::ui::presentation::CallRecordingState::Failed
+            }
+            talk_core::policy::RecordingState::Unknown => {
+                talk_core::ui::presentation::CallRecordingState::Unknown
+            }
+        },
+        recording_control: value.recording_control,
+        recording_pending: value.recording_pending,
+        recording_uncertain: value.recording_uncertain,
+        hand_supported: value.hand_supported,
+        hand_raised: value.hand_raised,
+        reactions: value.reactions.clone(),
+        latest_reaction: value.latest_reaction.as_ref().map(|reaction| {
+            talk_core::ui::presentation::CallReactionView {
+                sequence: reaction.sequence,
+                participant: reaction.participant,
+                emoji: reaction.emoji.clone(),
+            }
+        }),
+        invitees_loaded: value.invitees_loaded,
+        invitees: page(value.invitees.as_slice().iter().map(|person| {
+            talk_core::ui::presentation::CallInviteeView {
+                local_id: person.local,
+                ring_allowed: person.ring_allowed,
+                name: text(person.name.as_str()),
+                initials: initials(person.name.as_str()),
+            }
+        })),
+        ring_status: value
+            .ring_status
+            .map(|status| talk_core::ui::presentation::CallRingStatus {
+                target: status.target,
+                outcome: match status.outcome {
+                    talk_core::calls::RingOutcome::Pending => {
+                        talk_core::ui::presentation::CallRingOutcome::Pending
+                    }
+                    talk_core::calls::RingOutcome::Requested => {
+                        talk_core::ui::presentation::CallRingOutcome::Requested
+                    }
+                    talk_core::calls::RingOutcome::Failed => {
+                        talk_core::ui::presentation::CallRingOutcome::Failed
+                    }
+                },
+            }),
+        mute_status: value
+            .mute_status
+            .map(|status| talk_core::ui::presentation::CallRingStatus {
+                target: status.target,
+                outcome: match status.outcome {
+                    talk_core::calls::RingOutcome::Pending => {
+                        talk_core::ui::presentation::CallRingOutcome::Pending
+                    }
+                    talk_core::calls::RingOutcome::Requested => {
+                        talk_core::ui::presentation::CallRingOutcome::Requested
+                    }
+                    talk_core::calls::RingOutcome::Failed => {
+                        talk_core::ui::presentation::CallRingOutcome::Failed
+                    }
+                },
+            }),
+        can_end_everyone: value.can_end_everyone,
+        end_pending: value.end_pending,
+        end_failed: value.end_failed,
         participants: page(
-            value
-                .participants
-                .as_slice()
-                .iter()
-                .filter(|p| p.kind == talk_core::calls::StreamKind::Camera)
-                .map(|p| ParticipantView {
-                    local_id: p.local,
-                    name: text(p.name.as_str()),
-                    initials: initials(p.name.as_str()),
-                    role_label: text("Teilnehmend"),
-                    presence: Presence::Unknown,
-                    self_user: false,
-                }),
+            account
+                .filter(|_| {
+                    matches!(
+                        value.phase,
+                        Phase::Connecting | Phase::Active | Phase::Reconnecting
+                    )
+                })
+                .map(|account| ParticipantView {
+                    // Zero is reserved for the local sender within this call generation.
+                    local_id: 0,
+                    name: text(account.self_name.as_str()),
+                    initials: account.initials.clone(),
+                    role_label: text("Du"),
+                    presence: account.presence,
+                    self_user: true,
+                    raised_hand: value.hand_raised,
+                    speaking: value.local_speaking,
+                    call_can_mute: false,
+                    call_microphone: local_device_state(value.microphone),
+                    call_camera: local_device_state(value.camera),
+                })
+                .into_iter()
+                .chain(
+                    value
+                        .participants
+                        .as_slice()
+                        .iter()
+                        .filter(|p| p.kind == talk_core::calls::StreamKind::Camera)
+                        .map(|p| ParticipantView {
+                            local_id: p.local,
+                            name: text(p.name.as_str()),
+                            initials: initials(p.name.as_str()),
+                            role_label: text("Teilnehmend"),
+                            presence: Presence::Unknown,
+                            self_user: false,
+                            raised_hand: p.raised_hand,
+                            speaking: p.speaking,
+                            call_can_mute: p.can_mute,
+                            call_microphone: Some(p.microphone),
+                            call_camera: Some(p.camera),
+                        }),
+                ),
         ),
     }
 }
@@ -825,11 +1120,26 @@ mod action_tests {
                 phase: Phase::Ringing,
                 participants: Page::empty(),
                 microphone: DeviceState::Off,
+                local_speaking: false,
                 camera: DeviceState::Off,
                 screen: DeviceState::Off,
                 sharing: talk_core::calls::SharingState::Idle,
                 peers: 0,
                 recording: talk_core::policy::RecordingState::Unknown,
+                recording_control: None,
+                recording_pending: false,
+                recording_uncertain: false,
+                hand_supported: false,
+                hand_raised: false,
+                reactions: Page::empty(),
+                latest_reaction: None,
+                invitees_loaded: false,
+                invitees: Page::empty(),
+                ring_status: None,
+                mute_status: None,
+                can_end_everyone: false,
+                end_pending: false,
+                end_failed: false,
                 counters: Default::default(),
                 revision: 1,
             }),
@@ -869,6 +1179,64 @@ mod action_tests {
         );
         assert!(!model.call_ui.as_ref().unwrap().wishes.microphone);
     }
+    #[test]
+    fn local_sender_has_a_reserved_tile_and_never_displaces_remote_participants() {
+        let scope = call();
+        let account = AccountView {
+            scope: scope.account,
+            navigation_key: None,
+            connection: AccountConnectionState::Connected,
+            connection_failure: None,
+            label: text("Alex"),
+            server_label: text("Example"),
+            self_name: text("Alex"),
+            initials: text("A"),
+            presence: Presence::Unknown,
+            storage: StorageStatus::SessionOnly,
+        };
+        let mut snapshot = invitation(scope).call.unwrap();
+        assert!(
+            project(&snapshot, &text("Room"), false, Some(&account))
+                .participants
+                .as_slice()
+                .is_empty()
+        );
+        snapshot.phase = Phase::Active;
+        snapshot.hand_raised = true;
+        snapshot.local_speaking = true;
+        snapshot.microphone = DeviceState::Active;
+        for id in 1..=16 {
+            snapshot
+                .participants
+                .try_push(talk_core::calls::Participant {
+                    local: id,
+                    name: text("Other"),
+                    microphone: false,
+                    camera: false,
+                    raised_hand: false,
+                    speaking: false,
+                    can_mute: false,
+                })
+                .unwrap();
+        }
+        let view = project(&snapshot, &text("Room"), false, Some(&account));
+        assert_eq!(view.participants.as_slice().len(), 17);
+        let local = &view.participants.as_slice()[0];
+        assert_eq!(local.local_id, 0);
+        assert!(local.self_user && local.raised_hand && local.speaking && !local.call_can_mute);
+        assert_eq!(local.call_microphone, Some(true));
+        assert!(
+            view.participants.as_slice()[1..]
+                .iter()
+                .all(|p| !p.self_user && p.local_id != 0)
+        );
+        snapshot.microphone = DeviceState::Requested;
+        snapshot.local_speaking = false;
+        let view = project(&snapshot, &text("Room"), false, Some(&account));
+        assert_eq!(view.participants.as_slice()[0].call_microphone, None);
+        assert!(!view.participants.as_slice()[0].speaking);
+    }
+
     #[test]
     fn inactive_account_can_offer_without_selecting_or_capturing_and_other_errors_cannot_revoke_it()
     {

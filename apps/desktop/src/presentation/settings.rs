@@ -753,7 +753,7 @@ impl Desktop {
                 region: super::navigation::Region::Settings,
                 navigation,
                 page: self.reveal_from_action(("settings-page", tab as usize).into(), content),
-                footer: None,
+                footer: self.docked_call().then(|| self.call_dock(cx)),
             },
             window,
             cx,

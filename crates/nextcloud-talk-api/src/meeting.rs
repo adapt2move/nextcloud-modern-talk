@@ -94,6 +94,19 @@ pub struct MeetingWriter {
     binding: Arc<Binding>,
     selected: Vec<PeerBudget>,
     leave_started: bool,
+    activity: Option<MeetingActivityWriter>,
+    moderation: Option<MeetingModerationWriter>,
+}
+/// A single separately owned lane for transient activity. It shares the call's
+/// lifetime but cannot block the policy refresh/write lane.
+pub struct MeetingActivityWriter {
+    transport: Transport,
+    binding: Arc<Binding>,
+}
+/// A single bounded lane for explicit, revalidated moderation actions.
+pub struct MeetingModerationWriter {
+    transport: Transport,
+    binding: Arc<Binding>,
 }
 struct PeerBudget {
     stream: StreamKind,
@@ -135,7 +148,8 @@ impl Client {
                 return Err(self.error(ErrorKind::WrongScope));
             }
         }
-        let (reader, writer, lifetime) = self.transport.open_meeting(context)?;
+        let (reader, writer, activity, moderation, lifetime) =
+            self.transport.open_meeting(context)?;
         let hpb = self.hpb_route.take();
         let binding = Arc::new(Binding {
             room: call.room,
@@ -157,9 +171,17 @@ impl Client {
             },
             MeetingWriter {
                 transport: writer,
-                binding,
+                binding: binding.clone(),
                 selected: Vec::with_capacity(17),
                 leave_started: false,
+                activity: Some(MeetingActivityWriter {
+                    transport: activity,
+                    binding: binding.clone(),
+                }),
+                moderation: Some(MeetingModerationWriter {
+                    transport: moderation,
+                    binding,
+                }),
             },
             MeetingStop { lifetime, hpb },
         ))
@@ -175,6 +197,427 @@ impl Drop for ReadGuard {
         }
     }
 }
+impl MeetingModerationWriter {
+    async fn observe(
+        &mut self,
+        context: &OperationContext,
+        request: Request,
+    ) -> Result<Reply, Error> {
+        let (method, route, query, form, kind, _) =
+            crate::plan(&request).map_err(|kind| self.binding.error(kind))?;
+        let response = self
+            .transport
+            .ocs(context, method, &route, &query, &form, false)
+            .await?;
+        self.binding.lifetime.validate(context)?;
+        crate::decode(kind, response).map_err(|kind| self.binding.error(kind))
+    }
+
+    /// Ask currently connected peers to stop the target's microphone. This is
+    /// a signaling request, not proof that the remote client complied.
+    pub async fn mute_participant(
+        &mut self,
+        context: &OperationContext,
+        target: &PeerSession,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if target.0.as_str() == self.binding.session.as_str() {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || caps.call_enabled != Some(true)
+            || !caps.supports("force-mute")
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !matches!(room.participant_type, Some(1 | 2))
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if in_call.len() > 17
+            || !in_call
+                .iter()
+                .any(|p| p.session == self.binding.session.as_str())
+            || !in_call.iter().any(|p| p.session == target.0.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let mut recipients = Vec::with_capacity(16);
+        for participant in &in_call {
+            if participant.session == self.binding.session.as_str() {
+                continue;
+            }
+            let peer = PeerSession::parse(&participant.session)
+                .map_err(|kind| self.binding.error(kind))?;
+            if recipients.contains(&peer) {
+                return Err(self.binding.error(ErrorKind::Malformed));
+            }
+            recipients.push(peer);
+        }
+        if let Some(route) = &self.binding.hpb {
+            for peer in &recipients {
+                route
+                    .send_force_mute(&context, peer, target)
+                    .await
+                    .map_err(|kind| self.binding.error(kind))?;
+            }
+        } else {
+            let messages: Vec<_> = recipients.iter().map(|peer| {
+                let inner = json!({"to":peer.0.as_str(),"roomType":"video","type":"control","payload":{"action":"forceMute","peerId":target.0.as_str()}});
+                json!({"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()})
+            }).collect();
+            let messages = serde_json::to_string(&messages)
+                .map_err(|_| self.binding.error(ErrorKind::Malformed))?;
+            let route = format!(
+                "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+                self.binding.room.as_str()
+            );
+            self.transport
+                .ocs(
+                    &context,
+                    Method::POST,
+                    &route,
+                    &[],
+                    &[("messages", messages)],
+                    false,
+                )
+                .await
+                .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        }
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
+    /// End the current call for everyone after a fresh role and session check.
+    /// This is distinct from an ordinary local leave and is never replayed.
+    pub async fn end_for_everyone(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol() || caps.call_enabled != Some(true) {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || room.object_type.as_deref() == Some("room")
+            || !matches!(room.participant_type, Some(1 | 2 | 6))
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v4/call/{}",
+            self.binding.room.as_str()
+        );
+        self.transport
+            .ocs(
+                &context,
+                Method::DELETE,
+                &route,
+                &[],
+                &[("all", "true".to_owned())],
+                false,
+            )
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
+    /// Request a server-side video recording change after fresh policy and
+    /// session observations. A receipt is not proof of the resulting state;
+    /// callers must reconcile and must never replay an uncertain request.
+    pub async fn set_recording(
+        &mut self,
+        context: &OperationContext,
+        start: bool,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || !caps.supports("recording-v1")
+            || caps.call_enabled != Some(true)
+            || caps.recording_enabled != Some(true)
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        let valid_recording_state = if start {
+            room.recording_status == Some(0)
+        } else {
+            matches!(room.recording_status, Some(1..=4))
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !matches!(room.participant_type, Some(1 | 2))
+            || room
+                .attributes
+                .is_none_or(|attributes| attributes & !31 != 0 || attributes & 4 != 0)
+            || !valid_recording_state
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v1/recording/{}",
+            self.binding.room.as_str()
+        );
+        let form = if start {
+            vec![("status", "1".to_owned())]
+        } else {
+            Vec::new()
+        };
+        self.transport
+            .ocs(
+                &context,
+                if start { Method::POST } else { Method::DELETE },
+                &route,
+                &[],
+                &form,
+                false,
+            )
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+
+    /// One deliberate ring request. Fresh room, capability and session facts
+    /// are checked on this lane immediately before dispatch; success is only a
+    /// server receipt and never proves a notification was delivered or heard.
+    pub async fn ring(
+        &mut self,
+        context: &OperationContext,
+        attendee: u64,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if attendee == 0 {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let caps = match self.observe(&context, Request::Capabilities).await? {
+            Reply::Capabilities(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !caps.supported_protocol()
+            || !caps.supports("send-call-notification")
+            || caps.call_enabled != Some(true)
+        {
+            return Err(self.binding.error(ErrorKind::Unsupported));
+        }
+        let room = match self
+            .observe(&context, Request::Room(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Room(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if room.token != self.binding.room.as_str()
+            || room.server_id != Some(self.binding.room_id)
+            || room.remote
+            || room.read_only != Some(0)
+            || room.has_call != Some(true)
+            || !room
+                .permissions
+                .is_some_and(|permissions| permissions & 2 != 0)
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let people = match self
+            .observe(&context, Request::Participants(self.binding.room.clone()))
+            .await?
+        {
+            Reply::Participants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        let in_call = match self
+            .observe(
+                &context,
+                Request::CallParticipants(self.binding.room.clone()),
+            )
+            .await?
+        {
+            Reply::CallParticipants(value) => value,
+            _ => return Err(self.binding.error(ErrorKind::Malformed)),
+        };
+        if !in_call
+            .iter()
+            .any(|participant| participant.session == self.binding.session.as_str())
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        let mut targets = people
+            .iter()
+            .filter(|person| person.attendee_id == Some(attendee));
+        let Some(target) = targets.next() else {
+            return Err(self.binding.error(ErrorKind::NotFound));
+        };
+        if targets.next().is_some()
+            || target.actor_type.as_deref() != Some("users")
+            || target
+                .actor_id
+                .as_deref()
+                .is_none_or(|id| id.is_empty() || id == self.transport.user())
+            || target.in_call != Some(0)
+            || target.sessions.as_ref().is_none_or(|sessions| {
+                sessions
+                    .iter()
+                    .any(|session| in_call.iter().any(|active| &active.session == session))
+            })
+        {
+            return Err(self.binding.error(ErrorKind::PermissionDenied));
+        }
+        self.binding.lifetime.validate(&context)?;
+        let route = format!(
+            "ocs/v2.php/apps/spreed/api/v4/call/{}/ring/{attendee}",
+            self.binding.room.as_str()
+        );
+        self.transport
+            .ocs(&context, Method::POST, &route, &[], &[], false)
+            .await
+            .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+}
+
+impl MeetingActivityWriter {
+    /// Send one bounded batch to recipients reconciled by the call owner. The
+    /// HTTP receipt or socket write does not prove delivery or user attention.
+    pub async fn send(
+        &mut self,
+        context: &OperationContext,
+        peers: &[PeerSession],
+        activity: &crate::signaling::activity::Activity,
+    ) -> Result<AcceptedForProcessing, Error> {
+        let context = self.binding.context(context)?;
+        if peers.len() > 16
+            || peers.iter().enumerate().any(|(index, peer)| {
+                peer.0.as_str() == self.binding.session.as_str() || peers[..index].contains(peer)
+            })
+        {
+            return Err(self.binding.error(ErrorKind::WrongScope));
+        }
+        let (kind, payload) = activity.encode().map_err(|e| self.binding.error(e))?;
+        if let Some(route) = &self.binding.hpb {
+            for peer in peers {
+                route
+                    .send_activity(&context, peer, activity.clone())
+                    .await
+                    .map_err(|e| self.binding.error(e))?;
+            }
+        } else if !peers.is_empty() {
+            let messages: Vec<_> = peers.iter().map(|peer| {
+                let inner = json!({"to":peer.0.as_str(),"roomType":"video","type":kind,"payload":payload});
+                json!({"ev":"message","sessionId":self.binding.session.as_str(),"fn":inner.to_string()})
+            }).collect();
+            let messages = serde_json::to_string(&messages)
+                .map_err(|_| self.binding.error(ErrorKind::Malformed))?;
+            let route = format!(
+                "ocs/v2.php/apps/spreed/api/v3/signaling/{}",
+                self.binding.room.as_str()
+            );
+            self.transport
+                .ocs(
+                    &context,
+                    Method::POST,
+                    &route,
+                    &[],
+                    &[("messages", messages)],
+                    false,
+                )
+                .await
+                .map_err(|_| self.binding.error(ErrorKind::Uncertain))?;
+        }
+        self.binding.lifetime.validate(&context)?;
+        Ok(AcceptedForProcessing)
+    }
+}
+
 impl MeetingReader {
     pub async fn poll(&mut self, context: &OperationContext) -> Result<SignalBatch, Error> {
         let context = self.binding.context(context)?;
@@ -281,6 +724,15 @@ impl From<Error> for ObservationError {
 }
 
 impl MeetingWriter {
+    /// Transfer the one activity lane to the call owner once.
+    pub fn take_activity_writer(&mut self) -> Option<MeetingActivityWriter> {
+        self.activity.take()
+    }
+    /// Transfer the one moderation lane to the call owner once.
+    pub fn take_moderation_writer(&mut self) -> Option<MeetingModerationWriter> {
+        self.moderation.take()
+    }
+
     pub fn topology(&self) -> Topology {
         if self.binding.hpb.is_some() {
             Topology::Sfu

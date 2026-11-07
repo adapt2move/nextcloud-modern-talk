@@ -62,6 +62,9 @@ pub enum Overlay {
     Forward,
     CallParticipants,
     CallChat,
+    ConfirmEndCall,
+    ConfirmRecording,
+    RecordingConsent,
     Search,
     Create,
     Discover,
@@ -108,6 +111,20 @@ pub enum LocalAction {
     ShowIncoming,
     ToggleNavigation,
     ToggleCallChat,
+    ToggleCallReactions(CallScope),
+    ConfirmEndCall,
+    ConfirmRecording,
+    ToggleRecordingConsent(CallScope),
+    ConfirmRecordingConsent(CallScope),
+    DeclineRecordingConsent(CallScope),
+    MinimizeCall(CallScope),
+    ExpandCall(CallScope),
+    ToggleCallFullscreen(CallScope),
+    JoinRoomCall(CallScope),
+    AcceptCallWithVideo,
+    StartDirectWithVideo,
+    FocusCallParticipant(CallScope, Option<u128>),
+    SpeakerCallLayout(CallScope, bool),
     Navigate(ConversationRef),
     Destination(SidebarDestination),
     CollapseSection(sidebar::Section),
@@ -163,6 +180,7 @@ pub enum LocalAction {
         talk_core::preferences::permissions::PermissionAction,
     ),
     ToggleDevicePicker(talk_core::preferences::devices::DeviceKind),
+    CallDevicePicker(CallScope, talk_core::preferences::devices::DeviceKind),
     OpenDeviceSettings,
     SelectDevice(
         talk_core::preferences::devices::DeviceKind,
@@ -211,6 +229,9 @@ pub struct InitialView {
     pub appearance: Appearance,
     pub overlay: Option<Overlay>,
     pub prejoin: bool,
+    pub focus_first_call_participant: bool,
+    pub start_with_call_dock: bool,
+    pub start_with_call_devices: bool,
     pub onboarding: bool,
     pub scale: u16,
 }
@@ -290,8 +311,14 @@ pub struct Desktop {
         talk_core::preferences::devices::DevicePreferences,
     )>,
     camera_image: Option<gpui::ImageSource>,
-    call_images: Vec<(CallScope, u128, std::time::Instant, gpui::ImageSource)>,
+    call_images: Vec<(
+        CallScope,
+        talk_core::ui::presentation::CallTileId,
+        std::time::Instant,
+        gpui::ImageSource,
+    )>,
     device_picker: Option<talk_core::preferences::devices::DeviceKind>,
+    call_device_picker: Option<(CallScope, talk_core::preferences::devices::DeviceKind)>,
     pending_device_focus: Option<gpui::ElementId>,
     pub overlay: Option<Overlay>,
     startup_account_dialog: bool,
@@ -301,6 +328,18 @@ pub struct Desktop {
     pub navigation_open: bool,
     sidebar_hidden: bool,
     pub call_chat_open: bool,
+    call_reactions_open: Option<CallScope>,
+    call_focus: Option<(CallScope, u128)>,
+    call_speaker: Option<CallScope>,
+    call_minimized: Option<CallScope>,
+    call_started: Option<(CallScope, std::time::Instant)>,
+    recording_consent: call::consent::State,
+    fixture_call_reaction: Option<(CallScope, u64)>,
+    recent_call_reaction: Option<(
+        CallScope,
+        talk_core::ui::presentation::CallReactionView,
+        Instant,
+    )>,
     onboarding_open: bool,
     pub prejoin: Option<CallScope>,
     pub dismissed_incoming: Option<CallScope>,
@@ -380,6 +419,9 @@ impl Desktop {
             appearance,
             overlay: initial_overlay,
             prejoin,
+            focus_first_call_participant,
+            start_with_call_dock,
+            start_with_call_devices,
             onboarding,
             scale,
         } = initial;
@@ -390,6 +432,10 @@ impl Desktop {
             valid_snapshot(&snapshot),
             "composition supplied inconsistent initial projection"
         );
+        let consent_scope = call::consent::scope(&snapshot);
+        let mut recording_consent = call::consent::State::default();
+        recording_consent.observe(consent_scope);
+        let initial_overlay = initial_overlay.or(consent_scope.map(|_| Overlay::RecordingConsent));
         let startup_account_dialog = initial_overlay.is_none()
             && snapshot.accounts.as_slice().is_empty()
             && !snapshot.saved_accounts.as_slice().is_empty();
@@ -489,6 +535,43 @@ impl Desktop {
         {
             dialog_observers.push(cx.observe(&input, |_, _, cx| cx.notify()));
         }
+        let call_speaker = if development && focus_first_call_participant {
+            snapshot.call.as_ref().map(|call| call.scope)
+        } else {
+            None
+        };
+        let call_minimized = if development && start_with_call_dock {
+            snapshot.call.as_ref().map(|call| call.scope)
+        } else {
+            None
+        };
+        let call_device_picker = if development && start_with_call_devices {
+            snapshot.call.as_ref().map(|call| {
+                (
+                    call.scope,
+                    talk_core::preferences::devices::DeviceKind::Microphone,
+                )
+            })
+        } else {
+            None
+        };
+        let call_started = snapshot
+            .call
+            .as_ref()
+            .filter(|call| call.stage == CallStage::Active)
+            .map(|call| (call.scope, std::time::Instant::now()));
+        let recent_call_reaction = snapshot.call.as_ref().and_then(|call| {
+            call.latest_reaction
+                .clone()
+                .map(|reaction| (call.scope, reaction, Instant::now()))
+        });
+        let fixture_call_reaction = if development {
+            recent_call_reaction
+                .as_ref()
+                .map(|(scope, reaction, _)| (*scope, reaction.sequence))
+        } else {
+            None
+        };
         let mut desktop = Self {
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
@@ -548,8 +631,9 @@ impl Desktop {
             device_session: None,
             applied_devices: None,
             camera_image: None,
-            call_images: Vec::with_capacity(16),
-            device_picker: None,
+            call_images: Vec::with_capacity(17),
+            device_picker: call_device_picker.map(|(_, kind)| kind),
+            call_device_picker,
             pending_device_focus: None,
             settings_tab: if development {
                 preferences::SettingsTab::Appearance
@@ -564,6 +648,14 @@ impl Desktop {
             navigation_open: false,
             sidebar_hidden: false,
             call_chat_open: true,
+            call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
+            call_focus: None,
+            call_speaker,
+            call_minimized,
+            call_started,
+            recording_consent,
+            recent_call_reaction,
+            fixture_call_reaction,
             onboarding_open: onboarding,
             prejoin,
             dismissed_incoming: None,
@@ -790,6 +882,80 @@ impl Desktop {
             self.text_selection.update(cx, |owner, cx| owner.clear(cx));
         }
         self.refresh_account_removal(&next);
+        let consent_scope = call::consent::scope(&next);
+        if self.recording_consent.observe(consent_scope) {
+            if let Some(scope) = consent_scope {
+                if self.overlay.is_none() && self.call_minimized != Some(scope) {
+                    self.overlay = Some(Overlay::RecordingConsent);
+                    self.pending_modal_focus = true;
+                }
+            } else if self.overlay == Some(Overlay::RecordingConsent) {
+                self.overlay = None;
+                self.pending_modal_focus = true;
+            }
+        }
+        let live_scope = next
+            .call
+            .as_ref()
+            .filter(|call| {
+                !matches!(
+                    call.stage,
+                    CallStage::Ended | CallStage::Failed | CallStage::Incoming
+                )
+            })
+            .map(|call| call.scope);
+        if self
+            .call_minimized
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_minimized = None;
+        }
+        if self
+            .call_started
+            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        {
+            self.call_started = None;
+        }
+        if self
+            .call_reactions_open
+            .is_some_and(|scope| Some(scope) != live_scope)
+        {
+            self.call_reactions_open = None;
+        }
+        if self
+            .call_device_picker
+            .is_some_and(|(scope, _)| Some(scope) != live_scope)
+        {
+            self.call_device_picker = None;
+            self.device_picker = None;
+        }
+        if self.call_started.is_none()
+            && let Some(call) = next
+                .call
+                .as_ref()
+                .filter(|call| call.stage == CallStage::Active)
+        {
+            self.call_started = Some((call.scope, std::time::Instant::now()));
+        }
+        if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Active || call.latest_reaction.is_none())
+        {
+            self.recent_call_reaction = None;
+        }
+        if let Some(call) = next.call.as_ref()
+            && call.stage == CallStage::Active
+            && let Some(reaction) = call.latest_reaction.as_ref()
+            && self
+                .recent_call_reaction
+                .as_ref()
+                .is_none_or(|(scope, old, _)| {
+                    *scope != call.scope || old.sequence != reaction.sequence
+                })
+        {
+            self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
+        }
         self.snapshot = next;
         let limit = self.composer_message_limit();
         self.composer
@@ -1166,6 +1332,31 @@ impl Desktop {
             LocalAction::Open(overlay) => {
                 self.own_status_open = false;
                 self.own_status_editing = false;
+                if overlay == Overlay::RecordingConsent {
+                    if call::consent::scope(&self.snapshot).is_none() {
+                        return;
+                    }
+                    self.recording_consent.reset();
+                }
+                if overlay == Overlay::ConfirmEndCall
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        !call.can_end_everyone
+                            || call.end_pending
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
+                if overlay == Overlay::ConfirmRecording
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        call.recording_control != Some(true)
+                            || call.recording_pending
+                            || call.recording_uncertain
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1173,6 +1364,19 @@ impl Desktop {
                     cx.notify();
                     return;
                 }
+                if matches!(overlay, Overlay::Settings | Overlay::Accounts)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                    })
+                {
+                    self.call_minimized = Some(call.scope);
+                }
+                self.call_device_picker = None;
+                self.device_picker = None;
+                self.call_reactions_open = None;
                 self.startup_account_dialog = false;
                 self.retire_emoji_picker();
                 if self.overlay.is_none() {
@@ -1304,6 +1508,184 @@ impl Desktop {
                     self.pending_navigation_focus = Some(open);
                 }
             }
+            LocalAction::MinimizeCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = Some(scope);
+                    self.call_reactions_open = None;
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ExpandCall(scope) => {
+                if self.call_minimized == Some(scope)
+                    && self
+                        .snapshot
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_minimized = None;
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::ToggleCallFullscreen(scope) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    window.toggle_fullscreen();
+                }
+            }
+            LocalAction::JoinRoomCall(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !matches!(
+                            call.stage,
+                            CallStage::Incoming | CallStage::Ended | CallStage::Failed
+                        )
+                }) {
+                    self.call_minimized = None;
+                    self.root_focus.focus(window);
+                } else if let Some(row) = self
+                    .snapshot
+                    .conversations
+                    .as_slice()
+                    .iter()
+                    .find(|row| row.call_scope == Some(scope) && row.call_active == Some(true))
+                {
+                    let context = row.context;
+                    match call_entry(row, self.snapshot.content) {
+                        Some(CallEntry::Direct(_)) => {
+                            self.submit(UiIntent::StartDirect {
+                                call: scope,
+                                media: MediaIntent::MicrophoneOnCameraOff,
+                            });
+                        }
+                        Some(CallEntry::Conference(_)) => {
+                            if self.snapshot.selected == Some(context) {
+                                self.handle(LocalAction::Call, window, cx);
+                            } else {
+                                // Conference prejoin must use the newly selected room's
+                                // current snapshot; navigation alone never opens capture.
+                                self.handle(LocalAction::Navigate(context), window, cx);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            LocalAction::SpeakerCallLayout(scope, enabled) => {
+                if self
+                    .snapshot
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.scope == scope)
+                {
+                    self.call_focus = None;
+                    self.call_speaker = enabled.then_some(scope);
+                }
+            }
+            LocalAction::FocusCallParticipant(scope, participant) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && participant.is_none_or(|id| {
+                            call.participants
+                                .as_slice()
+                                .iter()
+                                .any(|p| p.local_id == id)
+                        })
+                }) {
+                    self.call_focus = participant.map(|id| (scope, id));
+                    self.call_speaker = None;
+                }
+            }
+            LocalAction::ConfirmEndCall => {
+                if self.overlay == Some(Overlay::ConfirmEndCall)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.can_end_everyone
+                            && !call.end_pending
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::EndCallForEveryone(scope)) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
+                }
+            }
+            LocalAction::ToggleCallReactions(scope) => {
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && !call.reactions.as_slice().is_empty()
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    self.call_reactions_open =
+                        (self.call_reactions_open != Some(scope)).then_some(scope);
+                    self.call_device_picker = None;
+                    self.device_picker = None;
+                }
+            }
+            LocalAction::ConfirmRecording => {
+                if self.overlay == Some(Overlay::ConfirmRecording)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.recording_control == Some(true)
+                            && !call.recording_pending
+                            && !call.recording_uncertain
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::SetCallRecording {
+                        call: scope,
+                        start: true,
+                    }) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
+                }
+            }
+            LocalAction::ToggleRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                {
+                    self.recording_consent.toggle(scope);
+                }
+            }
+            LocalAction::ConfirmRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.recording_consent.selected(scope)
+                    && self.submit(UiIntent::ResolveRequiredGate {
+                        call: scope,
+                        gate: talk_core::ui::presentation::RequiredGate::RecordingConsent,
+                    })
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
+            LocalAction::DeclineRecordingConsent(scope) => {
+                if self.overlay == Some(Overlay::RecordingConsent)
+                    && call::consent::scope(&self.snapshot) == Some(scope)
+                    && self.submit(UiIntent::Legacy(UserIntent::Leave(scope)))
+                {
+                    self.recording_consent.reset();
+                    self.overlay = None;
+                    self.root_focus.focus(window);
+                }
+            }
             LocalAction::ToggleCallChat => {
                 if window.viewport_size().width < px(1000.) || self.scale >= 150 {
                     self.handle(LocalAction::Open(Overlay::CallChat), window, cx);
@@ -1325,6 +1707,27 @@ impl Desktop {
             }
             LocalAction::ShowIncoming => self.dismissed_incoming = None,
             LocalAction::Close => {
+                if self.overlay == Some(Overlay::RecordingConsent) {
+                    self.recording_consent.reset();
+                }
+                if self.call_reactions_open.take().is_some() {
+                    if let Some(focus) = self.control_focus.current(&"call-reactions".into()) {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
+                if let Some((_, kind)) = self.call_device_picker.take() {
+                    self.device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                    cx.notify();
+                    return;
+                }
                 self.startup_account_dialog = false;
                 if self.close_forward_dialog(window, cx) {
                     cx.notify();
@@ -1551,11 +1954,14 @@ impl Desktop {
                     self.feedback = None;
                 }
                 let cancelled_login = matches!(intent, UiIntent::CancelLogin(_));
-                if self.submit(intent)
-                    && cancelled_login
-                    && !self.snapshot.accounts.as_slice().is_empty()
-                {
-                    self.onboarding_open = false;
+                let call_reaction = matches!(intent, UiIntent::SendCallReaction { .. });
+                if self.submit(intent) {
+                    if cancelled_login && !self.snapshot.accounts.as_slice().is_empty() {
+                        self.onboarding_open = false;
+                    }
+                    if call_reaction {
+                        self.call_reactions_open = None;
+                    }
                 }
             }
             LocalAction::Call => match self.selected_call() {
@@ -1590,6 +1996,29 @@ impl Desktop {
                     self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
                         call: call.scope,
                         media: MediaIntent::MicrophoneOnCameraOff,
+                    }));
+                }
+            }
+            LocalAction::StartDirectWithVideo => {
+                if self.selected().is_some_and(|row| {
+                    row.kind == talk_core::ui::presentation::ConversationKind::Direct
+                }) && let Some(CallEntry::Direct(call)) = self.selected_call()
+                {
+                    self.submit(UiIntent::StartDirect {
+                        call,
+                        media: MediaIntent::MicrophoneOnCameraOn,
+                    });
+                }
+            }
+            LocalAction::AcceptCallWithVideo => {
+                if let Some(call) = &self.snapshot.call
+                    && call.direct
+                    && call.stage == CallStage::Incoming
+                    && call.accept == Decision::Allowed
+                {
+                    self.submit(UiIntent::Legacy(UserIntent::AcceptDirect {
+                        call: call.scope,
+                        media: MediaIntent::MicrophoneOnCameraOn,
                     }));
                 }
             }
@@ -1655,6 +2084,23 @@ impl Desktop {
                 self.settings_tab = preferences::SettingsTab::Devices;
                 self.enter_device_page();
             }
+            LocalAction::CallDevicePicker(scope, kind) => {
+                self.call_reactions_open = None;
+                if self.snapshot.call.as_ref().is_some_and(|call| {
+                    call.scope == scope
+                        && matches!(call.stage, CallStage::Active | CallStage::Connecting)
+                }) {
+                    if self.call_device_picker == Some((scope, kind)) {
+                        self.call_device_picker = None;
+                        self.device_picker = None;
+                    } else {
+                        self.call_device_picker = Some((scope, kind));
+                        self.device_picker = None;
+                        self.enumerate_devices();
+                        self.toggle_device_picker(kind);
+                    }
+                }
+            }
             LocalAction::ToggleDevicePicker(kind) => self.toggle_device_picker(kind),
             LocalAction::RefreshDevice(kind) => self.refresh_device_kind(kind),
             LocalAction::Permission(kind, action) => {
@@ -1663,11 +2109,24 @@ impl Desktop {
                 }
             }
             LocalAction::SelectDevice(kind, selection) => {
+                let from_call = self
+                    .call_device_picker
+                    .is_some_and(|(_, current)| current == kind);
+                if from_call {
+                    self.call_device_picker = None;
+                    if let Some(focus) = self
+                        .control_focus
+                        .current(&("call-device", kind as usize).into())
+                    {
+                        focus.focus(window);
+                    }
+                }
                 self.device_picker = None;
                 self.pending_device_focus = None;
-                if let Some(focus) = self
-                    .control_focus
-                    .current(&("device-picker", kind as usize).into())
+                if !from_call
+                    && let Some(focus) = self
+                        .control_focus
+                        .current(&("device-picker", kind as usize).into())
                 {
                     focus.focus(window);
                 }
@@ -1898,6 +2357,62 @@ impl Desktop {
             cx.notify();
             cx.stop_propagation();
         } else if matches!(
+            self.overlay,
+            None | Some(Overlay::CallParticipants | Overlay::CallChat)
+        ) && self.prejoin.is_none()
+            && !self.incoming_visible()
+            && !self.text_input_focused(window, cx)
+            && registry_modifiers == Some(Modifiers::None)
+            && matches!(key.as_str(), "m" | "v" | "h")
+            && self.snapshot.call.as_ref().is_some_and(|call| {
+                self.call_minimized != Some(call.scope)
+                    && matches!(
+                        call.stage,
+                        CallStage::Active | CallStage::Connecting | CallStage::Reconnecting
+                    )
+            })
+        {
+            if let Some(call) = self.snapshot.call.as_ref() {
+                let scope = call.scope;
+                if key == "h" {
+                    if call.hand_supported && call.stage == CallStage::Active {
+                        let intent = UiIntent::SetCallHand {
+                            call: scope,
+                            raised: !call.hand_raised,
+                        };
+                        self.handle(LocalAction::Intent(intent), window, cx);
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                let state = if key == "m" {
+                    call.microphone
+                } else {
+                    call.camera
+                };
+                if matches!(
+                    state,
+                    talk_core::ui::presentation::MediaState::Off
+                        | talk_core::ui::presentation::MediaState::Active
+                        | talk_core::ui::presentation::MediaState::Requested
+                ) {
+                    let enabled = state == talk_core::ui::presentation::MediaState::Off;
+                    let intent = if key == "m" {
+                        UiIntent::SetMicrophone {
+                            call: scope,
+                            enabled,
+                        }
+                    } else {
+                        UiIntent::SetCamera {
+                            call: scope,
+                            enabled,
+                        }
+                    };
+                    self.handle(LocalAction::Intent(intent), window, cx);
+                    cx.stop_propagation();
+                }
+            }
+        } else if matches!(
             action,
             Some(ActionId::NextControl | ActionId::PreviousControl)
         ) {
@@ -2024,6 +2539,23 @@ impl Desktop {
             input.update(cx, |input, _| input.interactive = false);
         }
     }
+    fn text_input_focused(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.server,
+            &self.search,
+            &self.sidebar_filter,
+            &self.composer,
+            &self.conversation_name,
+            &self.group_name,
+            &self.upload_folder,
+            &self.message_ui.search,
+            &self.message_ui.time_input,
+        ]
+        .into_iter()
+        .chain(self.room_ui.inputs().iter())
+        .chain(self.content_ui.inputs())
+        .any(|input| input.focus_handle(cx).is_focused(window))
+    }
     fn input_composing(&self, cx: &App) -> bool {
         [
             &self.server,
@@ -2126,6 +2658,18 @@ impl Render for Desktop {
         if incoming && self.snapshot.call.as_ref().map(|c| c.scope) != self.last_incoming_scope {
             self.incoming_return_focus = window.focused(cx);
             self.last_incoming_scope = self.snapshot.call.as_ref().map(|c| c.scope);
+        }
+        if self
+            .recent_call_reaction
+            .as_ref()
+            .is_some_and(|(scope, _, at)| {
+                at.elapsed() < std::time::Duration::from_millis(1800)
+                    && self.snapshot.call.as_ref().is_some_and(|call| {
+                        call.scope == *scope && self.call_minimized != Some(*scope)
+                    })
+            })
+        {
+            window.request_animation_frame();
         }
         self.control_focus.begin_frame();
         self.navigation.reveal.begin();
@@ -2371,6 +2915,7 @@ impl Render for Desktop {
             self.prejoin_view(window, cx).into_any_element()
         } else if self.snapshot.call.as_ref().is_some_and(|c| {
             c.stage != CallStage::Incoming
+                && self.call_minimized != Some(c.scope)
                 && !(matches!(c.stage, CallStage::Ended | CallStage::Failed)
                     && self.dismissed_terminal_call == Some(c.scope))
         }) {
@@ -2526,7 +3071,7 @@ impl Render for Desktop {
             focus.focus(window);
         }
         if let Some(id) = self.pending_device_focus.take()
-            && self.devices_open()
+            && (self.devices_open() || self.call_device_picker.is_some())
             && let Some(focus) = self.control_focus.current(&id)
         {
             focus.focus(window);

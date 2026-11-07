@@ -792,6 +792,7 @@ pub(super) mod tests {
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,
             call: Decision::Unknown,
+            call_active: None,
             call_scope: None,
         };
         PresentationSnapshot {
@@ -1844,6 +1845,7 @@ pub(super) mod tests {
             attach: Decision::Unknown,
             draft_clipboard: Decision::Unknown,
             call: Decision::Allowed,
+            call_active: None,
             call_scope: Some(call),
         };
         assert_eq!(

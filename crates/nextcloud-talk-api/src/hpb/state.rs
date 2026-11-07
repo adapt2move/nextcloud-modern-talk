@@ -181,6 +181,61 @@ impl Shared {
                     }
                     return Ok(());
                 }
+                if data["type"].as_str() == Some("control") {
+                    let message = &value["message"];
+                    if message["sender"]["type"].as_str() != Some("session")
+                        || data["roomType"].as_str() != Some("video")
+                        || data["payload"]["action"].as_str() != Some("forceMute")
+                        || data["payload"]["peerId"].as_str() != Some(own_sfu.0.as_str())
+                    {
+                        return Ok(());
+                    }
+                    let Ok(sender) = wire::text(&message["sender"]["sessionid"], 512)
+                        .and_then(PeerSession::parse)
+                    else {
+                        return Ok(());
+                    };
+                    if data.get("from").is_some()
+                        && data["from"].as_str() != Some(sender.0.as_str())
+                    {
+                        return Ok(());
+                    }
+                    if let Some(member) = room.members.iter().find(|member| member.sfu == sender) {
+                        room.push(Event::ForceMuteBy {
+                            from: member.talk.clone(),
+                        })?;
+                    }
+                    return Ok(());
+                }
+                if matches!(data["type"].as_str(), Some("raiseHand" | "reaction")) {
+                    let message = &value["message"];
+                    if message["sender"]["type"].as_str() != Some("session")
+                        || data["roomType"].as_str() != Some("video")
+                    {
+                        return Ok(());
+                    }
+                    let Ok(sender) = wire::text(&message["sender"]["sessionid"], 512)
+                        .and_then(PeerSession::parse)
+                    else {
+                        return Ok(());
+                    };
+                    if data.get("from").is_some()
+                        && data["from"].as_str() != Some(sender.0.as_str())
+                    {
+                        return Ok(());
+                    }
+                    let Some(member) = room.members.iter().find(|member| member.sfu == sender)
+                    else {
+                        return Ok(());
+                    };
+                    let kind = data["type"].as_str().unwrap_or("");
+                    if let Ok(activity) =
+                        crate::signaling::activity::Activity::decode(kind, &data["payload"])
+                    {
+                        room.push_activity(member.talk.clone(), activity);
+                    }
+                    return Ok(());
+                }
                 let Some((from, sid, signal, stream)) = wire::signal(&value["message"])? else {
                     return Ok(());
                 };
