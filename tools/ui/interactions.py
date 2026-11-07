@@ -156,7 +156,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('switcher displays its initial matching conversation', ['Produktteam', 'Gruppengespräch'])
         click('Produkt', xmin=300, ymin=300)
         key('ctrl+a'); key('BackSpace')
-        expect('empty switcher shows recent rooms', ['Produktteam', 'Mara Fischer'])
+        expect('empty switcher shows recent rooms', ['Mara Fischer', 'Jonas Weber'])
         key('Down'); key('Down'); key('Return')
         expect('arrows and Enter open the selected conversation', ['Nachricht an Mara Fischer'], ['Mit Pfeiltasten auswählen'])
         key('ctrl+k')

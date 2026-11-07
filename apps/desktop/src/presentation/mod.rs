@@ -1889,14 +1889,6 @@ impl Desktop {
                 self.handle(action, window, cx);
             }
             cx.stop_propagation();
-        } else if matches!(key.as_str(), "up" | "down")
-            && self.overlay == Some(Overlay::Search)
-            && self.search.focus_handle(cx).is_focused(window)
-            && !self.search.read(cx).composing()
-        {
-            self.switcher_move(if key == "up" { -1 } else { 1 });
-            cx.notify();
-            cx.stop_propagation();
         } else if self.composer_available()
             && !self.onboarding_open
             && self.destination != SidebarDestination::Inbox
@@ -2362,6 +2354,17 @@ impl Render for Desktop {
                         // open dialogs. Focus transfer preserves this modality.
                         this.keyboard_navigation = true;
                     }
+                }
+                if !composing
+                    && this.overlay == Some(Overlay::Search)
+                    && this.search.focus_handle(cx).is_focused(window)
+                    && !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "up" | "down")
+                {
+                    this.switcher_move(if event.keystroke.key == "up" { -1 } else { 1 });
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
                 }
                 if !composing
                     && (this.member_dialog_key(event, window, cx)
