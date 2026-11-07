@@ -253,7 +253,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         # Exercise plain-text paste in each poll input independently.
-        for value, question in [('TEAM LUNCH', True), ('GARDEN', False), ('STUDIO', False)]:
+        for value, question in [('TEAMESSEN', True), ('GARTEN', False), ('WERKSTATT', False)]:
             if not question:
                 click('Antwortoption')
             subprocess.run(['xclip', '-selection', 'clipboard', '-i'],
@@ -261,7 +261,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                            stderr=subprocess.DEVNULL, check=True, timeout=10)
             key('ctrl+v')
             expect('poll field retains pasted text', [value])
-        expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
+        expect('completed poll keeps both distinct choices', ['TEAMESSEN', 'GARTEN', 'WERKSTATT'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 704))
         expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
@@ -464,6 +464,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         # The conversation header exposes conference entry as an icon.
         run(['xdotool', 'mousemove', '--window', xid, '1181', '92', 'click', '1'], env)
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
-        click('teilnehmen',inspected_point=(1280,800,640,695))
+        # The primary entry button is separate from the similarly worded helper.
+        run(['xdotool', 'mousemove', '--window', xid, '1050', '500', 'click', '1'], env)
         expect('join reports connecting without synthetic media success', ['Verbindung wird aufgebaut'], ['Anruf aktiv'])
     return checks
