@@ -44,7 +44,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talk_core::ids::{
+    use talk_core::ui::{
         AccountId, AccountScope, CallGeneration, ConversationId, HostId, RuntimeGeneration,
     };
     fn call(generation: u128) -> CallScope {
