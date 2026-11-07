@@ -1,9 +1,18 @@
-use gpui::{Hsla, WindowAppearance, rgb};
+use gpui::{BoxShadow, Hsla, WindowAppearance, point, px, rgb};
+
+#[derive(Clone, Copy)]
+pub(super) enum Elevation {
+    Card,
+    Raised,
+    Popover,
+    Dialog,
+}
 
 pub use talk_core::preferences::{Appearance, Palette};
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     pub dark: bool,
+    pub reduced_transparency: bool,
     pub disabled_fg: Hsla,
     pub hover: Hsla,
     pub row_hover: Hsla,
@@ -41,6 +50,38 @@ fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
 impl Theme {
+    /// Two cool shadow layers keep elevation consistent with the brand palette.
+    pub(super) fn elevation(self, level: Elevation) -> Vec<BoxShadow> {
+        let (offset, blur, strength) = match level {
+            Elevation::Card => (8., 24., 1.),
+            Elevation::Raised => (3., 8., 0.7),
+            Elevation::Popover => (8., 24., 1.3),
+            Elevation::Dialog => (16., 40., 1.6),
+        };
+        let color = if self.dark {
+            gpui::black()
+        } else {
+            color(0x26354b)
+        };
+        vec![
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.22 } else { 0.07 } * strength),
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(2.),
+                spread_radius: px(0.),
+            },
+            BoxShadow {
+                color: color.opacity(if self.dark { 0.40 } else { 0.10 } * strength),
+                offset: point(px(0.), px(offset)),
+                blur_radius: px(blur),
+                spread_radius: px(0.),
+            },
+        ]
+    }
+
+    pub(super) fn inner_highlight(self) -> Hsla {
+        gpui::rgba(if self.dark { 0xffffff1c } else { 0xffffff99 }).into()
+    }
     /// Small presence marks use distinct, saturated colors, independent of the
     /// darker warning/error text colors used on light surfaces.
     pub fn presence_dot(self, presence: talk_core::ui::presentation::Presence) -> Hsla {
@@ -72,11 +113,19 @@ impl Theme {
     }
 
     pub fn chrome(self) -> gpui::Background {
+        if self.reduced_transparency {
+            return self.canvas.into();
+        }
         gpui::linear_gradient(
             155.,
             gpui::linear_color_stop(self.canvas, 0.),
             gpui::linear_color_stop(self.chrome_end, 1.),
         )
+    }
+
+    /// Content keeps the palette surface as its base in every appearance.
+    pub fn content_material(self) -> gpui::Background {
+        self.surface.into()
     }
 
     pub fn avatar(self, seed: usize) -> (Hsla, Hsla) {
@@ -137,13 +186,14 @@ impl Theme {
             ],
         };
         let (disabled, hover, segment) = match (dark, sage) {
-            (false, false) => (0x8797ad, 0xeaf0f8, 0xffffff),
-            (false, true) => (0x879586, 0xeef1eb, 0xffffff),
-            (true, false) => (0x5d6d81, 0x293646, 0x2e3b4d),
-            (true, true) => (0x5c6f62, 0x2d3a32, 0x33413a),
+            (false, false) => (0x485b75, 0xeaf0f8, 0xffffff),
+            (false, true) => (0x515d53, 0xeef1eb, 0xffffff),
+            (true, false) => (0xa8b9cf, 0x293646, 0x2e3b4d),
+            (true, true) => (0xa7baad, 0x2d3a32, 0x33413a),
         };
         Self {
             dark,
+            reduced_transparency: true,
             disabled_fg: color(disabled),
             hover: color(hover),
             row_hover: Hsla {
@@ -157,7 +207,13 @@ impl Theme {
             surface: color(values[2]),
             subtle: color(values[3]),
             text: color(values[4]),
-            muted: color(values[5]),
+            // Secondary labels also remain readable over a blurred, strongly
+            // contrasting backdrop; the underlying surface palette is intact.
+            muted: color(match (dark, sage) {
+                (false, false) => 0x485b75,
+                (false, true) => 0x515d53,
+                _ => values[5],
+            }),
             placeholder: color(match (dark, sage) {
                 (false, false) => 0x657285,
                 (false, true) => 0x6b736a,
@@ -283,6 +339,7 @@ mod tests {
                     );
                 }
                 assert!(contrast(t.input_border, t.surface) >= 3.0);
+                assert!(contrast(t.input_border, t.segment) >= 3.0);
                 for background in [
                     t.surface,
                     t.subtle,
@@ -303,12 +360,21 @@ mod tests {
                         "selected marker {palette:?}/{appearance:?}: {}",
                         contrast(t.input_border, track)
                     );
+                }
+                for background in [
+                    t.surface,
+                    t.subtle,
+                    t.canvas,
+                    t.chrome_end,
+                    t.selected,
+                    t.segment,
+                ] {
                     assert!(
-                        contrast(t.disabled_fg, track) < contrast(t.muted, track) * 0.7,
-                        "disabled must be visibly weaker"
+                        contrast(t.disabled_fg, background) >= 4.5,
+                        "disabled labels {palette:?}/{appearance:?}: {}",
+                        contrast(t.disabled_fg, background)
                     );
                 }
-                assert!((2.0..3.6).contains(&contrast(t.disabled_fg, t.surface)));
                 if t.dark {
                     // Raised selection must increase lightness; its accessible
                     // marker, not that small luminance difference, carries state.

@@ -203,7 +203,7 @@ impl Desktop {
         let moderator = policy.enabled();
         let available = self.room_available(RoomSetting::Breakouts);
         let state = &self.room_ui.breakouts;
-        let mut section = self.dialog_section(Some("Gruppenräume"));
+        let mut section = self.dialog_section(None);
         if details.breakout_child {
             if !details.classified && !panel.state.pending() {
                 section = section.child(self.button(
@@ -271,10 +271,14 @@ impl Desktop {
                             .child(self.icon_button(
                                 "breakout-less",
                                 ("minus", "Weniger Gruppenräume"),
-                                ButtonStyle::Quiet,
+                                ButtonStyle::Secondary,
                                 Availability::when(
                                     state.count > 1 && configurable.is_enabled(),
-                                    "Weniger Gruppenräume",
+                                    if configured {
+                                        "Entferne die Gruppenräume, um Anzahl oder Modus zu ändern."
+                                    } else {
+                                        "Weniger Gruppenräume"
+                                    },
                                 ),
                                 LocalAction::Room(super::Action::Breakouts(Action::Count(-1))),
                                 cx,
@@ -283,10 +287,14 @@ impl Desktop {
                             .child(self.icon_button(
                                 "breakout-more",
                                 ("plus", "Mehr Gruppenräume"),
-                                ButtonStyle::Quiet,
+                                ButtonStyle::Secondary,
                                 Availability::when(
                                     state.count < 20 && configurable.is_enabled(),
-                                    "Mehr Gruppenräume",
+                                    if configured {
+                                        "Entferne die Gruppenräume, um Anzahl oder Modus zu ändern."
+                                    } else {
+                                        "Mehr Gruppenräume"
+                                    },
                                 ),
                                 LocalAction::Room(super::Action::Breakouts(Action::Count(1))),
                                 cx,
@@ -373,9 +381,6 @@ impl Desktop {
                 )));
             } else {
                 section = section.child(
-                    self.hint(self.l("Entferne die Gruppenräume, um Anzahl oder Modus zu ändern.")),
-                );
-                section = section.child(
                     self.dialog_actions()
                         .child(self.button(
                             "breakout-start-stop",
@@ -384,7 +389,11 @@ impl Desktop {
                             } else {
                                 "Gruppenräume starten"
                             },
-                            ButtonStyle::Secondary,
+                            if details.breakout_started == Some(true) {
+                                ButtonStyle::Danger
+                            } else {
+                                ButtonStyle::Secondary
+                            },
                             if details.breakout_started.is_none() {
                                 Availability::when(
                                     false,
@@ -405,7 +414,7 @@ impl Desktop {
                         .child(self.button(
                             "breakout-remove",
                             "Gruppenräume entfernen",
-                            ButtonStyle::Quiet,
+                            ButtonStyle::Danger,
                             available,
                             LocalAction::Room(super::Action::Breakouts(Action::Remove)),
                             cx,
@@ -473,12 +482,18 @@ impl Desktop {
                     let call_open = self.snapshot.call.as_ref().is_some_and(|call| {
                         !matches!(call.stage, CallStage::Ended | CallStage::Failed)
                     });
-                    let mut row = div().flex().items_center().gap_2().child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(room.name.as_str().to_owned()),
-                    );
+                    let mut row = self
+                        .style_card(div(), crate::presentation::controls::CardStyle::Outlined)
+                        .p_3()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(room.name.as_str().to_owned()),
+                        );
                     if can_switch {
                         row = row.child(
                             self.button(

@@ -398,7 +398,6 @@ impl Desktop {
             .left_0()
             .right_0()
             .occlude()
-            .rounded(px(12.))
             .child(
                 self.scroll_area(super::navigation::Region::Overlay)
                     .max_h(px(480.))

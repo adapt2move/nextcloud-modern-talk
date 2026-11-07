@@ -87,6 +87,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "El borrador se está procesando.",
     ),
     (
+        "Die Nachricht wird gesendet, sobald die Verbindung wieder da ist.",
+        "The message will be sent when the connection returns.",
+        "El mensaje se enviará cuando vuelva la conexión.",
+    ),
+    (
         "Die Systemzeitzone ist gerade nicht verfügbar. Bitte gleich erneut versuchen.",
         "The system time zone is unavailable. Please try again shortly.",
         "La zona horaria del sistema no está disponible. Inténtalo de nuevo en un momento.",

@@ -33,10 +33,7 @@ impl Desktop {
                 if row.kind == ConversationKind::Direct {
                     self.person_avatar(row.initials.as_str(), 36.)
                 } else {
-                    div()
-                        .flex_none()
-                        .size(px(36.))
-                        .rounded(px(12.))
+                    self.avatar_shape(36.)
                         .bg(t.selected)
                         .flex()
                         .items_center()
@@ -71,20 +68,18 @@ impl Desktop {
         if presence == Presence::Unknown {
             return avatar;
         }
-        // The requested diameter excludes the two-point surface ring. Half of
-        // the footprint sits outside on each axis, keeping initials unobscured.
-        let diameter = if avatar_size < 32. { 8. } else { 10. };
-        let footprint = diameter + 4.;
+        // Small sidebar avatars need more clearance for their initials. Keep
+        // most of the indicator outside while larger avatars retain their edge.
+        let (right, bottom) = if avatar_size <= 24. {
+            (9., 8.)
+        } else {
+            (7., 7.)
+        };
         div().flex_none().relative().child(avatar).child(
-            div()
+            self.presence_indicator(self.theme.presence_dot(presence), background)
                 .absolute()
-                .right(px(-footprint / 2.))
-                .bottom(px(-footprint / 2.))
-                .size(px(footprint))
-                .rounded_full()
-                .border_2()
-                .border_color(background)
-                .bg(self.theme.presence_dot(presence)),
+                .right(px(-right))
+                .bottom(px(-bottom)),
         )
     }
     pub fn shell(&self, window: &Window, cx: &Context<Self>) -> Div {
@@ -181,20 +176,18 @@ impl Desktop {
                     div()
                         .flex()
                         .flex_col()
-                        .child(self.collection_skeleton(Skeleton::Messages)),
+                        .child(self.collection_skeleton(Skeleton::Messages, "shell-messages")),
                 );
             }
             return self.content_card(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .flex_col()
-                    .gap_4()
-                    .child(self.l("Wähle ein Gespräch."))
-                    .when(self.local_feedback_visible(), |d| {
-                        d.child(self.feedback_view(cx))
-                    }),
+                self.empty_state(
+                    self.scaled_icon("chat", 24., t.muted),
+                    self.l("Wähle ein Gespräch.").to_owned(),
+                    "",
+                )
+                .when(self.local_feedback_visible(), |d| {
+                    d.child(self.feedback_view(cx))
+                }),
             );
         };
         let joining = self
@@ -269,20 +262,23 @@ impl Desktop {
             (Some(presence), false) => format!("{presence} · {custom_status}"),
             (Some(presence), true) => presence.to_owned(),
             (None, false) if row.kind == ConversationKind::Direct => custom_status,
-            _ => format!(
-                "{}{}",
-                self.l(kind),
-                row.participants.map_or(String::new(), |n| format!(
-                    " · {}",
-                    self.count(super::localization::Count::Participants, u64::from(n))
-                ))
-            ),
+            _ => self.l(kind).to_owned(),
         };
         let header = div()
             .id("conversation-header")
             .group("conversation-header")
+            .relative()
             .rounded_t(px(CONTENT_RADIUS))
-            .bg(chat_header::surface(h))
+            .bg(if h.reduced_transparency { h.surface } else { gpui::transparent_black() })
+            .children((!h.reduced_transparency).then(|| {
+                super::controls::glass_corners(h.surface, h.dark, gpui::Corners {
+                    top_left: px(CONTENT_RADIUS),
+                    top_right: px(CONTENT_RADIUS),
+                    bottom_left: px(0.),
+                    bottom_right: px(0.),
+                })
+            }))
+            .child(super::controls::inner_highlight(h, CONTENT_RADIUS))
             .text_color(h.text)
             .flex_none()
             .flex()
@@ -305,7 +301,7 @@ impl Desktop {
                             .items_center()
                             .gap_2()
                             .child(
-                                self.control(
+                                self.style_panel_title(self.control(
                                     "conversation-title",
                                     ButtonStyle::Quiet,
                                     title_availability.hinted().explained_elsewhere(),
@@ -314,14 +310,12 @@ impl Desktop {
                                         super::messaging::Action::Files,
                                     ),
                                     cx,
-                                )
+                                ))
                                 .min_w_0()
                                 .justify_start()
                                 .p_0()
                                 .min_h(px(28.))
                                 .text_color(h.text)
-                                .text_size(self.sp(18.))
-                                .font_weight(FontWeight::BOLD)
                                 .child(row.title.as_str().to_owned()),
                             )
                             .child(
@@ -578,6 +572,15 @@ impl Desktop {
             .flex_col()
             .flex_none()
             .child(header)
+            .children(
+                self.account_connection_failure(row.context.account)
+                    .and_then(|failure| self.connection_failure_footer(row.context, failure, cx))
+                    .map(|banner| div().px_4().py_1().child(banner)),
+            )
+            .children(
+                self.offline_footer(row.context, cx)
+                    .map(|banner| div().px_4().py_1().child(banner)),
+            )
             .children(self.pin_banner(row.context, cx))
             .child(self.conversation_search(cx).bg(chat_header::surface(h)));
         let timeline = self.conversation_timeline(header, constrained, cx);
@@ -709,7 +712,6 @@ impl Desktop {
             "emoji-picker"
         };
         let send_id = if thread { "thread-send" } else { "send" };
-        let connection_failure = self.account_connection_failure(row.context.account);
         let ready = super::state::composer_send_decision(&self.snapshot, row) == Decision::Allowed;
         let pending = if thread {
             self.thread_drafts.pending(row.context) || self.thread_edit_pending()
@@ -749,12 +751,27 @@ impl Desktop {
                     "Diese Dateioption ist derzeit nicht verfügbar."
                 } else if uncertain {
                     "Sendestatus unklar. Vor erneutem Senden ist ein Abgleich erforderlich."
+                } else if !attached && input.read(cx).content.trim().is_empty() {
+                    "Nachricht eingeben."
                 } else {
                     "Senden ist derzeit nicht verfügbar. Dein Entwurf bleibt erhalten."
                 },
             )
         }
         .above_composer();
+        let send_availability = if !thread
+            && self.snapshot.content == ContentState::Offline
+            && self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .is_some_and(|panel| panel.context == row.context && panel.queue_available)
+        {
+            send_availability
+                .help("Die Nachricht wird gesendet, sobald die Verbindung wieder da ist.")
+        } else {
+            send_availability
+        };
         let show_voice = !thread
             && input.read(cx).content.is_empty()
             && !attached
@@ -773,12 +790,8 @@ impl Desktop {
             .when(!thread, |d| d.child(self.typing_slot(row.context)))
             .children(if thread==(self.overlay==Some(Overlay::Thread)) {self.action_hint_view(cx)} else {None})
             .child(
-                div()
-                    .min_h(px(96.))
-                    .relative()
-                    .child(self.field_ring(input.focus_handle(cx), 10.))
-                    .rounded(px(10.))
-                    .border_1()
+                self.composer_frame()
+                    .child(self.field_ring(input.focus_handle(cx), 12.))
                     .border_color(if input.read(cx).rejected {
                         t.danger
                     } else {
@@ -798,10 +811,6 @@ impl Desktop {
                             }
                         }),
                     )
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
                     .children(if thread { self.thread_composer_context(cx) } else { self.composer_context(cx) })
                     .when(!unloaded, |d| d.child(input.clone()))
                     .when(unloaded, |d| {
@@ -1067,7 +1076,7 @@ impl Desktop {
                     .child(div().flex().justify_center().gap_3().py_3()
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("decline",("phone-down","Ablehnen"),ButtonStyle::StageDanger,Availability::available().labelled(),LocalAction::Intent(UiIntent::DeclineDirect(call.scope)),cx).size(px(56.)).min_h(px(56.))).child(self.l("Ablehnen")))
                         .child(div().flex().flex_col().items_center().gap_2().child(self.round_icon_button("accept",("phone","Annehmen"),ButtonStyle::Primary,Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(),LocalAction::Accept,cx).size(px(56.)).min_h(px(56.))).child(self.l("Annehmen")))
-                        .child(div().flex().flex_col().items_center().justify_center().gap_2().child(self.button_with_icon("accept-video", ("Mit Video annehmen", "video"), ButtonStyle::Primary, Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(), LocalAction::AcceptCallWithVideo, cx).min_h(px(44.)).rounded_full())))
+                        .child(div().flex().flex_col().items_center().justify_center().gap_2().child(self.round_icon_button("accept-video", ("video", "Mit Video annehmen"), ButtonStyle::Primary, Availability::when(call.accept==Decision::Allowed,"Der Anruf kann momentan nicht angenommen werden.").labelled().below_control(), LocalAction::AcceptCallWithVideo, cx).size(px(56.)).min_h(px(56.))).child(self.l("Mit Video annehmen"))))
                     .child(self.button("dismiss","Später ansehen",ButtonStyle::Quiet,true,LocalAction::DismissIncoming,cx))))
     }
 }

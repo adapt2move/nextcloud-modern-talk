@@ -40,6 +40,37 @@ def exercise(scenario, env, xid, out, label, large=False):
             for field in ('left','top','width','height'):r[field]=str(int(r[field])//2)
         return path, words, normalized(' '.join(r['text'] for r in words))
 
+    def poll_title_anchor(words):
+        titles = [word for word in words if normalized(word['text']) == 'umfrage'
+                  and 200 < int(word['left']) < 1000 and int(word['top']) < 300]
+        if not titles:
+            return None
+        title = min(titles, key=lambda word: int(word['top']))
+        return int(title['left']) + 8, int(title['top'])
+
+    def poll_option_hits(path, words):
+        # Whole-dialog OCR sometimes groups the outlined fields into graphics.
+        # OCR each interior relative to the visible dialog title; the dialog's
+        # height changes with its contents. Click only recognized placeholders.
+        if scenario not in ('poll-dialog', 'poll-drafts'):
+            return []
+        size = run(['identify', '-format', '%w %h', str(path)], env).stdout.split()
+        anchor = poll_title_anchor(words)
+        if size != ['1280', '800'] or anchor is None:
+            return []
+        x, top = anchor
+        first_y = top + 153
+        hits = []
+        crop_path = out / f'{label}-ocr-option.png'
+        for y in (first_y, first_y + 52):
+            run(['convert', str(path), '-crop', f'240x22+{x}+{y}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop_path)], env)
+            found = normalized(run(['tesseract', str(crop_path), 'stdout', '--psm', '7'], env).stdout)
+            if 'antwortoption' in found.replace(' ', ''):
+                hits.append((x + 80, y + 11))
+        crop_path.unlink()
+        return hits
+
     def expect(name, required=(), absent=(), footer_height=120, include_footer_words=False):
         path, words, text = observe()
         text += normalized(run(["tesseract",str(path),"stdout","--psm","6"],env).stdout)
@@ -97,16 +128,36 @@ def exercise(scenario, env, xid, out, label, large=False):
         if scenario == 'poll-dialog' and (width, height) == (1280, 800) and any(
                 term in ('TEAMESSEN', 'GARTEN', 'WERKSTATT') for term in required):
             # The small field text can be missed by whole-window OCR. Inspect
-            # the actual three native inputs at high contrast, in both themes.
+            # the actual three native inputs relative to the dialog title.
             field_path = out / f'{label}-ocr-poll-field.png'
-            for x, y, w in ((350, 222, 575), (382, 275, 420), (382, 327, 420)):
+            anchor = poll_title_anchor(words)
+            fields = [] if anchor is None else [(anchor[0], anchor[1] + dy, 575) for dy in (93, 146, 198)]
+            for x, y, w in fields:
                 image_args = ['convert', str(path), '-crop', f'{w}x36+{x}+{y}', '+repage',
                               '-resize', '400%', '-colorspace', 'gray']
                 if '-dark-' in label:
                     image_args.append('-negate')
                 run(image_args + ['-auto-level', '-threshold', '75%', str(field_path)], env)
                 text += normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
-            field_path.unlink()
+            field_path.unlink(missing_ok=True)
+        if scenario in ('chat', 'busy') and 'NO MATCH' in required and (width, height) == (1280, 800):
+            # Whole-window OCR can treat the focused switcher input as a graphic.
+            # Read its actual contents relative to the visible dialog heading.
+            headings = [word for word in words if normalized(word['text']) == 'suchen'
+                        and int(word['left']) >= 260 and int(word['top']) >= 200]
+            if headings:
+                heading = min(headings, key=lambda word: int(word['top']))
+                x, y = int(heading['left']) + 13, int(heading['top']) + 60
+                field_path = out / f'{label}-ocr-switcher-field.png'
+                image_args = ['convert', str(path), '-crop', f'640x42+{x}+{y}', '+repage',
+                              '-resize', '400%', '-colorspace', 'gray']
+                if '-dark-' in label:
+                    image_args.append('-negate')
+                run(image_args + ['-auto-level', str(field_path)], env)
+                text += ' ' + normalized(run(['tesseract', str(field_path), 'stdout', '--psm', '7'], env).stdout)
+                field_path.unlink()
+        if 'Antwortoption' in required and poll_option_hits(path, words):
+            text += ' antwortoption'
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -173,8 +224,37 @@ def exercise(scenario, env, xid, out, label, large=False):
                     raise
                 time.sleep(.15)
 
+    def accent_button_hit(path, word, xmin, ymin):
+        # White labels inside a colored button are frequently missed by
+        # whole-window OCR. Find actual brand-colored button-sized regions,
+        # then require the requested label in an enlarged crop of that region.
+        # This follows layout changes without treating a dispatched click as
+        # evidence that the action succeeded.
+        for color in ('#356fc1', '#3a75c8', '#354f41', '#4f7a63'):
+            result = run(['convert', str(path), '-fuzz', '5%', '-fill', 'black',
+                          '+opaque', color, '-fill', 'white', '-opaque', color,
+                          '-define', 'connected-components:verbose=true',
+                          '-connected-components', '4', 'null:'], env)
+            for line in (result.stdout + result.stderr).splitlines():
+                match = re.search(r'\b(\d+)x(\d+)\+(\d+)\+(\d+).*srgb\(255,255,255\)', line)
+                if not match:
+                    continue
+                width, height, x, y = map(int, match.groups())
+                if width < 50 or not 25 <= height <= 60 or x < xmin or y < ymin:
+                    continue
+                crop = out / f'{label}-ocr-accent-button.png'
+                run(['convert', str(path), '-crop', f'{width}x{height}+{x}+{y}',
+                     '+repage', '-resize', '400%', '-colorspace', 'gray', '-auto-level',
+                     str(crop)], env)
+                text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '7'], env).stdout)
+                crop.unlink()
+                if normalized(word).replace(' ', '') in text.replace(' ', ''):
+                    return x + width // 2, y + height // 2
+        return None
+
     def click(word, xmin=0, ymin=0, inspected_point=None, dy=0, first=False):
         path, words, _ = observe()
+        observed_words = words
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if not choices:
             tsv=run(['tesseract',str(path),'stdout','--psm','6','tsv'],env).stdout
@@ -192,13 +272,26 @@ def exercise(scenario, env, xid, out, label, large=False):
             choices=[r for r in inverted if normalized(r['text'])==normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         # Tesseract occasionally confuses Manrope h/n and the fl ligature.
         # Fixed aliases only; the subsequent native state transition is asserted.
-        aliases={'teilnehmen':('teilnenmen','telinenmen'),'Auflegen':('auriegen','autlegen','auilegen')}
+        aliases={'teilnehmen':('teilnenmen','telinenmen'),'Auflegen':('auriegen','autlegen','auilegen'),
+                 'Entwürfe':('entwirfe',)}
         if not choices and word in aliases:
-            choices=[r for r in words if normalized(r['text']) in aliases[word] and int(r['left'])>=xmin and int(r['top'])>=ymin]
+            choices=[r for r in observed_words + words if normalized(r['text']) in aliases[word]
+                     and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if choices:
             hit = choices[0] if first else choices[-1]
             x = int(hit['left']) + int(hit['width']) // 2
             y = int(hit['top']) + int(hit['height']) // 2
+        elif word == 'Antwortoption' and (hits := poll_option_hits(path, observed_words)):
+            x, y = hits[0] if first else hits[-1]
+        elif word in ('Veröffentlichen', 'Erinnern') and (hit := accent_button_hit(path, word, xmin, ymin)):
+            x, y = hit
+        elif word == 'discovery-search-input':
+            # The search input shares a row with its labeled primary button.
+            # Earlier and current layouts differ in their header/helper height.
+            hit = accent_button_hit(path, 'Suchen', 900, 150)
+            if not hit:
+                raise AssertionError('Cannot locate discovery search row')
+            x, y = hit[0] - 300, hit[1]
         elif inspected_point is not None:
             # Colored call controls are not reliably recognized by Tesseract.
             # These points were inspected on actual captures at the exact size.
@@ -229,34 +322,25 @@ def exercise(scenario, env, xid, out, label, large=False):
         return checks
 
     if scenario == 'chat-reminder-time':
-        # The fixture fixes the calendar at 15 January 2027. Sample the empty
-        # corners of adjacent day cells so the assertion measures the actual
-        # selected background, independently of text recognition.
-        before, words, _ = observe()
-        days = {day: [word for word in words if word['text'] == str(day)]
-                for day in (15, 16)}
-        pairs = [(left, right) for left in days[15] for right in days[16]
-                 if abs(int(left['top']) - int(right['top'])) <= 5
-                 and 30 <= int(right['left']) - int(left['left']) <= 50]
-        if pairs:
-            points = [(int(word['left']) - 4, int(word['top']) + int(word['height']) // 2)
-                      for word in pairs[0]]
-        else:
-            # Selected white numerals can evade OCR. These empty points were
-            # inspected inside the 15/16 cells of this exact-size fixture.
-            size = run(['identify', '-format', '%w %h', str(before)], env).stdout.strip()
-            if size != '1280 800':
-                raise AssertionError('Cannot locate adjacent native calendar days')
-            points = [(480, 534), (520, 534)]
-        pixels = lambda image: run(['convert', str(image), '-format',
-            '|'.join(f'%[pixel:p{{{x},{y}}}]' for x, y in points), 'info:'], env).stdout.split('|')
-        first = pixels(before)
-        if len(first) != 2 or first[0] == first[1]:
-            raise AssertionError('Calendar fixture does not show the expected selected day')
+        # Inspect the actual blue selection in the bounded calendar grid.
+        # Sampling fixed screen points broke on the unchanged integration build
+        # when the surrounding composer grew; track the painted marker instead.
+        def selected_day(image):
+            data = subprocess.run(['convert', str(image), '-crop', '280x200+310+420',
+                                   '+repage', '-depth', '8', 'rgb:-'], env=env,
+                                  check=True, capture_output=True, timeout=20).stdout
+            positions = [(index % 280, index // 280) for index in range(len(data) // 3)
+                         if tuple(data[index * 3:index * 3 + 3]) == (53, 111, 193)]
+            if len(positions) < 100:
+                raise AssertionError('Calendar fixture has no visible selected-day marker')
+            return (sum(x for x, _ in positions) / len(positions),
+                    sum(y for _, y in positions) / len(positions))
+        before, _, _ = observe()
+        first = selected_day(before)
         key('Right')
         after, _, _ = observe()
-        second = pixels(after)
-        if second[0] != first[1] or second[1] != first[0]:
+        second = selected_day(after)
+        if not (35 <= second[0] - first[0] <= 45 and abs(second[1] - first[1]) < 2):
             raise AssertionError('Right arrow did not move the selected calendar day')
         checks.append({'check': 'calendar arrow navigation moves selection', 'result': 'pass',
                        'image': after.name, 'sha256': sha(after)})
@@ -268,16 +352,16 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('calendar cancellation retains the message', ['Hier treffen wir uns.'], ['Später erinnern'])
     elif scenario == 'chat-schedule-time':
-        expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Fiktive Nachricht für morgen.'])
+        expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Notizen morgen teilen.'])
         key('Escape')
-        expect_settled('cancelling send-later retains the draft', ['Fiktive Nachricht für morgen.'], ['Nachricht planen'])
+        expect_settled('cancelling send-later retains the draft', ['Notizen morgen teilen.'], ['Nachricht planen'])
         type_text('X')
-        expect('send-later cancellation returns focus to the composer', ['Fiktive Nachricht für morgen.X'])
+        expect('send-later cancellation returns focus to the composer', ['Notizen morgen teilen.X'])
     elif scenario == 'thread-message-tools':
         expect('thread translation and account navigation coexist',
                ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
         click('anzeigen', xmin=950, ymin=300)
-        expect('thread translation can return to its original', ['That works for me.'], ['Das passt'])
+        expect('thread translation can return to its original', ['Das klingt gut.'], ['Das passt'])
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
         type_text('THREADTOOLS')
         expect_settled('thread tools preserve an unsent reply', ['THREADTOOLS'])
@@ -372,7 +456,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('composer plus exposes file sources and polls',
                ['Vom Computer hochladen', 'Aus NextCloud teilen', 'Umfrage erstellen'])
         key('Escape')
-        click('Nachricht', xmin=200, ymin=600)
+        click('Nachricht', xmin=200, ymin=600, inspected_point=(1280, 800, 480, 700))
         subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list', '-i'],
                        input='file:///tmp/Beispiel.txt\r\n', text=True, env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
@@ -419,6 +503,11 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'poll-dialog':
         expect('empty poll starts without validation warnings', ['Umfrage erstellen'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
+        click('Veröffentlichen', inspected_point=(1280, 800, 865, 650))
+        expect('an invalid publish attempt shows inline field reasons',
+               ['Gib eine Frage ein', 'Mindestens zwei unterschiedliche Antwortoptionen'])
+        if 'UI_POLL_FIXTURE create' in (out / f'{label}.log').read_text():
+            raise AssertionError('An invalid poll attempt must not submit a create intent')
         # Exercise plain-text paste in each poll input independently.
         for value, question in [('TEAMESSEN', True), ('GARTEN', False), ('WERKSTATT', False)]:
             if not question:
@@ -432,6 +521,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 704))
         expect_settled('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+        if (out / f'{label}.log').read_text().count('UI_POLL_FIXTURE create') != 1:
+            raise AssertionError('A valid poll should submit exactly once')
     elif scenario == 'poll-settings':
         expect('conversation settings omit the composer poll action', ['Allgemein', 'Nachrichten'], ['Umfrage erstellen'])
         click('auswählen', xmin=400, ymin=150)
@@ -441,11 +532,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
     elif scenario == 'poll-drafts':
-        expect('draft list is separate from the poll form', ['Fiktiver Entwurf'], ['Antwortoption'])
+        expect('draft list is separate from the poll form', ['Wo treffen wir uns?'], ['Antwortoption'])
         click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
-        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Fiktiver Entwurf'])
+        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Wo treffen wir uns?'])
         click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
-        expect('draft toggle reopens the saved list', ['Fiktiver Entwurf'], ['Antwortoption'])
+        expect('draft toggle reopens the saved list', ['Wo treffen wir uns?'], ['Antwortoption'])
     elif scenario == 'poll-details':
         expect('public poll offers voter expansion', ['Umfragedetails', 'Stimmen anzeigen'])
         # The first result's voter list in the fixed 1280x800 fixture.
@@ -462,15 +553,19 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('closing asks for confirmation', ['Umfrage wirklich beenden'])
         click('Jetzt', inspected_point=(1280, 800, 405, 638))
         expect('confirmed fictional close keeps the poll and disables voting',
-               ['Umfrage beendet', 'Fiktive Umfrage'], ['Umfrage beenden'])
+               ['Umfrage beendet', 'Welcher Entwurf'], ['Umfrage beenden'])
         log = (out / f'{label}.log').read_text()
         if log.count('UI_POLL_FIXTURE vote poll=9001 no_backend=true') != 1 or \
                 log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
             raise AssertionError('Vote or confirmed close did not submit exactly once')
         run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
+        # The pin label now lives in the icon's tooltip. Confirm the icon is
+        # still present while the message is collapsed, then reopen it.
+        run(['xdotool', 'mousemove', '--window', xid, '292', '149'], env)
+        time.sleep(.4)
         expect('pinned strip collapses its message', ['Angeheftet'], ['Perfekt. Dann nehmen wir das so mit.'])
         run(['xdotool', 'mousemove', '--window', xid, '1228', '149', 'click', '1'], env)
-        expect('pinned strip expands its message again', ['Angeheftet', 'Perfekt. Dann nehmen wir das so mit.'])
+        expect('pinned strip expands its message again', ['Perfekt. Dann nehmen wir das so mit.'])
     elif scenario == 'chat-voice':
         path, _, _ = observe()
         width, height = map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split())
@@ -532,7 +627,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('ctrl+k')
         expect_settled('quick switcher input is mounted', ['Mit Pfeiltasten'])
         type_text('NO MATCH UI')
-        expect_settled('local search filter reports no matching rows', ['Keine passenden Gespräche oder Personen'])
+        expect_settled('local search filter reports no matching rows', ['NO MATCH UI', 'Keine passenden Gespräche oder Personen'])
         key('ctrl+a'); key('BackSpace')
         key('Escape')
         click('Nachricht', xmin=200, ymin=600)
@@ -564,7 +659,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
         run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
-        expect('thread hover keeps reply text readable', ["I'll update the final details."])
+        expect('thread hover keeps reply text readable', ['Ich aktualisiere die letzten', 'Details'])
         run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
         words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
         if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
@@ -772,8 +867,9 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('Beitreten', xmin=140, ymin=250)
         expect('Join action expands the owned call', ['Teamk', 'Im Gespräch'], ['Nachricht an Produktteam'])
     elif scenario in ('gate-recording', 'gate-recording-direct'):
-        # The following points were inspected at this exact fixture size. The
-        # fixture log reports only the local room identity, never media data.
+        # Locate the switch from its visible label. At this fixture size the
+        # switch is 58 px left of "stimme"; verify its actual painted state.
+        # The fixture log reports only a local room identity, never media data.
         path, _, _ = observe()
         size = tuple(map(int, run(['identify', '-format', '%w %h', str(path)], env).stdout.split()))
         if size != (1280, 800):
@@ -784,31 +880,73 @@ def exercise(scenario, env, xid, out, label, large=False):
         def point(x, y):
             run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
             time.sleep(.35)
-        point(750, 506)  # Hit the actual disabled button, not the gap above it.
+        def switch_state(expected):
+            path, words, _ = observe()
+            matches = [r for r in words if normalized(r['text']) == 'stimme']
+            if not matches:
+                raise AssertionError(f'Cannot locate the recording consent switch: {path.name}')
+            # The keyboard hint can repeat the label to the left of the row.
+            hit = max(matches, key=lambda word: int(word['left']))
+            x = int(hit['left']) - 58
+            y = int(hit['top']) + int(hit['height']) // 2
+            pixel = run(['convert', str(path), '-format', f'%[pixel:p{{{x - 10},{y}}}]', 'info:'], env).stdout
+            channels = re.search(r'(?:s?rgba?)\((\d+),(\d+),(\d+)', pixel)
+            if not channels:
+                raise AssertionError(f'Cannot read the recording switch: {pixel}')
+            red, green, blue = map(int, channels.groups())
+            on = blue > red + 30 and red < 160
+            off = min(red, green, blue) > 230
+            if (expected and not on) or (not expected and not off):
+                raise AssertionError(f'Recording switch was not {"on" if expected else "off"}: {pixel}')
+            return x, y
+        def click_disabled_consent():
+            x, y = switch_state(False)
+            path, _, _ = observe()
+            crop = out / f'{label}-ocr-disabled-consent.png'
+            run(['convert', str(path), '-crop', f'210x65+{x + 190}+{y + 52}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop)], env)
+            text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '6'], env).stdout)
+            crop.unlink()
+            if 'zustimmen' not in text:
+                raise AssertionError(f'Cannot locate the disabled consent action: {path.name}')
+            point(x + 294, y + 81)
+        def click_selected_action(accept):
+            x, y = switch_state(True)
+            path, _, _ = observe()
+            crop = out / f'{label}-ocr-consent-action.png'
+            left, width = (x + 190, 210) if accept else (x + 75, 130)
+            run(['convert', str(path), '-crop', f'{width}x55+{left}+{y + 20}', '+repage',
+                 '-resize', '400%', '-colorspace', 'gray', '-auto-level', str(crop)], env)
+            text = normalized(run(['tesseract', str(crop), 'stdout', '--psm', '6'], env).stdout)
+            crop.unlink()
+            if ('zustimmen' if accept else 'nicht') not in text:
+                raise AssertionError(f'Cannot locate the consent action: {path.name}')
+            point(x + (294 if accept else 140), y + 47)
+        click_disabled_consent()  # Initially disabled: no implicit consent.
         if consent_sent():
             raise AssertionError('Unselected recording consent was submitted')
-        point(460, 425)  # Select the switch, then use its keyboard path to clear it.
-        key('space')
-        expect_settled('Space clears the recording consent choice', ['Bestätige zuerst die Zustimmung'])
-        point(750, 506)
+        point(*switch_state(False))  # Select, then use the keyboard path to clear it.
+        switch_state(True)
+        key('space'); time.sleep(.35)
+        click_disabled_consent()
         if consent_sent():
             raise AssertionError('Cleared recording consent was submitted')
-        point(460, 425)
+        point(*switch_state(False))
+        switch_state(True)
         key('Escape'); time.sleep(.35)
         click('prüfen')  # Reopen from the still-required gate.
-        expect_settled('Reopened consent starts clear', ['Bestätige zuerst die Zustimmung'])
-        point(750, 506)
+        click_disabled_consent()
         if consent_sent():
             raise AssertionError('Reopened consent retained an earlier selection')
-        point(460, 425)
-        expect_settled('Selected consent enables the explicit choice', absent=['Bestätige zuerst die Zustimmung'])
+        point(*switch_state(False))
+        switch_state(True)
         if scenario == 'gate-recording-direct':
-            click('Zustimmen', xmin=650, ymin=440, inspected_point=(1280,800,750,472))
+            click_selected_action(True)
             if consent_sent() != 1:
                 raise AssertionError('Explicit direct-call consent was not submitted exactly once')
             expect_settled('Explicit recording consent continues the direct call', ['Verbindung'], ['Zustimmung prüfen'])
         else:
-            click('Nicht', xmin=500, ymin=440, inspected_point=(1280,800,600,472))
+            click_selected_action(False)
             if consent_sent():
                 raise AssertionError('Declining submitted recording consent')
             expect_settled('Declining recording consent leaves the call', ['Nachricht an Produktteam'])

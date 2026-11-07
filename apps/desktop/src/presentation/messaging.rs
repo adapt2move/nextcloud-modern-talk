@@ -537,7 +537,7 @@ impl Desktop {
             "chat-reminder-menu" => self.message_ui.fixture_menu_pending = true,
             "chat-schedule-time" => {
                 self.composer.update(cx, |input, cx| {
-                    input.set_context_value("Fiktive Nachricht für morgen.");
+                    input.set_context_value("Notizen morgen teilen.");
                     cx.notify();
                 });
                 self.open_message_deadline(None, None, window, cx);
@@ -2166,6 +2166,7 @@ impl Desktop {
                 super::shell::chat_header::scroll_under_header(
                     header,
                     constrained,
+                    !self.theme.reduced_transparency && !cfg!(target_os = "windows"),
                     cx.processor(move |this, inset, _, cx| {
                         this.in_surface(inert, |this| this.message_history(inset, compact, cx))
                     }),
@@ -2189,14 +2190,19 @@ impl Desktop {
                         .child(self.history_boundary(cx)),
                 )
             } else {
-                body.child(div().flex_1().child(self.state_note(
-                    "chat",
-                    "Noch keine Nachrichten.",
-                    "Hier erscheinen die Nachrichten dieses Gesprächs.",
-                )))
+                body.child(
+                    div().flex_1().min_h_0().child(
+                        self.state_note(
+                            "chat",
+                            "Noch keine Nachrichten.",
+                            "Hier erscheinen die Nachrichten dieses Gesprächs.",
+                        )
+                        .size_full(),
+                    ),
+                )
             };
         } else if state.initial_loading() || context_pending {
-            body = body.child(self.collection_skeleton(Skeleton::Messages));
+            body = body.child(self.collection_skeleton(Skeleton::Messages, "messages"));
         } else {
             body = body.child(div().flex_1());
         }
@@ -2579,7 +2585,7 @@ impl Desktop {
                         .rounded_full()
                         .border_1()
                         .border_color(self.theme.border)
-                        .shadow_sm(),
+                        .shadow(self.theme.elevation(super::theme::Elevation::Popover)),
                     ),
                 )
             })
@@ -2714,7 +2720,7 @@ impl Desktop {
                     !panel.shared_files.as_slice().is_empty()
                 };
                 if !has_content {
-                    body = body.child(self.collection_skeleton(Skeleton::Rows));
+                    body = body.child(self.collection_skeleton(Skeleton::Rows, "shared-content"));
                 }
             }
             talk_core::ui::conversation::RemoteState::Failed(_, _) => {
@@ -3267,12 +3273,9 @@ impl Desktop {
             ))
     }
     fn composer_card(&self) -> Div {
-        div()
+        self.style_card(div(), super::controls::CardStyle::Outlined)
             .flex()
             .flex_col()
-            .rounded(px(10.))
-            .border_1()
-            .border_color(self.theme.border)
             .bg(self.theme.surface)
             .overflow_hidden()
     }

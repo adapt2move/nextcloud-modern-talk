@@ -10,17 +10,20 @@ pub(in crate::presentation) enum BannerRole {
 }
 
 impl BannerRole {
-    fn colors(self) -> (gpui::Hsla, gpui::Hsla, &'static str) {
-        let (foreground, background, symbol) = match self {
-            Self::Info => (0x315e98, 0xeaf1fb, "info"),
-            Self::Warning => (0x795300, 0xfff4d6, "cloud-off"),
-            Self::Error => (0x9e3e32, 0xfff0ec, "info"),
-        };
-        (rgb(foreground).into(), rgb(background).into(), symbol)
+    fn colors(self, theme: crate::presentation::Theme) -> (gpui::Hsla, gpui::Hsla, &'static str) {
+        match self {
+            Self::Info if theme.dark => (theme.selected_text, theme.selected, "info"),
+            Self::Info => (rgb(0x315e98).into(), rgb(0xeaf1fb).into(), "info"),
+            Self::Warning => (theme.warning, theme.warning_bg, "cloud-off"),
+            Self::Error => (theme.danger, theme.danger_bg, "info"),
+        }
     }
 
-    pub(in crate::presentation) fn foreground(self) -> gpui::Hsla {
-        self.colors().0
+    pub(in crate::presentation) fn foreground(
+        self,
+        theme: crate::presentation::Theme,
+    ) -> gpui::Hsla {
+        self.colors(theme).0
     }
 }
 
@@ -35,12 +38,30 @@ impl Desktop {
         label: &str,
         icon: Option<&'static str>,
     ) -> Div {
-        let (foreground, _, symbol) = role.colors();
+        let (foreground, _, symbol) = role.colors(self.theme);
         self.banner_with_leading(
             role,
             label,
             self.scaled_icon(icon.unwrap_or(symbol), 16., foreground),
         )
+    }
+
+    pub(in crate::presentation) fn banner_frame(&self, role: BannerRole) -> Div {
+        let (foreground, background, _) = role.colors(self.theme);
+        div()
+            .min_h(px(36.))
+            .px_3()
+            .py_1()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(foreground.opacity(0.20))
+            .flex()
+            .items_center()
+            .gap_2()
+            .bg(background)
+            .text_color(foreground)
+            .text_size(self.sp(12.))
+            .line_height(self.sp(18.))
     }
 
     pub(in crate::presentation) fn banner_with_leading(
@@ -49,19 +70,7 @@ impl Desktop {
         label: &str,
         leading: impl IntoElement,
     ) -> Div {
-        let (foreground, background, _) = role.colors();
-        div()
-            .min_h(px(36.))
-            .px_3()
-            .py_1()
-            .rounded(px(8.))
-            .flex()
-            .items_center()
-            .gap_2()
-            .bg(background)
-            .text_color(foreground)
-            .text_size(self.sp(12.))
-            .line_height(self.sp(18.))
+        self.banner_frame(role)
             .child(leading)
             .child(div().flex_1().min_w_0().child(label.to_owned()))
     }
@@ -73,6 +82,39 @@ impl Desktop {
             .items_center()
             .px_3()
             .child(self.hint(label))
+    }
+
+    pub(in crate::presentation) fn empty_state(
+        &self,
+        leading: impl IntoElement,
+        title: impl Into<gpui::SharedString>,
+        detail: &str,
+    ) -> Div {
+        let title: gpui::SharedString = title.into();
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .text_center()
+            .children(self.materials.layer(
+                if self.theme.dark {
+                    super::Texture::PatternDark
+                } else {
+                    super::Texture::PatternLight
+                },
+                self.theme.reduced_transparency,
+            ))
+            .child(leading)
+            .child(
+                div()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(self.theme.text)
+                    .child(title),
+            )
+            .child(self.hint(detail))
     }
 
     pub(in crate::presentation) fn loading_row(&self, label: &str) -> Div {

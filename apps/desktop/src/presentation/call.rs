@@ -129,7 +129,9 @@ impl Desktop {
         let preview=div().flex_1().min_w_0().flex().flex_col().gap_4()
             .child(self.title(self.l("Bereit, wenn du es bist.")))
             .child(self.hint(self.l("Wähle, wie du beitreten möchtest.")))
-            .child(div().h(px(304.)).w_full().rounded(px(12.)).bg(t.stage_panel).text_color(t.stage_text).flex().flex_col().items_center().justify_center().gap_4()
+            .child(self.style_card(div().relative(), super::controls::CardStyle::Inset).h(px(304.)).w_full().bg(t.stage_panel).text_color(t.stage_text).flex().flex_col().items_center().justify_center().gap_4()
+                .children(self.materials.layer(super::controls::Texture::Tile, t.reduced_transparency))
+                .child(super::controls::inner_highlight(super::Theme { dark: true, ..t }, 12.))
                 .child(self.avatar(self.snapshot.accounts.as_slice().iter().find(|a|Some(a.scope)==self.snapshot.active_account).map_or("?",|a|a.initials.as_str()),true))
                 .child(div().font_weight(FontWeight::MEDIUM).child(self.l("Deine Kamera ist nicht aktiv")))
                 .child(div().text_size(self.sp(13.)).text_color(t.stage_muted).child(self.l("Noch keine Vorschau verfügbar"))))
@@ -344,7 +346,7 @@ impl Desktop {
                     self.call_spinner(
                         "call-reconnecting-spinner".into(),
                         16.,
-                        BannerRole::Warning.foreground(),
+                        BannerRole::Warning.foreground(self.theme),
                     ),
                 )
                 .flex_none()
@@ -403,11 +405,10 @@ impl Desktop {
                     .items_center()
                     .justify_center()
                     .child(
-                        div()
+                        self.style_card(div(), super::controls::CardStyle::Raised)
                             .w_full()
                             .max_w(px(480.))
                             .p_6()
-                            .rounded(px(12.))
                             .bg(if t.dark { t.stage_panel } else { t.surface })
                             .border_1().border_color(if t.dark { gpui::rgb(0x52677f).into() } else { t.border })
                             .text_color(if t.dark { t.stage_text } else { t.text })
@@ -469,7 +470,7 @@ impl Desktop {
                     .gap_4()
                     .child(
                         self.incoming_call_avatar(
-                            self.call_stage_avatar(
+                            self.person_avatar(
                                 call.participants
                                     .as_slice()
                                     .iter()
@@ -542,13 +543,20 @@ impl Desktop {
                 .max(160.);
                 stage = stage.child(
                     div().w_full().flex().justify_center().child(
-                        div()
+                        self.style_card(div().relative(), super::controls::CardStyle::Inset)
                             .w(px(width))
                             .h(px(width * 9. / 16.))
                             .flex_none()
-                            .rounded(px(12.))
                             .bg(t.stage_panel)
-                            .child(visual),
+                            .child(visual)
+                            .children(
+                                self.materials
+                                    .layer(super::controls::Texture::Tile, t.reduced_transparency),
+                            )
+                            .child(super::controls::inner_highlight(
+                                super::Theme { dark: true, ..t },
+                                12.,
+                            )),
                     ),
                 );
             }
@@ -641,7 +649,7 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(self.call_stage_avatar(
+                        .child(self.person_avatar(
                             participant.initials.as_str(),
                             if focused == Some(participant.local_id) {
                                 104.
@@ -654,6 +662,12 @@ impl Desktop {
                             },
                         ))
                 };
+                let tile_base = if pip && participant.self_user {
+                    t.stage
+                } else {
+                    t.stage_panel
+                };
+                let dark_stage = super::Theme { dark: true, ..t };
                 let tile = div()
                     .relative()
                     .min_w_0()
@@ -677,14 +691,24 @@ impl Desktop {
                     .border_color(if participant.speaking {
                         stage_speaking_color(t)
                     } else {
-                        t.stage_panel
+                        gpui::rgba(0xffffff12).into()
                     })
+                    .shadow(dark_stage.elevation(super::theme::Elevation::Raised))
                     .group("call-tile")
                     .when(call.stage == CallStage::Reconnecting, |d| d.opacity(0.7))
-                    .bg(if pip && participant.self_user {
-                        t.stage
-                    } else {
-                        t.stage_panel
+                    .bg(tile_base)
+                    .when(!t.reduced_transparency, |tile| {
+                        tile.bg(gpui::linear_gradient(
+                            180.,
+                            gpui::linear_color_stop(
+                                gpui::Hsla {
+                                    l: (tile_base.l + 0.015).min(1.),
+                                    ..tile_base
+                                },
+                                0.,
+                            ),
+                            gpui::linear_color_stop(tile_base, 1.),
+                        ))
                     })
                     .flex()
                     .flex_col()
@@ -693,6 +717,11 @@ impl Desktop {
                     .gap_2()
                     .p_4()
                     .child(visual)
+                    .children(
+                        self.materials
+                            .layer(super::controls::Texture::Tile, t.reduced_transparency),
+                    )
+                    .child(super::controls::inner_highlight(dark_stage, 12.))
                     .when(call.stage == CallStage::Reconnecting, |d| {
                         d.child(
                             div()
@@ -727,7 +756,7 @@ impl Desktop {
                         },
                     ))
                     .child(
-                        div()
+                        self.style_tonal_chip(div())
                             .absolute()
                             .bottom(px(8.))
                             .left(px(8.))
@@ -741,8 +770,8 @@ impl Desktop {
                                 .max(0.)))
                             .px_2()
                             .py_1()
-                            .rounded(px(8.))
                             .bg(gpui::rgba(0x00000073))
+                            .text_color(t.stage_text)
                             .min_w_0()
                             .flex()
                             .items_center()
@@ -791,15 +820,14 @@ impl Desktop {
                     )
                     .when(pinned == Some(participant.local_id), |tile| {
                         tile.child(
-                            div()
+                            self.style_tonal_chip(div())
                                 .absolute()
                                 .top(px(8.))
                                 .left(px(8.))
                                 .px_2()
                                 .py_1()
-                                .rounded(px(8.))
                                 .bg(gpui::rgba(0x00000073))
-                                .text_size(self.sp(12.))
+                                .text_color(t.stage_text)
                                 .child(self.l("Angeheftet")),
                         )
                     })
@@ -1084,6 +1112,9 @@ impl Desktop {
                 .size(px(44.))
                 .min_h(px(44.))
                 .rounded_full()
+                .when(id != "screen-share", |d| {
+                    d.rounded(px(0.)).rounded_l(px(22.))
+                })
                 .when(id != "screen-share" && state == MediaState::Off, |d| {
                     d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
                 });
@@ -1092,7 +1123,11 @@ impl Desktop {
                 .flex()
                 .items_center()
                 .rounded_full()
-                .bg(t.stage_panel)
+                .bg(if id != "screen-share" && state == MediaState::Off {
+                    gpui::rgb(0x9e3e32).into()
+                } else {
+                    t.stage_panel
+                })
                 .child(control);
             if let Some(kind) = match id {
                 "microphone" => Some(talk_core::preferences::devices::DeviceKind::Microphone),
@@ -1118,7 +1153,9 @@ impl Desktop {
                     .w(px(28.))
                     .border_l_1()
                     .border_color(t.stage)
-                    .rounded_full(),
+                    .rounded(px(0.))
+                    .rounded_r(px(22.))
+                    .when(state == MediaState::Off, |d| d.bg(gpui::rgb(0x9e3e32))),
                 );
                 if self.call_device_picker == Some((call.scope, kind)) {
                     group = group
@@ -1202,20 +1239,22 @@ impl Desktop {
             );
             if !call.reactions.as_slice().is_empty() && self.call_reactions_open == Some(call.scope)
             {
-                let mut menu = div()
-                    .id("call-reaction-menu")
-                    .absolute()
-                    .bottom(px(54.))
-                    .left(px(-72.))
-                    .w(px(320.))
+                let mut menu = self
+                    .style_floating_surface(
+                        div()
+                            .id("call-reaction-menu")
+                            .absolute()
+                            .bottom(px(54.))
+                            .left(px(-72.))
+                            .w(px(320.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
                     .max_h(px(200.))
                     .overflow_y_scroll()
                     .p_2()
-                    .rounded(px(12.))
-                    .border_1()
-                    .border_color(t.border)
-                    .bg(t.stage_panel)
-                    .shadow_lg()
                     .flex()
                     .flex_wrap()
                     .gap_1();
@@ -1278,20 +1317,10 @@ impl Desktop {
                     |button| {
                         button.when(chat_unread > 0, |d| {
                             d.child(
-                                div()
+                                self.count_badge(chat_unread.min(99).to_string())
                                     .absolute()
                                     .top(px(-2.))
-                                    .right(px(-2.))
-                                    .min_w(px(18.))
-                                    .h(px(18.))
-                                    .px_1()
-                                    .rounded_full()
-                                    .bg(t.accent)
-                                    .text_color(t.on_accent)
-                                    .text_size(px(12.))
-                                    .line_height(px(18.))
-                                    .text_center()
-                                    .child(chat_unread.min(99).to_string()),
+                                    .right(px(-2.)),
                             )
                         })
                     },
@@ -1322,20 +1351,10 @@ impl Desktop {
                     && chat_unread > 0,
                 |button| {
                     button.child(
-                        div()
+                        self.count_badge(chat_unread.min(99).to_string())
                             .absolute()
                             .top(px(-2.))
-                            .right(px(-2.))
-                            .min_w(px(18.))
-                            .h(px(18.))
-                            .px_1()
-                            .rounded_full()
-                            .bg(t.accent)
-                            .text_color(t.on_accent)
-                            .text_size(px(12.))
-                            .line_height(px(18.))
-                            .text_center()
-                            .child(chat_unread.min(99).to_string()),
+                            .right(px(-2.)),
                     )
                 },
             ),
@@ -1343,50 +1362,49 @@ impl Desktop {
         if narrow_controls {
             if self.call_secondary_open {
                 more = more.child(
-                    div()
-                        .absolute()
-                        .bottom(px(54.))
-                        .right(px(0.))
-                        .p_2()
-                        .rounded(px(12.))
-                        .bg(t.stage_panel)
-                        .shadow_lg()
-                        .occlude()
-                        .child(interaction_controls.child(navigation_controls)),
+                    self.style_floating_surface(
+                        div().absolute().bottom(px(54.)).right(px(0.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
+                    .p_2()
+                    .occlude()
+                    .child(interaction_controls.child(navigation_controls)),
                 );
             }
             primary_controls = primary_controls.child(more);
         } else {
             if self.call_secondary_open {
                 more = more.child(
-                    div()
-                        .absolute()
-                        .bottom(px(54.))
-                        .right(px(0.))
-                        .w(px(240.))
-                        .p_2()
-                        .rounded(px(12.))
-                        .bg(t.stage_panel)
-                        .shadow_lg()
-                        .occlude()
-                        .flex()
-                        .flex_col()
-                        .child(self.button_with_leading_icon(
-                            "call-more-minimize",
-                            ("Anruf minimieren", "chevron-down"),
-                            ButtonStyle::Stage,
-                            Availability::available(),
-                            LocalAction::MinimizeCall(call.scope),
-                            cx,
-                        ))
-                        .child(self.button_with_leading_icon(
-                            "call-more-fullscreen",
-                            ("Vollbild umschalten", "maximize-2"),
-                            ButtonStyle::Stage,
-                            Availability::available(),
-                            LocalAction::ToggleCallFullscreen(call.scope),
-                            cx,
-                        )),
+                    self.style_floating_surface(
+                        div().absolute().bottom(px(54.)).right(px(0.)).w(px(240.)),
+                        t.stage_panel,
+                        true,
+                        12.,
+                        super::theme::Elevation::Popover,
+                    )
+                    .p_2()
+                    .occlude()
+                    .flex()
+                    .flex_col()
+                    .child(self.button_with_leading_icon(
+                        "call-more-minimize",
+                        ("Anruf minimieren", "chevron-down"),
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        LocalAction::MinimizeCall(call.scope),
+                        cx,
+                    ))
+                    .child(self.button_with_leading_icon(
+                        "call-more-fullscreen",
+                        ("Vollbild umschalten", "maximize-2"),
+                        ButtonStyle::Stage,
+                        Availability::available(),
+                        LocalAction::ToggleCallFullscreen(call.scope),
+                        cx,
+                    )),
                 );
             }
             primary_controls = primary_controls
@@ -1394,6 +1412,13 @@ impl Desktop {
                 .child(navigation_controls.child(more));
         }
         let controls = div()
+            .relative()
+            .bg(if t.reduced_transparency {
+                t.stage
+            } else {
+                gpui::transparent_black()
+            })
+            .children((!t.reduced_transparency).then(|| super::controls::glass(t.stage, true, 0.)))
             .flex_none()
             .flex()
             .items_center()
@@ -1425,6 +1450,8 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .bg(t.stage)
+                    .children(self.materials.layer(super::controls::Texture::PatternDark, t.reduced_transparency))
+                    .children(self.materials.layer(super::controls::Texture::Card, t.reduced_transparency))
                     .text_color(t.stage_text)
                     .child(
                         div()
@@ -1442,11 +1469,15 @@ impl Desktop {
                                     .flex_1()
                                     .min_w_0()
                                     .child(
-                                        div()
-                                            .text_size(self.sp(16.))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_ellipsis()
-                                            .child(format!("{}{}", call.title.as_str(), self.call_started.filter(|(scope, _)| *scope == call.scope).map(|(_, started)| { let seconds = started.elapsed().as_secs(); format!(" · {}:{:02}", seconds / 60, seconds % 60) }).unwrap_or_default())),
+                                        self.style_panel_title(div().flex().items_center().gap_2())
+                                            .text_color(t.stage_text)
+                                            .child(div().min_w_0().text_ellipsis().child(call.title.as_str().to_owned()))
+                                            .when_some(self.call_started.filter(|(scope, _)| *scope == call.scope), |title, (_, started)| {
+                                                let seconds = started.elapsed().as_secs();
+                                                let mut font = gpui::font("Google Sans");
+                                                font.features = gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
+                                                title.child(div().flex_none().font(font).font_weight(FontWeight::NORMAL).text_size(self.sp(12.)).text_color(t.stage_muted).child(format!("{}:{:02}", seconds / 60, seconds % 60)))
+                                            }),
                                     )
                                     .child(
                                         div()
@@ -1560,25 +1591,6 @@ impl Desktop {
         } else {
             self.call_reaction_motion(id.into(), element)
         })
-    }
-    fn call_stage_avatar(&self, initials: &str, size: f32) -> Div {
-        let seed = initials
-            .bytes()
-            .fold(0usize, |n, b| n.wrapping_mul(31).wrapping_add(b as usize));
-        let colors = [0x645287, 0x436d80, 0x87583e, 0x4e725e, 0x725366];
-        div()
-            .flex_none()
-            .size(px(size))
-            .rounded(px(size / 3.))
-            .bg(gpui::rgb(colors[seed % colors.len()]))
-            .text_color(gpui::white())
-            .text_size(px(size * 0.36))
-            .line_height(px(size * 0.5))
-            .font_weight(FontWeight::MEDIUM)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(initials.to_owned())
     }
     fn call_outcome(&self, failed: bool, cx: &Context<Self>) -> Div {
         let t = self.theme;

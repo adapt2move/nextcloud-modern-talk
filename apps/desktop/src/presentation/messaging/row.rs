@@ -191,6 +191,13 @@ impl Desktop {
                         )
                         .when(m.own, |d| d.child(metadata(self.l("Du"))))
                         .child(metadata(&time_label))
+                        .when_some(delivery.filter(|_| !continuation), |d, indicator| {
+                            d.child(self.delivery_indicator(
+                                indicator,
+                                row_id("message-delivery", 0),
+                                cx,
+                            ))
+                        })
                         .when(m.metadata.edited, |d| {
                             d.child(metadata(self.l("Bearbeitet")))
                         }),
@@ -261,7 +268,7 @@ impl Desktop {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.scaled_icon("clock", 12., t.muted))
+                    .child(self.scaled_icon("clock", 14., t.muted))
                     .child(self.hint(self.l("Erinnerung"))),
             );
         }
@@ -309,10 +316,8 @@ impl Desktop {
                 })
             {
                 content.child(
-                    div()
+                    self.style_card(div(), crate::presentation::controls::CardStyle::Inset)
                         .p_3()
-                        .rounded_lg()
-                        .bg(t.subtle)
                         .flex()
                         .items_center()
                         .gap_3()
@@ -367,10 +372,8 @@ impl Desktop {
                 content.child(self.poll_card(id, cx))
             } else {
                 content.child(
-                    div()
+                    self.style_card(div(), crate::presentation::controls::CardStyle::Inset)
                         .p_3()
-                        .rounded_lg()
-                        .bg(t.subtle)
                         .child(object.name.as_str().to_owned())
                         .child(self.hint(self.l(match object.kind.as_str() {
                             "file" => "Datei",
@@ -411,7 +414,7 @@ impl Desktop {
                             ),
                             ControlGeometry::inset_background(
                                 0.,
-                                7.,
+                                6.,
                                 4.,
                                 if r.own {
                                     t.selected
@@ -592,7 +595,7 @@ impl Desktop {
                     .justify_start()
                     .p_0()
                     .min_h(px(28.))
-                    .text_color(t.accent)
+                    .text_color(t.selected_text)
                     .child(self.scaled_icon("chat", 14., t.accent))
                     .children(
                         recent
@@ -620,12 +623,19 @@ impl Desktop {
                 self.l("Lange Nachricht gekürzt angezeigt. Bearbeiten ist hier nicht verfügbar."),
             ));
         }
+        let has_toolbar =
+            !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none();
+        let toolbar_id = row_id("message-toolbar-reveal", 0);
+        let hovered_id = toolbar_id.clone();
+        let toolbar_admission = self
+            .toolbar_hover
+            .admission(&toolbar_id, std::time::Instant::now());
         div()
         .when(!thread && self.message_ui.first_unread == Some((context, m.local_id)), |row| {
             row.child(
                 div().px_6().py_2().flex().items_center().gap_2()
                     .child(div().flex_1().h(px(1.)).bg(t.accent))
-                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.accent).child(self.l("Neue Nachrichten")))
+                    .child(div().text_size(self.sp(11.)).font_weight(FontWeight::MEDIUM).text_color(t.selected_text).child(self.l("Neue Nachrichten")))
                     .child(div().flex_1().h(px(1.)).bg(t.accent)),
             )
         })
@@ -633,6 +643,13 @@ impl Desktop {
             div()
                 .id(row_id("message", 0))
                 .group(action_group.clone())
+                .when(has_toolbar && !self.background_inert, |row| {
+                    row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        if this.toolbar_hover.update(&hovered_id, *hovered, this.reduced_motion, std::time::Instant::now()) {
+                            cx.notify();
+                        }
+                    }))
+                })
                 .relative()
                 .px(px(if compact { 8. } else { 24. }))
                 .py(px(if continuation { 3. } else if compact { 4. } else { 12. }))
@@ -696,7 +713,7 @@ impl Desktop {
                 })
                 .child(content)
                 .when(!thread, |d| d.child(self.pin_source_anchor(context, m.local_id)))
-                .when(!m.metadata.deleted && (pinned || delivery.is_some()), |d| {
+                .when(!m.metadata.deleted && (pinned || (continuation && delivery.is_some())), |d| {
                     let status = div().flex_none().flex().items_center().gap(px(4.))
                         .when(pinned, |d| {
                             let allowed = self.snapshot.message_panel.as_ref().is_some_and(|panel| {
@@ -714,7 +731,7 @@ impl Desktop {
                                 cx,
                             ).min_w(px(24.)).min_h(self.sp(20.)).h(self.sp(20.)).p_0())
                         })
-                        .when_some(delivery, |d, indicator| {
+                        .when_some(delivery.filter(|_| continuation), |d, indicator| {
                             d.child(self.delivery_indicator(indicator, row_id("message-delivery", 0), cx))
                         });
                     let mut status = status;
@@ -724,22 +741,20 @@ impl Desktop {
                 // Hover/menu controls never enter the message's flex layout.
                 // Revealing them cannot move text, metadata or delivery status.
                 .when(
-                    !m.metadata.deleted && upload.is_none() && self.media_span(m.local_id).is_none(),
+                    has_toolbar,
                     |d| {
-                        d.child(
+                        d.child(self.reveal_observation(toolbar_id,
                         div()
                             .absolute()
-                            // Narrow thread rows keep the actions over the header,
-                            // with an opaque surface so the message body remains readable.
-                            .when(thread, |d| {
-                                d.top_0().right_2().rounded(px(8.))
-                                    .group_hover(action_group.clone(), |s| {
-                                        s.bg(t.surface).border_1().border_color(t.border).shadow_sm()
-                                    })
-                                    .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
-                                        d.bg(t.surface).border_1().border_color(t.border).shadow_sm()
-                                    })
+                            // One surface frames the tools without changing row geometry.
+                            .rounded(px(8.))
+                            .group_hover(action_group.clone(), |s| {
+                                s.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
                             })
+                            .when(self.message_ui.menu.is_for(context, m.local_id), |d| {
+                                d.bg(t.surface).border_1().border_color(t.border).shadow(t.elevation(crate::presentation::theme::Elevation::Raised))
+                            })
+                            .when(thread, |d| d.top_0().right_2())
                             .when(!thread, |d| { d.top(px(-20.)).right(if m.own {
                                 px(24.) + self.delivery_width() + self.sp(8.) + px(if pinned { 28. } else { 0. })
                             } else { px(8.) })
@@ -831,7 +846,7 @@ impl Desktop {
                                 .group_hover(action_group, |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
                             ),
-                    )
+                        toolbar_admission))
                     },
                 ),
         )

@@ -271,9 +271,18 @@ pub enum ButtonStyle {
 
 use crate::presentation::probes::Probe;
 
+/// Prepared, bounded decorative images; composition owns decoding the embedded assets.
+pub struct MaterialImages {
+    pub grain: Option<gpui::ImageSource>,
+    pub light: Option<gpui::ImageSource>,
+    pub dark: Option<gpui::ImageSource>,
+}
+
 pub struct InitialView {
     pub probe: Probe,
     pub development: bool,
+    pub material_preview: bool,
+    pub material_images: MaterialImages,
     pub palette: Palette,
     pub appearance: Appearance,
     pub overlay: Option<Overlay>,
@@ -294,6 +303,8 @@ pub struct InitialView {
 use crate::presentation::feedback::Feedback;
 
 pub struct Desktop {
+    materials: controls::Materials,
+    material_preview: bool,
     text_selection: Entity<selectable::Selection>,
     _text_selection_observer: Subscription,
     _text_link_subscription: Subscription,
@@ -320,6 +331,8 @@ pub struct Desktop {
     hovered_control: Option<gpui::ElementId>,
     reduced_motion: bool,
     motion_trigger: Option<motion::MotionTrigger>,
+    unread_pop: Option<(ConversationRef, Instant)>,
+    toolbar_hover: motion::HoverMotion,
     dialog_motion: motion::DialogMotion,
     motion_frames: std::rc::Rc<std::cell::Cell<u64>>,
     emoji_picker_pending: Option<(ConversationRef, u64)>,
@@ -504,6 +517,8 @@ impl Desktop {
         let InitialView {
             probe,
             development,
+            material_preview,
+            material_images,
             palette,
             appearance,
             overlay: initial_overlay,
@@ -639,7 +654,7 @@ impl Desktop {
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
         let discovery_search =
-            cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
+            cx.new(|cx| TextInput::new("Freigegebene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -704,6 +719,8 @@ impl Desktop {
             None
         };
         let mut desktop = Self {
+            materials: controls::Materials::new(material_images, cx),
+            material_preview,
             updates: settings_port.update_snapshot(),
             update_restart_pending: false,
             text_selection,
@@ -728,6 +745,8 @@ impl Desktop {
             hovered_control: None,
             reduced_motion: settings_port.reduced_motion(),
             motion_trigger: None,
+            unread_pop: None,
+            toolbar_hover: motion::HoverMotion::default(),
             dialog_motion: motion::DialogMotion::default(),
             motion_frames: Default::default(),
             emoji_picker_pending: None,
@@ -1057,9 +1076,16 @@ impl Desktop {
         if self.reduced_motion != reduced_motion {
             self.reduced_motion = reduced_motion;
             self.motion_trigger = None;
+            self.unread_pop = None;
+            self.toolbar_hover.clear();
             cx.notify();
         }
         self.refresh_preferences(cx);
+        if self.theme.reduced_transparency
+            != (self.settings_port.reduced_transparency() && !self.material_preview)
+        {
+            cx.notify();
+        }
         self.refresh_onboarding(cx);
         if let Some(result) = self.pending_ack
             && self
@@ -1104,6 +1130,18 @@ impl Desktop {
             ));
             cx.notify();
             return;
+        }
+        if self.snapshot.selected != next.selected
+            || self.snapshot.active_account != next.active_account
+        {
+            self.toolbar_hover.clear();
+        }
+        match motion::unread_update(&self.snapshot, &next, self.reduced_motion) {
+            motion::UnreadUpdate::Retire => self.unread_pop = None,
+            motion::UnreadUpdate::Keep => {}
+            motion::UnreadUpdate::Admit(context) => {
+                self.unread_pop = Some((context, Instant::now()))
+            }
         }
         self.projection_blocked = false;
         self.call_recovery
@@ -3535,6 +3573,7 @@ impl Render for Desktop {
                 }
             });
         }
+        self.materials.begin_frame();
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;
@@ -3627,6 +3666,8 @@ impl Render for Desktop {
         self.navigation.hints.begin();
         self.navigation.prepare_history(self.snapshot.selected);
         self.theme = Theme::resolve(self.palette, self.appearance, cx.window_appearance());
+        self.theme.reduced_transparency =
+            self.settings_port.reduced_transparency() && !self.material_preview;
         let t = self.theme;
         for input in self.content_ui.inputs() {
             input.update(cx, |i, _| {
@@ -3695,7 +3736,7 @@ impl Render for Desktop {
             input.theme = t;
             input.text_scale = f32::from(self.scale) / 100.;
             input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
-            input.set_placeholder(self.l("Offene Gespräche suchen …"));
+            input.set_placeholder(self.l("Freigegebene Gespräche suchen …"));
         });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
@@ -4001,6 +4042,18 @@ impl Render for Desktop {
             .text_size(self.sp(14.))
             .line_height(self.sp(22.))
             .bg(t.chrome())
+            .children(self.materials.layer(
+                if t.dark {
+                    controls::Texture::PatternDark
+                } else {
+                    controls::Texture::PatternLight
+                },
+                t.reduced_transparency,
+            ))
+            .children(
+                self.materials
+                    .layer(controls::Texture::Grain, t.reduced_transparency),
+            )
             .text_color(t.text)
             .track_focus(&self.root_focus)
             .tab_group()

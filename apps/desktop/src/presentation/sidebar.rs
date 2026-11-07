@@ -12,6 +12,8 @@ use talk_core::ui::presentation::{
     FeatureSupport, TagEdit, TagKind,
 };
 
+const SECTION_ICON_SIZE: f32 = 14.;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Section {
     Personal,
@@ -218,6 +220,7 @@ impl Desktop {
             .iter()
             .find(|a| Some(a.scope) == self.snapshot.active_account);
         let mut sidebar = div()
+            .relative()
             .flex_none()
             .w(px(260.))
             .when(!narrow, |d| d.h_full())
@@ -225,7 +228,17 @@ impl Desktop {
             .flex_col()
             .px(px(12.))
             .pt(px(14.))
-            .pb(px(10.));
+            .pb(px(10.))
+            .border_r_1()
+            .border_color(t.border)
+            .children(
+                (!t.reduced_transparency).then(|| super::controls::glass(t.sidebar, t.dark, 0.)),
+            )
+            .children(
+                self.materials
+                    .layer(super::controls::Texture::Grain, t.reduced_transparency),
+            )
+            .child(super::controls::inner_highlight(t, 0.));
         if self
             .preferences
             .active
@@ -267,11 +280,16 @@ impl Desktop {
                 .bg(t.subtle)
                 .mb_2()
                 .child(div().flex_1())
-                .child(self.hint(if cfg!(target_os = "macos") {
-                    "⌘ K"
-                } else {
-                    self.l("Strg K")
-                })),
+                .child(
+                    self.style_tonal_chip(self.hint(if cfg!(target_os = "macos") {
+                        "⌘ K"
+                    } else {
+                        self.l("Strg K")
+                    }))
+                    .bg(t.surface)
+                    .border_1()
+                    .border_color(t.border),
+                ),
             )
             .child(self.sidebar_destination(
                 "nav-inbox",
@@ -344,29 +362,13 @@ impl Desktop {
                         .w_full()
                         .justify_start()
                         .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex_none()
-                                .min_w(px(18.))
-                                .h(px(18.))
-                                .px_1()
-                                .rounded_full()
-                                .bg(t.accent)
-                                .text_color(t.on_accent)
-                                .font_family("Google Sans Code")
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_size(px(11.))
-                                .line_height(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_center()
-                                .child(if view.invitations.as_slice().len() > 99 {
-                                    "99+".to_owned()
-                                } else {
-                                    view.invitations.as_slice().len().to_string()
-                                }),
-                        ),
+                        .child(self.count_badge(
+                            if view.invitations.as_slice().len() > 99 {
+                                "99+".to_owned()
+                            } else {
+                                view.invitations.as_slice().len().to_string()
+                            },
+                        )),
                     )
                 },
             )
@@ -444,7 +446,7 @@ impl Desktop {
             .iter()
             .any(|r| r.unread_mention.is_some());
         sidebar = sidebar.child(
-            div().flex().gap_1().mt_2().children(
+            self.segmented().w_full().mt_2().children(
                 [
                     (SidebarFilter::All, "Alle"),
                     (SidebarFilter::Unread, "Ungelesen"),
@@ -453,14 +455,10 @@ impl Desktop {
                 .into_iter()
                 .enumerate()
                 .map(|(index, (value, label))| {
-                    self.button(
+                    self.chip_with_availability(
                         ("sidebar-filter", index),
                         label,
-                        if value == filter {
-                            ButtonStyle::Secondary
-                        } else {
-                            ButtonStyle::Quiet
-                        },
+                        (value == filter, index, 3),
                         Availability::when(
                             can_filter
                                 && (value != SidebarFilter::Mentions
@@ -477,7 +475,8 @@ impl Desktop {
                     )
                     .flex_1()
                     .px_1()
-                    .text_size(self.sp(11.))
+                    .min_w_0()
+                    .text_size(self.sp(12.))
                 }),
             ),
         );
@@ -533,7 +532,7 @@ impl Desktop {
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(self.sp(12.))
                     .text_color(t.sidebar_secondary)
-                    .child(self.scaled_icon("star-filled", 12., t.accent))
+                    .child(self.scaled_icon("star-filled", SECTION_ICON_SIZE, t.accent))
                     .child(self.l("Favoriten")),
             );
             visible += favorites.len();
@@ -596,7 +595,7 @@ impl Desktop {
                         } else {
                             "chevron-down"
                         },
-                        12.,
+                        SECTION_ICON_SIZE,
                         t.muted,
                     ))
                     .child(
@@ -659,7 +658,7 @@ impl Desktop {
                         } else {
                             "chevron-down"
                         },
-                        12.,
+                        SECTION_ICON_SIZE,
                         t.muted,
                     ))
                     .child(
@@ -718,7 +717,7 @@ impl Desktop {
                     } else {
                         "chevron-down"
                     },
-                    12.,
+                    SECTION_ICON_SIZE,
                     t.muted,
                 ))
                 .child(self.l(section.key())),
@@ -759,12 +758,12 @@ impl Desktop {
                     .child(list),
             )
         };
+        let profile_id: gpui::ElementId = "own-status-menu".into();
         let profile = self
-            .button(
-                "own-status-menu",
-                "",
+            .control(
+                profile_id.clone(),
                 ButtonStyle::Quiet,
-                account.is_some(),
+                Availability::when(account.is_some(), "Noch kein Konto verbunden.").hinted(),
                 LocalAction::ToggleOwnStatus,
                 cx,
             )
@@ -810,27 +809,31 @@ impl Desktop {
                                 },
                             )),
                     )
-                    .when_some(account, |d, a| {
-                        d.child(
-                            div()
-                                .w_full()
-                                .text_size(self.sp(12.))
-                                .text_color(t.sidebar_secondary)
-                                .text_ellipsis()
-                                .child(
-                                    self.snapshot
-                                        .content_panel
-                                        .organization
-                                        .as_ref()
-                                        .filter(|name| {
-                                            self.snapshot.content_panel.account == Some(a.scope)
-                                                && !name.as_str().trim().is_empty()
-                                        })
-                                        .map_or(a.server_label.as_str(), |name| name.as_str())
-                                        .to_owned(),
-                                ),
-                        )
-                    }),
+                    .when_some(
+                        account.and_then(|a| {
+                            self.snapshot
+                                .content_panel
+                                .organization
+                                .as_ref()
+                                .filter(|name| {
+                                    self.snapshot.content_panel.account == Some(a.scope)
+                                        && !name.as_str().trim().is_empty()
+                                })
+                        }),
+                        |d, organization| {
+                            d.child(
+                                div()
+                                    .w_full()
+                                    .text_size(self.sp(12.))
+                                    .text_color(t.sidebar_secondary)
+                                    .text_ellipsis()
+                                    .child(organization.as_str().to_owned()),
+                            )
+                        },
+                    ),
+            )
+            .children(
+                account.map(|a| self.value_tip(profile_id, a.server_label.as_str().to_owned(), cx)),
             );
         let sidebar = sidebar.when(
             self.docked_call()
@@ -1076,13 +1079,16 @@ impl Desktop {
             self.message_feature_enabled(talk_core::ui::messaging::MessageFeature::MarkUnread);
         let menu_open = self.room_menu == Some((context, namespace));
         let control = self
-            .button(
-                id,
-                "",
-                ButtonStyle::Quiet,
-                true,
-                LocalAction::Navigate(context),
-                cx,
+            .style_list_row(
+                self.button(
+                    id,
+                    "",
+                    ButtonStyle::Quiet,
+                    true,
+                    LocalAction::Navigate(context),
+                    cx,
+                ),
+                super::controls::RowSize::Compact,
             )
             .flex_none()
             .w_full()
@@ -1117,13 +1123,13 @@ impl Desktop {
             })
             .when(
                 row.kind == ConversationKind::Direct && row.organization.classified == Some(true),
-                |d| d.child(self.scaled_icon("lock", 12., t.muted)),
+                |d| d.child(self.scaled_icon("lock", 14., t.muted)),
             )
             .when(row.call_active == Some(true), |d| {
                 let mut badge = d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 2),
                     ("headphones", "Anruf läuft"),
-                    (13., t.success),
+                    (14., t.success),
                     row_focus.clone(),
                     cx,
                 ));
@@ -1152,7 +1158,7 @@ impl Desktop {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 4),
                     ("bell-off", "Nachrichten stummgeschaltet"),
-                    (13., t.muted),
+                    (14., t.muted),
                     row_focus.clone(),
                     cx,
                 ))
@@ -1161,7 +1167,7 @@ impl Desktop {
                 d.child(self.status_icon(
                     scoped_id(namespace, context, 0, 1),
                     ("star-filled", "Favorit"),
-                    (13., t.accent),
+                    (14., t.accent),
                     row_focus.clone(),
                     cx,
                 ))
@@ -1181,46 +1187,28 @@ impl Desktop {
                 ))
             })
             .when(row.unread > 0, |d| {
-                d.child(
-                    if row.unread_direct_mention == Some(true)
-                        || matches!(
-                            row.kind,
-                            ConversationKind::Direct | ConversationKind::NoteToSelf
-                        )
-                    {
-                        div()
-                            .flex_none()
-                            .min_w(px(18.))
-                            .h(px(18.))
-                            .px_1()
-                            .rounded_full()
-                            .bg(t.accent)
-                            .text_color(t.on_accent)
-                            .font_family("Google Sans Code")
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_size(px(12.))
-                            .line_height(px(14.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_center()
-                            .child(format!(
-                                "{}{}",
-                                if row.unread_direct_mention == Some(true) {
-                                    "@ "
-                                } else {
-                                    ""
-                                },
-                                if row.unread > 99 {
-                                    "99+".to_owned()
-                                } else {
-                                    row.unread.to_string()
-                                }
-                            ))
-                    } else {
-                        div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
-                    },
-                )
+                let badge = if row.unread_direct_mention == Some(true)
+                    || matches!(
+                        row.kind,
+                        ConversationKind::Direct | ConversationKind::NoteToSelf
+                    ) {
+                    self.count_badge(format!(
+                        "{}{}",
+                        if row.unread_direct_mention == Some(true) {
+                            "@ "
+                        } else {
+                            ""
+                        },
+                        if row.unread > 99 {
+                            "99+".to_owned()
+                        } else {
+                            row.unread.to_string()
+                        }
+                    ))
+                } else {
+                    div().flex_none().size(px(6.)).rounded_full().bg(t.accent)
+                };
+                d.child(self.unread_badge(scoped_id(namespace, context, 0, 8), context, badge))
             });
         // One small indent is enough to show group membership. The list shares
         // the top-level gutter; stacked container/row insets waste that space.
@@ -1317,10 +1305,9 @@ impl Desktop {
                     self.context_menu_surface()
                         .ml_2()
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id("sidebar-room-notifications", context, 0, 0),
                                 ("Benachrichtigungen", "bell"),
-                                ButtonStyle::Quiet,
                                 Availability::available(),
                                 LocalAction::SidebarRoomNotifications(context),
                                 cx,
@@ -1328,7 +1315,7 @@ impl Desktop {
                             .w_full(),
                         )
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id("sidebar-room-archive", context, 0, 0),
                                 (
                                     if row.archived == Some(true) {
@@ -1338,7 +1325,6 @@ impl Desktop {
                                     },
                                     "inbox",
                                 ),
-                                ButtonStyle::Quiet,
                                 Availability::when(
                                     row.archive != Decision::Denied && row.archived.is_some(),
                                     "Der Archivstatus kann derzeit nicht geändert werden.",
@@ -1349,10 +1335,9 @@ impl Desktop {
                             .w_full(),
                         )
                         .child(
-                            self.button_with_leading_icon(
+                            self.menu_item(
                                 scoped_id(namespace, context, 1, 2),
                                 ("Als ungelesen markieren", "inbox"),
-                                ButtonStyle::Quiet,
                                 Availability::when(
                                     can_mark_unread,
                                     "Auf diesem Server nicht verfügbar.",

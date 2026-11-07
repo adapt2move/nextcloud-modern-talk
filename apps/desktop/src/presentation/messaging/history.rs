@@ -1,6 +1,7 @@
 //! One viewport-driven history request. Transport and page bounds belong to composition.
 use super::*;
 use talk_core::ui::conversation::RemoteState;
+use talk_core::ui::presentation::ConversationKind;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Status {
@@ -205,7 +206,27 @@ impl Desktop {
                     .text_size(self.sp(12.)),
                 );
             }
-            Status::End => boundary = boundary.child(self.l("Beginn des Gesprächs")),
+            Status::End => {
+                if let Some(room) = self.selected() {
+                    let kind = match room.kind {
+                        ConversationKind::Direct => "Persönliches Gespräch",
+                        ConversationKind::Group => "Gruppengespräch",
+                        ConversationKind::GuestAccessible => "Gespräch mit Gastzugang",
+                        ConversationKind::NoteToSelf => "Deine Notizen",
+                        ConversationKind::Unknown => "Unbekannte Gesprächsart",
+                    };
+                    let detail = format!("{} · {}", self.l(kind), self.l("Beginn des Gesprächs"));
+                    boundary = self
+                        .empty_state(
+                            self.conversation_avatar(room),
+                            room.title.as_str().to_owned(),
+                            &detail,
+                        )
+                        .py_4();
+                } else {
+                    boundary = boundary.child(self.l("Beginn des Gesprächs"));
+                }
+            }
         }
         boundary
     }

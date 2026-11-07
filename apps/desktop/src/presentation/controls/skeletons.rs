@@ -1,6 +1,6 @@
-//! Static, bounded placeholders for data that has not arrived yet.
+//! Bounded placeholders for data that has not arrived yet.
 use crate::presentation::Desktop;
-use gpui::{Div, div, prelude::*, px};
+use gpui::{Animation, AnimationExt, Div, div, prelude::*, px};
 
 #[derive(Clone, Copy)]
 pub(in crate::presentation) enum Skeleton {
@@ -9,9 +9,14 @@ pub(in crate::presentation) enum Skeleton {
 }
 
 impl Desktop {
-    /// These placeholders own no animation, timer or request. A refresh keeps
-    /// confirmed rows mounted; only an initial load uses a skeleton.
-    pub(in crate::presentation) fn collection_skeleton(&self, kind: Skeleton) -> Div {
+    /// A refresh keeps confirmed rows mounted; only an initial load uses a
+    /// skeleton. Its one shimmer is retired with the placeholder, and no task
+    /// or request belongs to it.
+    pub(in crate::presentation) fn collection_skeleton(
+        &self,
+        kind: Skeleton,
+        id: &'static str,
+    ) -> Div {
         let color = self
             .theme
             .muted
@@ -25,7 +30,7 @@ impl Desktop {
                 .rounded(px(4.))
                 .bg(color)
         };
-        match kind {
+        let content = match kind {
             Skeleton::Rows => {
                 let mut rows = div().flex_none().flex().flex_col().gap_1().py_2();
                 rows = rows.child(
@@ -90,6 +95,38 @@ impl Desktop {
                 }
                 messages
             }
+        };
+        let content = content.relative().overflow_hidden();
+        if self.reduced_motion || self.theme.reduced_transparency {
+            content
+        } else {
+            let clear = gpui::transparent_black();
+            let glint = self
+                .theme
+                .text
+                .opacity(if self.theme.dark { 0.045 } else { 0.025 });
+            let shimmer = div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(px(160.))
+                .flex()
+                .child(div().flex_1().h_full().bg(gpui::linear_gradient(
+                    90.,
+                    gpui::linear_color_stop(clear, 0.),
+                    gpui::linear_color_stop(glint, 1.),
+                )))
+                .child(div().flex_1().h_full().bg(gpui::linear_gradient(
+                    90.,
+                    gpui::linear_color_stop(glint, 0.),
+                    gpui::linear_color_stop(clear, 1.),
+                )))
+                .with_animation(
+                    id,
+                    Animation::new(crate::presentation::motion::SHIMMER).repeat(),
+                    |element, progress| element.left(gpui::relative(-0.2 + 1.4 * progress)),
+                );
+            content.child(shimmer)
         }
     }
 }

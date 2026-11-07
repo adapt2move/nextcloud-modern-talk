@@ -72,77 +72,75 @@ impl Desktop {
                     MediaState::Off | MediaState::Active | MediaState::Requested
                 )
         };
-        div()
-            .flex_none()
-            .w_full()
-            .h(px(64.))
-            .px_3()
-            .rounded(px(10.))
-            .bg(t.subtle)
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().size(px(8.)).rounded_full().bg(t.success))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(self.sp(13.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_ellipsis()
-                            .child(format!("{} · {}", call.title.as_str(), status)),
-                    )
-                    .child(avatars),
-            )
-            .child(
-                self.icon_button(
-                    "dock-mic",
-                    (
-                        if call.microphone == MediaState::Active {
-                            "mic"
-                        } else {
-                            "mic-off"
-                        },
-                        super::media_label(true, call.microphone),
-                    ),
-                    ButtonStyle::Quiet,
-                    Availability::when(
-                        media(call.microphone),
-                        super::media_reason(call.microphone),
-                    )
-                    .labelled(),
-                    LocalAction::Intent(UiIntent::SetMicrophone {
-                        call: call.scope,
-                        enabled: !matches!(
-                            call.microphone,
-                            MediaState::Active | MediaState::Requested
-                        ),
-                    }),
-                    cx,
+        self.style_floating_surface(
+            div().relative(),
+            t.subtle,
+            t.dark,
+            10.,
+            crate::presentation::theme::Elevation::Raised,
+        )
+        .flex_none()
+        .w_full()
+        .h(px(64.))
+        .px_3()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(div().size(px(8.)).rounded_full().bg(t.success))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(self.sp(13.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_ellipsis()
+                        .child(format!("{} · {}", call.title.as_str(), status)),
                 )
-                .when(call.microphone != MediaState::Active, |d| {
-                    d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
-                }),
-            )
-            .child(self.icon_button(
-                "dock-leave",
-                ("phone-down", "Anruf verlassen"),
-                ButtonStyle::StageDanger,
-                Availability::available().labelled(),
-                LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
-                cx,
-            ))
-            .child(self.icon_button(
-                "dock-expand",
-                ("arrow-up-right", "Anruf öffnen"),
+                .child(avatars),
+        )
+        .child(
+            self.icon_button(
+                "dock-mic",
+                (
+                    if call.microphone == MediaState::Active {
+                        "mic"
+                    } else {
+                        "mic-off"
+                    },
+                    super::media_label(true, call.microphone),
+                ),
                 ButtonStyle::Quiet,
-                Availability::available().labelled(),
-                LocalAction::ExpandCall(call.scope),
+                Availability::when(media(call.microphone), super::media_reason(call.microphone))
+                    .labelled(),
+                LocalAction::Intent(UiIntent::SetMicrophone {
+                    call: call.scope,
+                    enabled: !matches!(call.microphone, MediaState::Active | MediaState::Requested),
+                }),
                 cx,
-            ))
+            )
+            .when(call.microphone != MediaState::Active, |d| {
+                d.bg(gpui::rgb(0x9e3e32)).text_color(gpui::white())
+            }),
+        )
+        .child(self.icon_button(
+            "dock-leave",
+            ("phone-down", "Anruf verlassen"),
+            ButtonStyle::StageDanger,
+            Availability::available().labelled(),
+            LocalAction::Intent(UiIntent::Legacy(UserIntent::Leave(call.scope))),
+            cx,
+        ))
+        .child(self.icon_button(
+            "dock-expand",
+            ("arrow-up-right", "Anruf öffnen"),
+            ButtonStyle::Quiet,
+            Availability::available().labelled(),
+            LocalAction::ExpandCall(call.scope),
+            cx,
+        ))
     }
 }

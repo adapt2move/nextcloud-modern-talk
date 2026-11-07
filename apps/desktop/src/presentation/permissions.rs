@@ -533,7 +533,7 @@ impl Desktop {
             .px_1()
             .py_0()
             .text_size(self.sp(12.))
-            .text_color(self.theme.accent)
+            .text_color(self.theme.selected_text)
         };
         let mut notice = div().flex().items_center().flex_wrap().gap_2().child(
             self.hint(self.l(status)).text_color(if attention {

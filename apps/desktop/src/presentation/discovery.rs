@@ -3,7 +3,7 @@ use super::{
     ButtonStyle, Desktop, LocalAction,
     controls::{Availability, BannerRole},
 };
-use gpui::{Context, Div, FontWeight, Window, div, prelude::*};
+use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
 use talk_core::ui::{
     Decision, Text,
     conversation::RemoteState,
@@ -90,32 +90,25 @@ impl Desktop {
         let busy = panel.is_some_and(|p| p.state.pending() || p.uncertain);
         let unsupported = panel.is_some_and(|p| p.support == FeatureSupport::Unsupported);
         let query = self.discovery_search.read(cx).content.trim().to_lowercase();
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                self.hint(self.l("Finde Gespräche, die für dich im Verzeichnis freigegeben sind.")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        self.input_surface(&self.discovery_search, cx)
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.discovery_search.clone()),
-                    )
-                    .child(self.button(
-                        "discover-search",
-                        "Suchen",
-                        ButtonStyle::Primary,
-                        self.active_account_connected() && !busy && !unsupported,
-                        LocalAction::DiscoverSearch,
-                        cx,
-                    )),
-            );
+        let mut body = div().flex().flex_col().gap_4().child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    self.input_surface(&self.discovery_search, cx)
+                        .flex_1()
+                        .min_w_0()
+                        .child(self.discovery_search.clone()),
+                )
+                .child(self.button(
+                    "discover-search",
+                    "Suchen",
+                    ButtonStyle::Primary,
+                    self.active_account_connected() && !busy && !unsupported,
+                    LocalAction::DiscoverSearch,
+                    cx,
+                )),
+        );
         if !self.active_account_connected() {
             body = body.child(self.banner(
                 BannerRole::Warning,
@@ -123,7 +116,9 @@ impl Desktop {
             ));
         }
         let Some(panel) = panel else {
-            return body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+            return body.child(
+                self.collection_skeleton(super::controls::Skeleton::Rows, "discover-initial"),
+            );
         };
         if panel.uncertain {
             body = body.child(self.loading_row(self.l("Der Beitritt wird überprüft.")));
@@ -137,7 +132,9 @@ impl Desktop {
                 }),
             ));
         } else if panel.state.pending() && !panel.loaded {
-            body = body.child(self.collection_skeleton(super::controls::Skeleton::Rows));
+            body = body.child(
+                self.collection_skeleton(super::controls::Skeleton::Rows, "discover-pending"),
+            );
         }
         let mut shown = 0;
         for room in panel.rooms.as_slice().iter().filter(|room| {
@@ -178,16 +175,17 @@ impl Desktop {
                     ));
             }
             body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(self.theme.border)
-                    .child(details)
-                    .child(self.button(
+                self.style_card(
+                    self.style_list_row(div(), super::controls::RowSize::Detailed),
+                    super::controls::CardStyle::Raised,
+                )
+                .flex()
+                .items_center()
+                .gap_3()
+                .p_3()
+                .child(details)
+                .child(
+                    self.button(
                         super::controls::scoped_id("discover-join", room.context, 0, 0),
                         if joining {
                             "Beitritt läuft …"
@@ -203,7 +201,11 @@ impl Desktop {
                         ),
                         LocalAction::DiscoverJoin(room.context),
                         cx,
-                    )),
+                    )
+                    .border_1()
+                    .border_color(self.theme.input_border)
+                    .rounded(px(8.)),
+                ),
             );
         }
         if panel.loaded && shown == 0 && !panel.state.pending() {

@@ -2,6 +2,30 @@
 use gpui::{AssetSource, Result, SharedString};
 use std::borrow::Cow;
 pub struct Assets;
+
+/// Decode the three fixed, tiny project-owned materials once per window. They
+/// are static assets, not content or media frames supplied by an account.
+pub(super) fn materials() -> crate::presentation::MaterialImages {
+    fn prepare(bytes: &[u8]) -> Option<gpui::ImageSource> {
+        let mut pixels = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+            .ok()?
+            .into_rgba8();
+        if pixels.width() != 128 || pixels.height() != 128 {
+            return None;
+        }
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2); // GPUI uses straight-alpha BGRA.
+        }
+        Some(gpui::ImageSource::Render(std::sync::Arc::new(
+            gpui::RenderImage::new([image::Frame::new(pixels)]),
+        )))
+    }
+    crate::presentation::MaterialImages {
+        grain: prepare(include_bytes!("../../assets/materials/grain.png")),
+        light: prepare(include_bytes!("../../assets/materials/grid-light.png")),
+        dark: prepare(include_bytes!("../../assets/materials/grid-dark.png")),
+    }
+}
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         let bytes: &'static [u8] = match path {

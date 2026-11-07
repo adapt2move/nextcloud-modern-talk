@@ -192,7 +192,6 @@ impl Desktop {
             .left_0()
             .right_0()
             .occlude()
-            .rounded(px(12.))
             .p_2()
             .flex()
             .flex_col()
@@ -229,22 +228,25 @@ impl Desktop {
             ] {
                 let selected = self.own_status_value() == Some(choice);
                 menu = menu.child(
-                    self.button(
-                        ("own-status-choice", index),
-                        "",
-                        ButtonStyle::Quiet,
-                        Availability::when(ready, "Status wird aktualisiert."),
-                        LocalAction::SetOwnStatus(choice),
-                        cx,
+                    self.style_list_row(
+                        self.button(
+                            ("own-status-choice", index),
+                            "",
+                            ButtonStyle::Quiet,
+                            Availability::when(ready, "Status wird aktualisiert."),
+                            LocalAction::SetOwnStatus(choice),
+                            cx,
+                        ),
+                        super::controls::RowSize::Regular,
                     )
                     .w_full()
                     .justify_start()
                     .gap_2()
                     .px_2()
-                    .child(div().size(px(9.)).rounded_full().bg(color))
+                    .child(self.presence_indicator(color, t.surface))
                     .child(div().flex_1().child(self.l(label)))
                     .when(selected, |d| {
-                        d.child(self.scaled_icon("check", 14., t.accent))
+                        d.child(self.scaled_icon("check", 16., t.accent))
                     }),
                 );
             }

@@ -447,7 +447,7 @@ impl Desktop {
                 .w(px(440.)).max_w_full()
                 .h((window.viewport_size().height - px(super::window_chrome::HEIGHT + 48.)).min(px(380.)).max(px(1.)))
                 .min_h_0().flex().flex_col()
-                .child(self.dialog_header().child(div().text_size(self.sp(20.)).font_weight(FontWeight::MEDIUM)
+                .child(self.dialog_header().child(self.style_dialog_title(div())
                     .child(self.l("Konto aus dieser App entfernen?"))))
                 .child(self.scroll_area(super::navigation::Region::Overlay).flex_1().min_h_0().p_4()
                     .child(div().flex().flex_col().gap_4()

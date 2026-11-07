@@ -7,7 +7,7 @@ mod overlay;
 use crate::presentation::messaging::pins::motion::{Activity, Kind, Motion, Ticket};
 use std::time::Duration;
 
-const CYCLE: Duration = Duration::from_millis(170);
+const CYCLE: Duration = crate::presentation::motion::REVEAL;
 
 #[derive(Default)]
 pub(super) struct Pins {
@@ -183,21 +183,26 @@ impl Desktop {
             }
         };
         Some(
-            div()
+            self.banner_frame(crate::presentation::controls::BannerRole::Info)
                 .flex_none()
                 .min_h(px(32.))
                 .px_6()
                 .py_0()
-                .flex()
-                .items_center()
                 .gap_3()
+                .rounded(px(0.))
+                .border_0()
                 .border_b_1()
                 .border_color(theme.border.opacity(0.65))
                 .bg(crate::presentation::shell::chat_header::surface(theme))
                 .relative()
                 .child(self.pin_header_anchor(context, selected))
-                .child(self.scaled_icon("pin", 15., theme.accent))
-                .child(self.hint(self.l("Angeheftet")))
+                .child(self.status_icon(
+                    scoped_id("pin-banner-label", context, selected, 0),
+                    ("pin", "Angeheftet"),
+                    (14., theme.accent),
+                    None,
+                    cx,
+                ))
                 .when(!pins.collapsed, |d| {
                     d.child(
                         self.control(

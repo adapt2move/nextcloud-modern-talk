@@ -1,9 +1,40 @@
 //! Shared form geometry. Focus borders and disabled pointer behavior use the same
 //! control owner as buttons; input entities retain editing and IME state.
-use crate::presentation::{Desktop, input::TextInput};
+use crate::presentation::{Desktop, input::TextInput, theme::Elevation};
 use gpui::{Context, Div, Entity, Focusable, FontWeight, div, prelude::*, px};
 
+#[derive(Clone, Copy)]
+pub(in crate::presentation) enum RowSize {
+    Compact,
+    Regular,
+    Detailed,
+}
+
 impl Desktop {
+    /// Shared frame for the main, thread, and voice composer modes.
+    pub(in crate::presentation) fn composer_frame(&self) -> Div {
+        div()
+            .relative()
+            .min_h(px(96.))
+            .p_3()
+            .rounded(px(12.))
+            .border_1()
+            .border_color(self.theme.input_border)
+            .bg(self.theme.surface)
+            .shadow(self.theme.elevation(Elevation::Raised))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(super::inner_highlight(self.theme, 12.))
+    }
+    /// Geometry shared by list rows; callers retain their own action and focus.
+    pub(in crate::presentation) fn style_list_row<T: Styled>(&self, row: T, size: RowSize) -> T {
+        row.rounded(px(8.)).min_h(px(match size {
+            RowSize::Compact => 32.,
+            RowSize::Regular => 40.,
+            RowSize::Detailed => 48.,
+        }))
+    }
     /// A composite field shell. Callers add their icon and retained editor;
     /// clicks on padding focus that editor only while it is interactive.
     pub(in crate::presentation) fn input_surface(
@@ -133,7 +164,7 @@ impl Desktop {
             .justify_center()
             .when(selected && !radio, |d| {
                 d.bg(self.theme.accent)
-                    .child(self.scaled_icon("check", 15., self.theme.on_accent))
+                    .child(self.scaled_icon("check", 14., self.theme.on_accent))
             })
             .when(selected && radio, |d| {
                 d.child(div().size(px(10.)).rounded_full().bg(self.theme.accent))

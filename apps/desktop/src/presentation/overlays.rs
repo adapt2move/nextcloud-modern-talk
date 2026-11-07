@@ -93,6 +93,7 @@ impl Desktop {
             .child(
                 div()
                     .id("thread-resize-handle")
+                    .group("thread-resize")
                     .absolute()
                     .left_0()
                     .top_3()
@@ -103,7 +104,14 @@ impl Desktop {
                     .justify_center()
                     .hover(|handle| handle.bg(t.subtle))
                     .focus(|handle| handle.bg(t.subtle))
-                    .child(div().w(px(2.)).h(px(36.)).rounded_full().bg(t.border))
+                    .child(
+                        div()
+                            .w(px(2.))
+                            .h(px(36.))
+                            .rounded_full()
+                            .bg(gpui::transparent_black())
+                            .group_hover("thread-resize", |handle| handle.bg(t.border)),
+                    )
                     .when_some(resize_focus, |handle, focus| handle.track_focus(&focus))
                     .cursor(gpui::CursorStyle::ResizeLeftRight)
                     .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
@@ -158,23 +166,21 @@ impl Desktop {
             .flex()
             .flex_col()
             .child(if self.current_thread_details().is_some() {
-                self.control(
+                self.style_panel_title(self.control(
                     "thread-options",
                     ButtonStyle::Quiet,
                     Availability::available(),
                     LocalAction::ToggleThreadOptions,
                     cx,
-                )
+                ))
                 .justify_start()
                 .p_0()
                 .min_h(px(24.))
-                .font_weight(FontWeight::BOLD)
                 .child(heading.to_owned())
                 .child(self.scaled_icon("chevron-down", 14., self.theme.muted))
                 .into_any_element()
             } else {
-                div()
-                    .font_weight(FontWeight::BOLD)
+                self.style_panel_title(div())
                     .child(heading.to_owned())
                     .into_any_element()
             })
@@ -289,6 +295,19 @@ impl Desktop {
                 .child(body)
                 .into_any_element()
         };
+        let preferred_height = match overlay {
+            Overlay::CreatePoll => self.poll_dialog_preferred_height(cx),
+            Overlay::CloudFiles => {
+                let rows = self
+                    .snapshot
+                    .content_panel
+                    .file_browser
+                    .as_ref()
+                    .map_or(2, |browser| browser.entries.as_slice().len().clamp(2, 7));
+                (320. + rows as f32 * 48.).min(632.)
+            }
+            _ => 632.,
+        };
         self.dialog_scrim()
             .when(side, |d| d.justify_end().p_3())
             .when(!side, |d| d.items_center().justify_center().p_5())
@@ -318,7 +337,7 @@ impl Desktop {
                                 d.h(px((f32::from(window.viewport_size().height)
                                     - super::window_chrome::HEIGHT
                                     - 66.)
-                                    .min(632.)))
+                                    .min(f32::from(self.sp(preferred_height)))))
                             },
                         )
                         .when(!side, |d| {
@@ -348,7 +367,8 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .flex_1()
-                                        .text_size(self.sp(if side { 16. } else { 20. }))
+                                        .when(side, |title| self.style_panel_title(title))
+                                        .when(!side, |title| self.style_dialog_title(title))
                                         // Keep the single-word consent title visible when
                                         // large text leaves little room beside the close control.
                                         .when(overlay == Overlay::RecordingConsent, |title| {
@@ -363,7 +383,6 @@ impl Desktop {
                                             ),
                                             |title| title.line_height(self.sp(30.)),
                                         )
-                                        .font_weight(FontWeight::BOLD)
                                         .child(header_title),
                                 )
                                 .when(overlay == Overlay::CreatePoll, |d| {
@@ -597,7 +616,8 @@ impl Desktop {
                 CallRingOutcome::Failed => "Stummschaltung nicht möglich",
             })));
         }
-        let mut row = div()
+        let mut row = self
+            .style_list_row(div(), super::controls::RowSize::Detailed)
             .flex()
             .items_center()
             .gap_3()
@@ -622,7 +642,7 @@ impl Desktop {
     }
     fn participant_row(&self, p: &ParticipantView) -> Div {
         let t = self.theme;
-        div()
+        self.style_list_row(div(), super::controls::RowSize::Detailed)
             .flex()
             .items_center()
             .gap_3()
@@ -812,31 +832,21 @@ impl Desktop {
     }
     pub(super) fn state_note(&self, symbol: &'static str, title: &str, detail: &str) -> Div {
         let t = self.theme;
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_3()
-            .py_6()
-            .px_3()
-            .text_center()
-            .child(
-                div()
-                    .size(px(52.))
-                    .rounded(px(16.))
-                    .bg(t.subtle)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(self.scaled_icon(symbol, 26., t.accent)),
-            )
-            .child(
-                div()
-                    .text_size(self.sp(18.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.l(title).to_owned()),
-            )
-            .child(self.hint(self.l(detail)))
+        self.empty_state(
+            div()
+                .size(px(52.))
+                .rounded(px(16.))
+                .bg(t.subtle)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.scaled_icon(symbol, 26., t.accent)),
+            self.l(title).to_owned(),
+            self.l(detail),
+        )
+        .gap_3()
+        .py_6()
+        .px_3()
     }
     fn thread_body(&self, cx: &Context<Self>) -> Div {
         let mut body = div().flex().flex_col();

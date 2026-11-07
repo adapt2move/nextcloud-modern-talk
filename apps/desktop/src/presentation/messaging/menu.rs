@@ -76,6 +76,7 @@ struct Session {
     generation: u64,
     target: Option<Target>,
     mode: Mode,
+    opened: Option<Instant>,
 }
 impl Session {
     fn open(&mut self, context: ConversationRef, message: u128) -> Option<Target> {
@@ -87,6 +88,7 @@ impl Session {
         };
         self.target = Some(target);
         self.mode = Mode::Actions;
+        self.opened = Some(Instant::now());
         Some(target)
     }
     fn accepts(&self, target: Target, selected: Option<ConversationRef>) -> bool {
@@ -95,6 +97,7 @@ impl Session {
     fn close(&mut self) {
         self.target = None;
         self.mode = Mode::Actions;
+        self.opened = None;
     }
 }
 
@@ -945,28 +948,31 @@ impl Desktop {
                     self.theme.muted
                 };
                 body = body.child(
-                    self.control(
-                        item.id(target),
-                        if item.choice == Choice::ConfirmDelete {
-                            ButtonStyle::Danger
-                        } else {
-                            ButtonStyle::Quiet
-                        },
-                        Availability::when(item.enabled, item.reason).hinted(),
-                        LocalAction::MessageIn(
-                            target.context,
-                            Action::MenuChoice(target, item.choice),
+                    self.style_list_row(
+                        self.control(
+                            item.id(target),
+                            if item.choice == Choice::ConfirmDelete {
+                                ButtonStyle::Danger
+                            } else {
+                                ButtonStyle::Quiet
+                            },
+                            Availability::when(item.enabled, item.reason).hinted(),
+                            LocalAction::MessageIn(
+                                target.context,
+                                Action::MenuChoice(target, item.choice),
+                            ),
+                            cx,
                         ),
-                        cx,
+                        crate::presentation::controls::RowSize::Regular,
                     )
                     .w_full()
                     .justify_start()
                     .child(
                         div()
                             .relative()
-                            .size(px(18.))
+                            .size(px(16.))
                             .flex_none()
-                            .child(self.scaled_icon(item.choice.icon(), 18., color))
+                            .child(self.scaled_icon(item.choice.icon(), 16., color))
                             .when(item.choice == Choice::Unpin, |icon| {
                                 icon.child(
                                     div()
@@ -997,7 +1003,16 @@ impl Desktop {
                 geometry,
                 list: self.message_ui.list.clone(),
                 header_inset: self.message_ui.geometry.borrow().header_inset,
-                child: body.into_any_element(),
+                child: self.reveal_observation(
+                    scoped_id(
+                        "message-popup-reveal",
+                        target.context,
+                        target.message,
+                        u128::from(target.generation),
+                    ),
+                    div().child(body),
+                    self.message_ui.menu.session.opened,
+                ),
                 width,
             }
             .into_any_element(),

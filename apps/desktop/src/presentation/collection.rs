@@ -89,7 +89,7 @@ impl Desktop {
             };
         }
         if state.initial_loading() {
-            return self.collection_skeleton(Skeleton::Rows);
+            return self.collection_skeleton(Skeleton::Rows, "collection-rows");
         }
         // Connectivity belongs to the single account banner. A failed refresh
         // with retained content is also quiet; the owner keeps retrying it.

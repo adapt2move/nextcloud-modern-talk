@@ -43,13 +43,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Ya hay una incorporación en curso.",
     ),
     (
+        "Freigegebene Gespräche suchen …",
+        "Search available conversations …",
+        "Buscar conversaciones disponibles…",
+    ),
+    (
         "Keine offenen Gespräche gefunden.",
         "No open conversations found.",
         "No se encontraron conversaciones abiertas.",
-    ),
-    (
-        "Offene Gespräche suchen …",
-        "Search open conversations …",
-        "Buscar conversaciones abiertas…",
     ),
 ];

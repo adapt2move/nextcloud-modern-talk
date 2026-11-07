@@ -14,561 +14,641 @@
       "asset": "arrow-left.svg",
       "upstream_path": "icons/arrow-left.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/arrow-left.svg",
-      "sha256": "c5f4b88076108eb1a0d95336e1aa7e7bb1419a3a92af96f6247d88cd3456f933",
-      "transformation": "none"
+      "sha256": "f43109c821e739a9658db62e482f339be26095788f33aa5ec3e0bbf7306a659b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "c5f4b88076108eb1a0d95336e1aa7e7bb1419a3a92af96f6247d88cd3456f933"
     },
     {
       "asset": "arrow-right.svg",
       "upstream_path": "icons/arrow-right.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/arrow-right.svg",
-      "sha256": "288397fdb73bb4f783cf9eabb726ff47357df1d4e3f1201dd748090579f108b9",
-      "transformation": "none"
+      "sha256": "bea495363c62497a298014b9a2dc18fba0fc12268b42322b5edc713286583cf9",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "288397fdb73bb4f783cf9eabb726ff47357df1d4e3f1201dd748090579f108b9"
     },
     {
       "asset": "arrow-up-right.svg",
       "upstream_path": "icons/arrow-up-right.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/arrow-up-right.svg",
-      "sha256": "50b2503b9d11881142255466b7e3461d022b919735841c321d72003ac9959fe1",
-      "transformation": "none"
+      "sha256": "f72d95364da53e2efde584f700ec577dc96d15cbd35fb50115d0c5ef608b1534",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "50b2503b9d11881142255466b7e3461d022b919735841c321d72003ac9959fe1"
     },
     {
       "asset": "arrow-up.svg",
       "upstream_path": "icons/arrow-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/arrow-up.svg",
-      "sha256": "8c22c25874c80bb062bef985d207d8f1d4a4d7847237d0a8cf720a3235968518",
-      "transformation": "none"
+      "sha256": "e8f4621a4245f9db9e1225f4d4629e26e1f10168eb6f794e1d0fc45c380d09a0",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "8c22c25874c80bb062bef985d207d8f1d4a4d7847237d0a8cf720a3235968518"
     },
     {
       "asset": "at.svg",
       "upstream_path": "icons/at-sign.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/at-sign.svg",
-      "sha256": "a71ec1918c3787172b16949262ca4c4a7c427c045367bb58f2c2cdbd87297c5e",
-      "transformation": "none"
+      "sha256": "af26e31bda5f2e65215e926c8b27f9498fd21d013e12b3ef68b1795a198e7b6b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a71ec1918c3787172b16949262ca4c4a7c427c045367bb58f2c2cdbd87297c5e"
     },
     {
       "asset": "bar-chart-2.svg",
       "upstream_path": "icons/chart-no-axes-column.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chart-no-axes-column.svg",
-      "sha256": "4276b34a07295ac22ebb09687bdec9cb9683547bf8d56969166e19a6a13fbdd7",
-      "transformation": "none"
+      "sha256": "a75e6aee45851cac17a620cce2e26879a1fc63e9aebf51c5b5a399d0ec98a3d6",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "4276b34a07295ac22ebb09687bdec9cb9683547bf8d56969166e19a6a13fbdd7"
     },
     {
       "asset": "bell-off.svg",
       "upstream_path": "icons/bell-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell-off.svg",
-      "sha256": "14ad2775c3a594f09a79c195531778ae51302f847a9c558f720340d1e450bd6a",
-      "transformation": "none"
+      "sha256": "0d8522f63ed1045a41a47114ec461787bdd55f98c4e01a4e34c7e0e6d4cd36c5",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "14ad2775c3a594f09a79c195531778ae51302f847a9c558f720340d1e450bd6a"
     },
     {
       "asset": "bell.svg",
       "upstream_path": "icons/bell.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell.svg",
-      "sha256": "394889e9631fe3a9a63be9a479a95b451b708e432d895978d21d9130b5ee5dbe",
-      "transformation": "none"
+      "sha256": "e9d1afd4bff911a5243a93615a073a17a5941268fe9731694b7c2e600d4847be",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "394889e9631fe3a9a63be9a479a95b451b708e432d895978d21d9130b5ee5dbe"
     },
     {
       "asset": "browser.svg",
       "upstream_path": "icons/panels-top-left.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/panels-top-left.svg",
-      "sha256": "321a2a5500f2b814a2e62eb73c4b01dc65c7334fe2e6f7d77517239383e26bb1",
-      "transformation": "none"
+      "sha256": "ead6df48231db41b7fc23fd778812780b790da959ad3ca88ca3e7cd7a207645d",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "321a2a5500f2b814a2e62eb73c4b01dc65c7334fe2e6f7d77517239383e26bb1"
     },
     {
       "asset": "chat.svg",
       "upstream_path": "icons/message-circle.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/message-circle.svg",
-      "sha256": "a9bd7a3e24bf81c598974bda992d0d363dd0996d0f14ecbe9986e03a07068884",
-      "transformation": "none"
+      "sha256": "48669ab6d21b29180450b03ca024fddc918917cd4a6371e18a3c2c9abd3ed4e7",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a9bd7a3e24bf81c598974bda992d0d363dd0996d0f14ecbe9986e03a07068884"
     },
     {
       "asset": "check-circle.svg",
       "upstream_path": "icons/circle-check.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/circle-check.svg",
-      "sha256": "3e519680ab8e2a8ad8f56a340c10d61957d872237aaa868cf324b0900a74f384",
-      "transformation": "none"
+      "sha256": "4bce95c20e05cad1f7f7c9ff85d7d2c671ff7e94685dab60e32c7d6cb98557dd",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "3e519680ab8e2a8ad8f56a340c10d61957d872237aaa868cf324b0900a74f384"
     },
     {
       "asset": "check.svg",
       "upstream_path": "icons/check.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/check.svg",
-      "sha256": "7f33acc9a77a61659531044525fc008edebe215bf4dcf1c789c8674ad3277db0",
-      "transformation": "none"
+      "sha256": "33a6993fba7cce13b525738bd876b48cf80731df252005582baaa5fa8bdeac54",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "7f33acc9a77a61659531044525fc008edebe215bf4dcf1c789c8674ad3277db0"
     },
     {
       "asset": "chevron-down.svg",
       "upstream_path": "icons/chevron-down.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-down.svg",
-      "sha256": "66ea878e72ed3488bb3b464c39dfdccee8d1f78e560dccea40e5e12da0e87e87",
-      "transformation": "none"
+      "sha256": "ca21855745fafc105d959e3e44ecdd146ed91cc671a89f98642a0ce50b898c39",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "66ea878e72ed3488bb3b464c39dfdccee8d1f78e560dccea40e5e12da0e87e87"
     },
     {
       "asset": "chevron-left.svg",
       "upstream_path": "icons/chevron-left.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-left.svg",
-      "sha256": "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93",
-      "transformation": "none"
+      "sha256": "8ae06556ea354fb59dae8f450ca3f3d02b089b39084b665f72ed54e555c035bd",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"
     },
     {
       "asset": "chevron-up.svg",
       "upstream_path": "icons/chevron-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-up.svg",
-      "sha256": "d09f13fcbef3c493ead7e4663b5ee91804fec38d5edb5e7cc3acfbd547641cf4",
-      "transformation": "none"
+      "sha256": "a7220adf74899dd7749e2f0f739f32eefb5c7e1d66586223b938b6348e902ec5",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "d09f13fcbef3c493ead7e4663b5ee91804fec38d5edb5e7cc3acfbd547641cf4"
     },
     {
       "asset": "clock.svg",
       "upstream_path": "icons/clock.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/clock.svg",
-      "sha256": "ede96d40554848eaa512664b11e73def3960cd60c260efa59ca9ccc1bbe8ec9c",
-      "transformation": "none"
+      "sha256": "8264d8c62868fd97f6060e13757ccb67f8d20dc6013bb9c2f67acf27352dfa56",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "ede96d40554848eaa512664b11e73def3960cd60c260efa59ca9ccc1bbe8ec9c"
     },
     {
       "asset": "cloud-off.svg",
       "upstream_path": "icons/cloud-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/cloud-off.svg",
-      "sha256": "0d11a5038ae6eab3514a6c557516c55f47e199086772c6024f321b7469c13484",
-      "transformation": "none"
+      "sha256": "e9a8e521b53102e82bea34e9f1b99616257db5766c0d3ed3e54ef4302deca3be",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "0d11a5038ae6eab3514a6c557516c55f47e199086772c6024f321b7469c13484"
     },
     {
       "asset": "cloud.svg",
       "upstream_path": "icons/cloud.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/cloud.svg",
-      "sha256": "28a34022ed00177eb1f218eea5d2b7af30d09b529187fe32219e4dd8ea2b9740",
-      "transformation": "none"
+      "sha256": "d03976c2044e3851d8b1ff20ae79e47b5cba74f23434e98523a915cf1ce71046",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "28a34022ed00177eb1f218eea5d2b7af30d09b529187fe32219e4dd8ea2b9740"
     },
     {
       "asset": "compass.svg",
       "upstream_path": "icons/compass.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/compass.svg",
-      "sha256": "554b51f38db4af3c7a3a603ce9fc3786d32fe20eb9e3226ec41e7b5fdcbb2b68",
-      "transformation": "none"
+      "sha256": "656da2decd607b17c36a3c6df2e97aa0d91ac70ef388b50daae6aa9c85f8a0a5",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "554b51f38db4af3c7a3a603ce9fc3786d32fe20eb9e3226ec41e7b5fdcbb2b68"
     },
     {
       "asset": "copy.svg",
       "upstream_path": "icons/copy.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/copy.svg",
-      "sha256": "ea80e566c7a12628a447cb53179b19aea4f60b9143e2becd0d0f20bf260e5718",
-      "transformation": "none"
+      "sha256": "b6ff09a12d0e5caf009630a33eb82063525a55e660a2432c3f80394912eef62e",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "ea80e566c7a12628a447cb53179b19aea4f60b9143e2becd0d0f20bf260e5718"
     },
     {
       "asset": "door-open.svg",
       "upstream_path": "icons/door-open.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/door-open.svg",
-      "sha256": "dd7d3d092ce2770a2e291050aaa9d7f93e197cd0a4179cd2dc051c7ebc02b703",
-      "transformation": "none"
+      "sha256": "b09543e2e55452636cc808e1f3f8589d91fd72e8885a79f75c4a2b60815242eb",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "dd7d3d092ce2770a2e291050aaa9d7f93e197cd0a4179cd2dc051c7ebc02b703"
     },
     {
       "asset": "download.svg",
       "upstream_path": "icons/download.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/download.svg",
-      "sha256": "21ee20839a201a74e612aafe7eaaf56f6ddc095c74aa5fcbb252c51f74a7535c",
-      "transformation": "none"
+      "sha256": "4b99c81bf5b00cea88a0bb5d256c855ee552eee1d6bb8a3721e3f5296cad821f",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "21ee20839a201a74e612aafe7eaaf56f6ddc095c74aa5fcbb252c51f74a7535c"
     },
     {
       "asset": "external.svg",
       "upstream_path": "icons/external-link.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/external-link.svg",
-      "sha256": "3891241b8c3bfc3a8a930078f26ffc5a7e9763da6d0162ace2050b28d4c1d1fe",
-      "transformation": "none"
+      "sha256": "c3840a72fc640c7a2f2a965435f9e16bcb58087978ae2cd5e0fb8bc50327131b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "3891241b8c3bfc3a8a930078f26ffc5a7e9763da6d0162ace2050b28d4c1d1fe"
     },
     {
       "asset": "file-archive.svg",
       "upstream_path": "icons/file-archive.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-archive.svg",
-      "sha256": "50adc280c84fcde3a62288e91a049557bb15ab3162fcb9533f4e2f821eaad7dd",
-      "transformation": "none"
+      "sha256": "e23afbde542b05a058c01fe58e970f044d3ce52f162b35725268e60afd08c1be",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "50adc280c84fcde3a62288e91a049557bb15ab3162fcb9533f4e2f821eaad7dd"
     },
     {
       "asset": "file-audio.svg",
       "upstream_path": "icons/file-audio.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-audio.svg",
-      "sha256": "679bd56e43c3f817d544788a7e90a0fbb8636162a0b5925844bd7435db456013",
-      "transformation": "none"
+      "sha256": "2366d7b695ee7fc8cb8a0a35fdab15d0545652e2de9870714942a7ebb65828ad",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "679bd56e43c3f817d544788a7e90a0fbb8636162a0b5925844bd7435db456013"
     },
     {
       "asset": "file-image.svg",
       "upstream_path": "icons/file-image.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-image.svg",
-      "sha256": "258b199a41deca975018e808568f017adc11ba1c5b1ffb7a956daa0e22f30a35",
-      "transformation": "none"
+      "sha256": "fb9a270a2783b6c7dbd599d6ffa000287b66944ee40f424ea92f40a43ce72378",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "258b199a41deca975018e808568f017adc11ba1c5b1ffb7a956daa0e22f30a35"
     },
     {
       "asset": "file-video.svg",
       "upstream_path": "icons/file-video.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-video.svg",
-      "sha256": "f9f5f97ade68e7975187b5e44a5b24154cd96c656758f4d34a764e46d11e251b",
-      "transformation": "none"
+      "sha256": "679b57b138b325a65c051744d5b4e10aa6a90e3ac4865b8a9e3e831145c9c218",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "f9f5f97ade68e7975187b5e44a5b24154cd96c656758f4d34a764e46d11e251b"
     },
     {
       "asset": "file.svg",
       "upstream_path": "icons/file-text.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/file-text.svg",
-      "sha256": "486fab70d8ad3cdc69b5ff9b6c356a58d41fcc4c885359cbf9d6e088a7c47f70",
-      "transformation": "none"
+      "sha256": "5172b0f239313017ce067b818b2a050c58b56947358511b202f6f77567c19cfa",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "486fab70d8ad3cdc69b5ff9b6c356a58d41fcc4c885359cbf9d6e088a7c47f70"
     },
     {
       "asset": "folder.svg",
       "upstream_path": "icons/folder.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/folder.svg",
-      "sha256": "f0d92b94b797a8ab7d4c4ae33c3236c47f64068351b4e14bdb5014ee42898a39",
-      "transformation": "none"
+      "sha256": "2d748a0e7ad81fadd1a48829d5a6793d9b9365f75f196344ae4d6e860d98ed5b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "f0d92b94b797a8ab7d4c4ae33c3236c47f64068351b4e14bdb5014ee42898a39"
     },
     {
       "asset": "globe.svg",
       "upstream_path": "icons/globe.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/globe.svg",
-      "sha256": "82c6b8fa0b8e8d775ec9becd86f74a4e50bff7bee4c81f7362de45348504f14d",
-      "transformation": "none"
+      "sha256": "c98d025bda4e1ed8e528b8b72eb6d5d30f78f66bf2088f94f64fa5f35ce52a69",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "82c6b8fa0b8e8d775ec9becd86f74a4e50bff7bee4c81f7362de45348504f14d"
     },
     {
       "asset": "grid.svg",
       "upstream_path": "icons/layout-grid.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/layout-grid.svg",
-      "sha256": "b8903f61d09b1d75e55c71158277d26570962f69c2099446a251871e0a2d6678",
-      "transformation": "none"
+      "sha256": "ddde7b479052b222f913df7af92d7d8089c13b4406c077629d6884d4173d7e1c",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "b8903f61d09b1d75e55c71158277d26570962f69c2099446a251871e0a2d6678"
     },
     {
       "asset": "hand.svg",
       "upstream_path": "icons/hand.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/hand.svg",
-      "sha256": "fe3771fa2f0a9a3c7736164c9a855beefacc02548084ac1d6fc8da8a8a9180b0",
-      "transformation": "none"
+      "sha256": "217ce2f8f744ef5d5ef408c1f2b1f442063bd458a6ae8ec59c35a1cba1f0619a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "fe3771fa2f0a9a3c7736164c9a855beefacc02548084ac1d6fc8da8a8a9180b0"
     },
     {
       "asset": "headphones.svg",
       "upstream_path": "icons/headphones.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/headphones.svg",
-      "sha256": "7719585dafa921805aefc21fc3262bbcc621507610a653b84e1632236650b35a",
-      "transformation": "none"
+      "sha256": "0f19710001825a6685ba64404ea0c02786b975f053d8a44decef3ca700149035",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "7719585dafa921805aefc21fc3262bbcc621507610a653b84e1632236650b35a"
     },
     {
       "asset": "inbox.svg",
       "upstream_path": "icons/inbox.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/inbox.svg",
-      "sha256": "1838482c53d0846badef9be96fdcf7a167064241bd4891efa995c77ebec5f187",
-      "transformation": "none"
+      "sha256": "8b6089b50995f8e5fb766f2e3fbabda269efd86e3b4267299d73dbc08386472f",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "1838482c53d0846badef9be96fdcf7a167064241bd4891efa995c77ebec5f187"
     },
     {
       "asset": "info.svg",
       "upstream_path": "icons/info.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/info.svg",
-      "sha256": "bc977a64eb96f3e9c1041ffd09a3fceb70e3e65c02b571f76064062ed31f3cb9",
-      "transformation": "none"
+      "sha256": "9f06543810eedca7e3f775ad5b7993ae584a8407cadcede3be45a773e23b9953",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "bc977a64eb96f3e9c1041ffd09a3fceb70e3e65c02b571f76064062ed31f3cb9"
     },
     {
       "asset": "keyboard.svg",
       "upstream_path": "icons/keyboard.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/keyboard.svg",
-      "sha256": "f509925ca81964ed06251ad4702e989bb81a566ffc74d15c2226b4f07ded67be",
-      "transformation": "none"
+      "sha256": "e0fe06e00f50114aa237d0a49b8d2e0fe9e9d072bba1d54a58c3c304259c1a2e",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "f509925ca81964ed06251ad4702e989bb81a566ffc74d15c2226b4f07ded67be"
     },
     {
       "asset": "link.svg",
       "upstream_path": "icons/link.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/link.svg",
-      "sha256": "4f3237183dcaabfac92f4e94c776a9a9e45c3c5e77a921061a6b34b61eb5413f",
-      "transformation": "none"
+      "sha256": "73de4b5400167a7564f0296eb1dc4482a0e12bbe5638add8487b9ffe00c18956",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "4f3237183dcaabfac92f4e94c776a9a9e45c3c5e77a921061a6b34b61eb5413f"
     },
     {
       "asset": "lock.svg",
       "upstream_path": "icons/lock.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/lock.svg",
-      "sha256": "d2cfe60cac8deaef36442b5c8218c1e61abe18222784b2a370ea090d13fca840",
-      "transformation": "none"
+      "sha256": "0a3e01d21e2bebe21e15a5072c88654fd2b373a2dc1c80162e72861e0364ca92",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "d2cfe60cac8deaef36442b5c8218c1e61abe18222784b2a370ea090d13fca840"
     },
     {
       "asset": "maximize-2.svg",
       "upstream_path": "icons/maximize-2.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/maximize-2.svg",
-      "sha256": "f81488c6b37714d3aa402209ba9696bbc4e318d3b400a8eeba7188f25eb81340",
-      "transformation": "none"
+      "sha256": "b55ad1713b0e96f499b51f168592851d5435bc2923d7065a2b53b95ff5795b8b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "f81488c6b37714d3aa402209ba9696bbc4e318d3b400a8eeba7188f25eb81340"
     },
     {
       "asset": "megaphone.svg",
       "upstream_path": "icons/megaphone.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/megaphone.svg",
-      "sha256": "fc7034672eed180a4d401f37cc8eafe019b97a3130c2c78775dc8f1bb4202c52",
-      "transformation": "none"
+      "sha256": "64ce27bc589487a85959c5eb76309df2bdc862d97b181888eff38f433e191567",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "fc7034672eed180a4d401f37cc8eafe019b97a3130c2c78775dc8f1bb4202c52"
     },
     {
       "asset": "mic-off.svg",
       "upstream_path": "icons/mic-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic-off.svg",
-      "sha256": "d1ab9ea1f638142a61fab3510d39629a862a4f18812b7642933d5466dd09429a",
-      "transformation": "none"
+      "sha256": "c1bb4d6709ff58fd4a87a84afd4e13c955ae87e9d197958ac69cc280133c438f",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "d1ab9ea1f638142a61fab3510d39629a862a4f18812b7642933d5466dd09429a"
     },
     {
       "asset": "mic.svg",
       "upstream_path": "icons/mic.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic.svg",
-      "sha256": "2db62a8268f7a16f0bd0f062ccd21ec4a3733d19a9d88f5332798b4ce437b757",
-      "transformation": "none"
+      "sha256": "82f9f4570561579b2cc05f6643123370028b131d8d7ce4096ab3f5bf6c7a71af",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "2db62a8268f7a16f0bd0f062ccd21ec4a3733d19a9d88f5332798b4ce437b757"
     },
     {
       "asset": "minimize-2.svg",
       "upstream_path": "icons/minimize-2.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/minimize-2.svg",
-      "sha256": "29f4686d2c30f76def7057230d08737228e5f4d9bed3ebc2341d019bb1803837",
-      "transformation": "none"
+      "sha256": "202a26a52f54d9c2b6ff7f6a940bb107e72494bdb131ee913a9602360967a68d",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "29f4686d2c30f76def7057230d08737228e5f4d9bed3ebc2341d019bb1803837"
     },
     {
       "asset": "minus.svg",
       "upstream_path": "icons/minus.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/minus.svg",
-      "sha256": "a0c743ab6dbf545d8a6e19ef3874f48ede686ce68d25e231bd81f540d97b1f19",
-      "transformation": "none"
+      "sha256": "b44b8e2740f7fb1597709a46662b1ec2054d12f88402eb1f3337f2ad02c2c18a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a0c743ab6dbf545d8a6e19ef3874f48ede686ce68d25e231bd81f540d97b1f19"
     },
     {
       "asset": "monitor-up.svg",
       "upstream_path": "icons/monitor-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/monitor-up.svg",
-      "sha256": "6d72719398041d19f6980d34162715ca6e22d745b31f5458680f987ff3d32a5a",
-      "transformation": "none"
+      "sha256": "b54c8ec0f3265e7ab3719da62fae5cadeb230a2cd73fca4b8db443f568ee01bf",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "6d72719398041d19f6980d34162715ca6e22d745b31f5458680f987ff3d32a5a"
     },
     {
       "asset": "moon.svg",
       "upstream_path": "icons/moon.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/moon.svg",
-      "sha256": "47503477c9c6848eeaff01c324093e1a04a7d264220f580662d92f229eaa428e",
-      "transformation": "none"
+      "sha256": "5e593431cb56471baaf85a4bcae412e9e1f22a6c3655fcb0db29a075d589d478",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "47503477c9c6848eeaff01c324093e1a04a7d264220f580662d92f229eaa428e"
     },
     {
       "asset": "more.svg",
       "upstream_path": "icons/ellipsis.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/ellipsis.svg",
-      "sha256": "4f495cc72013ffdfec677f03b33a150f7b4dd741979283fd6853a09024bca112",
-      "transformation": "none"
+      "sha256": "2422240b63bf1557be4a58997cc3138233e1e17eb815a97efe4146f32c487d53",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "4f495cc72013ffdfec677f03b33a150f7b4dd741979283fd6853a09024bca112"
     },
     {
       "asset": "palette.svg",
       "upstream_path": "icons/palette.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/palette.svg",
-      "sha256": "fbe81d6b4e00ee35dfc9100ddeaaee72e2e1aeb4acb16568b768c316588d104d",
-      "transformation": "none"
+      "sha256": "7603419a72d96dd3ff11f0b4a571f202547a88ad8b8a9455dd4c56b6374d8a45",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "fbe81d6b4e00ee35dfc9100ddeaaee72e2e1aeb4acb16568b768c316588d104d"
     },
     {
       "asset": "panel-right.svg",
       "upstream_path": "icons/panel-right.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/panel-right.svg",
-      "sha256": "327d197328f9feb1f88c36c9db04e9b00fe717d877459f92fcd892f5e4c349fa",
-      "transformation": "none"
+      "sha256": "c74b4b0857ce0974043a2fdb97656ef54192429443df0a31fadf59c628462ff6",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "327d197328f9feb1f88c36c9db04e9b00fe717d877459f92fcd892f5e4c349fa"
     },
     {
       "asset": "paperclip.svg",
       "upstream_path": "icons/paperclip.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/paperclip.svg",
-      "sha256": "510ced7c1ffbcec127ce6e4ed5fc1d4b268fbad75d6fe7926920b4113bc3bd73",
-      "transformation": "none"
+      "sha256": "b3c2766e1a5463d8c2c06d2d6922518df52efba56be7c0d3e47c82e30505beaf",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "510ced7c1ffbcec127ce6e4ed5fc1d4b268fbad75d6fe7926920b4113bc3bd73"
     },
     {
       "asset": "pause.svg",
       "upstream_path": "icons/pause.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pause.svg",
-      "sha256": "0f4280e6dcc1047551bbc6ef8a9f1a34959de13c7f077d9667d12ab90c8fbca7",
-      "transformation": "none"
+      "sha256": "1781e3142ddef8664af1fb5e4083479cf3abe643ad7c09a5cfc29d6fd00cff31",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "0f4280e6dcc1047551bbc6ef8a9f1a34959de13c7f077d9667d12ab90c8fbca7"
     },
     {
       "asset": "phone-down.svg",
       "upstream_path": "icons/phone-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-off.svg",
-      "sha256": "0216563fb50f55098d2d7a9ed11ac92a11f3c561ffec92a53657632779ed30f2",
-      "transformation": "none"
+      "sha256": "c5b0b450d1fc978d7a195910625f90c4484816e6f1f98dee45fbfd09047bf633",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "0216563fb50f55098d2d7a9ed11ac92a11f3c561ffec92a53657632779ed30f2"
     },
     {
       "asset": "phone-incoming.svg",
       "upstream_path": "icons/phone-incoming.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-incoming.svg",
-      "sha256": "a5c41356a5197644ff96300ae14e63d568b94433bae97c2ea662bf7350c4cf69",
-      "transformation": "none"
+      "sha256": "8f7460215c2547105612cbe6c6649f119e0ce56cf72cf1425420476626b75373",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a5c41356a5197644ff96300ae14e63d568b94433bae97c2ea662bf7350c4cf69"
     },
     {
       "asset": "phone-missed.svg",
       "upstream_path": "icons/phone-missed.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-missed.svg",
-      "sha256": "759b876efb659ea490fb6574c9b04720fa7ba3ffdd49a43b17c73343755179f7",
-      "transformation": "none"
+      "sha256": "643b78f56b6c5bdfd9993b5cea1e2c0a2719ee3299f264170de4814c34de7615",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "759b876efb659ea490fb6574c9b04720fa7ba3ffdd49a43b17c73343755179f7"
     },
     {
       "asset": "phone-outgoing.svg",
       "upstream_path": "icons/phone-outgoing.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone-outgoing.svg",
-      "sha256": "bf09a24fb5b28b3be94569843cd01ac9d859ddcb3a5d765c5838c9dc65886922",
-      "transformation": "none"
+      "sha256": "8cd08bbf673d32f1b36cdba467454094b003c09b35295662f0aaaeed34e7f3b3",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "bf09a24fb5b28b3be94569843cd01ac9d859ddcb3a5d765c5838c9dc65886922"
     },
     {
       "asset": "phone.svg",
       "upstream_path": "icons/phone.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone.svg",
-      "sha256": "08dc20d60c087dd6f19a8960927dac5c6d67f870de853d718cca79a10a94d535",
-      "transformation": "none"
+      "sha256": "22e6b623a0ee3821932632a8d5bc39f918309fd6209d3332208762127b530a5c",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "08dc20d60c087dd6f19a8960927dac5c6d67f870de853d718cca79a10a94d535"
     },
     {
       "asset": "pin.svg",
       "upstream_path": "icons/pin.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pin.svg",
-      "sha256": "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7",
-      "transformation": "none"
+      "sha256": "9ec9569445ec3292fc7abcc4a7d9a88f655938c93ef9089488242cb8cadd0a53",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"
     },
     {
       "asset": "play.svg",
       "upstream_path": "icons/play.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/play.svg",
-      "sha256": "e646902a5a8ba055ce573c6f51d10bb6eb9d230e7d6e84a9e6c81f599778ffc1",
-      "transformation": "none"
+      "sha256": "2bd2a72e6c15949faedbf62e4c193481e1249e1bac9a58259b78cea50ac8bcc0",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "e646902a5a8ba055ce573c6f51d10bb6eb9d230e7d6e84a9e6c81f599778ffc1"
     },
     {
       "asset": "plus.svg",
       "upstream_path": "icons/plus.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/plus.svg",
-      "sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17",
-      "transformation": "none"
+      "sha256": "904060299cdc6cbf08016780ad946a7794908ad84e29ee21f464da97aa656bf8",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"
     },
     {
       "asset": "refresh.svg",
       "upstream_path": "icons/refresh-cw.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/refresh-cw.svg",
-      "sha256": "2e10dd403c85a24f163d59fc6151aa21147fe9402e1305dfc8979208caee8944",
-      "transformation": "none"
+      "sha256": "cb79e263f7ef5b46aed39a9f0130dcf7f76d4e2eb04a1625f380a6bb054e29b9",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "2e10dd403c85a24f163d59fc6151aa21147fe9402e1305dfc8979208caee8944"
     },
     {
       "asset": "reply.svg",
       "upstream_path": "icons/reply.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/reply.svg",
-      "sha256": "51b1dcd60fedd9167411bcd841d2b53cdb7e13478b2a368c18a02aef640867b5",
-      "transformation": "none"
+      "sha256": "c1a861de9b03ee68d5c88cfe98a81cd553be6fd6a59737a8d422bf6a27dc4484",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "51b1dcd60fedd9167411bcd841d2b53cdb7e13478b2a368c18a02aef640867b5"
     },
     {
       "asset": "search.svg",
       "upstream_path": "icons/search.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/search.svg",
-      "sha256": "9322d964b61cf729b3a81210568d5a97eaf4a1f3239f25a056fda3013bf35611",
-      "transformation": "none"
+      "sha256": "6552180ee43d8054bb68f4546e53a6f3ac0cddc400dd76bd1fc33f72f5367187",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "9322d964b61cf729b3a81210568d5a97eaf4a1f3239f25a056fda3013bf35611"
     },
     {
       "asset": "settings.svg",
       "upstream_path": "icons/settings.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/settings.svg",
-      "sha256": "3c7bee2696ce0c2d48d34e813f4fcda31f0ad21ab9309aee3751cde4280ad737",
-      "transformation": "none"
+      "sha256": "fe1d66d8af4fac2b83c36587ae7e5fdaf6158430844f632249f976af92cbb26b",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "3c7bee2696ce0c2d48d34e813f4fcda31f0ad21ab9309aee3751cde4280ad737"
     },
     {
       "asset": "shield.svg",
       "upstream_path": "icons/shield.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/shield.svg",
-      "sha256": "be32f6a86df7cbe43a83c439dd8849e5bcf5145e484d23420c20d8b98a78e82b",
-      "transformation": "none"
+      "sha256": "8596f67618b772150520cd6c5fa056b807ba26d822f8448c9e027aa3227232da",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "be32f6a86df7cbe43a83c439dd8849e5bcf5145e484d23420c20d8b98a78e82b"
     },
     {
       "asset": "sidebar.svg",
       "upstream_path": "icons/panel-left.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/panel-left.svg",
-      "sha256": "029f67b9e3eeb7ddf7c7c499b174c50388725e8ea50d4ea59ed7dbaf8d61cb82",
-      "transformation": "none"
+      "sha256": "05d97a1210b1a1a42ec6218217d99967f1074d400746fc312aa0d4c3ffaf5f4a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "029f67b9e3eeb7ddf7c7c499b174c50388725e8ea50d4ea59ed7dbaf8d61cb82"
     },
     {
       "asset": "smile.svg",
       "upstream_path": "icons/smile.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/smile.svg",
-      "sha256": "e9b9aa831b0491cfc08c41fe72c41a4815456fc1421b19a0c7f7378efd4c9d29",
-      "transformation": "none"
+      "sha256": "de98b072b5b6c4271b15e3148f5a6e195a099c94df64d726d7d95d3a4407f544",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "e9b9aa831b0491cfc08c41fe72c41a4815456fc1421b19a0c7f7378efd4c9d29"
     },
     {
       "asset": "sparkles.svg",
       "upstream_path": "icons/sparkles.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/sparkles.svg",
-      "sha256": "cc8061ee31c43138e081522260d2ddd35465dfb2a4435fddd3d9857952d7231e",
-      "transformation": "none"
+      "sha256": "4a3ee84cc2edc6ea4d2eee69d80909cc017768fbba2ee9ea29d6f17095edd545",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "cc8061ee31c43138e081522260d2ddd35465dfb2a4435fddd3d9857952d7231e"
     },
     {
       "asset": "speaker.svg",
       "upstream_path": "icons/volume-2.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-2.svg",
-      "sha256": "fb404f9c128a0579de67b399177631e5edb3502fdc247ceb30e8b15754b46071",
-      "transformation": "none"
+      "sha256": "190472c8894bd309df23bce49d76734a054637c76b99eb72a391edfcf0111c1a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "fb404f9c128a0579de67b399177631e5edb3502fdc247ceb30e8b15754b46071"
     },
     {
       "asset": "square.svg",
       "upstream_path": "icons/square.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square.svg",
-      "sha256": "bd979354f0ab184b95cecf03eedefe40c2dc65830ac6d7e60017b2b25a354acb",
-      "transformation": "none"
+      "sha256": "e1f4e756c2e7162323898f6d741cea24139b114fef064119c5fceb1c6b6336d5",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "bd979354f0ab184b95cecf03eedefe40c2dc65830ac6d7e60017b2b25a354acb"
     },
     {
       "asset": "star-filled.svg",
       "upstream_path": "icons/star.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/star.svg",
-      "sha256": "cf45da49575551e58ac7ec4dd31bb1220265129ee0d123676a833880ae9a43ab",
-      "transformation": "fill changed from none to currentColor; geometry unchanged"
+      "sha256": "7cbdcbfa65f50a10d573b0c5956f4a4756bbdeafbbf1cf039e0ffd08554ac7ca",
+      "transformation": "fill changed from none to currentColor; geometry unchanged; stroke width 2 to 1.75",
+      "upstream_sha256": "c59da86b889569387db28e69ad00a89f96af22863ad9eea9aa12c4876a14338c"
     },
     {
       "asset": "star.svg",
       "upstream_path": "icons/star.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/star.svg",
-      "sha256": "c59da86b889569387db28e69ad00a89f96af22863ad9eea9aa12c4876a14338c",
-      "transformation": "none"
+      "sha256": "b745ac5b71ba441c022d11e5525ed67dd2732806d5dcb108473f37acfa036a2f",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "c59da86b889569387db28e69ad00a89f96af22863ad9eea9aa12c4876a14338c"
     },
     {
       "asset": "sun.svg",
       "upstream_path": "icons/sun.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/sun.svg",
-      "sha256": "a3955c8b0425fcc5c9ba12d2bdd77fe53b2cd5dd05e7742a56f342e996fb2ef8",
-      "transformation": "none"
+      "sha256": "2c7d53efbdcfc8192c8ab2fbc7ae415cbfbb58e7dd3f39d08a7f6b486c8951fc",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a3955c8b0425fcc5c9ba12d2bdd77fe53b2cd5dd05e7742a56f342e996fb2ef8"
     },
     {
       "asset": "thumbs-up.svg",
       "upstream_path": "icons/thumbs-up.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/thumbs-up.svg",
-      "sha256": "f66a57d3b8491f866e7da9375c04b9b7627a4ed898fbfe1a0a331dc12b16fbd8",
-      "transformation": "none"
+      "sha256": "53b8dc1b7558d3c73da5f44035aa026df43ac3bdf6774a6a2f269c858b070f8a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "f66a57d3b8491f866e7da9375c04b9b7627a4ed898fbfe1a0a331dc12b16fbd8"
     },
     {
       "asset": "trash-2.svg",
       "upstream_path": "icons/trash-2.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/trash-2.svg",
-      "sha256": "e63698acf757d3043fcb4a9ea6ffceff9dd84708707eafc879c86b34a6ff2786",
-      "transformation": "none"
+      "sha256": "8811ce0c5f81b544cbe320bcbfdafab78e816b567e6948d526249bc02ea09196",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "e63698acf757d3043fcb4a9ea6ffceff9dd84708707eafc879c86b34a6ff2786"
     },
     {
       "asset": "user.svg",
       "upstream_path": "icons/user.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/user.svg",
-      "sha256": "eae3b3b2400031ddd5ec869327d127a96014e5f63aa6e06658dd5d4e90661aa8",
-      "transformation": "none"
+      "sha256": "6b4abcd24ab6a5691b7fd3acabeba12c3d253b29a847fc78b6115e676f52d7f8",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "eae3b3b2400031ddd5ec869327d127a96014e5f63aa6e06658dd5d4e90661aa8"
     },
     {
       "asset": "users.svg",
       "upstream_path": "icons/users.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/users.svg",
-      "sha256": "c94a3781b154ab2716e1696c25c50d37b4b5634f26cb80ae1cdea20cfafc49c1",
-      "transformation": "none"
+      "sha256": "4d4678b3abefea657a41e91c8813db1f873a0716ff647d357c5126335c9f745a",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "c94a3781b154ab2716e1696c25c50d37b4b5634f26cb80ae1cdea20cfafc49c1"
     },
     {
       "asset": "video-off.svg",
       "upstream_path": "icons/video-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/video-off.svg",
-      "sha256": "a2e53dcae00b37cbb7fb75373f28fa6b7c455b8b5e992cc620e3890dde80a178",
-      "transformation": "none"
+      "sha256": "125fe40abc7d8fb0ea414ee1d643c0151bfa8770c9ce4fbf6948f16b51435387",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "a2e53dcae00b37cbb7fb75373f28fa6b7c455b8b5e992cc620e3890dde80a178"
     },
     {
       "asset": "video.svg",
       "upstream_path": "icons/video.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/video.svg",
-      "sha256": "d4fb6587f282c1152b953fe9494cd8ccafdf1e9f44957fbb7fe8dc7af0457597",
-      "transformation": "none"
+      "sha256": "0281c7a42dbe93b539f4835b3f563f9c802ee0835be58e972b28b63743c1d188",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "d4fb6587f282c1152b953fe9494cd8ccafdf1e9f44957fbb7fe8dc7af0457597"
     },
     {
       "asset": "wifi-off.svg",
       "upstream_path": "icons/wifi-off.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/wifi-off.svg",
-      "sha256": "318b290106e55c3505933f434d3663524206c7a44165a89508774fba4fdbaadd",
-      "transformation": "none"
+      "sha256": "765df999ea7e3fd0c25d6a32e0bffc5c0ff871d064c8750028cb799e9fe47fe1",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "318b290106e55c3505933f434d3663524206c7a44165a89508774fba4fdbaadd"
     },
     {
       "asset": "x.svg",
       "upstream_path": "icons/x.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/x.svg",
-      "sha256": "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117",
-      "transformation": "none"
+      "sha256": "dd90312c94ed6ba8eff4594d70275ebe59841b12f357a38e3815d0d65f8cf042",
+      "transformation": "stroke width 2 to 1.75; geometry unchanged",
+      "upstream_sha256": "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"
     }
   ]
 }

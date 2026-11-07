@@ -548,16 +548,19 @@ impl Desktop {
         for room in &rows {
             let selected = approval.destination == Some(room.context);
             list = list.child(
-                self.control(
-                    destination_id(target, room.context),
-                    ButtonStyle::Quiet,
-                    Availability::available(),
-                    action(Action::Select(target, room.context)),
-                    cx,
+                self.style_list_row(
+                    self.control(
+                        destination_id(target, room.context),
+                        ButtonStyle::Quiet,
+                        Availability::available(),
+                        action(Action::Select(target, room.context)),
+                        cx,
+                    ),
+                    crate::presentation::controls::RowSize::Detailed,
                 )
                 .w_full()
                 .justify_start()
-                .min_h(self.sp(44.))
+                .min_h(self.sp(44.).max(px(48.)))
                 .gap_3()
                 .bg(self.selected_row_color(selected, t.surface))
                 .child(self.scaled_icon("chat", 18., t.muted))
@@ -692,12 +695,7 @@ impl Desktop {
                     }))
                     .child(
                         self.dialog_header()
-                            .child(
-                                div()
-                                    .text_size(self.sp(20.))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(self.l("Weiterleiten")),
-                            )
+                            .child(self.style_dialog_title(div()).child(self.l("Weiterleiten")))
                             .child(self.icon_button(
                                 dialog_id("forward-close", target),
                                 ("x", "Schließen"),

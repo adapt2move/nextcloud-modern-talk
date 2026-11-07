@@ -627,7 +627,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             message: 40,
             ordinal: 0,
             title: text("Studiokonzept im Thread"),
-            description: Some(text("Ein fiktiver Link aus der Diskussion.")),
+            description: Some(text("Ein Link aus der Diskussion.")),
         }]);
         return state;
     }
@@ -645,7 +645,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             message: 1,
             ordinal: 0,
             title: text("Ein ruhiger Ort für neue Ideen"),
-            description: Some(text("Ein fiktiver Einblick in das neue Studiokonzept.")),
+            description: Some(text("Ein Einblick in das neue Studiokonzept.")),
         }]);
         state.content_panel.account = Some(context.account);
         state.content_panel.context = Some(context);
@@ -679,12 +679,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 invitations: page([
                     FederationInvitationView {
                         id: 101,
-                        room: text("Community planning"),
+                        room: text("Gemeinschaft planen"),
                         inviter: text("Alex Morgan"),
                     },
                     FederationInvitationView {
                         id: 102,
-                        room: text("Design exchange"),
+                        room: text("Designaustausch"),
                         inviter: text("Sam Rivera"),
                     },
                 ]),
@@ -717,7 +717,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 },
                 Some("chat-summary-result") => Summary::Ready {
                     parts: page([text(
-                        "The team agreed to share the draft on Friday. Mara will collect feedback before the next meeting.",
+                        "Das Team teilt den Entwurf am Freitag. Mara sammelt bis zum nächsten Treffen die Rückmeldungen.",
                     )]),
                     partial: false,
                 },
@@ -766,7 +766,11 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 message: message.local_id,
                 source: message.body.clone(),
                 language: text(language),
-                text: text("Fictional translated message for the team."),
+                text: text(match language {
+                    "de" => "Eine übersetzte Nachricht für das Team.",
+                    "es" => "Un mensaje traducido para el equipo.",
+                    _ => "A translated message for the team.",
+                }),
             }));
         }
         return state;
@@ -833,7 +837,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         state.messages = page(state.messages.as_slice().iter().cloned().map(|mut message| {
             if message.local_id == 5 { message.metadata.edited = true; }
             if message.local_id == 6 {
-                message.body = text("Eine längere fiktive Nachricht prüft den Umbruch und den gleichbleibenden Abstand der Bestätigung. Auch mit mehreren Textzeilen bleibt das Häkchen in derselben Spalte wie bei der vorherigen Nachricht.");
+                message.body = text("Für den nächsten Termin sammeln wir noch Ideen und besprechen gemeinsam, welche Vorschläge wir zuerst umsetzen. Ich freue mich auf eure Rückmeldungen und ergänze sie anschließend im Entwurf.");
             }
             message
         }));
@@ -865,7 +869,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             size: None,
             placeholder: text("location"),
             kind: text("geo-location"),
-            name: text("Fiktiver Treffpunkt"),
+            name: text("Treffpunkt"),
             link: None,
         }]);
         rows.push(location);
@@ -897,7 +901,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             panel.scheduled = page([
                 Scheduled {
                     id: 41,
-                    body: text("Fiktive Nachricht für morgen"),
+                    body: text("Nachricht für morgen"),
                     timestamp: 1_800_090_000,
                     failed_original_timestamp: None,
                     editable: true,
@@ -905,7 +909,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 },
                 Scheduled {
                     id: 42,
-                    body: text("Fiktive Nachricht erneut prüfen"),
+                    body: text("Nachricht erneut prüfen"),
                     timestamp: 0,
                     failed_original_timestamp: Some(1_800_003_600),
                     editable: true,
@@ -1079,14 +1083,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     },
                 ));
             }
-            let mut reply = message(
-                40,
-                "Mara Fischer",
-                "MF",
-                "10:00",
-                "That works for me.",
-                false,
-            );
+            let mut reply = message(40, "Mara Fischer", "MF", "10:00", "Das klingt gut.", false);
             reply.metadata.thread = Some(root);
             reply.metadata.author_key = Some(text("5:users:mara"));
             reply.metadata.replyable = true;
@@ -1104,7 +1101,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 "Alex Sommer",
                 "AS",
                 "10:02",
-                "I'll update the final details.",
+                "Ich aktualisiere die letzten Details.",
                 true,
             );
             second.metadata.thread = Some(root);
@@ -1373,10 +1370,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         state.messages = page((1..=30).map(|id| {
             message(
                 id,
-                "Fictional teammate",
-                "FT",
+                "Mara Fischer",
+                "MF",
                 "10:00",
-                "Fictional history row for the finite native motion fixture.",
+                "Die nächsten Schritte besprechen wir im Team.",
                 false,
             )
         }));
@@ -1990,7 +1987,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     if n == 40 {
                         "Neuester geladener Stand."
                     } else {
-                        "Fiktiver Verlauf für die lokale Navigation."
+                        "Notizen aus der gemeinsamen Planung."
                     }
                 ),
                 false,
@@ -2179,7 +2176,7 @@ fn populate(s: &mut PresentationSnapshot, selected: ConversationRef) {
             "Mara Fischer",
             "MF",
             "09:51",
-            "Hier ist Platz für unser Gespräch. Diese Inhalte sind fiktive UI-Beispiele.",
+            "Hier ist Platz für unser Gespräch.",
             false,
         )]);
     }
@@ -2752,17 +2749,13 @@ impl NativeDesktopPort for DevelopmentPort {
                         if !rows.iter().any(|row| row.local_id == id) {
                             rows.push(message(
                                 id,
-                                if own {
-                                    "Fictional own projection"
-                                } else {
-                                    "Fictional teammate"
-                                },
-                                if own { "FO" } else { "FT" },
+                                if own { "Alex Sommer" } else { "Mara Fischer" },
+                                if own { "AS" } else { "MF" },
                                 "10:01",
                                 if own {
-                                    "Own message projection fixture; no backend send or acceptance."
+                                    "Ich ergänze die nächsten Schritte."
                                 } else {
-                                    "New incoming message projection fixture."
+                                    "Danke, ich schaue es mir an."
                                 },
                                 own,
                             ));
@@ -2770,7 +2763,7 @@ impl NativeDesktopPort for DevelopmentPort {
                     }
                     6 => {
                         if let Some(row) = rows.last_mut() {
-                            row.body = text("Edited fictional row, same stable message ID.");
+                            row.body = text("Danke, ich schaue es mir später an.");
                             row.metadata.edited = true;
                         }
                     }
@@ -2780,33 +2773,32 @@ impl NativeDesktopPort for DevelopmentPort {
                         0,
                         message(
                             0,
-                            "Fictional teammate",
-                            "FT",
+                            "Mara Fischer",
+                            "MF",
                             "09:00",
-                            "Older loaded history fixture; no new-message entry.",
+                            "Hier sind die Notizen vom letzten Termin.",
                             false,
                         ),
                     ),
                     11 => {
-                        let mut event =
-                            message(37, "", "", "10:02", "Fictional call ended.", false);
+                        let mut event = message(37, "", "", "10:02", "Anruf beendet.", false);
                         event.metadata.system = true;
                         rows.push(event);
                     }
                     12 => {
                         if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
                             row.body = text(
-                                "Edited fictional message with a changed height.\n\
-                                 The reader is already at the bottom.\n\
-                                 The viewport must remain at the end.\n\
-                                 This is a presentation fixture, not a server write.",
+                                "Hier sind die überarbeiteten Notizen.\n\
+                                 Die nächsten Schritte sind abgestimmt.\n\
+                                 Ich ergänze noch den Zeitplan.\n\
+                                 Danke für eure Rückmeldungen.",
                             );
                             row.metadata.edited = true;
                         }
                     }
                     13 => {
                         if let Some(row) = rows.iter_mut().find(|row| row.local_id == 36) {
-                            row.body = text("Fictional message removed.");
+                            row.body = text("Nachricht entfernt.");
                             row.metadata.deleted = true;
                         }
                     }
@@ -3059,7 +3051,7 @@ impl NativeDesktopPort for DevelopmentPort {
                             "Mara Fischer",
                             "MF",
                             "09:40",
-                            "Ältere fiktive Nachricht für die lokale Navigation.",
+                            "Hier sind die Notizen vom letzten Termin.",
                             false,
                         )
                     })
@@ -3194,7 +3186,7 @@ impl NativeDesktopPort for DevelopmentPort {
                             "Mara Fischer",
                             "MF",
                             "10:00",
-                            "Fictional thread reply for native input checks.",
+                            "Das klingt gut, danke für den Vorschlag.",
                             false,
                         );
                         row.metadata.replyable = true;
@@ -3211,7 +3203,7 @@ impl NativeDesktopPort for DevelopmentPort {
                             "Jonas Weber",
                             "JW",
                             "09:55",
-                            "Earlier fictional reply.",
+                            "Hier ist meine frühere Antwort.",
                             false,
                         );
                         row.metadata.thread = Some(root);

@@ -40,16 +40,19 @@ include its upstream license and patch provenance, separately from project code.
 Distributors must include the project license, this notice, the font notices,
 and applicable dependency notices.
 Synthetic people and organization data are available only through an explicit
-`--ui-scenario` development option and labeled in every application view.
+`--ui-scenario` development option; capture manifests identify that evidence.
 
 Functional SVG icons use Lucide 0.468.0, pinned to commit
-`f12b0de177fbc2a6795e99be065887e72b237123`. Their bytes are unchanged except for
-the filled favorite-star variant: its fill is `currentColor` and its upstream
-geometry is unchanged. Preserve the unchanged
+`f12b0de177fbc2a6795e99be065887e72b237123`. All functional icons retain their
+upstream geometry and adjust the two-unit stroke to 1.75 units; the filled
+favorite-star variant also changes its fill to `currentColor`. Preserve the unchanged
 [Lucide notice](assets/icons/LUCIDE-LICENSE), which includes the ISC license and
 Cole Bemis / Feather MIT attribution. The three brand SVGs remain original
 project artwork under EUPL-1.2. [Icon provenance](assets/icons/PROVENANCE.md) and
 `assets/icons/lucide-manifest.json` identify exact upstream paths and hashes.
 SVG bytes are embedded; no runtime asset directory is needed.
+
+The material grain and dot-grid PNG tiles are original project artwork under
+EUPL-1.2, generated deterministically by `tools/ui/generate-materials.py`.
 
 Application sounds have separate upstream licenses. See [sound attribution](assets/sounds/README.md) and the included license texts; retain them in binary distributions.

@@ -287,6 +287,11 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let hidden = talk_core::preferences::starts_hidden(&saved.active, options.autostart);
     let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
     let development = options.scenario.is_some();
+    // Deliberate UI-scenario-only visual evidence; a normal run always uses
+    // the system preference, including the unknown-platform fallback.
+    let material_preview = development
+        && std::env::var_os("TALK_UI_MATERIAL_PREVIEW").is_some_and(|value| value == "1");
+    let material_images = assets::materials();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
         Some(
@@ -386,7 +391,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             show:true,focus:!hidden,
             window_min_size:Some(size(px(720.),px(580.))),
             titlebar:Some(TitlebarOptions{
-                title:Some(if development{"Talk — FICTITIOUS DATA · UI development"}else{"Talk"}.into()),
+                title:Some("NextCloud Talk".into()),
                 appears_transparent:true,
                 traffic_light_position:Some(gpui::point(px(12.),px(8.))),
             }),
@@ -413,7 +418,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
             cx.new(|cx|{
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE desktop"); }
-                let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
+                let mut desktop=Desktop::new(port,InitialView{probe,development,material_preview,material_images,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,focus_first_call_participant:options.scenario.as_deref()==Some("call-speaker"),start_with_call_dock:options.scenario.as_deref()==Some("call-dock"),start_with_call_devices:options.scenario.as_deref()==Some("call-devices"),threads_fixture:options.scenario.as_deref()==Some("thread-list"),thread_options_fixture:matches!(options.scenario.as_deref(),Some("thread-options"|"thread-offline")),room_menu_fixture:options.scenario.as_deref()==Some("sidebar-unread"),new_thread_fixture:options.scenario.as_deref()==Some("thread-compose"),private_reply_fixture:options.scenario.as_deref()==Some("private-reply"),sidebar_menu_fixture:options.scenario.as_deref()==Some("sidebar-room-menu"),onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
                 #[cfg(feature = "dev-probes")]
                 if options.dev_latency { println!("DEV_STAGE constructed"); }
                 #[cfg(feature = "dev-probes")]

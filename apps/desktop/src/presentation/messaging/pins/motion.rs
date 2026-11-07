@@ -3,9 +3,9 @@
 use super::*;
 
 pub(super) const DEADLINE: Duration = Duration::from_millis(450);
-pub(super) const FLIGHT: Duration = Duration::from_millis(300);
-pub(super) const SHRED: Duration = Duration::from_millis(220);
-pub(super) const SCROLL: Duration = Duration::from_millis(280);
+pub(super) const FLIGHT: Duration = crate::presentation::motion::PIN_FLIGHT;
+pub(super) const SHRED: Duration = crate::presentation::motion::PIN_SHRED;
+pub(super) const SCROLL: Duration = crate::presentation::motion::PIN_SCROLL;
 const SOURCES: usize = 100;
 pub(super) const EXCERPT_BYTES: usize = 240;
 

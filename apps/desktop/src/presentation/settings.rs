@@ -282,9 +282,7 @@ impl Desktop {
             .child(content)
     }
     pub(super) fn dialog_title(&self, title: &str) -> Div {
-        div()
-            .text_size(self.sp(20.))
-            .font_weight(FontWeight::MEDIUM)
+        self.style_dialog_title(div())
             .child(self.l(title).to_owned())
     }
     /// Navigation entries: icon first, then label; selection is a quiet tint.
@@ -297,24 +295,22 @@ impl Desktop {
         cx: &Context<Self>,
     ) -> Stateful<Div> {
         let (label, symbol) = content;
-        self.control(id, ButtonStyle::Quiet, true, action, cx)
-            .w_full()
-            .justify_start()
-            .min_h(px(37.))
-            .mb_1()
-            .bg(if active {
-                self.theme.selected
-            } else {
-                gpui::transparent_black()
-            })
-            .text_color(self.theme.text)
-            .font_weight(if active {
-                FontWeight::MEDIUM
-            } else {
-                FontWeight::NORMAL
-            })
-            .child(self.scaled_icon(symbol, 17., self.theme.muted))
-            .child(self.l(label).to_owned())
+        self.style_segment_option(
+            self.control(id, ButtonStyle::Quiet, true, action, cx),
+            active,
+        )
+        .w_full()
+        .justify_start()
+        .min_h(px(37.))
+        .mb_1()
+        .text_color(self.theme.text)
+        .font_weight(if active {
+            FontWeight::MEDIUM
+        } else {
+            FontWeight::NORMAL
+        })
+        .child(self.scaled_icon(symbol, 16., self.theme.muted))
+        .child(self.l(label).to_owned())
     }
     /// Every page starts with the same title scale; descriptions stay one quiet line.
     pub(super) fn dialog_page_header(&self, title: &str, description: Option<&str>) -> Div {

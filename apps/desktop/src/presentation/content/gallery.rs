@@ -347,7 +347,8 @@ impl Desktop {
                     ),
             );
         }
-        let card = div()
+        let card = self
+            .style_card(div(), crate::presentation::controls::CardStyle::Outlined)
             .group(group.clone())
             .relative()
             .w(px(width))
