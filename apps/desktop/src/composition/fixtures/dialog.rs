@@ -11,7 +11,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
     panel.details = Some(RoomDetails {
         name: text("Produktteam"),
         description: Some(text(
-            "Fiktiver Raum für gemeinsame Ideen und Projektabsprachen.",
+            "Raum für gemeinsame Ideen und Projektabsprachen.",
         )),
         read_only: Some(false),
         notifications: Some(NotificationLevel::Mention),

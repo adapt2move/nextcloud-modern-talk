@@ -25,7 +25,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         "Mara Fischer",
         "MF",
         "09:41",
-        "Die neue Meetingecke — ein fiktiver Entwurf für unsere Abstimmung.",
+        "Die neue Meetingecke — ein Entwurf für unsere Abstimmung.",
         false,
     );
     photo.metadata.rich = page([RichObject {
@@ -59,7 +59,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         "Alex Sommer",
         "AS",
         "09:44",
-        "Fiktive Umfrage für die Oberflächenprüfung",
+        "Was haltet ihr von den Entwürfen?",
         true,
     );
     poll.metadata.rich = page([RichObject {
@@ -119,7 +119,7 @@ pub(super) fn configure(snapshot: &mut PresentationSnapshot) {
         poll_create: ready,
         polls: page([PollView {
             id: 9001,
-            question: text("Fiktive Umfrage: Welcher Entwurf gefällt euch?"),
+            question: text("Welcher Entwurf gefällt euch?"),
             options: page([
                 PollOption {
                     id: 0,
@@ -169,7 +169,7 @@ pub(super) fn polls(snapshot: &mut PresentationSnapshot) {
     snapshot.content_panel.poll_drafts = page([PollDraftEntry {
         id: 9002,
         draft: PollDraft {
-            question: text("Fiktiver Entwurf: Wo treffen wir uns?"),
+            question: text("Wo treffen wir uns?"),
             options: page([text("Im Studio"), text("Im Garten")]),
             max_votes: 1,
             hidden_results: false,
@@ -182,7 +182,7 @@ pub(super) fn poll_details(snapshot: &mut PresentationSnapshot) {
     let Some(mut poll) = snapshot.content_panel.polls.as_slice().first().cloned() else {
         return;
     };
-    poll.question = text("Fiktive Umfrage: Was soll unser gemeinsamer Raum bieten?");
+    poll.question = text("Was soll unser gemeinsamer Raum bieten?");
     poll.closed = true;
     poll.max_votes = 0;
     poll.voters = Some(6);
@@ -329,7 +329,7 @@ pub(super) fn transfer(snapshot: &mut PresentationSnapshot) {
             message: 102,
             placeholder: text("document"),
         },
-        name: text("Fiktive Übertragungsansicht.pdf"),
+        name: text("Raumkonzept.pdf"),
         received: 3 * 1024 * 1024,
         total: Some(8 * 1024 * 1024),
         state: DownloadState::Transferring,

@@ -35,6 +35,15 @@ def replace_once(path, old, new):
 
 def instrument(tree):
     fixture = tree / "apps/desktop/src/composition/fixtures.rs"
+    # Both revisions must exercise the same text and glyphs, even when the
+    # candidate has improved the user-facing fixture copy.
+    old_copy = '"Fiktiver Verlauf für die lokale Navigation."'
+    workload_copy = '"Notizen aus der gemeinsamen Planung."'
+    fixture_text = fixture.read_text()
+    if old_copy in fixture_text:
+        replace_once(fixture, old_copy, workload_copy)
+    elif fixture_text.count(workload_copy) != 1:
+        raise RuntimeError(f"Expected the reviewed history text in {fixture}")
     replace_once(fixture,
         'if scenario.starts_with("history") {\n        s.messages = page((1..=40).map(|n| {',
         'if scenario.starts_with("history") {\n        s.messages = page((1..=100).map(|n| {')

@@ -517,7 +517,7 @@ impl Desktop {
             "chat-reminder-menu" => self.message_ui.fixture_menu_pending = true,
             "chat-schedule-time" => {
                 self.composer.update(cx, |input, cx| {
-                    input.set_context_value("Fiktive Nachricht für morgen.");
+                    input.set_context_value("Notizen morgen teilen.");
                     cx.notify();
                 });
                 self.open_message_deadline(None, None, window, cx);

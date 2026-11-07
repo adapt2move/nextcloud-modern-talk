@@ -343,11 +343,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('calendar cancellation retains the message', ['Hier treffen wir uns.'], ['Später erinnern'])
     elif scenario == 'chat-schedule-time':
-        expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Fiktive Nachricht für morgen.'])
+        expect('send-later opens a calendar beside the draft', ['Nachricht planen', 'Januar', 'Notizen morgen teilen.'])
         key('Escape')
-        expect('cancelling send-later retains the draft', ['Fiktive Nachricht für morgen.'], ['Nachricht planen'])
+        expect('cancelling send-later retains the draft', ['Notizen morgen teilen.'], ['Nachricht planen'])
         type_text('X')
-        expect('send-later cancellation returns focus to the composer', ['Fiktive Nachricht für morgen.X'])
+        expect('send-later cancellation returns focus to the composer', ['Notizen morgen teilen.X'])
     elif scenario == 'thread-message-tools':
         expect('thread translation and account navigation coexist',
                ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
@@ -516,11 +516,11 @@ def exercise(scenario, env, xid, out, label, large=False):
         key('Escape')
         expect('Escape closes the conversation settings', ['Designteam'], ['Gesprächsdetails'])
     elif scenario == 'poll-drafts':
-        expect('draft list is separate from the poll form', ['Fiktiver Entwurf'], ['Antwortoption'])
+        expect('draft list is separate from the poll form', ['Wo treffen wir uns?'], ['Antwortoption'])
         click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
-        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Fiktiver Entwurf'])
+        expect('draft toggle returns to the poll form', ['Frage', 'Antwortoption'], ['Wo treffen wir uns?'])
         click('Entwürfe', xmin=700, inspected_point=(1280, 800, 840, 138))
-        expect('draft toggle reopens the saved list', ['Fiktiver Entwurf'], ['Antwortoption'])
+        expect('draft toggle reopens the saved list', ['Wo treffen wir uns?'], ['Antwortoption'])
     elif scenario == 'poll-details':
         expect('public poll offers voter expansion', ['Umfragedetails', 'Stimmen anzeigen'])
         # The first result's voter list in the fixed 1280x800 fixture.
@@ -537,7 +537,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('closing asks for confirmation', ['Umfrage wirklich beenden'])
         click('Jetzt', inspected_point=(1280, 800, 405, 638))
         expect('confirmed fictional close keeps the poll and disables voting',
-               ['Umfrage beendet', 'Fiktive Umfrage'], ['Umfrage beenden'])
+               ['Umfrage beendet', 'Welcher Entwurf'], ['Umfrage beenden'])
         log = (out / f'{label}.log').read_text()
         if log.count('UI_POLL_FIXTURE vote poll=9001 no_backend=true') != 1 or \
                 log.count('UI_POLL_FIXTURE close poll=9001 no_backend=true') != 1:
