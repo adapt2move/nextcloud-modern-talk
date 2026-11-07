@@ -829,7 +829,7 @@ impl NextcloudClient {
                 if let Some(send) = self.sends.iter_mut().find(|s| s.operation == operation) {
                     send.state = state
                 }
-                Ok((SendReceipt { operation, state }, Some(message)))
+                Ok((SendReceipt { operation, state }, Some(*message)))
             }
             Ok(_) => Err(self.error(ErrorKind::Uncertain)),
             Err(e) => {
@@ -1988,7 +1988,7 @@ impl NextcloudClient {
                 })
             }
             api::Reply::Message(message) => Ok(R::Message(Box::new(
-                self.details(message, id, &room, caps)?,
+                self.details(*message, id, &room, caps)?,
             ))),
             api::Reply::Chat(WireResponse::Mentions(values)) => {
                 let mut out = Page::empty();
