@@ -51,11 +51,12 @@ not establish native UI, macOS input, production TLS or media behavior.
 
 If needed, `access.py fetch --directory ... --file credentials.json` (or `fixtures.json`, `manifest.json`, `login-flow.json`, `app-password.json`) copies the named file privately without printing it. Never put secrets in command arguments, logs, screenshots or reports.
 
-## Direct-message status check
+## Presence and typing checks
 
 The opt-in status runner creates a synthetic direct conversation and status,
 then reads it and changes the current user's availability, custom and predefined
-messages through the Rust adapter.
+messages through the Rust adapter. Two users also exchange room-scoped typing
+events, including idle expiry, explicit stop and privacy changes.
 It removes the owned backend
 and private fixture on completion:
 
@@ -65,6 +66,17 @@ python3 tests/lab/presence.py --profile r35 --output /absolute/new/presence-resu
 
 Use `--profile all` to exercise both pinned server families. This is a backend
 check; it does not qualify native presentation or accessibility.
+
+For the external signaling route, this separate runner adds the pinned HPB
+2.1.1 image to the same isolated network and repeats the typed adapter checks:
+
+```sh
+python3 tests/lab/typing_hpb.py --profile r35 --output /absolute/new/hpb-typing-results
+```
+
+The runner uses loopback-only relays and publishes no container ports. It
+configures no MCU and tests neither calls nor media. Its HTTP loopback fixture
+does not qualify production TLS.
 
 ## Browser authorization preparation
 
@@ -83,4 +95,4 @@ python3 tests/lab/dev.py stop --state /run/nmtlab-RUN/state.json
 
 Remove separately copied credentials and verify no owned containers, volumes, runtime files or access tunnels remain. In the managed agent workflow, retrieve sanitized results, inspect session stats and hibernate the assigned environment only after secret-bearing cleanup. Preserve recovery snapshots and unrelated sessions. Hibernation alone does not delete credentials or data.
 
-HPB/TURN, native capture, real calls, production TLS, macOS storage/permissions, accessibility and performance need separate qualification. HTTP call-control success is not media exchange.
+HPB media/TURN, native capture, real calls, production TLS, macOS storage/permissions, accessibility and performance need separate qualification. HTTP call-control success is not media exchange.

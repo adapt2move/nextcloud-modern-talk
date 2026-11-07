@@ -5,8 +5,6 @@ mod content_images;
 mod content_video;
 mod files;
 mod fixtures;
-#[cfg(test)]
-pub(crate) use fixtures::snapshot as test_snapshot;
 mod lifecycle;
 mod preferences;
 mod updates;

@@ -306,7 +306,7 @@ async fn direct_room_list_exposes_server_status() {
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires the disposable presence lab fixture"]
-async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
+async fn signaling_typing_is_room_scoped_and_respects_privacy() {
     use std::time::{Duration, Instant};
     let root = std::env::var_os("NMT_FIXTURE_DIR").expect("private fixture directory");
     let runtime = NetworkRuntime::new(ClockEpoch::from_local(911));
@@ -330,6 +330,7 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
         runtime.clone(),
     )
     .unwrap();
+    let alice_direct = alice.fixture_conversation().unwrap();
     let context = |scope| {
         let mut deadline = runtime.now();
         deadline.millis += 20_000;
@@ -363,9 +364,23 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
             .await
             .unwrap();
     }
-    let end = Instant::now() + Duration::from_secs(45);
+    let end = Instant::now() + Duration::from_secs(60);
     let mut observed = false;
+    let mut retry_alice = Instant::now();
+    let mut retry_bob = Instant::now();
     while Instant::now() < end {
+        if let ProtocolReply::Typing(state) = bob
+            .request(context(bob_scope), ProtocolRequest::PollTyping(bob_room))
+            .await
+            .unwrap()
+            && !state.running
+            && Instant::now() >= retry_bob
+        {
+            let _ = bob
+                .request(context(bob_scope), ProtocolRequest::WatchTyping(bob_room))
+                .await;
+            retry_bob = Instant::now() + Duration::from_secs(2);
+        }
         let _ = bob
             .request(
                 context(bob_scope),
@@ -382,14 +397,25 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
             )
             .await
             .unwrap()
-            && observation
+        {
+            if observation
                 .people
                 .as_slice()
                 .iter()
                 .any(|person| person.name.as_str() == "lab_bob")
-        {
-            observed = true;
-            break;
+            {
+                observed = true;
+                break;
+            }
+            if !observation.running && Instant::now() >= retry_alice {
+                let _ = alice
+                    .request(
+                        context(alice_scope),
+                        ProtocolRequest::WatchTyping(alice_room),
+                    )
+                    .await;
+                retry_alice = Instant::now() + Duration::from_secs(2);
+            }
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
@@ -397,6 +423,65 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
         observed,
         "remote typing should arrive from the joined participant"
     );
+    let ProtocolReply::Typing(other_room) = alice
+        .request(
+            context(alice_scope),
+            ProtocolRequest::PollTyping(alice_direct),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("other-room observation")
+    };
+    assert!(!other_room.running && other_room.people.as_slice().is_empty());
+
+    // No more activity renewals: the sender's lease must retire on idle.
+    let end = Instant::now() + Duration::from_secs(12);
+    let mut idle_cleared = false;
+    while Instant::now() < end {
+        if let ProtocolReply::Typing(observation) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            .unwrap()
+            && observation.running
+            && observation.people.as_slice().is_empty()
+        {
+            idle_cleared = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(idle_cleared, "idle must clear the indicator");
+    let end = Instant::now() + Duration::from_secs(12);
+    let mut restarted = false;
+    while Instant::now() < end {
+        bob.request(
+            context(bob_scope),
+            ProtocolRequest::TypingActivity {
+                conversation: bob_room,
+                active: true,
+            },
+        )
+        .await
+        .unwrap();
+        if let ProtocolReply::Typing(observation) = alice
+            .request(
+                context(alice_scope),
+                ProtocolRequest::PollTyping(alice_room),
+            )
+            .await
+            .unwrap()
+            && !observation.people.as_slice().is_empty()
+        {
+            restarted = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(restarted, "new typing should become visible after idle");
     bob.request(
         context(bob_scope),
         ProtocolRequest::TypingActivity {
@@ -406,7 +491,7 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
     )
     .await
     .unwrap();
-    let end = Instant::now() + Duration::from_secs(12);
+    let end = Instant::now() + Duration::from_secs(4);
     let mut cleared = false;
     while Instant::now() < end {
         if let ProtocolReply::Typing(observation) = alice
@@ -416,6 +501,7 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
             )
             .await
             .unwrap()
+            && observation.running
             && observation.people.as_slice().is_empty()
         {
             cleared = true;
@@ -444,6 +530,27 @@ async fn internal_signaling_typing_is_room_scoped_and_respects_privacy() {
         .await
         .is_err()
     );
+    alice
+        .request(
+            context(alice_scope),
+            ProtocolRequest::SetPreference {
+                request: RequestId(1000),
+                change: AccountPreferenceChange::ShareTypingStatus(false),
+            },
+        )
+        .await
+        .unwrap();
+    let ProtocolReply::Typing(observation) = alice
+        .request(
+            context(alice_scope),
+            ProtocolRequest::PollTyping(alice_room),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("typing observation")
+    };
+    assert!(!observation.running && observation.people.as_slice().is_empty());
     alice
         .request(context(alice_scope), ProtocolRequest::StopTyping)
         .await

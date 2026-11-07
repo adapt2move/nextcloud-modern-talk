@@ -1,5 +1,7 @@
 //! One room-scoped, keyboard-accessible person card. Member authority stays in
 //! the account owner and is revalidated again before a direct room is created.
+#[cfg(test)]
+use super::state::tests::draft_snapshot;
 use super::{
     ButtonStyle, Desktop, LocalAction,
     controls::{Availability, scoped_id},
@@ -782,15 +784,23 @@ mod tests {
 
     #[test]
     fn group_card_call_requires_matching_creation_and_current_direct_permission() {
-        let mut snapshot = crate::composition::test_snapshot(Some("people-card"));
+        let mut snapshot = draft_snapshot();
         let source = snapshot.selected.unwrap();
-        let target = snapshot
-            .conversations
-            .as_slice()
-            .iter()
-            .find(|row| row.kind == ConversationKind::Direct)
-            .unwrap()
-            .context;
+        let mut direct = snapshot.conversations.as_slice()[0].clone();
+        direct.context.conversation.local = 2;
+        direct.kind = ConversationKind::Direct;
+        let target = direct.context;
+        direct.call_scope = Some(talk_core::ui::CallScope {
+            account: target.account,
+            conversation: target.conversation,
+            call: talk_core::ui::CallGeneration::from_local(1),
+        });
+        let mut rooms = talk_core::ui::Page::empty();
+        rooms
+            .try_push(snapshot.conversations.as_slice()[0].clone())
+            .unwrap();
+        rooms.try_push(direct).unwrap();
+        snapshot.conversations = rooms;
         let now = Instant::now();
         let mut pending = PendingCall {
             source,

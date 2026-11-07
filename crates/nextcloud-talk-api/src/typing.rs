@@ -218,7 +218,12 @@ fn map_people(members: &[Participant], typing: &[PeerSession], own: &str) -> Vec
     result
 }
 async fn run(mut client: Client, shared: Arc<Shared>) {
-    let _ = run_inner(&mut client, &shared).await;
+    let result = run_inner(&mut client, &shared).await;
+    #[cfg(feature = "backend-test")]
+    if let Err(error) = &result {
+        eprintln!("typing lab watch ended: {:?}", error.kind);
+    }
+    let _ = result;
     shared.cancel.cancel();
     if let Ok(mut people) = shared.people.lock() {
         people.clear();
@@ -359,64 +364,70 @@ async fn run_inner(client: &mut Client, shared: &Arc<Shared>) -> Result<(), Erro
     let mut next_policy = Instant::now() + Duration::from_secs(10);
     let mut last_sent = None;
     let mut sent = false;
-    loop {
-        if shared.cancel.is_cancelled() || shared.account_cancel.is_cancelled() {
-            break;
-        }
-        let now = Instant::now();
-        if now >= next_privacy {
-            let ctx = context(client, shared, 5000, false);
-            let Reply::Capabilities(caps) = client.request(&ctx, Request::Capabilities).await?
-            else {
-                break;
-            };
-            if !caps.supported_protocol()
-                || !caps.supports("typing-privacy")
-                || caps.typing_privacy != Some(0)
-            {
+    // Even a cancelled or failed policy refresh must go through the best-effort
+    // stop below before the chat session is retired.
+    let result: Result<(), Error> = async {
+        loop {
+            if shared.cancel.is_cancelled() || shared.account_cancel.is_cancelled() {
                 break;
             }
-            next_privacy = Instant::now() + Duration::from_secs(15);
-        }
-        if now >= next_policy {
-            refresh_room_policy(client, shared).await?;
-            next_policy = Instant::now() + Duration::from_secs(10);
-        }
-        if now >= next_members {
-            let ctx = context(client, shared, 5000, false);
-            if let Ok(Reply::Participants(value)) = client
-                .request(&ctx, Request::Participants(shared.room.clone()))
-                .await
+            let now = Instant::now();
+            if now >= next_privacy {
+                let ctx = context(client, shared, 5000, false);
+                let Reply::Capabilities(caps) = client.request(&ctx, Request::Capabilities).await?
+                else {
+                    break;
+                };
+                if !caps.supported_protocol()
+                    || !caps.supports("typing-privacy")
+                    || caps.typing_privacy != Some(0)
+                {
+                    break;
+                }
+                next_privacy = Instant::now() + Duration::from_secs(15);
+            }
+            if now >= next_policy {
+                refresh_room_policy(client, shared).await?;
+                next_policy = Instant::now() + Duration::from_secs(10);
+            }
+            if now >= next_members {
+                let ctx = context(client, shared, 5000, false);
+                if let Ok(Reply::Participants(value)) = client
+                    .request(&ctx, Request::Participants(shared.room.clone()))
+                    .await
+                {
+                    members = value;
+                }
+                next_members = Instant::now() + Duration::from_secs(10);
+            }
+            let active =
+                shared.can_send.load(std::sync::atomic::Ordering::Acquire) && desired(shared, now);
+            if active != sent
+                || (active
+                    && last_sent.is_none_or(|last: Instant| {
+                        now.saturating_duration_since(last) >= Duration::from_secs(2)
+                    }))
             {
-                members = value;
+                let ctx = context(client, shared, 2000, false);
+                if link.send(client, &ctx, active).await.is_ok() {
+                    sent = active;
+                    last_sent = Some(now);
+                }
             }
-            next_members = Instant::now() + Duration::from_secs(10);
-        }
-        let active =
-            shared.can_send.load(std::sync::atomic::Ordering::Acquire) && desired(shared, now);
-        if active != sent
-            || (active
-                && last_sent.is_none_or(|last: Instant| {
-                    now.saturating_duration_since(last) >= Duration::from_secs(2)
-                }))
-        {
-            let ctx = context(client, shared, 2000, false);
-            if link.send(client, &ctx, active).await.is_ok() {
-                sent = active;
-                last_sent = Some(now);
+            let sessions = link.sessions();
+            let people = map_people(&members, &sessions, client.transport.user());
+            if let Ok(mut current) = shared.people.lock() {
+                *current = people;
             }
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        let sessions = link.sessions();
-        let people = map_people(&members, &sessions, client.transport.user());
-        if let Ok(mut current) = shared.people.lock() {
-            *current = people;
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        Ok(())
     }
+    .await;
     if sent && !shared.account_cancel.is_cancelled() {
         let ctx = context(client, shared, 1000, true);
         let _ = link.send(client, &ctx, false).await;
     }
     drop(link);
-    Ok(())
+    result
 }
