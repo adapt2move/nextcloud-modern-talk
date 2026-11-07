@@ -1466,6 +1466,7 @@ mod action_tests {
             invitation(scope).call.as_ref().unwrap(),
             &text("Synthetic call"),
             false,
+            None,
         ));
         model.breakout_leave = Some(BreakoutLeave {
             scope,

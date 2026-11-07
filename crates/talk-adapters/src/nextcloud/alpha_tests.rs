@@ -1547,6 +1547,8 @@ async fn federation_chat_uses_remote_capabilities_before_read_and_send() {
 async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
     for major in [34, 35] {
         let mut capabilities = caps(major);
+        let include_status = major == 35;
+        capabilities["capabilities"]["user_status"] = json!({"enabled": include_status});
         capabilities["capabilities"]["spreed"]["features"]
             .as_array_mut()
             .unwrap()
@@ -1633,6 +1635,14 @@ async fn breakout_modes_assignments_and_broadcast_use_scoped_rooms() {
             matches!(broadcast, ProtocolReply::ConversationSettings { result: CR::BreakoutRooms(ref rooms), .. } if rooms.as_slice().len() == 1)
         );
         let seen = server.seen.lock().unwrap();
+        // Assignment refresh must use the same capability gate as the initial
+        // member read, including when user status is disabled by the server.
+        for index in [2, 5] {
+            assert_eq!(
+                String::from_utf8_lossy(&seen[index]).contains("includeStatus=true"),
+                include_status
+            );
+        }
         let configure = String::from_utf8_lossy(&seen[6]);
         assert!(configure.contains("mode=2"));
         assert!(configure.contains("attendeeMap=%7B%2242%22%3A0%7D"));

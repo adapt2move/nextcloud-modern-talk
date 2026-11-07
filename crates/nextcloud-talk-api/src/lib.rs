@@ -210,7 +210,7 @@ pub enum Reply {
     Account(Account),
     Capabilities(Capabilities),
     Rooms(Vec<Room>),
-    Room(Room),
+    Room(Box<Room>),
     Participants(Vec<Participant>),
     History {
         messages: Vec<Message>,
@@ -218,7 +218,7 @@ pub enum Reply {
         /// Missing header is None; explicit unavailability is Some(0).
         common_read: Option<u64>,
     },
-    Message(Message),
+    Message(Box<Message>),
     RoomSession(RoomSession),
     Tags(Vec<Tag>),
     Tag(Tag),
@@ -343,7 +343,7 @@ impl Client {
     fn observe_rooms(&mut self, reply: &Reply) -> Result<(), Error> {
         let observed = match reply {
             Reply::Rooms(rooms) => rooms.as_slice(),
-            Reply::Room(room) => std::slice::from_ref(room),
+            Reply::Room(room) => std::slice::from_ref(room.as_ref()),
             _ => return Ok(()),
         };
         let mut tokens = Vec::with_capacity(observed.len());
@@ -1377,7 +1377,7 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
         Kind::Room => {
             let mut room = Room::decode(v)?;
             room.incomplete_invitations |= r.status == 202;
-            Reply::Room(room)
+            Reply::Room(Box::new(room))
         }
         Kind::Participants => Reply::Participants(list(v, 100, Participant::decode)?),
         Kind::History => Reply::History {
@@ -1385,12 +1385,12 @@ fn decode(kind: Kind, r: transport::Response) -> Result<Reply, ErrorKind> {
             last_given: r.last_given,
             common_read: r.common_read,
         },
-        Kind::Message => Reply::Message(Message::decode(v)?),
+        Kind::Message => Reply::Message(Box::new(Message::decode(v)?)),
         Kind::OptionalMessage => {
             if v.is_null() {
                 Reply::Acknowledged
             } else {
-                Reply::Message(Message::decode(v)?)
+                Reply::Message(Box::new(Message::decode(v)?))
             }
         }
         Kind::Session => {
