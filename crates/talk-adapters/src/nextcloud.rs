@@ -789,7 +789,10 @@ impl NextcloudClient {
                 }
                 self.subscribed_threads(context, offset)
                     .await
-                    .map(ProtocolReply::SubscribedThreads)
+                    .map(|(threads, has_next)| ProtocolReply::SubscribedThreads {
+                        threads,
+                        has_next,
+                    })
             }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,

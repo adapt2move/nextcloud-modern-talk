@@ -1814,7 +1814,7 @@ impl NextcloudClient {
         &mut self,
         context: &OperationContext,
         offset: u32,
-    ) -> Result<Page<Thread, 50>, PortError> {
+    ) -> Result<(Page<Thread, 50>, bool), PortError> {
         let reply = self
             .transport
             .api_request(context, api::Request::SubscribedThreads { offset })
@@ -1822,21 +1822,26 @@ impl NextcloudClient {
         let api::Reply::Chat(WireResponse::Threads(threads)) = reply else {
             return Err(self.error(ErrorKind::Malformed));
         };
+        // Pagination follows the raw server page, even when some rooms are not
+        // in the bounded local room registry and must not enter the projection.
+        let has_next = threads.len() == 50;
         let mut result = Page::empty();
         for thread in threads {
             // A server token alone does not grant room authority. Only use bindings
             // established by the account's conversation owner.
-            let id = self
+            let Some(id) = self
                 .rooms
                 .iter()
                 .find(|room| room.token == thread.token)
                 .map(|room| room.id)
-                .ok_or_else(|| self.error(ErrorKind::NotFound))?;
+            else {
+                continue;
+            };
             result
                 .try_push(self.thread(thread, id)?)
                 .map_err(|_| self.error(ErrorKind::TooLarge))?;
         }
-        Ok(result)
+        Ok((result, has_next))
     }
 
     fn thread(&self, t: api::chat::Thread, id: ConversationId) -> Result<Thread, PortError> {

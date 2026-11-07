@@ -7,6 +7,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Los archivos adjuntos en hilos aún no están disponibles.",
     ),
     (
+        "Keine Threads auf dieser Seite.",
+        "No threads on this page.",
+        "No hay hilos en esta página.",
+    ),
+    (
         "Keine abonnierten Threads.",
         "No followed threads.",
         "No hay hilos seguidos.",

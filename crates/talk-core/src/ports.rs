@@ -202,7 +202,11 @@ pub enum ProtocolReply {
     },
     IncomingCalls(crate::calls::IncomingCalls),
     MessageNotifications(crate::protocol::MessageNotifications),
-    SubscribedThreads(crate::bounded::Page<crate::protocol::messaging::Thread, 50>),
+    SubscribedThreads {
+        threads: crate::bounded::Page<crate::protocol::messaging::Thread, 50>,
+        /// Based on the server page before unbound rooms are excluded.
+        has_next: bool,
+    },
     LiveEvents(crate::protocol::AccountLiveEvents),
     Meeting(crate::calls::Snapshot),
     AccountValid(AccountScope),

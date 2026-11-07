@@ -46,18 +46,60 @@ async fn subscribed_threads_require_capability_and_known_account_room() {
         if !enabled {
             assert_eq!(result.unwrap_err().kind, ErrorKind::Unsupported);
             assert_eq!(server.count(), 1);
-        } else if token == "otherroom" {
-            assert_eq!(result.unwrap_err().kind, ErrorKind::NotFound);
         } else {
-            let ProtocolReply::SubscribedThreads(page) = result.unwrap() else {
+            let ProtocolReply::SubscribedThreads { threads, has_next } = result.unwrap() else {
                 panic!("threads")
             };
-            assert_eq!(page.as_slice().len(), 1);
-            assert_eq!(page.as_slice()[0].root.conversation, conversation);
-            assert_eq!(page.as_slice()[0].root.sequence, 42);
-            assert_eq!(page.as_slice()[0].replies, 2);
+            assert!(!has_next);
+            if token == "otherroom" {
+                assert!(threads.as_slice().is_empty());
+            } else {
+                assert_eq!(threads.as_slice().len(), 1);
+                assert_eq!(threads.as_slice()[0].root.conversation, conversation);
+                assert_eq!(threads.as_slice()[0].root.sequence, 42);
+                assert_eq!(threads.as_slice()[0].replies, 2);
+            }
         }
     }
+}
+
+#[tokio::test]
+async fn subscribed_threads_skip_unbound_rooms_without_ending_pagination() {
+    let threads: Vec<_> = (1..=50)
+        .map(|id| {
+            json!({
+                "thread": {
+                    "id": id,
+                    "roomToken": if id == 1 { "testroom" } else { "otherroom" },
+                    "title": "Topic",
+                    "numReplies": 2
+                },
+                "attendee": {"notificationLevel": 1}
+            })
+        })
+        .collect();
+    let server = Server::start(vec![
+        Reply::data(features(&["threads"])),
+        Reply::data(json!(threads)),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let ProtocolReply::SubscribedThreads { threads, has_next } = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::SubscribedThreads { offset: 0 },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("threads")
+    };
+    assert!(has_next);
+    assert_eq!(threads.as_slice().len(), 1);
+    assert_eq!(threads.as_slice()[0].root.conversation, conversation);
+    assert_eq!(threads.as_slice()[0].root.sequence, 1);
 }
 
 #[tokio::test]

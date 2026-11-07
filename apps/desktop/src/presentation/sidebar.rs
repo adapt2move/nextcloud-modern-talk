@@ -1026,7 +1026,12 @@ impl Desktop {
         if self.snapshot.threads.content == ContentState::Ready
             && self.snapshot.threads.entries.as_slice().is_empty()
         {
-            rows = rows.child(self.hint(self.l("Keine abonnierten Threads.")));
+            let label = if self.snapshot.threads.offset > 0 || self.snapshot.threads.has_next {
+                "Keine Threads auf dieser Seite."
+            } else {
+                "Keine abonnierten Threads."
+            };
+            rows = rows.child(self.hint(self.l(label)));
         }
         if matches!(
             self.snapshot.threads.content,

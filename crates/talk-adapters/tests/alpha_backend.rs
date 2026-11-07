@@ -810,7 +810,10 @@ async fn released_server_messaging_and_room_controls() {
     else {
         panic!("conversation list")
     };
-    let ProtocolReply::SubscribedThreads(subscribed) = client
+    let ProtocolReply::SubscribedThreads {
+        threads: subscribed,
+        ..
+    } = client
         .request(
             context(&runtime),
             ProtocolRequest::SubscribedThreads { offset: 0 },

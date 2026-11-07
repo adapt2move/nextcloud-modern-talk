@@ -90,7 +90,7 @@ impl Accounts {
         }
         let mut retry = false;
         match result {
-            Ok(RuntimeReply::Protocol(ProtocolReply::SubscribedThreads(threads)))
+            Ok(RuntimeReply::Protocol(ProtocolReply::SubscribedThreads { threads, has_next }))
                 if threads.as_slice().iter().all(|thread| {
                     thread.root.conversation.account == scope.account
                         && thread.root.sequence > 0
@@ -101,7 +101,7 @@ impl Accounts {
                 }) =>
             {
                 self.snapshot.threads.offset = offset;
-                self.snapshot.threads.has_next = threads.as_slice().len() == 50;
+                self.snapshot.threads.has_next = has_next;
                 self.snapshot.threads.entries =
                     page(threads.as_slice().iter().filter_map(|thread| {
                         let context = ConversationRef {
