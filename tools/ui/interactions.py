@@ -229,10 +229,10 @@ def exercise(scenario, env, xid, out, label, large=False):
         click('suchen', xmin=285, ymin=200, inspected_point=(1280, 800, 450, 256))
         type_text('Workshop')
         time.sleep(.7)  # Allow the 250 ms debounce and the native owner ticks.
-        expect('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
+        expect_settled('debounced search changes the listing', ['Workshop.png'], ['Projektübersicht.pdf'])
         key('ctrl+a'); key('BackSpace')
         time.sleep(.7)
-        expect('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
+        expect_settled('clearing search restores the root listing', ['Projektübersicht.pdf', 'Workshop.png'])
         # The file row is visible in dark and light captures, but low contrast
         # can make Tesseract miss its name. Verify the resulting selection below.
         click('Projektübersicht.pdf', inspected_point=(1280, 800, 400, 580))
@@ -261,11 +261,11 @@ def exercise(scenario, env, xid, out, label, large=False):
                            input=value, text=True, env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, check=True, timeout=10)
             key('ctrl+v')
-            expect('poll field retains pasted text', [value])
+            expect_settled('poll field retains pasted text', [value])
         expect('completed poll keeps both distinct choices', ['TEAM LUNCH', 'GARDEN', 'STUDIO'],
                ['Mindestens zwei unterschiedliche Antwortoptionen'])
         click('Veröffentlichen', inspected_point=(1280, 800, 865, 655))
-        expect('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
+        expect_settled('accepted fictional poll closes the dialog', ['Designteam'], ['Umfrage erstellen'])
     elif scenario == 'poll-settings':
         expect('conversation settings offers poll creation', ['Allgemein', 'Umfrage erstellen'])
         click('erstellen', inspected_point=(1280, 800, 540, 548))
