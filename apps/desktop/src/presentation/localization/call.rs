@@ -28,6 +28,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "La grabación ha fallado",
     ),
     (
+        "Aufzeichnung fehlgeschlagen. Bitte die moderierende Person, sie zu prüfen.",
+        "Recording failed. Ask the moderator to check it.",
+        "La grabación ha fallado. Pide a la persona moderadora que la compruebe.",
+    ),
+    (
         "Aufzeichnung läuft",
         "Recording in progress",
         "Grabación en curso",

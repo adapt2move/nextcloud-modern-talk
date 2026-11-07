@@ -145,6 +145,7 @@ pub const SCENARIOS: &[&str] = &[
     "call-screen-stage",
     "call-recording",
     "call-recording-confirm",
+    "call-recording-failed",
     "call-end-confirm",
     "call-reactions",
     "call-active",
@@ -833,6 +834,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             | "call-screen-stage"
             | "call-recording"
             | "call-recording-confirm"
+            | "call-recording-failed"
             | "call-end-confirm"
             | "call-reactions"
             | "sharing"
@@ -913,10 +915,10 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             } else {
                 None
             },
-            recording: if scenario == "call-recording" {
-                talk_core::ui::presentation::CallRecordingState::Active
-            } else {
-                talk_core::ui::presentation::CallRecordingState::Unknown
+            recording: match scenario {
+                "call-recording" => talk_core::ui::presentation::CallRecordingState::Active,
+                "call-recording-failed" => talk_core::ui::presentation::CallRecordingState::Failed,
+                _ => talk_core::ui::presentation::CallRecordingState::Unknown,
             },
             recording_control: match scenario {
                 "call-participants-raised" | "call-recording-confirm" => Some(true),

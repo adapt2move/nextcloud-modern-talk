@@ -1036,6 +1036,15 @@ impl Desktop {
                     )
                     .when(call.end_pending || call.end_failed, |d| d.child(div().px_5().py_2().text_size(self.sp(12.))
                         .child(self.l(if call.end_pending { "Anruf wird für alle beendet …" } else { "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde." }))))
+                    .when_some(
+                        match call.recording {
+                            talk_core::ui::presentation::CallRecordingState::Starting => Some("Aufzeichnung startet …"),
+                            talk_core::ui::presentation::CallRecordingState::Stopping => Some("Aufzeichnung wird beendet …"),
+                            talk_core::ui::presentation::CallRecordingState::Failed => Some("Aufzeichnung fehlgeschlagen. Bitte die moderierende Person, sie zu prüfen."),
+                            _ => None,
+                        },
+                        |d, status| d.child(div().flex_none().px_5().py_2().text_size(self.sp(12.)).child(self.l(status))),
+                    )
                     .when(self.local_feedback_visible(), |d| {
                         d.child(
                             div()
