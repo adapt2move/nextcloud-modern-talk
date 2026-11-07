@@ -28,7 +28,10 @@ impl Desktop {
 
     /// Common opaque dialog panel; callers own geometry, contents and focus.
     pub(in crate::presentation) fn dialog_shell_surface(&self) -> Div {
-        div()
+        self.style_dialog_shell(div())
+    }
+    pub(in crate::presentation) fn style_dialog_shell<T: Styled>(&self, surface: T) -> T {
+        surface
             .bg(self.theme.surface)
             .rounded(px(13.))
             .border_1()
