@@ -115,6 +115,7 @@ pub enum LocalAction {
     ToggleCallChat,
     ToggleCallParticipants,
     ToggleCallModeration,
+    ToggleCallSecondary,
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
     ConfirmRecording,
@@ -334,6 +335,7 @@ pub struct Desktop {
     pub call_chat_open: bool,
     call_participants_open: bool,
     call_moderation_open: bool,
+    call_secondary_open: bool,
     call_reactions_open: Option<CallScope>,
     call_focus: Option<(CallScope, u128)>,
     call_speaker: Option<CallScope>,
@@ -663,6 +665,7 @@ impl Desktop {
             call_chat_open: false,
             call_participants_open: false,
             call_moderation_open: false,
+            call_secondary_open: false,
             call_reactions_open: fixture_call_reaction.map(|(scope, _)| scope),
             call_focus: None,
             call_speaker,
@@ -838,6 +841,7 @@ impl Desktop {
             self.call_chat_open = false;
             self.call_participants_open = false;
             self.call_moderation_open = false;
+            self.call_secondary_open = false;
         }
         let previous = self.snapshot.selected;
         let previous_account = self.snapshot.active_account;
@@ -1757,6 +1761,9 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::ToggleCallSecondary => {
+                self.call_secondary_open = !self.call_secondary_open
+            }
             LocalAction::ToggleCallModeration => {
                 self.call_moderation_open = !self.call_moderation_open
             }
@@ -1848,6 +1855,7 @@ impl Desktop {
                     self.call_chat_open = false;
                     self.call_participants_open = false;
                     self.call_moderation_open = false;
+                    self.call_secondary_open = false;
                     None
                 };
                 if let Some(focus) = target.filter(|f| self.root_focus.contains(f, window)) {

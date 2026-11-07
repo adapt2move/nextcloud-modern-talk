@@ -95,14 +95,14 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El micrófono y la cámara permanecen apagados hasta que aceptes. Los dispositivos se activan solo después de conceder permiso.",
     ),
     (
-        "Dein Bildschirm wird geteilt.",
-        "Your screen is being shared.",
-        "Se está compartiendo tu pantalla.",
-    ),
-    (
         "Dauer {duration}",
         "Duration {duration}",
         "Duración {duration}",
+    ),
+    (
+        "Dein Bildschirm wird geteilt.",
+        "Your screen is being shared.",
+        "Se está compartiendo tu pantalla.",
     ),
     (
         "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde.",
@@ -311,6 +311,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Wartet auf Freigabe",
         "Waiting for approval",
         "Esperando autorización",
+    ),
+    (
+        "Weitere Anrufaktionen",
+        "More call actions",
+        "Más acciones de llamada",
     ),
     (
         "Wähle den Bildschirm oder das Fenster für die Freigabe.",

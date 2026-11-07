@@ -80,7 +80,7 @@ def exercise(scenario, env, xid, out, label, large=False):
     def type_text(value):
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
 
-    def click(word, xmin=0, ymin=0, inspected_point=None):
+    def click(word, xmin=0, ymin=0, inspected_point=None, dy=0):
         path, words, _ = observe()
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
         if not choices:
@@ -117,7 +117,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             print(f'Native {word} click uses inspected ({x}, {y}) in {path.name}; OCR unavailable',flush=True)
         else:
             raise AssertionError(f'Cannot locate native control {word!r}')
-        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y), 'click', '1'], env)
+        run(['xdotool', 'mousemove', '--window', xid, str(x), str(y + dy), 'click', '1'], env)
 
     if large:
         if scenario in ('chat','prejoin','settings'):
@@ -324,14 +324,14 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])
-        click('ansehen',xmin=800)
+        click('ansehen')
         expect('dismiss keeps a discoverable incoming call', ['Eingehender Anruf ansehen'], ['Annehmen'])
-        click('ansehen',xmin=800)
-        click('Annehmen',xmin=800,ymin=200,inspected_point=(1200,800,987,244))
+        click('ansehen')
+        click('Annehmen', ymin=200, dy=-36)
         expect('direct accept bypasses optional conference prejoin', ['Verbindung wird angefragt'], ['Bereit'])
         key('Escape')
         expect('escape never hangs up a call', ['Verbindung wird angefragt'])
-        click('Auflegen',inspected_point=(1200,800,862,682))
+        click('Verlassen')
         expect('explicit leave returns to conversation', ['Nachricht an Produktteam'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
@@ -375,7 +375,7 @@ def exercise(scenario, env, xid, out, label, large=False):
             raise AssertionError('Cleared recording consent was submitted')
         point(468, 437)
         key('Escape'); time.sleep(.35)
-        point(500, 235)  # Reopen from the still-required gate.
+        click('prüfen')  # Reopen from the still-required gate.
         point(660, 485)
         if consent_sent():
             raise AssertionError('Reopened consent retained an earlier selection')
@@ -393,7 +393,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
         key('Escape')
-        expect('conference prejoin cancellation returns to room', ['Nachricht an Produktteam'])
+        expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
         click('Beitreten')
         expect('explicit conference entry shows prejoin', ['Bereit', 'Jetzt', 'teil'])
         click('teilnehmen',inspected_point=(1200,800,600,695))

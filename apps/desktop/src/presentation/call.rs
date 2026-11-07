@@ -551,7 +551,14 @@ impl Desktop {
                         strip_count as f32 * 160. + strip_count.saturating_sub(1) as f32 * 12.
                     ))
                 })
-                .when(!filmstrip, |d| d.w_full())
+                .when(!filmstrip, |d| {
+                    d.w(px(f32::from(if pip { 1 } else { columns }) * tile_width
+                        + f32::from(if pip {
+                            0
+                        } else {
+                            columns.saturating_sub(1)
+                        }) * 12.))
+                })
                 // The viewport scrolls rows that cannot fit at narrow sizes.
                 .flex_none();
             for participant in call.participants.as_slice() {
@@ -613,7 +620,12 @@ impl Desktop {
                         t.stage_panel
                     })
                     .group("call-tile")
-                    .bg(t.stage_panel)
+                    .when(call.stage == CallStage::Reconnecting, |d| d.opacity(0.7))
+                    .bg(if pip && participant.self_user {
+                        t.stage
+                    } else {
+                        t.stage_panel
+                    })
                     .flex()
                     .flex_col()
                     .items_center()
@@ -977,8 +989,10 @@ impl Desktop {
             }
             primary_controls = primary_controls.child(group);
         }
+        let narrow_controls = window.viewport_size().width < px(720.) || self.scale >= 150;
+        let mut secondary_controls = div().flex().items_center().gap_2();
         if call.hand_supported {
-            primary_controls = primary_controls.child(
+            secondary_controls = secondary_controls.child(
                 self.round_icon_button(
                     "call-hand",
                     (
@@ -1004,7 +1018,7 @@ impl Desktop {
             );
         }
         if !call.hand_supported {
-            primary_controls = primary_controls.child(div().size(px(44.)));
+            secondary_controls = secondary_controls.child(div().size(px(44.)));
         }
         if !call.reactions.as_slice().is_empty() {
             let mut reaction_control = div().relative().child(
@@ -1027,7 +1041,7 @@ impl Desktop {
                     .absolute()
                     .bottom(px(54.))
                     .left(px(-72.))
-                    .w(px(192.))
+                    .w(px(320.))
                     .max_h(px(200.))
                     .overflow_y_scroll()
                     .p_2()
@@ -1039,7 +1053,7 @@ impl Desktop {
                     .flex()
                     .flex_wrap()
                     .gap_1();
-                for (index, emoji) in call.reactions.as_slice().iter().enumerate() {
+                for (index, emoji) in call.reactions.as_slice().iter().take(6).enumerate() {
                     menu = menu.child(
                         self.button(
                             ("call-reaction", index),
@@ -1052,8 +1066,9 @@ impl Desktop {
                             }),
                             cx,
                         )
-                        .min_w(px(40.))
-                        .min_h(px(40.))
+                        .min_w(px(44.))
+                        .min_h(px(44.))
+                        .text_size(self.sp(28.))
                         .p_1(),
                     );
                 }
@@ -1067,10 +1082,10 @@ impl Desktop {
             {
                 reaction_control = reaction_control.children(self.call_reaction(call.scope, None));
             }
-            primary_controls = primary_controls.child(reaction_control);
+            secondary_controls = secondary_controls.child(reaction_control);
         }
         if call.reactions.as_slice().is_empty() {
-            primary_controls = primary_controls.child(div().size(px(44.)));
+            secondary_controls = secondary_controls.child(div().size(px(44.)));
         }
         for (id, symbol, label, action) in [
             (
@@ -1081,7 +1096,7 @@ impl Desktop {
             ),
             ("call-chat", "chat", "Chat", LocalAction::ToggleCallChat),
         ] {
-            primary_controls = primary_controls.child(
+            secondary_controls = secondary_controls.child(
                 self.round_icon_button(
                     id,
                     (symbol, label),
@@ -1099,6 +1114,38 @@ impl Desktop {
                 ),
             );
         }
+        if narrow_controls {
+            let mut more = div().relative().child(
+                self.round_icon_button(
+                    "call-more",
+                    ("more", "Weitere Anrufaktionen"),
+                    ButtonStyle::Stage,
+                    Availability::available().hinted(),
+                    LocalAction::ToggleCallSecondary,
+                    cx,
+                )
+                .size(px(44.))
+                .min_h(px(44.))
+                .rounded_full(),
+            );
+            if self.call_secondary_open {
+                more = more.child(
+                    div()
+                        .absolute()
+                        .bottom(px(54.))
+                        .right(px(0.))
+                        .p_2()
+                        .rounded(px(12.))
+                        .bg(t.stage_panel)
+                        .shadow_lg()
+                        .occlude()
+                        .child(secondary_controls),
+                );
+            }
+            primary_controls = primary_controls.child(more);
+        } else {
+            primary_controls = primary_controls.child(secondary_controls);
+        }
         let controls = div()
             .flex_none()
             .flex()
@@ -1108,7 +1155,7 @@ impl Desktop {
             .py_3()
             .border_t_1()
             .border_color(t.stage_panel)
-            .child(div().w(px(120.)).flex_none())
+            .when(!narrow_controls, |d| d.child(div().w(px(120.)).flex_none()))
             .child(primary_controls)
             .child(
                 self.button_with_icon(
@@ -1210,6 +1257,7 @@ impl Desktop {
                                 cx,
                             )),
                     )
+                    .when(call.stage == CallStage::Connecting, |d| d.child(div().h(px(2.)).w_full().bg(t.stage_panel).child(div().h_full().w(gpui::relative(0.4)).bg(t.accent))))
                     .when(call.end_pending || call.end_failed, |d| d.child(div().px_5().py_2().text_size(self.sp(12.))
                         .child(self.l(if call.end_pending { "Anruf wird für alle beendet …" } else { "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde." }))))
                     .when_some(
