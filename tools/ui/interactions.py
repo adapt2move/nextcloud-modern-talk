@@ -173,6 +173,15 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('native editing replaces selection and deletes one grapheme', ['eplacement.example.test'], ['probe.example.test'])
         key('Tab')
         expect('keyboard focus can leave input')
+    elif scenario == 'accounts':
+        expect('account settings list is visible', ['Konten', 'Nord Studio'])
+        # The first account row's remove control opens a confirmation; the
+        # fictional account is not removed by this check.
+        run(['xdotool', 'mousemove', '--window', xid, '1027', '306', 'click', '1'], env)
+        expect('account removal asks for confirmation', ['Konto aus dieser App entfernen', 'Abbrechen'])
+        key('Escape')
+        expect('Escape dismisses confirmation without removing the account', ['Konten', 'Nord Studio'],
+               ['Du wirst in dieser App abgemeldet'])
     elif scenario == 'status-message':
         expect('status message editor is visible', ['Statusnachricht', 'Vorschläge'])
         click('Statusnachricht')

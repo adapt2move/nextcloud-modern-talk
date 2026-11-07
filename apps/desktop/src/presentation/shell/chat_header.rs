@@ -21,6 +21,8 @@ pub(in crate::presentation) fn surface(theme: crate::presentation::Theme) -> gpu
 }
 
 type History = Box<dyn FnOnce(Pixels, &mut Window, &mut App) -> Div>;
+// Keep partial scrolled rows away from the pinned strip's lower border.
+const TIMELINE_CLEARANCE: f32 = 16.;
 
 pub(in crate::presentation) fn scroll_under_header(
     header: Div,
@@ -93,11 +95,12 @@ impl Element for ScrollUnderHeader {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let header_height = window.layout_bounds(*header_layout).size.height;
+        let timeline_inset = (header_height + px(TIMELINE_CLEARANCE)).min(bounds.size.height);
         // Clip timeline hitboxes and paint below the measured header, without
         // caching its height or needing another frame after wrapping.
         self.header.prepaint(window, cx);
         let mut history =
-            (self.history.take().expect("one prepaint per element"))(header_height, window, cx)
+            (self.history.take().expect("one prepaint per element"))(timeline_inset, window, cx)
                 .size_full()
                 .into_any_element();
         history.layout_as_root(
@@ -111,7 +114,7 @@ impl Element for ScrollUnderHeader {
         let visible = Bounds::from_corners(
             gpui::point(
                 bounds.left(),
-                (bounds.top() + header_height).min(bounds.bottom()),
+                (bounds.top() + timeline_inset).min(bounds.bottom()),
             ),
             bounds.bottom_right(),
         );
