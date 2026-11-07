@@ -315,8 +315,8 @@ impl Desktop {
                     .h(px(36.))
                     .px_3()
                     .rounded(px(8.))
-                    .bg(t.warning_bg)
-                    .text_color(t.warning)
+                    .bg(gpui::rgb(0xfff4d6))
+                    .text_color(gpui::rgb(0x795300))
                     .flex()
                     .items_center()
                     .gap_3()
@@ -339,13 +339,13 @@ impl Desktop {
                     .h(px(32.))
                     .px_3()
                     .rounded(px(8.))
-                    .bg(t.warning_bg)
-                    .text_color(t.warning)
+                    .bg(gpui::rgb(0xfff4d6))
+                    .text_color(gpui::rgb(0x795300))
                     .text_size(self.sp(12.))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(self.scaled_icon("refresh", 16., t.warning))
+                    .child(self.scaled_icon("refresh", 16., gpui::rgb(0x795300).into()))
                     .child(self.l("Verbindung wird wiederhergestellt …"))
                     .when(
                         self.call_reconnecting_since.is_some_and(|(scope, at)| {
@@ -459,13 +459,15 @@ impl Desktop {
                     .justify_center()
                     .gap_4()
                     .child(
-                        self.person_avatar(
-                            call.participants
-                                .as_slice()
-                                .iter()
-                                .find(|p| !p.self_user)
-                                .map_or("?", |p| p.initials.as_str()),
-                            96.,
+                        self.incoming_call_avatar(
+                            self.call_stage_avatar(
+                                call.participants
+                                    .as_slice()
+                                    .iter()
+                                    .find(|p| !p.self_user)
+                                    .map_or("?", |p| p.initials.as_str()),
+                                96.,
+                            ),
                         ),
                     )
                     .child(div().text_size(self.sp(20.)).child(
@@ -670,6 +672,21 @@ impl Desktop {
                     .gap_2()
                     .p_4()
                     .child(visual)
+                    .when(call.stage == CallStage::Reconnecting, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .bottom(px(8.))
+                                .right(px(8.))
+                                .size(px(28.))
+                                .rounded_full()
+                                .bg(t.stage)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(self.scaled_icon("wifi-off", 16., t.stage_text)),
+                        )
+                    })
                     .when(participant.speaking, |d| {
                         d.child(
                             div()

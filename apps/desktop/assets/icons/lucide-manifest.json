@@ -536,6 +536,13 @@
       "transformation": "none"
     },
     {
+      "asset": "wifi-off.svg",
+      "upstream_path": "icons/wifi-off.svg",
+      "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/wifi-off.svg",
+      "sha256": "318b290106e55c3505933f434d3663524206c7a44165a89508774fba4fdbaadd",
+      "transformation": "none"
+    },
+    {
       "asset": "x.svg",
       "upstream_path": "icons/x.svg",
       "upstream_url": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/x.svg",
