@@ -159,10 +159,9 @@ impl Desktop {
             && self.directory_query.as_ref().is_some_and(|(account, q)| {
                 Some(*account) == self.snapshot.active_account && q == &self.switcher.query
             })
+            && self.switcher.record_failure(request, reason)
         {
-            if self.switcher.record_failure(request, reason) {
-                self.directory_query = None;
-            }
+            self.directory_query = None;
         }
     }
 
