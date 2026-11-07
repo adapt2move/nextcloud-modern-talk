@@ -83,6 +83,16 @@ class RecoveryLab(Lab):
                 and parts[1].strip().isdigit() and parts[2].strip() == job_class]
         self.require("recovery.reminder-job", len(jobs) == 1)
         self.occ("background-job:execute", jobs[0], "--force-execute")
+        notices = self.request("lab_alice", "GET", "/ocs/v2.php/apps/notifications/api/v2/notifications",
+                               name="recovery.reminder-notifications")
+        reminders = [item for item in notices if item.get("app") == "spreed"
+                     and item.get("object_type") == "reminder"]
+        self.current["reminder_probe"] = {
+            "count": len(reminders),
+            "object_has_message": any(len(item.get("object_id", "").split("/")) >= 2 for item in reminders),
+            "should_notify": [item.get("shouldNotify") for item in reminders],
+        }
+        self.require("recovery.reminder-event-created", bool(reminders))
 
     async def trigger_reminders(self, directory):
         async def wait_for_request():

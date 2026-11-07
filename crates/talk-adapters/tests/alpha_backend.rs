@@ -902,21 +902,31 @@ async fn released_server_messaging_and_room_controls() {
     })
     .await
     .expect("lab reminder job");
-    let ProtocolReply::MessageNotifications(observed) = client
-        .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
-        .await
-        .expect("notification observation")
-    else {
-        panic!("notification observation")
-    };
+    let mut delivered = false;
+    for _ in 0..8 {
+        let ProtocolReply::MessageNotifications(observed) = client
+            .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
+            .await
+            .expect("notification observation")
+        else {
+            panic!("notification observation")
+        };
+        println!(
+            "alpha-backend reminder-poll: source={:?} changed={} notices={}",
+            observed.source,
+            observed.changed,
+            observed.notices.as_slice().len()
+        );
+        delivered = observed.notices.as_slice().iter().any(|notice| {
+            notice.reminder && notice.conversation == id && notice.message == first.sequence
+        });
+        if delivered || !observed.changed {
+            break;
+        }
+    }
     assert!(
-        observed
-            .notices
-            .as_slice()
-            .iter()
-            .any(|notice| notice.reminder
-                && notice.conversation == id
-                && notice.message == first.sequence)
+        delivered,
+        "the new reminder must resolve to its original message"
     );
     println!("alpha-backend reminder-notification-target: pass");
     let MR::Schedule(schedule) = m(
