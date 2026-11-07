@@ -275,6 +275,12 @@ impl History {
             panel.thread_root_message = thread.root_message.clone();
         }
     }
+    pub(super) fn open_thread_root(&self, root: u128) -> Option<&MessageView> {
+        self.open_thread
+            .as_ref()
+            .filter(|thread| thread.root == root)
+            .and_then(|thread| thread.root_message.as_ref())
+    }
     pub(super) fn visible_messages(&self) -> Page<MessageView, 100> {
         page(
             self.messages

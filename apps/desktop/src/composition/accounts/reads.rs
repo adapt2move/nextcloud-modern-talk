@@ -361,20 +361,35 @@ impl Accounts {
             self.history.expire(history::now_unix());
             let cached_thread = match &job.read {
                 Read::Thread(root) => self.history.get(context).and_then(|history| {
-                    history
-                        .thread(*root)
-                        .map(|rows| (*root, rows.clone(), history.thread_root(*root).cloned()))
+                    history.thread(*root).map(|rows| {
+                        (
+                            *root,
+                            rows.clone(),
+                            history
+                                .open_thread_root(*root)
+                                .or_else(|| history.thread_root(*root))
+                                .cloned(),
+                        )
+                    })
                 }),
                 _ => None,
             };
             if let Some(panel) = self.snapshot.message_panel.as_mut() {
                 project(panel, &job, RemoteState::Loading(request), true);
-                if let Some((root, rows, root_message)) = cached_thread
-                    && panel.thread_root == Some(root)
+                if let Some((root, rows, root_message)) = cached_thread.as_ref()
+                    && panel.thread_root == Some(*root)
                 {
-                    panel.thread_messages = rows;
-                    panel.thread_root_message = root_message;
+                    panel.thread_messages = rows.clone();
+                    panel.thread_root_message = root_message.clone();
+                    // A cached tail is already the latest page; the older
+                    // page's cursor cannot describe this different window.
+                    panel.thread_has_newer = false;
+                    panel.thread_older = None;
                 }
+            }
+            if let Some((root, rows, root_message)) = cached_thread {
+                self.history
+                    .remember_open_thread(context, root, rows, root_message);
             }
             if job.read.thread_root().is_some() {
                 // Reopening a retained thread restores its current-session

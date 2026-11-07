@@ -61,6 +61,38 @@ fn older_thread_read_uses_the_current_root_and_cursor() {
 }
 
 #[test]
+fn returning_to_latest_thread_page_shows_cached_tail_before_network_admission() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let mut older = model.snapshot.messages.as_slice()[0].clone();
+    older.local_id = 10;
+    let mut latest = older.clone();
+    latest.local_id = 50;
+    let mut root = older.clone();
+    root.local_id = 7;
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(7);
+    panel.thread_messages = page([older]);
+    panel.thread_root_message = Some(root.clone());
+    panel.thread_has_newer = true;
+    panel.thread_older = Some(10);
+    model.project_history(context);
+    model
+        .history
+        .remember_thread(context, 7, page([latest.clone()]), None);
+    occupied(&mut model, Work::Thread);
+    assert!(matches!(
+        model.deliberate_read(RequestId(42), context, &view::MessageAction::Thread(7)),
+        Some(Ok(()))
+    ));
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_messages.as_slice(), &[latest]);
+    assert_eq!(panel.thread_root_message, Some(root));
+    assert!(!panel.thread_has_newer);
+    assert_eq!(panel.thread_older, None);
+}
+
+#[test]
 fn transient_thread_page_retry_preserves_the_page_and_retires_on_navigation() {
     let mut model = model();
     let context = model.snapshot.selected.unwrap();
