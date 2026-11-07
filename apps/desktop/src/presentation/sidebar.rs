@@ -932,6 +932,7 @@ impl Desktop {
             else {
                 continue;
             };
+            let unread = thread_unread(thread, room) == Some(true);
             rows = rows.child(
                 self.control(
                     scoped_id("subscribed-thread", thread.context, thread.root, 0),
@@ -943,15 +944,26 @@ impl Desktop {
                 .w_full()
                 .justify_start()
                 .p_3()
+                .gap_3()
+                .child(div().flex_none().size(px(8.)).rounded_full().bg(if unread {
+                    self.theme.accent
+                } else {
+                    gpui::transparent_black()
+                }))
                 .child(
                     div()
+                        .flex_1()
                         .flex()
                         .flex_col()
                         .items_start()
                         .min_w_0()
                         .child(
                             div()
-                                .font_weight(FontWeight::MEDIUM)
+                                .font_weight(if unread {
+                                    FontWeight::BOLD
+                                } else {
+                                    FontWeight::MEDIUM
+                                })
                                 .child(thread.title.as_str().to_owned()),
                         )
                         .child(self.hint(&format!(
@@ -959,7 +971,8 @@ impl Desktop {
                             room.title.as_str(),
                             self.count(super::localization::Count::Replies, thread.replies.into())
                         ))),
-                ),
+                )
+                .when(unread, |row| row.child(self.hint(self.l("Ungelesen")))),
             );
         }
         if self.snapshot.threads.content == ContentState::Ready
@@ -967,23 +980,67 @@ impl Desktop {
         {
             rows = rows.child(self.hint(self.l("Keine abonnierten Threads.")));
         }
-        let mut page = div()
+        if matches!(
+            self.snapshot.threads.content,
+            ContentState::Failed | ContentState::Denied
+        ) {
+            rows = rows.child(self.hint(self.l("Threads konnten nicht geladen werden.")));
+        }
+        let mut heading = div()
             .flex()
-            .flex_col()
-            .p_5()
-            .gap_3()
-            .child(self.title(self.l("Threads")));
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().child(self.title(self.l("Threads"))));
         if let Some(account) = self.snapshot.active_account {
-            page = page.child(self.button(
+            heading = heading.child(self.icon_button(
                 "refresh-threads",
-                "Threads aktualisieren",
-                ButtonStyle::Secondary,
-                self.snapshot.threads.content != ContentState::Loading,
+                ("refresh", "Threads aktualisieren"),
+                ButtonStyle::Quiet,
+                Availability::when(self.snapshot.threads.content != ContentState::Loading, ""),
                 LocalAction::Intent(talk_core::ui::presentation::UiIntent::RefreshThreads(
                     account,
                 )),
                 cx,
             ));
+        }
+        let mut page = div().flex().flex_col().p_5().gap_3().child(heading);
+        if let Some(account) = self.snapshot.active_account {
+            let list = &self.snapshot.threads;
+            if list.offset > 0 || list.has_next {
+                let ready = list.content != ContentState::Loading;
+                page = page.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(self.button(
+                            "threads-previous",
+                            "Vorherige Threads",
+                            ButtonStyle::Quiet,
+                            ready && list.offset >= 50,
+                            LocalAction::Intent(
+                                talk_core::ui::presentation::UiIntent::PageThreads {
+                                    account,
+                                    offset: list.offset.saturating_sub(50),
+                                },
+                            ),
+                            cx,
+                        ))
+                        .child(self.button(
+                            "threads-next",
+                            "Weitere Threads",
+                            ButtonStyle::Quiet,
+                            ready && list.has_next && list.offset.checked_add(50).is_some(),
+                            LocalAction::Intent(
+                                talk_core::ui::presentation::UiIntent::PageThreads {
+                                    account,
+                                    offset: list.offset.saturating_add(50),
+                                },
+                            ),
+                            cx,
+                        )),
+                );
+            }
         }
         self.content_card(
             page.child(
@@ -996,9 +1053,41 @@ impl Desktop {
     }
 }
 
+fn thread_unread(
+    thread: &talk_core::ui::presentation::ThreadView,
+    room: &talk_core::ui::presentation::ConversationView,
+) -> Option<bool> {
+    let marker = room.last_read_message?;
+    let latest = thread
+        .last_message
+        .or_else(|| (thread.replies == 0).then_some(thread.root))?;
+    Some(room.unread > 0 && latest > marker)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unread_thread_requires_a_known_room_marker_and_recent_message() {
+        let snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
+        let mut room = snapshot.conversations.as_slice()[0].clone();
+        let mut thread = snapshot.threads.entries.as_slice()[0].clone();
+        room.unread = 1;
+        room.last_read_message = Some(40);
+        thread.last_message = Some(41);
+        assert_eq!(thread_unread(&thread, &room), Some(true));
+        room.last_read_message = Some(41);
+        assert_eq!(thread_unread(&thread, &room), Some(false));
+        room.last_read_message = None;
+        assert_eq!(thread_unread(&thread, &room), None);
+        room.last_read_message = Some(40);
+        thread.last_message = None;
+        thread.replies = 2;
+        assert_eq!(thread_unread(&thread, &room), None);
+        thread.replies = 0;
+        thread.root = 41;
+        assert_eq!(thread_unread(&thread, &room), Some(true));
+    }
     #[test]
     fn direct_conversations_stay_first_and_titles_cannot_grant_a_category() {
         assert_eq!(

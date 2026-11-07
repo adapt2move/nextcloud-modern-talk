@@ -550,6 +550,8 @@ pub struct ThreadList {
     pub support: FeatureSupport,
     pub content: ContentState,
     pub entries: Page<ThreadView, 50>,
+    pub offset: u32,
+    pub has_next: bool,
 }
 impl Default for ThreadList {
     fn default() -> Self {
@@ -558,6 +560,8 @@ impl Default for ThreadList {
             support: FeatureSupport::Unknown,
             content: ContentState::Unconfigured,
             entries: Page::empty(),
+            offset: 0,
+            has_next: false,
         }
     }
 }
@@ -568,6 +572,8 @@ pub struct ThreadView {
     pub root: u128,
     pub title: Text<256>,
     pub replies: u32,
+    /// Last reply when the server supplies one; zero-reply threads use their root.
+    pub last_message: Option<u128>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -580,6 +586,10 @@ pub struct ConversationListState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiIntent {
     RefreshThreads(AccountScope),
+    PageThreads {
+        account: AccountScope,
+        offset: u32,
+    },
     /// Acknowledge or cancel only this native promise, including after navigation.
     FinishFileExport {
         request: RequestId,

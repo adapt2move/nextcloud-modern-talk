@@ -255,6 +255,7 @@ pub struct Thread {
     pub token: String,
     pub title: String,
     pub replies: u32,
+    pub last_message: Option<u64>,
     pub notification_level: Option<u8>,
 }
 #[derive(Clone, Debug)]
@@ -362,6 +363,7 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
         token,
         title: required(t, "title", 256)?,
         replies: u32::try_from(number(t, "numReplies")?).map_err(|_| ErrorKind::TooLarge)?,
+        last_message: integer(t.get("lastMessageId")).filter(|id| *id > 0),
         notification_level: integer(v.get("attendee").and_then(|a| a.get("notificationLevel")))
             .and_then(|n| u8::try_from(n).ok()),
     })

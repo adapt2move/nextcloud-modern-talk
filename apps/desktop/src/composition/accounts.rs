@@ -71,7 +71,7 @@ enum Purpose {
     RestoreAutomatic(AccountId),
     Removal(RequestId, AccountId, removal::Step),
     Rooms(AccountScope),
-    Threads(AccountScope),
+    Threads(AccountScope, u32),
     Mutation(RequestId, ConversationRef),
     Send(RequestId, ConversationRef, OperationId),
     Preferences(AccountScope, PreferenceRequest),
@@ -776,7 +776,7 @@ impl Accounts {
             }
             Purpose::Removal(request, account, step) => self.complete_removal(request, account, step, result),
             Purpose::Rooms(scope) => self.complete_rooms(scope, result),
-            Purpose::Threads(scope) => self.complete_threads(scope, result),
+            Purpose::Threads(scope, offset) => self.complete_threads(scope, offset, result),
             Purpose::Tags(scope) | Purpose::TagMutation(_, scope) => {
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Tags(tags))) if tags.scope == scope => {
@@ -983,6 +983,7 @@ impl Accounts {
         }
         match intent {
             UiIntent::RefreshThreads(scope) => self.refresh_threads(scope)?,
+            UiIntent::PageThreads { account, offset } => self.page_threads(account, offset)?,
             UiIntent::FinishFileExport { request, context } => {
                 self.finish_file_export(request, context)
             }

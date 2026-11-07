@@ -1695,6 +1695,10 @@ impl NextcloudClient {
                 conversation: id,
                 sequence: t.id,
             },
+            last_message: t.last_message.map(|sequence| MessageId {
+                conversation: id,
+                sequence,
+            }),
             title: Text::new(&t.title).map_err(|_| self.error(ErrorKind::TooLarge))?,
             replies: t.replies,
             unread: None,

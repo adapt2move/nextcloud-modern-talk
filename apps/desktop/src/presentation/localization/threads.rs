@@ -42,4 +42,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Refresh threads",
         "Actualizar hilos",
     ),
+    (
+        "Threads konnten nicht geladen werden.",
+        "Could not load threads.",
+        "No se pudieron cargar los hilos.",
+    ),
+    ("Vorherige Threads", "Previous threads", "Hilos anteriores"),
+    ("Weitere Threads", "More threads", "Más hilos"),
 ];

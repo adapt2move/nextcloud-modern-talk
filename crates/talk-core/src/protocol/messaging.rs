@@ -82,6 +82,7 @@ pub struct ScheduledMessage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Thread {
     pub root: MessageId,
+    pub last_message: Option<MessageId>,
     pub title: Text<256>,
     pub replies: u32,
     pub unread: Option<u32>,

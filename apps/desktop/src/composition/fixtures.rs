@@ -213,6 +213,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     .map_or(3, |message| message.local_id),
                 title: text("Design review"),
                 replies: 2,
+                last_message: Some(41),
             }]);
         }
         return state;
@@ -1400,6 +1401,11 @@ impl NativeDesktopPort for DevelopmentPort {
         match intent {
             UiIntent::RefreshThreads(account) if self.snapshot.threads.account == Some(account) => {
                 self.snapshot.threads.content = ContentState::Ready;
+            }
+            UiIntent::PageThreads { account, offset }
+                if self.snapshot.threads.account == Some(account) =>
+            {
+                self.snapshot.threads.offset = offset;
             }
             UiIntent::Message {
                 context,
