@@ -148,6 +148,7 @@ impl Client {
             tag_creation_uncertain: false,
             schedule_uncertain: Vec::new(),
             poll_creation_uncertain: Vec::new(),
+            directory_cursor: None,
             hpb: None,
             hpb_route: None,
             live_settings_at: None,
