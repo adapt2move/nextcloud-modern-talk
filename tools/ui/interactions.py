@@ -481,6 +481,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         checks.append({'check': 'Recording consent starts clear and is reset on reopen', 'result': 'pass'})
     elif scenario == 'prejoin':
         expect('conference prejoin starts open', ['Bereit', 'Jetzt', 'teil'])
+        time.sleep(.7)  # Wait for the first-frame prejoin focus handoff.
         key('Escape')
         expect('conference prejoin cancellation returns to room', ['Nachricht an Designbesprechung'])
         # The conversation header exposes conference entry as an icon.
