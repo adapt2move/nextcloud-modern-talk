@@ -256,7 +256,15 @@ pub struct Thread {
     pub title: String,
     pub replies: u32,
     pub last_message: Option<u64>,
+    /// Validated, display-only activity from the server's `last` message.
+    pub last_reply: Option<ThreadReply>,
     pub notification_level: Option<u8>,
+}
+#[derive(Clone, Debug)]
+pub struct ThreadReply {
+    pub author: String,
+    pub timestamp: u64,
+    pub expires: Option<u64>,
 }
 #[derive(Clone, Debug)]
 pub struct AttachmentFolder {
@@ -358,12 +366,33 @@ fn thread(v: &Value) -> Result<Thread, ErrorKind> {
     let id = number(t, "id")?;
     // A thread ID is also a message ID and cannot be used in routes when zero.
     positive(id)?;
+    let last_message = integer(t.get("lastMessageId")).filter(|n| *n > 0);
+    // The nested message is optional, can have expired, and does not grant
+    // room authority. Accept display data only for this exact thread and room.
+    let last_reply = v.get("last").filter(|last| {
+        last.is_object()
+            && last.get("token").and_then(Value::as_str) == Some(token.as_str())
+            && integer(last.get("id")) == last_message
+            && last_message.is_some_and(|last| last > id)
+            && last.get("deleted").and_then(Value::as_bool) != Some(true)
+            && last.get("messageType").and_then(Value::as_str) != Some("comment_deleted")
+    });
+    let last_reply = last_reply
+        .map(|last| {
+            Ok(ThreadReply {
+                author: required(last, "actorDisplayName", 256)?,
+                timestamp: number(last, "timestamp")?,
+                expires: integer(last.get("expirationTimestamp")),
+            })
+        })
+        .transpose()?;
     Ok(Thread {
         id,
         token,
         title: required(t, "title", 256)?,
         replies: u32::try_from(number(t, "numReplies")?).map_err(|_| ErrorKind::TooLarge)?,
-        last_message: integer(t.get("lastMessageId")).filter(|id| *id > 0),
+        last_message,
+        last_reply,
         notification_level: integer(v.get("attendee").and_then(|a| a.get("notificationLevel")))
             .and_then(|n| u8::try_from(n).ok()),
     })
@@ -914,6 +943,23 @@ mod thread_tests {
             decode(ResponseKind::Threads, &overflow),
             Err(ErrorKind::TooLarge)
         ));
+    }
+
+    #[test]
+    fn thread_activity_requires_the_expected_room_and_reply() {
+        let mut value = json!({
+            "thread": {"id": 42, "roomToken": "room1234", "title": "Topic", "numReplies": 1, "lastMessageId": 43},
+            "last": {"id": 43, "token": "room1234", "actorDisplayName": "Alex", "timestamp": 123}
+        });
+        assert_eq!(thread(&value).unwrap().last_reply.unwrap().author, "Alex");
+        value["last"]["token"] = json!("room5678");
+        assert!(thread(&value).unwrap().last_reply.is_none());
+        value["last"]["token"] = json!("room1234");
+        value["last"]["id"] = json!(44);
+        assert!(thread(&value).unwrap().last_reply.is_none());
+        value["last"]["id"] = json!(43);
+        value["last"]["messageType"] = json!("comment_deleted");
+        assert!(thread(&value).unwrap().last_reply.is_none());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use talk_core::ui::{conversation::RemoteState, messaging as view};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Work {
     Thread,
+    ThreadActivity,
     ThreadRoot(u128),
     ThreadInfo(u128),
     ThreadChange(u128),
@@ -82,7 +83,12 @@ impl Work {
     pub(super) fn background(self) -> bool {
         matches!(
             self,
-            Self::Latest | Self::Prefetch | Self::Poll | Self::Metadata | Self::Recovery
+            Self::Latest
+                | Self::Prefetch
+                | Self::Poll
+                | Self::Metadata
+                | Self::Recovery
+                | Self::ThreadActivity
         )
     }
 }
@@ -520,6 +526,23 @@ impl Accounts {
                 context,
                 wire::MessagingCommand::Pins,
                 Work::Pins,
+            );
+        }
+        if self
+            .snapshot
+            .message_panel
+            .as_ref()
+            .is_some_and(|panel| panel.availability(view::MessageFeature::Threads).enabled())
+            && self
+                .history
+                .get(context)
+                .is_some_and(|history| history.needs_thread_activity(Instant::now()))
+        {
+            let _ = self.start_message(
+                RequestId(0),
+                context,
+                wire::MessagingCommand::Threads,
+                Work::ThreadActivity,
             );
         }
         let Ok((command, work)) = self.live_message_request(context) else {
@@ -1137,6 +1160,7 @@ impl Accounts {
                 (Work::Search, Ok(wire::MessagingResult::Search { .. }))
                 | (Work::Reminders, Ok(wire::MessagingResult::Reminders(_)))
                 | (Work::Scheduled, Ok(wire::MessagingResult::Scheduled(_)))
+                | (Work::ThreadActivity, Ok(wire::MessagingResult::Threads(_)))
                 | (
                     Work::Files | Work::Pins | Work::Metadata,
                     Ok(wire::MessagingResult::Messages { .. }),
@@ -1145,6 +1169,7 @@ impl Accounts {
                     Work::Search
                     | Work::Reminders
                     | Work::Scheduled
+                    | Work::ThreadActivity
                     | Work::Files
                     | Work::Pins
                     | Work::Metadata,
@@ -1327,6 +1352,19 @@ impl Accounts {
                             } else {
                                 Completion::Uncertain
                             };
+                        if completion == Completion::ServerAccepted
+                            && panel.thread_root.is_some_and(|root| {
+                                message
+                                    .thread
+                                    .is_some_and(|thread| u128::from(thread.sequence) == root)
+                            })
+                        {
+                            panel.thread_messages = merge_thread(
+                                &panel.thread_messages,
+                                std::iter::once(message_view(&message)),
+                            );
+                            thread_changed = true;
+                        }
                     }
                     wire::MessagingResult::Message(_) => (),
                     wire::MessagingResult::Reactions { message, reactions } => {
@@ -1830,6 +1868,14 @@ fn canonical_scope(result: &wire::MessagingResult, context: ConversationRef) -> 
             .as_slice()
             .iter()
             .all(|s| s.id.conversation == context.conversation),
+        wire::MessagingResult::Threads(threads) => threads.as_slice().iter().all(|thread| {
+            thread.root.conversation == context.conversation
+                && thread.root.sequence > 0
+                && thread.last_message.is_none_or(|last| {
+                    last.conversation == context.conversation
+                        && last.sequence >= thread.root.sequence
+                })
+        }),
         wire::MessagingResult::Search { hits, .. } => hits
             .as_slice()
             .iter()

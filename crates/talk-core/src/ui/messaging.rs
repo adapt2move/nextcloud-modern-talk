@@ -50,6 +50,15 @@ pub struct ThreadDetails {
     pub title: Text<256>,
     pub notification_level: Option<i8>,
 }
+/// Recent room thread activity, scoped by the enclosing message panel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadActivity {
+    pub root: u128,
+    pub replies: u16,
+    pub last_initials: Option<Text<16>>,
+    pub last_time: Option<Text<32>>,
+    pub expires: Option<u64>,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RichObject {
     pub id: Option<Text<1024>>,
@@ -268,6 +277,7 @@ pub struct MessagePanel {
     pub thread_root_state: RemoteState,
     pub thread_root_message: Option<super::presentation::MessageView>,
     pub thread_messages: Page<super::presentation::MessageView, 50>,
+    pub thread_activity: Page<ThreadActivity, 50>,
     pub thread_details: Option<ThreadDetails>,
     pub thread_details_request: Option<RequestId>,
     pub context: ConversationRef,
@@ -320,6 +330,7 @@ impl MessagePanel {
             thread_root_state: RemoteState::Idle,
             thread_root_message: None,
             thread_messages: Page::empty(),
+            thread_activity: Page::empty(),
             thread_details: None,
             thread_details_request: None,
             context,

@@ -70,6 +70,9 @@ pub(super) struct History {
     reaction_snapshots: Vec<ReactionSnapshot>,
     // Four recently opened threads per scoped room; no permission is cached.
     threads: Vec<(u128, Page<MessageView, 50>)>,
+    thread_activity: Page<talk_core::ui::messaging::ThreadActivity, 50>,
+    thread_activity_version: Version,
+    thread_activity_requested: Option<Instant>,
     capabilities: Option<(Instant, Version, protocol::messaging::MessagingCapabilities)>,
     // Same room/runtime lifetime as history; at most 50 canonical pin excerpts.
     // A confirmed write fences all already-admitted pin reads, just like edits.
@@ -101,6 +104,9 @@ impl History {
             metadata_probe: None,
             reaction_snapshots: Vec::new(),
             threads: Vec::new(),
+            thread_activity: Page::empty(),
+            thread_activity_version: Version(0, false),
+            thread_activity_requested: None,
             capabilities: None,
             pins: Page::empty(),
             pins_version: Version(0, false),
@@ -123,6 +129,16 @@ impl History {
         panel.pinned_messages = self.pins.clone();
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
+        let now = now_unix();
+        panel.thread_activity = page(self.thread_activity.as_slice().iter().cloned().map(
+            |mut activity| {
+                if activity.expires.is_some_and(|at| at > 0 && at <= now) {
+                    activity.last_initials = None;
+                    activity.last_time = None;
+                }
+                activity
+            },
+        ));
         if let Some((expires, _, capabilities)) = &self.capabilities
             && Instant::now() < *expires
         {
@@ -137,6 +153,15 @@ impl History {
                 .filter(|message| !message.metadata.pin_notice)
                 .map(|message| {
                     let mut visible = message.clone();
+                    if let Some(activity) = self
+                        .thread_activity
+                        .as_slice()
+                        .iter()
+                        .find(|activity| activity.root == message.local_id)
+                        && !message.metadata.deleted
+                    {
+                        visible.reply_count = activity.replies;
+                    }
                     let target = self.read_through_pin_notices(message.local_id);
                     visible.metadata.read_through = (target != message.local_id).then_some(target);
                     visible.metadata.unread_after = self.predecessor(message.local_id);
@@ -150,6 +175,11 @@ impl History {
             .iter()
             .find(|(id, _)| *id == root)
             .map(|(_, rows)| rows)
+    }
+
+    pub(super) fn needs_thread_activity(&self, now: Instant) -> bool {
+        self.thread_activity_requested
+            .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_secs(15))
     }
 
     /// Only a live page's adjacent IDs can identify the server's preceding
@@ -680,6 +710,11 @@ impl Cache {
             room.pins_state = RemoteState::Loading(request);
             room.pins_read_at = Some(Instant::now());
         }
+        if work == Work::ThreadActivity
+            && let Some(room) = self.get_mut(context)
+        {
+            room.thread_activity_requested = Some(started);
+        }
     }
     pub(super) fn admission_failed(
         &mut self,
@@ -754,6 +789,26 @@ impl Cache {
                     room.pins_state = RemoteState::Failed(request, *reason)
                 }
                 _ => room.pins_state = RemoteState::Uncertain(request),
+            }
+        }
+        if work == Work::ThreadActivity {
+            // Slow requests receive the same cooldown as immediate failures.
+            room.thread_activity_requested = Some(Instant::now());
+            if flight.version >= room.thread_activity_version
+                && let Ok(MessagingResult::Threads(threads)) = result
+            {
+                room.thread_activity = page(threads.as_slice().iter().map(|thread| {
+                    let last = thread.last_reply.as_ref();
+                    talk_core::ui::messaging::ThreadActivity {
+                        root: u128::from(thread.root.sequence),
+                        replies: u16::try_from(thread.replies).unwrap_or(u16::MAX),
+                        last_initials: last.map(|last| initials(last.author.as_str())),
+                        last_time: last
+                            .map(|last| text(&super::messaging::time_label(last.timestamp))),
+                        expires: last.and_then(|last| last.expires),
+                    }
+                }));
+                room.thread_activity_version = flight.version;
             }
         }
         if let Work::PinChange { message, pinned } = work

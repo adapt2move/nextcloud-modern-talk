@@ -434,6 +434,18 @@ impl Desktop {
                 .as_ref()
                 .filter(|panel| panel.context == context && panel.thread_root == Some(m.local_id))
                 .map(|panel| panel.thread_messages.as_slice());
+            let activity = self
+                .snapshot
+                .message_panel
+                .as_ref()
+                .filter(|panel| panel.context == context)
+                .and_then(|panel| {
+                    panel
+                        .thread_activity
+                        .as_slice()
+                        .iter()
+                        .find(|a| a.root == m.local_id)
+                });
             let mut recent = Vec::new();
             if let Some(replies) = replies {
                 for reply in replies
@@ -460,7 +472,10 @@ impl Desktop {
                         .rev()
                         .find(|reply| reply.local_id != m.local_id && !reply.metadata.deleted)
                 })
-                .map(|reply| reply.time_label.as_str().to_owned());
+                .map(|reply| reply.time_label.as_str().to_owned())
+                .or_else(|| {
+                    activity.and_then(|a| a.last_time.as_ref().map(|time| time.as_str().to_owned()))
+                });
             content = if self.message_feature_enabled(MessageFeature::Threads) {
                 content.child(
                     self.control(
@@ -480,6 +495,14 @@ impl Desktop {
                             .iter()
                             .map(|reply| self.person_avatar(reply.initials.as_str(), 20.)),
                     )
+                    .when(recent.is_empty(), |button| {
+                        button.when_some(
+                            activity.and_then(|a| a.last_initials.as_ref()),
+                            |button, initials| {
+                                button.child(self.person_avatar(initials.as_str(), 20.))
+                            },
+                        )
+                    })
                     .child(count)
                     .when_some(last_time, |button, time| button.child(self.hint(&time))),
                 )

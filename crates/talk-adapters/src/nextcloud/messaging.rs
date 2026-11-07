@@ -1702,6 +1702,17 @@ impl NextcloudClient {
                 conversation: id,
                 sequence,
             }),
+            last_reply: t
+                .last_reply
+                .map(|last| {
+                    Ok(talk_core::protocol::messaging::ThreadReplyActivity {
+                        author: Text::new(&last.author)
+                            .map_err(|_| self.error(ErrorKind::TooLarge))?,
+                        timestamp: last.timestamp,
+                        expires: last.expires,
+                    })
+                })
+                .transpose()?,
             title: Text::new(&t.title).map_err(|_| self.error(ErrorKind::TooLarge))?,
             replies: t.replies,
             unread: None,

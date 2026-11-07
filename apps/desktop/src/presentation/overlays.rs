@@ -133,9 +133,8 @@ impl Desktop {
                     .on_drag(ThreadResize, |_, _, _, cx| cx.new(|_| ThreadResize))
                     .on_drag_move::<ThreadResize>(cx.listener(
                         |this, event: &gpui::DragMoveEvent<ThreadResize>, window, cx| {
-                            let max = (f32::from(window.viewport_size().width) - 600.)
-                                .max(288.)
-                                .min(608.);
+                            let max =
+                                (f32::from(window.viewport_size().width) - 600.).clamp(288., 608.);
                             this.thread_width = (f32::from(window.viewport_size().width)
                                 - f32::from(event.event.position.x))
                             .clamp(288., max);

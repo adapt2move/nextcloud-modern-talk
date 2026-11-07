@@ -17,6 +17,90 @@ fn cached_thread_count_roundtrips_without_restoring_authority() {
 }
 
 #[test]
+fn recent_thread_activity_is_scoped_versioned_and_expires() {
+    let mut model = super::super::tests::model();
+    let key = context(1, 1, 1, 1);
+    select(&mut model, key);
+    complete(
+        &mut model.history,
+        key,
+        1,
+        Work::History,
+        messages(key, [message(key, 7, "Root")], Some(7)),
+    );
+    let summary = |conversation, replies, expires| {
+        MessagingResult::Threads(page([protocol::messaging::Thread {
+            root: MessageId {
+                conversation,
+                sequence: 7,
+            },
+            last_message: Some(MessageId {
+                conversation,
+                sequence: 8,
+            }),
+            last_reply: Some(protocol::messaging::ThreadReplyActivity {
+                author: text("Alex Brown"),
+                timestamp: 1,
+                expires,
+            }),
+            title: text("Topic"),
+            replies,
+            unread: None,
+            notification_level: None,
+        }]))
+    };
+    let old = admit(&mut model.history, key, 2, Work::ThreadActivity);
+    let fresh = admit(&mut model.history, key, 3, Work::ThreadActivity);
+    model.apply_message(
+        RequestId(3),
+        key,
+        fresh,
+        Work::ThreadActivity,
+        reply(key, fresh, summary(key.conversation, 3, None)),
+    );
+    model.apply_message(
+        RequestId(2),
+        key,
+        old,
+        Work::ThreadActivity,
+        reply(key, old, summary(key.conversation, 1, None)),
+    );
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 3);
+    let activity = &model
+        .snapshot
+        .message_panel
+        .as_ref()
+        .unwrap()
+        .thread_activity
+        .as_slice()[0];
+    assert_eq!(activity.last_initials.as_ref().unwrap().as_str(), "AB");
+
+    let wrong = admit(&mut model.history, key, 4, Work::ThreadActivity);
+    let foreign = context(1, 1, 1, 2);
+    model.apply_message(
+        RequestId(4),
+        key,
+        wrong,
+        Work::ThreadActivity,
+        reply(key, wrong, summary(foreign.conversation, 50, None)),
+    );
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 3);
+
+    let expired = admit(&mut model.history, key, 5, Work::ThreadActivity);
+    model.apply_message(
+        RequestId(5),
+        key,
+        expired,
+        Work::ThreadActivity,
+        reply(key, expired, summary(key.conversation, 4, Some(1))),
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(model.snapshot.messages.as_slice()[0].reply_count, 4);
+    assert!(panel.thread_activity.as_slice()[0].last_initials.is_none());
+    assert!(panel.thread_activity.as_slice()[0].last_time.is_none());
+}
+
+#[test]
 fn mark_unread_predecessor_requires_observed_adjacency() {
     let key = context(1, 1, 1, 1);
     let mut history = History::new(key);
