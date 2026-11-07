@@ -134,7 +134,7 @@ impl Desktop {
                         body = body.child(self.hint(self.l("Aufzeichnung wird aktualisiert …")));
                     }
                     if call.recording_uncertain {
-                        body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status, bevor du erneut eine Änderung anforderst.")));
+                        body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.")));
                     }
                     if let Some(start) = call.recording_control {
                         body = body.child(self.button(

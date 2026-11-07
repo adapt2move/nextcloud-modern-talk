@@ -66,3 +66,72 @@ pub(super) async fn run(
         let _ = results.try_send(result);
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RecordingResolution {
+    Pending,
+    Confirmed,
+    Uncertain,
+}
+
+/// A receipt alone is not a recording state. Only a later fresh observation
+/// settles the request; expiry never replays it or claims that it stopped.
+pub(super) fn recording_resolution(
+    start: bool,
+    accepted: bool,
+    fresh: bool,
+    observed: talk_core::policy::RecordingState,
+    expired: bool,
+) -> RecordingResolution {
+    use talk_core::policy::RecordingState;
+    if expired {
+        return RecordingResolution::Uncertain;
+    }
+    if !accepted || !fresh {
+        return RecordingResolution::Pending;
+    }
+    if observed == RecordingState::Failed {
+        return RecordingResolution::Uncertain;
+    }
+    if (start && matches!(observed, RecordingState::Starting | RecordingState::Active))
+        || (!start && observed == RecordingState::Inactive)
+    {
+        RecordingResolution::Confirmed
+    } else {
+        RecordingResolution::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talk_core::policy::RecordingState;
+
+    #[test]
+    fn recording_receipts_never_fabricate_or_replay_a_result() {
+        assert_eq!(
+            recording_resolution(false, true, false, RecordingState::Inactive, false),
+            RecordingResolution::Pending
+        );
+        assert_eq!(
+            recording_resolution(false, true, true, RecordingState::Active, false),
+            RecordingResolution::Pending
+        );
+        assert_eq!(
+            recording_resolution(false, true, true, RecordingState::Inactive, false),
+            RecordingResolution::Confirmed
+        );
+        assert_eq!(
+            recording_resolution(true, true, true, RecordingState::Starting, false),
+            RecordingResolution::Confirmed
+        );
+        assert_eq!(
+            recording_resolution(true, true, true, RecordingState::Failed, false),
+            RecordingResolution::Uncertain
+        );
+        assert_eq!(
+            recording_resolution(false, false, false, RecordingState::Unknown, true),
+            RecordingResolution::Uncertain
+        );
+    }
+}

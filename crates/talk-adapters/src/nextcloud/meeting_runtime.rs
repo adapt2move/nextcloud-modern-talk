@@ -940,16 +940,16 @@ async fn media_loop(
                     Observed::Known { value, .. } => value.recording,
                     _ => RecordingState::Unknown,
                 };
-                let settled = pending.accepted && if pending.start {
-                    matches!(observed, RecordingState::Starting | RecordingState::Active)
-                } else {
-                    observed == RecordingState::Inactive
-                };
-                let failed = pending.accepted && observed == RecordingState::Failed;
-                let expired = pending.requested.elapsed() >= Duration::from_secs(20);
-                if settled || failed || expired {
-                    recording_pending = None;
-                    recording_uncertain = failed || expired;
+                match moderation::recording_resolution(
+                    pending.start, pending.accepted, policy_ready, observed,
+                    pending.requested.elapsed() >= Duration::from_secs(20),
+                ) {
+                    moderation::RecordingResolution::Pending => {}
+                    moderation::RecordingResolution::Confirmed => { recording_pending = None; }
+                    moderation::RecordingResolution::Uncertain => {
+                        recording_pending = None;
+                        recording_uncertain = true;
+                    }
                 }
             }
             if policy_ready && hand_raised && bundle.hand_supported && announced_refresh != refreshes {

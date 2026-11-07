@@ -78,9 +78,9 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
     ),
     (
-        "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status, bevor du erneut eine Änderung anforderst.",
-        "The recording change could not be confirmed. Check its status before requesting another change.",
-        "No se pudo confirmar el cambio de grabación. Comprueba su estado antes de solicitar otro cambio.",
+        "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status und trete bei Bedarf erneut bei.",
+        "The recording change could not be confirmed. Check its status and rejoin if needed.",
+        "No se pudo confirmar el cambio de grabación. Comprueba su estado y vuelve a unirte si es necesario.",
     ),
     (
         "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",
