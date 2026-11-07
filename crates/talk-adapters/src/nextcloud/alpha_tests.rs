@@ -1,7 +1,7 @@
 use super::*;
 use talk_core::protocol::conversation::{ConversationCommand as C, Setting};
 use talk_core::protocol::messaging::{
-    MessagingCommand as M, MessagingFeature, MessagingResult as R,
+    ComposeOptions, MessagingCommand as M, MessagingFeature, MessagingResult as R,
 };
 use talk_core::protocol::{FeatureSupport, Role};
 fn features(names: &[&str]) -> Value {
@@ -58,6 +58,45 @@ async fn subscribed_threads_require_capability_and_known_account_room() {
             assert_eq!(page.as_slice()[0].replies, 2);
         }
     }
+}
+
+#[tokio::test]
+async fn quoted_thread_reply_rejects_a_parent_from_another_thread_before_writing() {
+    let mut parent = message(8);
+    parent["threadId"] = json!(12);
+    let server = Server::start(vec![
+        Reply::data(features(&["threads", "chat-get-context", "chat-replies"])),
+        Reply::data(room()),
+        Reply::data(json!([parent])),
+    ])
+    .await;
+    let runtime = runtime();
+    let mut client = client(&server.origin, runtime.clone());
+    let conversation = bind(&mut client);
+    let mid = |sequence| MessageId {
+        conversation,
+        sequence,
+    };
+    let error = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::Messaging {
+                conversation,
+                operation: OperationId::from_local(1),
+                command: M::Send {
+                    text: Text::new("Quote").unwrap(),
+                    options: ComposeOptions {
+                        reply_to: Some(mid(8)),
+                        thread: Some(mid(7)),
+                        ..Default::default()
+                    },
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::WrongScope);
+    assert_eq!(server.count(), 3);
 }
 #[tokio::test]
 async fn reminder_writes_publish_only_confirmed_values_and_keep_read_failure_uncertain() {

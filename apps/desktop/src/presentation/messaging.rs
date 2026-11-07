@@ -1257,6 +1257,38 @@ impl Desktop {
             context,
         });
     }
+
+    pub(super) fn begin_new_thread(
+        &mut self,
+        context: ConversationRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if Some(context) != self.snapshot.selected
+            || !self.message_feature_enabled(MessageFeature::Threads)
+            || self.message_ui.editing.is_some()
+            || self.drafts.pending(context)
+            || self.has_staged_attachments()
+            || !self.save_draft(cx)
+        {
+            return;
+        }
+        let previous = self.drafts.target(context);
+        let target = ComposeTarget {
+            new_thread: true,
+            ..Default::default()
+        };
+        if !self.drafts.set_target(context, target) {
+            self.report_draft_error(talk_core::ui::SubmitError::Busy, context);
+            return;
+        }
+        let body = self.drafts.text(context).to_owned();
+        if !self.load_composer_value(&body, cx) {
+            self.drafts.set_target(context, previous);
+            return;
+        }
+        self.composer.focus_handle(cx).focus(window);
+    }
     pub(super) fn show_reaction_authors(
         &mut self,
         context: ConversationRef,
@@ -1427,6 +1459,7 @@ impl Desktop {
                         ComposeTarget {
                             reply_to: Some(id),
                             thread: None,
+                            new_thread: false,
                             silent: false,
                             private_reply: None,
                         },
@@ -2443,6 +2476,11 @@ impl Desktop {
             })
             .or_else(|| {
                 target
+                    .new_thread
+                    .then(|| scoped_id("compose-mode", context, 4, 0))
+            })
+            .or_else(|| {
+                target
                     .private_reply
                     .as_ref()
                     .map(|private| scoped_id("compose-mode", context, 3, private.message))
@@ -2458,7 +2496,15 @@ impl Desktop {
         // Explicit reply/edit context and silent sending are the only persistent
         // composer states; each is one slim strip with its own dismissal.
         if let Some(motion_id) = self.compose_motion_id(context) {
-            let strip = if let Some(private) = target.private_reply.as_ref() {
+            let strip = if target.new_thread {
+                self.composer_strip(
+                    Some("chat"),
+                    "Neuer Thread · Titel aus der Nachricht",
+                    "cancel-compose-mode",
+                    LocalAction::Message(Action::CancelCompose),
+                    cx,
+                )
+            } else if let Some(private) = target.private_reply.as_ref() {
                 self.private_reply_preview(context, private, cx)
             } else if self.message_ui.editing.is_none()
                 && target.thread.is_none()
@@ -2858,6 +2904,7 @@ fn feature_allows_intent(
             | MessageFeature::Schedules
             | MessageFeature::Forward
             | MessageFeature::MarkUnread
+            | MessageFeature::Threads
     );
     value.enabled() && content == ContentState::Ready
         || queue_available

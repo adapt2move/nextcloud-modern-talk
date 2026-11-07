@@ -511,8 +511,15 @@ impl NextcloudClient {
         if let Some(parent) = o.reply_to {
             self.message_scope(parent, id)?;
             self.message_action(MessagingFeature::Reply, room, data, caps)?;
-            if self.target(c, parent).await?.replyable != Some(true) {
+            let target = self.target(c, parent).await?;
+            if target.replyable != Some(true) {
                 return Err(self.error(ErrorKind::PermissionDenied));
+            }
+            if let Some(thread) = o.thread
+                && target.id != thread.sequence
+                && target.thread_id != Some(thread.sequence)
+            {
+                return Err(self.error(ErrorKind::WrongScope));
             }
         }
         let private_token = if let Some(parent) = o.private_reply.as_deref().copied() {
@@ -573,7 +580,13 @@ impl NextcloudClient {
                 .or(o.private_reply.as_deref().copied())
                 .map(|m| m.sequence),
             reply_to_token: private_token,
-            thread: o.thread.map(|m| m.sequence),
+            // Talk derives the thread from the quoted parent and ignores the
+            // threadId parameter in that case. Validate the parent above, then
+            // send only replyTo so the pinned wire contract stays unambiguous.
+            thread: o
+                .thread
+                .filter(|_| o.reply_to.is_none())
+                .map(|m| m.sequence),
             thread_title: o.thread_title.as_ref().map(|s| s.as_str().into()),
             silent: o.silent,
         })

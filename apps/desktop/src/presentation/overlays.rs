@@ -3,7 +3,9 @@ use super::controls::{Availability, scoped_id};
 use super::{ButtonStyle, Desktop, LocalAction, Overlay, SearchKind};
 use crate::presentation::motion::DialogSurface;
 use gpui::{Context, Div, FontWeight, Window, div, prelude::*, px};
-use talk_core::ui::presentation::{ContentState, ConversationKind, ParticipantView, Presence};
+use talk_core::ui::presentation::{
+    ContentState, ConversationKind, ConversationRef, ParticipantView, Presence,
+};
 
 #[derive(Clone)]
 struct ThreadResize;
@@ -722,23 +724,37 @@ impl Desktop {
             .p_3()
             .border_b_1()
             .border_color(self.theme.border);
-        let following = details.notification_level.is_some_and(|level| level != 3);
-        body = body.child(
-            self.button(
-                "thread-follow",
-                if following {
-                    "Thread nicht mehr folgen"
-                } else {
-                    "Thread folgen"
-                },
-                ButtonStyle::Quiet,
-                can_change && details.notification_level.is_some(),
-                LocalAction::ThreadNotification(if following { 3 } else { 0 }),
-                cx,
-            )
-            .justify_start(),
+        let following = thread_following(
+            &self.snapshot.threads,
+            context,
+            root,
+            details.notification_level,
         );
-        if following {
+        if following != Some(true) {
+            body = body.child(
+                self.button(
+                    "thread-follow",
+                    "Thread folgen",
+                    ButtonStyle::Quiet,
+                    can_change && details.notification_level.is_some(),
+                    LocalAction::ThreadNotification(0),
+                    cx,
+                )
+                .justify_start(),
+            );
+        }
+        if following != Some(false) {
+            body = body.child(
+                self.button(
+                    "thread-unfollow",
+                    "Thread nicht mehr folgen",
+                    ButtonStyle::Quiet,
+                    can_change && details.notification_level.is_some(),
+                    LocalAction::ThreadNotification(3),
+                    cx,
+                )
+                .justify_start(),
+            );
             body = body.child(
                 div().flex().flex_wrap().gap_1().children(
                     [
@@ -1024,5 +1040,80 @@ impl Desktop {
             .child(self.state_note("compass","Verzeichnis nicht verfügbar","Auffindbarkeit und Beitrittsrechte sind noch nicht bekannt. Ein Gastlink allein macht ein Gespräch nicht öffentlich auffindbar."))
             .child(self.button_with_icon("discover-refresh",("Verzeichnis laden","refresh"),ButtonStyle::Secondary,Availability::when(false,"Das Gesprächsverzeichnis ist in diesem Client noch nicht verfügbar."),LocalAction::Notice(""),cx))
             .child(self.button("discover-back","Zurück zu deinen Gesprächen",ButtonStyle::Quiet,true,LocalAction::Close,cx))
+    }
+}
+
+/// A thread-info response synthesizes the default notification level even for
+/// a non-attendee. Only a subscribed page, or a complete empty page, proves
+/// membership; an incomplete page leaves it unknown.
+fn thread_following(
+    list: &talk_core::ui::presentation::ThreadList,
+    context: ConversationRef,
+    root: u128,
+    notification_level: Option<i8>,
+) -> Option<bool> {
+    use talk_core::ui::presentation::ContentState;
+    if notification_level == Some(3) {
+        return Some(false);
+    }
+    if list.account != Some(context.account) {
+        return None;
+    }
+    if list
+        .entries
+        .as_slice()
+        .iter()
+        .any(|entry| entry.context == context && entry.root == root)
+    {
+        return Some(true);
+    }
+    if list.content == ContentState::Ready && list.offset == 0 && !list.has_next {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod thread_follow_tests {
+    use super::*;
+    use talk_core::ui::presentation::{ThreadList, ThreadView};
+    use talk_core::ui::{AccountId, AccountScope, ConversationId, HostId, RuntimeGeneration, Text};
+
+    #[test]
+    fn default_level_is_not_proof_of_membership() {
+        let account = AccountId::from_local(1);
+        let scope = AccountScope {
+            account,
+            runtime: RuntimeGeneration::from_local(1),
+        };
+        let context = ConversationRef {
+            account: scope,
+            conversation: ConversationId {
+                account,
+                host: HostId::from_local(1),
+                local: 2,
+            },
+        };
+        let mut list = ThreadList {
+            account: Some(scope),
+            ..Default::default()
+        };
+        assert_eq!(thread_following(&list, context, 7, Some(0)), None);
+        list.content = ContentState::Ready;
+        assert_eq!(thread_following(&list, context, 7, Some(0)), Some(false));
+        list.has_next = true;
+        assert_eq!(thread_following(&list, context, 7, Some(0)), None);
+        list.entries
+            .try_push(ThreadView {
+                context,
+                root: 7,
+                title: Text::new("Planning").unwrap(),
+                replies: 0,
+                last_message: None,
+            })
+            .unwrap();
+        assert_eq!(thread_following(&list, context, 7, Some(0)), Some(true));
+        assert_eq!(thread_following(&list, context, 7, Some(3)), Some(false));
     }
 }

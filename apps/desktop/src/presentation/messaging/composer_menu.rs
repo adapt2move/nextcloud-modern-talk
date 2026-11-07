@@ -124,12 +124,16 @@ impl Desktop {
             availability: self.message_available(feature),
         };
         vec![
-            message(
-                Choice::File,
-                "Datei anhängen",
-                "paperclip",
-                MessageFeature::Files,
-            ),
+            Item {
+                choice: Choice::File,
+                label: "Datei anhängen",
+                icon: "paperclip",
+                availability: if self.drafts.target(target.context).new_thread {
+                    Availability::when(false, "Anhänge in Threads sind noch nicht verfügbar.")
+                } else {
+                    self.message_available(MessageFeature::Files)
+                },
+            },
             Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",
@@ -146,7 +150,9 @@ impl Desktop {
                 choice: Choice::Schedule,
                 label: "Nachricht planen",
                 icon: "clock",
-                availability: if self.drafts.target(target.context).private_reply.is_some() {
+                availability: if self.drafts.target(target.context).new_thread {
+                    Availability::when(false, "Neue Threads können nicht geplant werden.")
+                } else if self.drafts.target(target.context).private_reply.is_some() {
                     Availability::when(false, "Private Antworten können nicht geplant werden.")
                 } else {
                     self.message_available(MessageFeature::Schedules)

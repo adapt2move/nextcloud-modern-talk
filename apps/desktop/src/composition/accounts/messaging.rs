@@ -812,7 +812,7 @@ impl Accounts {
             V::Context(id) => W::Context(message_id(context, id)?),
             V::Send { body, target } => W::Send {
                 text: text(body.as_str()),
-                options: options(context, target)?,
+                options: options(context, target, body.as_str())?,
             },
             V::Edit { message, body } => W::Edit {
                 message: message_id(context, message)?,
@@ -878,7 +878,12 @@ impl Accounts {
             } => W::Schedule {
                 text: text(body.as_str()),
                 send_at: timestamp,
-                options: options(context, target)?,
+                options: {
+                    if target.new_thread {
+                        return Err(SubmitError::Unavailable(UnavailableReason::Unsupported));
+                    }
+                    options(context, target, body.as_str())?
+                },
             },
             V::Scheduled => W::Scheduled,
             V::CancelScheduled(id) => W::CancelScheduled(message_id(context, id)?),
@@ -2035,10 +2040,13 @@ fn reconcile_related(
 fn options(
     context: ConversationRef,
     target: view::ComposeTarget,
+    body: &str,
 ) -> Result<wire::ComposeOptions, SubmitError> {
     // Cross-room replies require the outbox's stable-key resolution. Never
     // degrade to an unquoted direct message when that owner is unavailable.
-    if target.private_reply.is_some() {
+    if target.private_reply.is_some()
+        || target.new_thread && (target.thread.is_some() || target.reply_to.is_some())
+    {
         return Err(SubmitError::Unavailable(UnavailableReason::PolicyStale));
     }
     Ok(wire::ComposeOptions {
@@ -2051,9 +2059,27 @@ fn options(
             .thread
             .map(|id| message_id(context, id))
             .transpose()?,
-        thread_title: None,
+        thread_title: target.new_thread.then(|| thread_title(body)).transpose()?,
         silent: target.silent,
     })
+}
+
+/// Talk creates a new thread only while posting its root. Use the first
+/// meaningful line as a short, Unicode-safe title; users can rename it later.
+pub(super) fn thread_title(body: &str) -> Result<Text<256>, SubmitError> {
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or(SubmitError::Unavailable(UnavailableReason::Unsupported))?;
+    let mut title = String::new();
+    for character in line.chars().take(80) {
+        if title.len() + character.len_utf8() > 256 {
+            break;
+        }
+        title.push(character);
+    }
+    Text::new(&title).map_err(|_| SubmitError::Busy)
 }
 fn message_id(context: ConversationRef, id: u128) -> Result<protocol::MessageId, SubmitError> {
     Ok(protocol::MessageId {
@@ -2258,6 +2284,20 @@ pub(super) fn time_label(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_thread_title_uses_a_bounded_unicode_safe_first_line() {
+        assert_eq!(
+            thread_title("\n  Design review  \nDetails")
+                .unwrap()
+                .as_str(),
+            "Design review"
+        );
+        let title = thread_title(&"🦀".repeat(100)).unwrap();
+        assert!(title.as_str().len() <= 256);
+        assert_eq!(title.as_str().chars().count(), 64);
+        assert!(thread_title(" \n ").is_err());
+    }
 
     #[test]
     fn live_thread_updates_replace_rows_and_bound_the_page() {

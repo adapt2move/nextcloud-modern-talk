@@ -277,7 +277,7 @@
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/chat/{token}",
       "status": "partial",
       "api": "Request::Chat / chat::Command::Send",
-      "scope": "Reply/thread/silent/reference supported; typed source room token can be supplied for a private reply. Object/share metadata uses separate operations. No guest actorDisplayName override. Source: spreed stable34 and stable35 lib/Controller/ChatController.php sendMessage/resolveReplyTo."
+      "scope": "Reply/thread/silent/reference supported; typed source room token can be supplied for a private reply. For a quoted reply in a thread the adapter validates the parent belongs to that thread and sends replyTo alone; Talk derives the thread from its topmost parent. Object/share metadata uses separate operations. No guest actorDisplayName override. Source: spreed stable34 and stable35 lib/Controller/ChatController.php sendMessage/resolveReplyTo and lib/Chat/ChatManager.php sendMessage."
     },
     {
       "operation_id": "chat-receive-messages",

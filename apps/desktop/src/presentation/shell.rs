@@ -308,7 +308,27 @@ impl Desktop {
                                 .opacity(0.)
                                 .group_hover("conversation-header", |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
-                            ),
+                            )
+                            .when(self.message_feature_enabled(MessageFeature::Threads), |title| {
+                                title.child(
+                                    self.icon_button(
+                                        "new-thread",
+                                        ("chat", "Neuen Thread beginnen"),
+                                        ButtonStyle::Quiet,
+                                        Availability::when(
+                                            self.message_ui.editing.is_none()
+                                                && !self.has_staged_attachments()
+                                                && !self.drafts.pending(row.context),
+                                            "Schließe zuerst die aktuelle Bearbeitung oder den Dateientwurf.",
+                                        ),
+                                        LocalAction::NewThread(row.context),
+                                        cx,
+                                    )
+                                    .opacity(0.)
+                                    .group_hover("conversation-header", |s| s.opacity(1.))
+                                    .focus(|s| s.opacity(1.)),
+                                )
+                            }),
                     )
                     .child(
                         self.hint(&format!(
@@ -463,8 +483,9 @@ impl Desktop {
             .child(timeline.tab_group().tab_index(0))
             .child(composer.tab_group().tab_index(1));
         let drop_context = row.context;
-        let drop_enabled =
-            self.overlay.is_none() && self.message_feature_enabled(MessageFeature::Files);
+        let drop_enabled = self.overlay.is_none()
+            && !self.drafts.target(row.context).new_thread
+            && self.message_feature_enabled(MessageFeature::Files);
         self.content_card(
             div().child(
                 self.scroll_area(super::navigation::Region::Conversation)
@@ -547,6 +568,9 @@ impl Desktop {
                     && !pending
                     && !unloaded
                     && (!attached || self.can_send_attachments())
+                    && (thread
+                        || !self.drafts.target(row.context).new_thread
+                        || self.message_feature_enabled(MessageFeature::Threads))
                     && if thread {
                         self.thread_send_available(cx)
                     } else {

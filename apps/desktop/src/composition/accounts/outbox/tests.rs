@@ -103,6 +103,28 @@ fn model() -> (Accounts, ConversationRef, NavigationRoomKey) {
 }
 
 #[test]
+fn new_thread_send_keeps_its_title_through_the_durable_intent() {
+    let (model, context, room) = model();
+    let action = view::MessageAction::Send {
+        body: text("Release planning\nDetails"),
+        target: view::ComposeTarget {
+            new_thread: true,
+            ..Default::default()
+        },
+    };
+    let intent = model.outbox_intent(context, &action).unwrap().unwrap();
+    let record = OutboxRecord::from_intent(OperationId::from_local(2), room, &intent).unwrap();
+    let restored = record.intent().unwrap();
+    let Some((wire::MessagingCommand::Send { options, .. }, messaging::Work::Send)) =
+        command(context, &restored, |_| None)
+    else {
+        panic!("new thread send")
+    };
+    assert_eq!(options.thread_title.unwrap().as_str(), "Release planning");
+    assert!(options.reply_to.is_none() && options.thread.is_none());
+}
+
+#[test]
 fn queued_room_unread_overlays_new_observations_and_never_replays_ambiguity() {
     let (mut model, context, room) = model();
     model.snapshot.conversations = page(

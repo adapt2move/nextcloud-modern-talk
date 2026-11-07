@@ -11,7 +11,27 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No followed threads.",
         "No hay hilos seguidos.",
     ),
+    (
+        "Neue Threads können nicht geplant werden.",
+        "New threads cannot be scheduled yet.",
+        "Los hilos nuevos aún no se pueden programar.",
+    ),
+    (
+        "Neuen Thread beginnen",
+        "Start a new thread",
+        "Iniciar un hilo nuevo",
+    ),
+    (
+        "Neuer Thread · Titel aus der Nachricht",
+        "New thread · title from the message",
+        "Hilo nuevo · título a partir del mensaje",
+    ),
     ("Nur Erwähnungen", "Mentions only", "Solo menciones"),
+    (
+        "Schließe zuerst die aktuelle Bearbeitung oder den Dateientwurf.",
+        "Finish the current edit or attachment draft first.",
+        "Termina primero la edición o el borrador de archivos.",
+    ),
     ("Thread", "Thread", "Hilo"),
     ("Thread folgen", "Follow thread", "Seguir hilo"),
     (

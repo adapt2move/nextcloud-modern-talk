@@ -567,7 +567,10 @@ impl Drafts {
                 // Never erase text the user changed while the operation was in flight.
                 if draft.pending_may_clear && draft.text == *submitted {
                     draft.text = Text::new("").expect("empty bounded text");
-                    if draft.target.reply_to.is_some() || draft.target.private_reply.is_some() {
+                    if draft.target.reply_to.is_some()
+                        || draft.target.private_reply.is_some()
+                        || draft.target.new_thread
+                    {
                         completed_reply = Some((draft.context, draft.target.clone()));
                     }
                 }
@@ -595,6 +598,7 @@ impl Drafts {
                 // and delivery option, without retiring a newer reply target.
                 target.reply_to = None;
                 target.private_reply = None;
+                target.new_thread = false;
                 self.set_target(context, target);
             }
         }
@@ -1695,6 +1699,35 @@ mod tests {
             assert_eq!(drafts.text(c), "Different draft");
             assert!(!drafts.has_text_for_target(c, &reply));
         }
+    }
+    #[test]
+    fn creating_a_thread_reuses_the_draft_and_clears_only_after_its_admission() {
+        use talk_core::ui::messaging::ComposeTarget;
+        let c = context(1);
+        let mut drafts = Drafts::default();
+        let mut port = Port {
+            fail: None,
+            submissions: 0,
+        };
+        drafts.save(c, "A new discussion").unwrap();
+        assert!(drafts.set_target(
+            c,
+            ComposeTarget {
+                new_thread: true,
+                ..Default::default()
+            }
+        ));
+        assert_eq!(drafts.text(c), "A new discussion");
+        drafts.save(c, "A new discussion").unwrap();
+        let request = drafts.send(c, Decision::Allowed, &mut port).unwrap();
+        assert!(drafts.target(c).new_thread);
+        assert!(drafts.complete(SubmissionResult {
+            request,
+            context: c,
+            result: Completion::Queued
+        }));
+        assert!(!drafts.target(c).new_thread);
+        assert!(drafts.text(c).is_empty());
     }
     #[test]
     fn only_correlated_confirmation_clears_unchanged_text() {

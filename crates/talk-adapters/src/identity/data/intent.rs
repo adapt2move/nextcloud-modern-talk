@@ -11,6 +11,12 @@ pub struct OutboxOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_reply: Option<OutboxPrivateReply>,
     pub thread: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "codec::optional_text"
+    )]
+    pub thread_title: Option<Text<256>>,
     pub silent: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -93,6 +99,12 @@ impl OutboxIntent {
         let options = |o: &OutboxOptions| {
             o.reply_to != Some(0)
                 && o.thread != Some(0)
+                && o.thread_title.as_ref().is_none_or(|title| {
+                    !title.as_str().trim().is_empty()
+                        && o.reply_to.is_none()
+                        && o.private_reply.is_none()
+                        && o.thread.is_none()
+                })
                 && o.private_reply.as_ref().is_none_or(|private| {
                     private.message > 0 && o.reply_to.is_none() && o.thread.is_none()
                 })
@@ -108,6 +120,7 @@ impl OutboxIntent {
                 !body.as_str().trim().is_empty()
                     && *timestamp > 0
                     && o.private_reply.is_none()
+                    && o.thread_title.is_none()
                     && options(o)
             }
             Self::Edit { message, body } => *message > 0 && !body.as_str().trim().is_empty(),
@@ -164,6 +177,33 @@ mod tests {
                 .unwrap();
         assert_eq!(record.kind, OutboxKind::MarkUnread);
         assert_eq!(record.intent(), Ok(OutboxIntent::MarkUnread));
+    }
+
+    #[test]
+    fn thread_root_intent_is_bounded_and_cannot_be_combined_with_a_reply() {
+        let room = NavigationRoomKey::new(&format!("r1:{:032x}", 7)).unwrap();
+        let options = OutboxOptions {
+            thread_title: Some(Text::new("Planning").unwrap()),
+            ..Default::default()
+        };
+        let root = OutboxIntent::Send {
+            body: Text::new("Planning details").unwrap(),
+            options: options.clone(),
+        };
+        let record =
+            OutboxRecord::from_intent(OperationId::from_local(5), room.clone(), &root).unwrap();
+        assert_eq!(record.intent(), Ok(root));
+        let invalid = OutboxIntent::Send {
+            body: Text::new("Reply").unwrap(),
+            options: OutboxOptions {
+                reply_to: Some(3),
+                ..options
+            },
+        };
+        assert_eq!(
+            OutboxRecord::from_intent(OperationId::from_local(6), room, &invalid),
+            Err(DataError::InvalidInput)
+        );
     }
 
     #[test]

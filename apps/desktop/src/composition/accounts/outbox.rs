@@ -576,7 +576,12 @@ impl Accounts {
                 .filter(|n| *n > 0)
                 .ok_or(SubmitError::StaleScope)
         };
-        let options = |o: &view::ComposeTarget| {
+        let options = |o: &view::ComposeTarget, body: &str| {
+            if o.new_thread
+                && (o.reply_to.is_some() || o.private_reply.is_some() || o.thread.is_some())
+            {
+                return Err(SubmitError::StaleScope);
+            }
             Ok(OutboxOptions {
                 reply_to: o.reply_to.map(id).transpose()?,
                 private_reply: o
@@ -598,14 +603,20 @@ impl Accounts {
                     })
                     .transpose()?,
                 thread: o.thread.map(id).transpose()?,
+                thread_title: o
+                    .new_thread
+                    .then(|| messaging::thread_title(body))
+                    .transpose()?,
                 silent: o.silent,
             })
         };
         Some(match action {
-            A::Send { body, target } => options(target).map(|options| Intent::Send {
-                body: body.clone(),
-                options,
-            }),
+            A::Send { body, target } => {
+                options(target, body.as_str()).map(|options| Intent::Send {
+                    body: body.clone(),
+                    options,
+                })
+            }
             A::Edit { message, body } => id(*message).map(|message| Intent::Edit {
                 message,
                 body: body.clone(),
@@ -632,11 +643,17 @@ impl Accounts {
                 body,
                 timestamp,
                 target,
-            } => options(target).map(|options| Intent::Schedule {
-                body: body.clone(),
-                timestamp: *timestamp,
-                options,
-            }),
+            } => {
+                if target.new_thread {
+                    Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+                } else {
+                    options(target, body.as_str()).map(|options| Intent::Schedule {
+                        body: body.clone(),
+                        timestamp: *timestamp,
+                        options,
+                    })
+                }
+            }
             A::CancelScheduled(message) => {
                 id(*message).map(|message| Intent::CancelScheduled { message })
             }
@@ -1257,6 +1274,7 @@ fn failed_draft(entry: &Entry) -> Option<view::FailedDraft> {
                 body: private.body.clone(),
             }),
         thread: o.thread.map(u128::from),
+        new_thread: o.thread_title.is_some(),
         silent: o.silent,
     };
     let (body, target, kind) = match &entry.intent {
@@ -1376,7 +1394,7 @@ fn command(
                 None => None,
             },
             thread: o.thread.map(mid),
-            thread_title: None,
+            thread_title: o.thread_title.clone(),
             silent: o.silent,
         })
     };

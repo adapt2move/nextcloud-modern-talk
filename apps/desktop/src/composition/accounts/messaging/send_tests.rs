@@ -8,6 +8,7 @@ fn queued(now: Instant) -> QueuedSend {
         target: view::ComposeTarget {
             reply_to: Some(7),
             thread: Some(3),
+            new_thread: false,
             silent: true,
             private_reply: None,
         },

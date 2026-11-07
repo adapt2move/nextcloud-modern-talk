@@ -51,6 +51,7 @@ pub const SCENARIOS: &[&str] = &[
     "chat-edit",
     "thread-error",
     "thread-list",
+    "thread-compose",
     "sidebar-unread",
     "chat-content",
     "chat-content-progress",
@@ -198,8 +199,25 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if scenario == Some("thread-compose") {
+        let mut state = snapshot(Some("chat-edit"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
+    }
     if scenario == Some("sidebar-unread") {
-        return snapshot(Some("chat-ux"));
+        let mut state = snapshot(Some("chat-ux"));
+        state.messages = page(state.messages.as_slice().iter().cloned().map(|mut row| {
+            row.metadata.rich = Page::empty();
+            row.attachments = Page::empty();
+            row.reply_count = 0;
+            row
+        }));
+        return state;
     }
     if scenario == Some("thread-list") {
         let mut state = snapshot(Some("thread"));

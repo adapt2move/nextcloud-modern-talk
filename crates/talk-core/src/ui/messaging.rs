@@ -371,6 +371,8 @@ pub struct ComposeTarget {
     pub reply_to: Option<u128>,
     pub private_reply: Option<PrivateReplyTarget>,
     pub thread: Option<u128>,
+    /// Create a thread whose root is this new message.
+    pub new_thread: bool,
     pub silent: bool,
 }
 /// Displayed quote and durable lookup key; neither grants access to the source.

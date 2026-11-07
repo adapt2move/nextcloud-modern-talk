@@ -106,6 +106,7 @@ pub enum LocalAction {
     Navigate(ConversationRef),
     ToggleRoomMenu(ConversationRef, &'static str),
     MarkRoomUnread(ConversationRef),
+    NewThread(ConversationRef),
     OpenSubscribedThread(ConversationRef, u128),
     SendThread,
     ToggleThreadOptions,
@@ -209,6 +210,7 @@ pub struct InitialView {
     pub onboarding: bool,
     pub threads_fixture: bool,
     pub room_menu_fixture: bool,
+    pub new_thread_fixture: bool,
     pub scale: u16,
 }
 
@@ -369,6 +371,7 @@ impl Desktop {
             onboarding,
             threads_fixture,
             room_menu_fixture,
+            new_thread_fixture,
             scale,
         } = initial;
         let snapshot = port
@@ -640,6 +643,23 @@ impl Desktop {
                     },
                 );
             }
+        }
+        if development
+            && new_thread_fixture
+            && let Some(context) = desktop.snapshot.selected
+        {
+            let _ = desktop.drafts.set_target(
+                context,
+                talk_core::ui::messaging::ComposeTarget {
+                    new_thread: true,
+                    ..Default::default()
+                },
+            );
+            let body = "Plan für den nächsten Release";
+            let _ = desktop.drafts.save(context, body);
+            desktop.composer.update(cx, |input, _| {
+                input.set_value(body);
+            });
         }
         if development && initial_overlay == Some(Overlay::Search) {
             desktop.search.update(cx, |i, _| i.set_value("Navigation"));
@@ -1468,6 +1488,7 @@ impl Desktop {
                 self.room_menu = None;
                 self.submit_sidebar_unread(context);
             }
+            LocalAction::NewThread(context) => self.begin_new_thread(context, window, cx),
             LocalAction::OpenSubscribedThread(context, root) => {
                 if self
                     .snapshot
@@ -1593,6 +1614,14 @@ impl Desktop {
             }
             LocalAction::Send => {
                 if self.composer_submission(cx).is_none() {
+                    return;
+                }
+                if self.snapshot.selected.is_some_and(|context| {
+                    self.drafts.target(context).new_thread
+                        && !self.message_feature_enabled(
+                            talk_core::ui::messaging::MessageFeature::Threads,
+                        )
+                }) {
                     return;
                 }
                 // The scoped queue decision admits offline work. A connection

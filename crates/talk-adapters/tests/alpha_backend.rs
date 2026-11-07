@@ -750,7 +750,7 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
-    m(
+    let thread_reply = m(
         &mut client,
         &runtime,
         id,
@@ -765,6 +765,47 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let thread_reply = canonical_accepted_id(thread_reply, OperationId::from_local(127));
+    let nested = m(
+        &mut client,
+        &runtime,
+        id,
+        133,
+        "thread-quoted-reply",
+        M::Send {
+            text: text("Quoted thread reply"),
+            options: ComposeOptions {
+                reply_to: Some(thread_reply),
+                thread: Some(thread),
+                ..ComposeOptions::default()
+            },
+        },
+    )
+    .await;
+    let nested = canonical_accepted_id(nested, OperationId::from_local(133));
+    let MR::Messages { messages, .. } = m(
+        &mut client,
+        &runtime,
+        id,
+        134,
+        "thread-quoted-history",
+        M::History {
+            before: None,
+            thread: Some(thread),
+        },
+    )
+    .await
+    else {
+        panic!("thread history")
+    };
+    assert!(messages.as_slice().iter().any(|message| {
+        message.message.id == nested
+            && message.thread == Some(thread)
+            && message
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.id == thread_reply)
+    }));
     m(
         &mut client,
         &runtime,
