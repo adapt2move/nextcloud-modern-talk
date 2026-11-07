@@ -177,9 +177,9 @@ impl Desktop {
         Some(
             div()
                 .flex_none()
-                .min_h(px(44.))
+                .min_h(px(32.))
                 .px_6()
-                .py_1()
+                .py_0()
                 .flex()
                 .items_center()
                 .gap_3()
@@ -189,6 +189,7 @@ impl Desktop {
                 .relative()
                 .child(self.pin_header_anchor(context, selected))
                 .child(self.scaled_icon("pin", 15., theme.accent))
+                .child(self.hint(self.l("Angeheftet")))
                 .child(
                     self.control(
                         scoped_id("pin-banner-open", context, selected, 0),
@@ -211,7 +212,7 @@ impl Desktop {
                             div()
                                 .flex_none()
                                 .font_family("Google Sans Code")
-                                .text_size(self.sp(11.))
+                                .text_size(self.sp(12.))
                                 .text_color(theme.text)
                                 .child(format!("{} / {}", index + 1, rows.len())),
                         )

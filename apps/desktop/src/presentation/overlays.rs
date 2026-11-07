@@ -208,7 +208,7 @@ impl Desktop {
             self.scroll_area(super::navigation::Region::Overlay)
                 .min_h_0()
                 .flex_1()
-                .p_6()
+                .p_4()
                 .child(body)
                 .into_any_element()
         };
@@ -234,7 +234,7 @@ impl Desktop {
                         .when(overlay == Overlay::ConfirmRecording, |d| d.h(self.sp(260.)))
                         .when(overlay == Overlay::ConfirmEndCall, |d| d.h(self.sp(230.)))
                         .when(overlay == Overlay::RecordingConsent, |d| d.h(self.sp(280.)))
-                        .when(overlay == Overlay::Create, |d| {
+                        .when(matches!(overlay, Overlay::Create | Overlay::CloudFiles | Overlay::CreatePoll | Overlay::PollDetails), |d| {
                             d.h(px((f32::from(window.viewport_size().height)
                                 - super::window_chrome::HEIGHT
                                 - 66.)
@@ -263,7 +263,7 @@ impl Desktop {
                                 .items_center()
                                 .justify_between()
                                 .gap_3()
-                                .px_6()
+                                .px_4()
                                 .py_4()
                                 .border_b_1()
                                 .border_color(t.border)
@@ -271,7 +271,7 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .flex_1()
-                                        .text_size(self.sp(if side { 18. } else { 24. }))
+                                        .text_size(self.sp(20.))
                                         // Keep the single-word consent title visible when
                                         // large text leaves little room beside the close control.
                                         .when(overlay == Overlay::RecordingConsent, |title| {
@@ -307,6 +307,9 @@ impl Desktop {
                         })
                         .when(overlay == Overlay::CreatePoll, |d| {
                             d.child(self.poll_creation_footer(cx))
+                        })
+                        .when(overlay == Overlay::CloudFiles, |d| {
+                            d.child(self.cloud_files_footer(cx))
                         })
                         .when(
                             self.feedback_visible() && overlay != Overlay::CallChat,

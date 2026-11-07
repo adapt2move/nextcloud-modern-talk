@@ -584,7 +584,7 @@ impl Desktop {
             trigger.child(gpui::deferred(
                 gpui::anchored()
                     .anchor(gpui::Corner::TopLeft)
-                    .offset(gpui::point(px(0.), px(4.)))
+                    .offset(gpui::point(px(44.), px(0.)))
                     .child(self.person_card(target, cx)),
             ))
         })
@@ -668,7 +668,7 @@ impl Desktop {
                                             .flex_1()
                                             .min_w_0()
                                             .text_ellipsis()
-                                            .font_weight(gpui::FontWeight::BOLD)
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
                                             .child(name.to_owned()),
                                     )
                                     .when_some(member, |d, member| {
@@ -676,10 +676,10 @@ impl Desktop {
                                             div()
                                                 .flex_none()
                                                 .rounded(px(5.))
-                                                .bg(self.theme.subtle)
+                                                .bg(self.theme.selected)
                                                 .px_1()
-                                                .text_size(self.sp(11.))
-                                                .text_color(self.theme.muted)
+                                                .text_size(self.sp(12.))
+                                                .text_color(self.theme.selected_text)
                                                 .child(self.l(role(member.role))),
                                         )
                                     }),
@@ -708,10 +708,8 @@ impl Desktop {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .rounded(px(8.))
-                            .bg(self.theme.subtle)
-                            .px_3()
-                            .py_2()
+                            .px_1()
+                            .py_1()
                             .when_some(icon, |d, icon| {
                                 let mut value = icon.as_str().to_owned();
                                 if value.chars().count() == 1 {

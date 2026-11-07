@@ -50,6 +50,7 @@ impl Desktop {
         self.own_status_clear_after = StatusClearAfter::Never;
         self.own_status_message_error = false;
         self.own_status_editing = true;
+        self.own_status_emoji_open = false;
         self.own_status_message_input.focus_handle(cx).focus(window);
     }
 
@@ -236,15 +237,44 @@ impl Desktop {
                         cx,
                     )),
             )
-            .child(
-                self.input_surface(&self.own_status_message_input, cx)
-                    .child(self.own_status_message_input.clone()),
-            );
-        if values.is_some_and(|v| v.user_status_emoji == Some(true)) {
-            body = body.child(
-                self.input_surface(&self.own_status_icon_input, cx)
-                    .child(self.own_status_icon_input.clone()),
-            );
+;
+        if let Some(choices) = values.and_then(|v| v.predefined_statuses.as_ref()) {
+            if !choices.as_slice().is_empty() {
+                body = body.child(self.hint(self.l("Vorschläge")));
+            }
+            for (index, choice) in choices.as_slice().iter().enumerate() {
+                body = body.child(
+                    self.button(
+                        ("predefined-status", index),
+                        "",
+                        ButtonStyle::Quiet,
+                        ready,
+                        LocalAction::SelectPredefinedStatus(index),
+                        cx,
+                    )
+                    .w_full()
+                    .justify_start()
+                    .child(format!(
+                        "{} {}",
+                        choice.icon.as_str(),
+                        choice.message.as_str()
+                    )),
+                );
+            }
+        }
+        body = body.child(div().flex().items_center().gap_1().min_h(px(40.))
+            .rounded(px(8.)).border_1().border_color(t.input_border).bg(t.subtle)
+            .when(values.is_some_and(|v| v.user_status_emoji == Some(true)), |d| {
+                let icon = self.own_status_icon_input.read(cx).content.clone();
+                d.child(self.button("status-emoji-picker", if icon.is_empty() { "💬".to_owned() } else { icon.to_string() },
+                    ButtonStyle::Quiet, ready, LocalAction::ToggleStatusEmoji, cx).min_h(px(32.)).px_1())
+            })
+            .child(self.input_surface(&self.own_status_message_input, cx).flex_1().border_0()
+                .child(self.own_status_message_input.clone())));
+        if self.own_status_emoji_open {
+            body = body.child(div().flex().flex_wrap().gap_1().children(["💬", "😊", "🏠", "🎯", "☕", "🌴"].into_iter().enumerate().map(|(i, emoji)|
+                self.button(("status-emoji", i), emoji, ButtonStyle::Quiet, ready, LocalAction::SelectStatusEmoji(emoji), cx)
+            )));
         }
         if self.own_status_message_error {
             body = body.child(
@@ -292,7 +322,7 @@ impl Desktop {
                     LocalAction::SaveStatusMessage,
                     cx,
                 ))
-                .child(self.button(
+                .when(self.visible_status_message().is_some(), |d| d.child(self.button(
                     "clear-status-message",
                     "Entfernen",
                     ButtonStyle::Quiet,
@@ -302,32 +332,8 @@ impl Desktop {
                     ),
                     LocalAction::ClearStatusMessage,
                     cx,
-                )),
+                ))),
         );
-        if let Some(choices) = values.and_then(|v| v.predefined_statuses.as_ref()) {
-            if !choices.as_slice().is_empty() {
-                body = body.child(self.hint(self.l("Vorschläge")));
-            }
-            for (index, choice) in choices.as_slice().iter().enumerate() {
-                body = body.child(
-                    self.button(
-                        ("predefined-status", index),
-                        "",
-                        ButtonStyle::Quiet,
-                        ready,
-                        LocalAction::SelectPredefinedStatus(index),
-                        cx,
-                    )
-                    .w_full()
-                    .justify_start()
-                    .child(format!(
-                        "{} {}",
-                        choice.icon.as_str(),
-                        choice.message.as_str()
-                    )),
-                );
-            }
-        }
         div()
             .absolute()
             .bottom(px(58.))

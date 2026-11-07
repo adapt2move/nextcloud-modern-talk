@@ -958,18 +958,6 @@ impl Desktop {
                                 ConversationAction::SetReadOnly(d.read_only != Some(true)),
                                 cx,
                             ))
-                            .child(self.button_with_leading_icon(
-                                "room-create-poll",
-                                ("Umfrage erstellen", "plus"),
-                                ButtonStyle::Quiet,
-                                Availability::when(
-                                    self.content_scope_current()
-                                        && self.snapshot.content_panel.poll_create.enabled(),
-                                    unavailable(self.snapshot.content_panel.poll_create),
-                                ),
-                                LocalAction::Content(super::content::Action::CreatePoll),
-                                cx,
-                            )),
                     )
                     .child(personal)
                     .child(

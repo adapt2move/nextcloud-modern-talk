@@ -34,6 +34,8 @@ pub(crate) enum Action {
     ChooseFolder,
     BrowseDirectory(Text<16384>),
     BrowserBack,
+    BrowserClearSearch,
+    ToggleBrowserSort,
     BrowserPage(i8),
     BrowserRecent,
     BrowserFavorites,
@@ -112,6 +114,7 @@ pub(super) struct ContentUi {
     pub(super) browser_search: Entity<TextInput>,
     browser_search_value: String,
     browser_search_since: Option<std::time::Instant>,
+    browser_sort_open: bool,
     pub(super) composer_menu: composer_menu::Menu,
     preview: Option<AttachmentRef>,
     gallery: Vec<AttachmentRef>,
@@ -171,6 +174,7 @@ impl ContentUi {
             browser_search,
             browser_search_value: String::new(),
             browser_search_since: None,
+            browser_sort_open: false,
             composer_menu: composer_menu::Menu::new(cx),
             preview: None,
             gallery: Vec::new(),
@@ -904,42 +908,27 @@ impl Desktop {
             voice.elapsed_ms / 60_000,
             (voice.elapsed_ms / 1_000) % 60
         );
-        let mut body = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(self.icon_button(
-                "voice-cancel",
-                ("trash-2", "Aufnahme verwerfen"),
-                ButtonStyle::Quiet,
-                true.into(),
-                LocalAction::Content(Action::VoiceCancel(context)),
-                cx,
-            ))
-            .when(
-                matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording),
-                |d| d.child(self.recording_dot()),
-            )
-            .child(self.hint(&time))
-            .when(voice.phase == VoicePhase::Review, |d| {
-                d.child(self.hint(self.l("Aufnahme bereit zum Senden")))
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(32.))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .children(self.content_ui.voice_levels.iter().map(|level| {
-                        div()
-                            .w(px(3.))
-                            .h(px(3. + f32::from(*level) / 1000. * 25.))
-                            .rounded(px(2.))
-                            .bg(self.theme.accent)
-                    })),
-            );
+        let playback = self.content_ui.voice_playback.filter(|p| p.context == context);
+        let playing = playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
+        let controllable = playback.is_some_and(|p| matches!(p.state, talk_core::ui::content::PlaybackState::Paused | talk_core::ui::content::PlaybackState::Playing | talk_core::ui::content::PlaybackState::Ended));
+        let speed = playback.map_or(2, |p| p.speed_half_steps);
+        let mut body = div().flex().items_center().gap_2()
+            .child(self.icon_button("voice-cancel", ("trash-2", "Aufnahme verwerfen"), ButtonStyle::Quiet, true.into(), LocalAction::Content(Action::VoiceCancel(context)), cx))
+            .when(matches!(voice.phase, VoicePhase::Starting | VoicePhase::Recording), |d| d
+                .child(self.recording_dot())
+                .child(self.hint(self.l("Aufnahme läuft")))
+                .child(self.hint(&time)))
+            .when(voice.phase == VoicePhase::Review, |d| d.child(self.icon_button(
+                "voice-review-play", (if playing { "pause" } else { "play" }, if playing { "Pausieren" } else { "Aufnahme abspielen" }),
+                ButtonStyle::Quiet, true.into(), LocalAction::Content(Action::VoiceReviewPlay { context, play: !playing }), cx)))
+            .child(div().flex_1().min_w_0().h(px(32.)).flex().items_center().gap(px(2.))
+                .children(self.content_ui.voice_levels.iter().map(|level| div().w(px(3.))
+                    .h(px(3. + f32::from(*level) / 1000. * 25.)).rounded(px(2.)).bg(self.theme.accent))))
+            .when(voice.phase == VoicePhase::Review, |d| d.child(self.hint(&time)).child(self.button(
+                "voice-review-speed", format!("{}×", f32::from(speed) / 2.0), ButtonStyle::Secondary,
+                Availability::when(controllable, "Die Aufnahme kann hier nicht abgespielt werden."),
+                LocalAction::Content(Action::VoiceReviewSpeed { context, speed: if speed >= 4 { 2 } else { speed + 1 } }), cx,
+            ).min_h(px(28.)).h(px(28.)).px_2()));
         let can_send = Availability::when(
             !self.media_offline()
                 && self.snapshot.content == ContentState::Ready
@@ -951,7 +940,7 @@ impl Desktop {
                 .child(self.icon_button(
                     "voice-stop",
                     ("square", "Aufnahme prüfen"),
-                    ButtonStyle::Quiet,
+                    ButtonStyle::StageDanger,
                     (self.content_ui.voice_auto_send.is_none()).into(),
                     LocalAction::Content(Action::VoiceStop(context)),
                     cx,
@@ -980,76 +969,17 @@ impl Desktop {
         } else if voice.phase == VoicePhase::Stopping {
             body = body.child(self.hint(self.l("Aufnahme wird abgeschlossen …")));
         }
-        let mut review = div().flex().items_center().gap_2();
-        if voice.phase == VoicePhase::Review {
-            let playback = self
-                .content_ui
-                .voice_playback
-                .filter(|p| p.context == context);
-            let playing =
-                playback.is_some_and(|p| p.state == talk_core::ui::content::PlaybackState::Playing);
-            let controllable = playback.is_some_and(|p| {
-                matches!(
-                    p.state,
-                    talk_core::ui::content::PlaybackState::Paused
-                        | talk_core::ui::content::PlaybackState::Playing
-                        | talk_core::ui::content::PlaybackState::Ended
-                )
-            });
-            let speed = playback.map_or(2, |p| p.speed_half_steps);
-            review = review
-                .child(self.icon_button(
-                    "voice-review-play",
-                    (
-                        if playing { "pause" } else { "play" },
-                        if playing {
-                            "Pausieren"
-                        } else {
-                            "Aufnahme abspielen"
-                        },
-                    ),
-                    ButtonStyle::Quiet,
-                    true.into(),
-                    LocalAction::Content(Action::VoiceReviewPlay {
-                        context,
-                        play: !playing,
-                    }),
-                    cx,
-                ))
-                .child(self.button(
-                    "voice-review-speed",
-                    format!("{}×", f32::from(speed) / 2.0),
-                    ButtonStyle::Quiet,
-                    controllable,
-                    LocalAction::Content(Action::VoiceReviewSpeed {
-                        context,
-                        speed: if speed >= 4 { 2 } else { speed + 1 },
-                    }),
-                    cx,
-                ));
-            if let Some(playback) = playback
-                && playback.duration_ms.is_some()
-            {
-                review = review.child(self.hint(&format!(
-                    "{:02}:{:02} / {time}",
-                    playback.position_ms / 60_000,
-                    playback.position_ms / 1_000 % 60
-                )));
-            }
-            if playback.is_some_and(|p| {
-                matches!(p.state, talk_core::ui::content::PlaybackState::Failed(_))
-            }) {
-                review = review
-                    .child(self.hint(self.l("Die Aufnahme kann hier nicht abgespielt werden.")));
-            }
-        }
         div()
             .flex_none()
             .px(if compact { px(12.) } else { px(24.) })
             .pb_4()
             .pt_2()
+            .flex().flex_col().gap_2()
+            .child(self.typing_slot(context))
             .child(
                 div()
+                    .min_h(px(96.))
+                    .justify_center()
                     .p_3()
                     .rounded(px(10.))
                     .border_1()
@@ -1058,7 +988,6 @@ impl Desktop {
                     .flex_col()
                     .gap_2()
                     .child(body)
-                    .child(review)
                     .when(voice.phase == VoicePhase::Review && self.media_offline(), |d| {
                         d.child(self.hint(self.l("Verbinde dich erneut, um die Aufnahme zu senden.")))
                     })
@@ -1191,7 +1120,8 @@ impl Desktop {
                 .min_h(px(28.))
                 .h(px(28.))
                 .px_2()
-                .rounded(px(8.)),
+                .rounded(px(8.))
+                .border_1().border_color(self.theme.border),
             )
             .child(
                 self.icon_button(
@@ -1402,6 +1332,11 @@ impl Desktop {
                 self.clear_cloud_search(cx);
                 self.submit_content(ContentAction::ListFiles(path));
             }
+            Action::ToggleBrowserSort => self.content_ui.browser_sort_open = !self.content_ui.browser_sort_open,
+            Action::BrowserClearSearch => {
+                self.clear_cloud_search(cx);
+                self.submit_content(ContentAction::ListFiles(Text::new("/").expect("constant")));
+            }
             Action::BrowserBack => {
                 if let Some(location) = self.content_ui.browser_history.pop() {
                     self.content_ui.browser_page = 0;
@@ -1505,6 +1440,7 @@ impl Desktop {
                 }
             }
             Action::BrowserSort(sort) => {
+                self.content_ui.browser_sort_open = false;
                 self.content_ui.browser_page = 0;
                 self.content_ui.browser_cursor = None;
                 self.submit_content(ContentAction::SortFiles(sort));
@@ -2017,13 +1953,13 @@ impl Desktop {
                         .child(
                             div()
                                 .truncate()
-                                .text_size(self.sp(11.))
+                                .text_size(self.sp(12.))
                                 .child(transfer.name.as_str().to_owned()),
                         )
                         .child(
                             div()
                                 .truncate()
-                                .text_size(self.sp(10.))
+                                .text_size(self.sp(12.))
                                 .text_color(self.theme.muted)
                                 .child(if active {
                                     match transfer.total {
@@ -2095,23 +2031,7 @@ impl Desktop {
     pub(super) fn poll_drafts_header(&self, cx: &Context<Self>) -> Option<gpui::Stateful<Div>> {
         (self.content_scope_current() && self.snapshot.content_panel.poll_drafts_manage.enabled())
             .then(|| {
-                let label = if self.content_ui.drafts_open {
-                    self.lf(
-                        "Entwürfe · {n}",
-                        &[(
-                            "n",
-                            &self
-                                .snapshot
-                                .content_panel
-                                .poll_drafts
-                                .as_slice()
-                                .len()
-                                .to_string(),
-                        )],
-                    )
-                } else {
-                    self.l("Entwürfe").to_owned()
-                };
+                let label = self.lf("Entwürfe · {n}", &[("n", &self.snapshot.content_panel.poll_drafts.as_slice().len().to_string())]);
                 self.button(
                     "poll-drafts-toggle",
                     label,
@@ -2308,14 +2228,14 @@ impl Desktop {
             .child(div().flex().flex_wrap().gap_2().child(self.button(
                 "poll-add-option",
                 "Option hinzufügen",
-                ButtonStyle::Quiet,
-                !busy && self.content_ui.option_count < MAX_POLL_OPTIONS,
+                ButtonStyle::Secondary,
+                Availability::when(!busy && self.content_ui.option_count < MAX_POLL_OPTIONS, "Die maximale Anzahl an Optionen ist erreicht."),
                 LocalAction::Content(Action::AddOption),
                 cx,
             )))
             .child(self.dialog_row(
                 "Mehrere Antworten erlauben",
-                None,
+                Some("Teilnehmende können mehr als eine Antwort wählen."),
                 self.switch(
                     "poll-multiple",
                     "Mehrere Antworten erlauben",
@@ -2427,8 +2347,10 @@ impl Desktop {
                     ))
                 },
             ))
-            .child(
-                self.button(
+            .child(div().flex().items_center().gap_2()
+                .when(!valid, |d| d.child(self.hint(self.l("Gib eine Frage und mindestens zwei unterschiedliche Optionen ein."))))
+                .child(self.button("poll-cancel", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
+                .child(self.button(
                     "poll-submit",
                     "Veröffentlichen",
                     ButtonStyle::Primary,
@@ -2441,12 +2363,11 @@ impl Desktop {
                     ) {
                         Availability::pending()
                     } else {
-                        (available && !busy && valid).into()
+                        Availability::when(available && !busy && valid, if !valid { "Gib eine Frage und mindestens zwei unterschiedliche Optionen ein." } else { "Die Verbindung ist derzeit nicht bereit." })
                     },
                     LocalAction::Content(Action::SubmitPoll),
                     cx,
-                ),
-            )
+                )))
     }
     pub(super) fn poll_card(&self, id: u64, cx: &Context<Self>) -> Div {
         let Some(poll) = self
@@ -2544,14 +2465,13 @@ impl Desktop {
             .flex_col()
             .items_start()
             .w_full()
-            .max_w(px(560.))
+            .max_w(px(if full { 620. } else { 480. }))
             .gap_2()
-            .p_3()
-            .bg(self.theme.subtle)
-            .rounded(px(8.))
+            .when(!full, |d| d.p_4().bg(self.theme.subtle).rounded(px(12.)))
             .child(
                 div()
-                    .text_size(self.sp(16.))
+                    .text_size(self.sp(15.))
+                    .line_height(self.sp(22.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(poll.question.as_str().to_owned()),
             )
@@ -2593,42 +2513,14 @@ impl Desktop {
                 )
                 .w_full()
                 .justify_start()
-                .child(if poll.max_votes != 1 {
-                    div()
-                        .size(px(16.))
-                        .rounded(px(3.))
-                        .border_1()
-                        .border_color(if selected {
-                            self.theme.accent
-                        } else {
-                            self.theme.muted
-                        })
-                        .when(selected, |d| {
-                            d.bg(self.theme.accent).child(self.scaled_icon(
-                                "check",
-                                14.,
-                                self.theme.surface,
-                            ))
-                        })
-                        .into_any_element()
-                } else if selected {
-                    self.scaled_icon("check-circle", 16., self.theme.accent)
-                        .into_any_element()
-                } else {
-                    div()
-                        .size(px(16.))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(self.theme.muted)
-                        .into_any_element()
-                })
+                .child(self.choice_marker(selected, poll.max_votes == 1))
                 .child(
                     div()
                         .flex_1()
                         .text_color(self.theme.text)
                         .child(option.label.as_str().to_owned()),
                 )
-                .when(option.own, |d| d.child(self.hint(self.l("Deine Stimme"))))
+                .when(option.own && selected, |d| d.child(self.hint(self.l("Deine Stimme"))))
                 .when(pending && selected, |d| {
                     d.child(self.hint(self.l("Wird gesendet …")))
                 }),
@@ -2639,9 +2531,9 @@ impl Desktop {
                 });
                 let bar = div()
                     .w_full()
-                    .h(px(5.))
+                    .h(px(6.))
                     .rounded(px(3.))
-                    .bg(self.theme.border)
+                    .bg(self.theme.muted.opacity(if self.theme.dark { 0.65 } else { 0.35 }))
                     .child(
                         div()
                             .h_full()
@@ -2725,7 +2617,7 @@ impl Desktop {
         } else if poll.hidden_results {
             body = body.child(self.hint(self.l("Ergebnisse werden nach Abschluss angezeigt.")));
         }
-        if !poll.hidden_results {
+        if full && !poll.hidden_results {
             for voter in poll
                 .details
                 .as_slice()
@@ -2751,7 +2643,7 @@ impl Desktop {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(self.person_avatar(&initials, 22.))
+                            .child(self.person_avatar(&initials, 20.))
                             .child(self.hint(&format!(
                                 "{} · {}",
                                 voter.name.as_str(),
@@ -2796,14 +2688,13 @@ impl Desktop {
                         cx,
                     ));
             } else {
-                secondary = secondary.child(self.button(
+                secondary = secondary.child(self.icon_button(
                     ("close-poll", poll.id as usize),
-                    "Umfrage beenden",
+                    ("more", "Umfrage beenden"),
                     ButtonStyle::Quiet,
-                    !self.poll_submission_blocked() && !self.media_offline(),
-                    LocalAction::Content(Action::ConfirmClosePoll(poll.id)),
-                    cx,
-                ));
+                    Availability::when(!self.poll_submission_blocked() && !self.media_offline(), "Die Verbindung ist derzeit nicht bereit."),
+                    LocalAction::Content(Action::ConfirmClosePoll(poll.id)), cx,
+                ).size(px(32.)).min_h(px(32.)));
             }
         }
         body.child(secondary)

@@ -43,12 +43,6 @@ impl Desktop {
         // A tombstone remains an authored row even beside the same sender.
         let continuation = continuation && !m.metadata.deleted;
         let context = self.snapshot.selected.expect("message context");
-        let poll_message = m
-            .metadata
-            .rich
-            .as_slice()
-            .iter()
-            .any(|object| matches!(object.kind.as_str(), "poll" | "talk-poll"));
         let action_group: gpui::SharedString = scoped_id("message-actions", context, m.local_id, 0)
             .to_string()
             .into();
@@ -277,7 +271,7 @@ impl Desktop {
                                 .px(px(6.))
                                 .h(reaction_height)
                                 .text_color(if r.own { t.accent } else { t.muted })
-                                .text_size(self.sp(11.))
+                                .text_size(self.sp(12.))
                                 .line_height(self.sp(16.))
                                 .child(r.emoji.as_str().to_owned())
                                 .child(r.count.to_string()),
@@ -309,7 +303,7 @@ impl Desktop {
                     div()
                         .w(px(36.))
                         .flex_none()
-                        .text_size(self.sp(10.))
+                        .text_size(self.sp(12.))
                         .line_height(self.sp(20.))
                         .text_color(t.muted)
                         .child(
@@ -379,14 +373,7 @@ impl Desktop {
                         d.child(
                         div()
                             .absolute()
-                            .when(!m.own || poll_message, |d| d.top(px(8.)))
-                            .when(m.own && !poll_message, |d| {
-                                // Centre the 34 px action beside the 20 sp status.
-                                d.bottom(
-                                    px(if continuation { 3. } else { 12. }) + self.sp(10.)
-                                        - px(17.),
-                                )
-                            })
+                            .top(px(-20.))
                             // Own-message status keeps the far-right column even
                             // on compact continuations; actions sit to its left.
                             .right(if m.own {

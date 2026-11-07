@@ -156,7 +156,7 @@ impl Desktop {
             Item {
                 choice: Choice::Poll,
                 label: "Umfrage erstellen",
-                icon: "plus",
+                icon: "bar-chart-2",
                 availability: Availability::when(
                     self.content_scope_current()
                         && self.snapshot.content_panel.poll_create.enabled(),
@@ -189,7 +189,7 @@ impl Desktop {
                 "bell",
                 MessageFeature::Reminders,
             ),
-        ]
+        ].into_iter().filter(|item| item.availability.is_enabled()).collect()
     }
 
     pub(in crate::presentation) fn toggle_composer_menu(
@@ -381,7 +381,12 @@ impl Desktop {
             ))
             .children(items.into_iter().map(|item| {
                 let id = item.choice.id(target);
-                self.control(
+                div().flex().flex_col()
+                .when(matches!(item.choice, Choice::File | Choice::Poll), |d| d
+                    .when(item.choice == Choice::Poll, |d| d.mt_1().border_t_1().border_color(self.theme.border))
+                    .child(div().px_3().pt_2().text_size(self.sp(12.)).text_color(self.theme.muted)
+                        .child(self.l(if item.choice == Choice::File { "Hochladen" } else { "Erstellen" }))))
+                .child(self.control(
                     id.clone(),
                     if item.choice == Choice::Silent && silent {
                         ButtonStyle::Secondary
@@ -409,7 +414,7 @@ impl Desktop {
                     item.availability,
                     Some(item.label),
                     cx,
-                ))
+                )))
             }));
         Some(
             Popup {

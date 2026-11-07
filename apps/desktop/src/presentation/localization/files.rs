@@ -65,7 +65,9 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "No files are saved offline for this location.",
         "No hay archivos guardados sin conexión para esta ubicación.",
     ),
+    ("Erstellen", "Create", "Crear"),
     ("Größe", "Size", "Tamaño"),
+    ("Hochladen", "Upload", "Subir"),
     (
         "In NextCloud öffnen",
         "Open in NextCloud",
@@ -88,11 +90,13 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Sorting applies to this page.",
         "La ordenación se aplica a esta página.",
     ),
+    ("Suche löschen", "Clear search", "Borrar búsqueda"),
     (
         "Vom Computer hochladen",
         "Upload from computer",
         "Subir desde el ordenador",
     ),
+    ("Wähle mindestens eine Datei aus.", "Select at least one file.", "Selecciona al menos un archivo."),
     ("Zuletzt", "Recent", "Recientes"),
     (
         "Zur Auswahl hinzufügen",

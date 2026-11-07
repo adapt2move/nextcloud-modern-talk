@@ -163,7 +163,7 @@ impl Desktop {
                         .gap_2()
                         .child(if let Some(preview) = preview {
                             div()
-                                .size(px(32.))
+                                .size(px(40.))
                                 .flex_none()
                                 .rounded(px(4.))
                                 .overflow_hidden()
@@ -186,7 +186,7 @@ impl Desktop {
                                         .text_size(self.sp(13.))
                                         .child(file.name.as_str().to_owned()),
                                 )
-                                .child(self.hint(self.l(upload_label(file.state)))),
+                                .child(self.hint(&if matches!(file.state, UploadState::Selected) { crate::presentation::localization::file_size(self.locale, file.bytes) } else { self.l(upload_label(file.state)).to_owned() })),
                         )
                         .when(
                             matches!(file.state, UploadState::Uploading | UploadState::Sharing),
@@ -324,7 +324,7 @@ impl Desktop {
                                 .text_size(self.sp(13.))
                                 .child(file.name.as_str().to_owned()),
                         )
-                        .child(self.hint(&file_detail(file.name.as_str(), file.bytes))),
+                        .child(self.hint(&file_detail(self.locale, file.name.as_str(), file.bytes))),
                 )
         });
         if file.state == UploadState::Uploading {
@@ -356,7 +356,7 @@ impl Desktop {
                     div()
                         .min_w_0()
                         .flex_1()
-                        .child(self.hint(self.l(label)).text_size(self.sp(11.))),
+                        .child(self.hint(self.l(label)).text_size(self.sp(12.))),
                 )
                 .when(pending, |d| d.child(self.pending_dots(self.theme.muted)))
                 .when(retry, |d| {

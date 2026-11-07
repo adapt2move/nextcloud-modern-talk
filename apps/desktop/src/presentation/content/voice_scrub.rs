@@ -195,7 +195,7 @@ impl Desktop {
                     .bg(if (index as f32 + 0.5) / 40. <= fraction {
                         self.theme.accent
                     } else {
-                        self.theme.muted.opacity(0.38)
+                        self.theme.muted
                     })
             }))
             .child(surface)

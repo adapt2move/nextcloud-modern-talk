@@ -65,7 +65,7 @@ impl Desktop {
         &self,
         avatar: Div,
         presence: Presence,
-        dot_size: f32,
+        _dot_size: f32,
         background: gpui::Hsla,
     ) -> Div {
         if presence == Presence::Unknown {
@@ -76,10 +76,9 @@ impl Desktop {
                 .absolute()
                 .right(px(-1.))
                 .bottom(px(-1.))
-                .size(px(dot_size))
+                .size(px(14.))
                 .rounded_full()
-                .when(dot_size < 10., |dot| dot.border_1())
-                .when(dot_size >= 10., |dot| dot.border_2())
+                .border_2()
                 .border_color(background)
                 .bg(self.theme.presence_dot(presence)),
         )
@@ -628,7 +627,6 @@ impl Desktop {
             .flex_col()
             .gap_2()
             .child(self.typing_slot(row.context))
-            .children(self.composer_context(cx))
             .child(
                 div()
                     .min_h(px(96.))
@@ -655,6 +653,7 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .gap_2()
+                    .children(self.composer_context(cx))
                     .when(!unloaded, |d| d.child(self.composer.clone()))
                     .when(unloaded, |d| {
                         d.child(self.hint(self.l(crate::presentation::input::RICH_REJECTION)))
@@ -737,7 +736,7 @@ impl Desktop {
                                             d.child(self.icon_button(
                                                 "voice-start",
                                                 ("mic", "Sprachnachricht aufnehmen"),
-                                                ButtonStyle::Quiet,
+                                                ButtonStyle::Primary,
                                                 ready.into(),
                                                 LocalAction::Content(
                                                     super::content::Action::VoiceStart(row.context),
@@ -746,14 +745,14 @@ impl Desktop {
                                             ))
                                         },
                                     )
-                                    .child(self.icon_button(
+                                    .when(!self.composer.read(cx).content.is_empty() || attached || !self.message_feature_enabled(MessageFeature::Voice), |d| d.child(self.icon_button(
                                         "send",
                                         ("arrow-up", "Senden"),
                                         ButtonStyle::Primary,
                                         send_availability,
                                         LocalAction::Send,
                                         cx,
-                                    )),
+                                    ))),
                             ),
                     ),
             )

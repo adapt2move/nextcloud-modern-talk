@@ -19,14 +19,6 @@ fn parent_path(path: &str) -> Option<Text<16384>> {
     let end = path.rfind('/')?;
     Text::new(if end == 0 { "/" } else { &path[..end] }).ok()
 }
-fn size_label(size: Option<u64>) -> String {
-    match size {
-        None => String::new(),
-        Some(n) if n < 1024 => format!("{n} B"),
-        Some(n) if n < 1024 * 1024 => format!("{:.1} KB", n as f64 / 1024.),
-        Some(n) => format!("{:.1} MB", n as f64 / (1024. * 1024.)),
-    }
-}
 fn file_icon(name: &str, mime: Option<&str>, directory: bool) -> &'static str {
     if directory {
         return "folder";
@@ -334,14 +326,16 @@ impl Desktop {
         if browser.search_available {
             body = body.child(
                 self.input_surface(&self.content_ui.browser_search, cx)
-                    .child(self.content_ui.browser_search.clone()),
+                    .child(self.scaled_icon("search", 16., self.theme.muted))
+                    .child(self.content_ui.browser_search.clone())
+                    .when(!self.content_ui.browser_search.read(cx).content.is_empty(), |d| d.child(self.icon_button(
+                        "cloud-clear-search", ("x", "Suche löschen"), ButtonStyle::Quiet,
+                        Availability::available(), LocalAction::Content(Action::BrowserClearSearch), cx,
+                    ))),
             );
         }
         body = body.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
+            self.segmented()
                 .when(!self.content_ui.browser_history.is_empty(), |row| {
                     row.child(self.icon_button(
                         "cloud-history-back",
@@ -420,13 +414,13 @@ impl Desktop {
                     .child((*part).to_owned()),
                 );
         }
-        if browser.section == FileSection::All {
+        if browser.section == FileSection::All && path != "/" {
             body = body.child(crumbs);
         }
         if browser.offline {
-            body = body.child(self.hint(self.l("Offline · gespeicherte Dateien")));
+            body = body.child(self.banner(crate::presentation::controls::BannerRole::Warning, self.l("Offline · gespeicherte Dateien")));
         } else if browser.loading {
-            body = body.child(self.hint(self.l("Dateien werden geladen …")));
+            body = body.child(self.banner(crate::presentation::controls::BannerRole::Info, self.l("Dateien werden geladen …")));
         }
         if self.content_ui.browser_folder_picker && browser.section == FileSection::All {
             body = body.child(self.button(
@@ -521,44 +515,20 @@ impl Desktop {
             ));
         }
         let entries = browser.entries.as_slice();
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(self.hint(self.l("Sortieren nach")))
-                .child(self.chip(
-                    "cloud-sort-name",
-                    "Name",
-                    (browser.sort == talk_core::ui::content::FileSort::Name, 0, 3),
-                    LocalAction::Content(Action::BrowserSort(
-                        talk_core::ui::content::FileSort::Name,
-                    )),
-                    cx,
-                ))
-                .child(self.chip(
-                    "cloud-sort-modified",
-                    "Änderungsdatum",
-                    (
-                        browser.sort == talk_core::ui::content::FileSort::Modified,
-                        1,
-                        3,
-                    ),
-                    LocalAction::Content(Action::BrowserSort(
-                        talk_core::ui::content::FileSort::Modified,
-                    )),
-                    cx,
-                ))
-                .child(self.chip(
-                    "cloud-sort-size",
-                    "Größe",
-                    (browser.sort == talk_core::ui::content::FileSort::Size, 2, 3),
-                    LocalAction::Content(Action::BrowserSort(
-                        talk_core::ui::content::FileSort::Size,
-                    )),
-                    cx,
-                )),
-        );
+        let sort_label = match browser.sort {
+            talk_core::ui::content::FileSort::Name => "Name",
+            talk_core::ui::content::FileSort::Modified => "Änderungsdatum",
+            talk_core::ui::content::FileSort::Size => "Größe",
+        };
+        body = body.child(div().flex().flex_col().items_start()
+            .child(self.button_with_leading_icon("cloud-sort-toggle", (sort_label, "chevron-down"), ButtonStyle::Secondary,
+                true, LocalAction::Content(Action::ToggleBrowserSort), cx))
+            .when(self.content_ui.browser_sort_open, |d| d.child(self.segmented().children([
+                (talk_core::ui::content::FileSort::Name, "Name"),
+                (talk_core::ui::content::FileSort::Modified, "Änderungsdatum"),
+                (talk_core::ui::content::FileSort::Size, "Größe"),
+            ].into_iter().enumerate().map(|(i, (sort, label))| self.chip(("cloud-sort", i), label,
+                (browser.sort == sort, i, 3), LocalAction::Content(Action::BrowserSort(sort)), cx))))));
         if browser
             .pagination
             .is_some_and(|(_, total)| total > PAGE_SIZE as u64)
@@ -595,8 +565,10 @@ impl Desktop {
                 .flex()
                 .items_center()
                 .gap_3()
-                .px_3()
-                .py_2()
+                .px_2()
+                .h(px(48.))
+                .flex_none()
+                .group(SharedString::from(format!("cloud-row-{}", entry.path.as_str())))
                 .border_b_1()
                 .border_color(self.theme.border)
                 .when(
@@ -604,6 +576,17 @@ impl Desktop {
                         || self.content_ui.browser_selection.contains(&entry.path),
                     |row| row.bg(self.theme.selected),
                 )
+                .child(if !entry.directory && !self.content_ui.browser_folder_picker {
+                    let path = entry.path.clone();
+                    div().id(SharedString::from(format!("cloud-checkbox-{}", path.as_str())))
+                        .child(self.choice_marker(self.content_ui.browser_selection.contains(&entry.path), false))
+                        .when(self.cloud_can_stage(browser), |d| d.on_mouse_down(gpui::MouseButton::Left,
+                            cx.listener(move |this, _: &gpui::MouseDownEvent, window, cx| {
+                                this.modal_focus.focus(window);
+                                this.select_cloud_file(path.clone(), false, true, cx);
+                                cx.stop_propagation();
+                            }))).into_any_element()
+                } else { div().size(px(20.)).flex_none().into_any_element() })
                 .child(if let Some(image) = thumbnail {
                     div()
                         .size(px(32.))
@@ -613,6 +596,8 @@ impl Desktop {
                 } else {
                     div()
                         .size(px(32.))
+                        .rounded(px(6.))
+                        .bg(self.theme.subtle)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -659,53 +644,21 @@ impl Desktop {
                             .flex()
                             .flex_col()
                             .child(div().truncate().child(entry.name.as_str().to_owned()))
-                            .when(browser.section != FileSection::All, |column| {
-                                column.child(
-                                    div()
-                                        .text_size(self.sp(11.))
-                                        .text_color(self.theme.muted)
-                                        .truncate()
-                                        .child(parent_path(entry.path.as_str()).map_or_else(
-                                            || "/".to_owned(),
-                                            |p| p.as_str().to_owned(),
-                                        )),
-                                )
-                            }),
                     );
             }
             row = row.child(
                 div()
                     .text_size(self.sp(12.))
                     .text_color(self.theme.muted)
-                    .child(size_label(entry.size)),
+                    .child(crate::presentation::localization::file_size(self.locale, entry.size)),
             );
-            if let Some(modified) = &entry.modified {
+            if let Some(modified) = entry.modified.as_ref().and_then(|value| crate::presentation::localization::file_date(self.locale, value.as_str())) {
                 row = row.child(
                     div()
                         .text_size(self.sp(12.))
                         .text_color(self.theme.muted)
-                        .child(modified.as_str().to_owned()),
+                        .child(modified),
                 );
-            }
-            if !self.content_ui.browser_folder_picker
-                && !entry.directory
-                && let Some(context) = self
-                    .snapshot
-                    .selected
-                    .filter(|context| context.account == browser.account)
-            {
-                let id: SharedString = format!("cloud-add-{}", entry.path.as_str()).into();
-                row = row.child(self.button(
-                    id,
-                    "Zur Auswahl hinzufügen",
-                    ButtonStyle::Quiet,
-                    self.cloud_can_stage(browser),
-                    LocalAction::Content(Action::Command(ContentAction::StageCloudFile {
-                        context,
-                        path: entry.path.clone(),
-                    })),
-                    cx,
-                ));
             }
             if entry
                 .file_id
@@ -726,7 +679,7 @@ impl Desktop {
                         entry.path.clone(),
                     ))),
                     cx,
-                ));
+                ).opacity(0.).group_hover(SharedString::from(format!("cloud-row-{}", entry.path.as_str())), |style| style.opacity(1.)).focus(|style| style.opacity(1.)));
             }
             if !entry.directory && self.snapshot.selected.is_some() {
                 let id: SharedString = format!("cloud-download-{}", entry.path.as_str()).into();
@@ -752,7 +705,7 @@ impl Desktop {
                         entry.path.clone(),
                     ))),
                     cx,
-                ));
+                ).opacity(0.).group_hover(SharedString::from(format!("cloud-row-{}", entry.path.as_str())), |style| style.opacity(1.)).focus(|style| style.opacity(1.)));
             }
             if !entry.directory
                 && !self.content_ui.browser_folder_picker
@@ -782,26 +735,6 @@ impl Desktop {
             } else {
                 body = body.child(row);
             }
-        }
-        if !self.content_ui.browser_selection.is_empty() && !self.content_ui.browser_folder_picker {
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(self.button(
-                        "cloud-stage-selection",
-                        "Auswahl hinzufügen",
-                        ButtonStyle::Primary,
-                        self.cloud_can_stage(browser),
-                        LocalAction::Content(Action::BrowserStageSelection),
-                        cx,
-                    ))
-                    .child(self.hint(&self.lf(
-                        "{n} ausgewählt",
-                        &[("n", &self.content_ui.browser_selection.len().to_string())],
-                    ))),
-            );
         }
         if let Some((offset, total)) = browser.pagination {
             if total > PAGE_SIZE as u64 {
@@ -870,6 +803,20 @@ impl Desktop {
         }
         body
     }
+    pub(in crate::presentation) fn cloud_files_footer(&self, cx: &Context<Self>) -> Div {
+        let count = self.content_ui.browser_selection.len();
+        let can_stage = self.snapshot.content_panel.file_browser.as_ref().is_some_and(|browser| self.cloud_can_stage(browser));
+        div().flex_none().flex().items_center().justify_end().gap_2().px_4().py_3()
+            .border_t_1().border_color(self.theme.border)
+            .when(count > 0, |d| d.child(self.hint(&self.lf("{n} ausgewählt", &[("n", &count.to_string())]))))
+            .child(self.button("cloud-cancel", "Abbrechen", ButtonStyle::Quiet, true, LocalAction::Close, cx))
+            .when(!self.content_ui.browser_folder_picker, |d| d.child(self.button(
+                "cloud-stage-selection", format!("{} ({count})", self.l("Auswahl hinzufügen")), ButtonStyle::Primary,
+                Availability::when(count > 0 && can_stage, if !can_stage { "Die Verbindung ist derzeit nicht bereit." } else { "Wähle mindestens eine Datei aus." }),
+                LocalAction::Content(Action::BrowserStageSelection), cx,
+            )))
+    }
+
 }
 
 #[cfg(test)]

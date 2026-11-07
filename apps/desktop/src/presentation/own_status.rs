@@ -294,7 +294,7 @@ impl Desktop {
                 })
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| self.l("Statusnachricht festlegen").to_owned());
-            menu = menu.child(
+            menu = menu.child(div().h(px(1.)).bg(t.border)).child(
                 self.button(
                     "edit-status-message",
                     "",
@@ -306,6 +306,7 @@ impl Desktop {
                 .w_full()
                 .justify_start()
                 .px_2()
+                .child(self.scaled_icon("chat", 16., t.muted))
                 .child(div().min_w_0().text_ellipsis().child(label)),
             );
         }

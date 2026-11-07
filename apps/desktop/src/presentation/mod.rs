@@ -167,6 +167,8 @@ pub enum LocalAction {
     AccountPreference(talk_core::preferences::account::AccountPreferenceChange),
     ToggleOwnStatus,
     EditStatusMessage,
+    ToggleStatusEmoji,
+    SelectStatusEmoji(&'static str),
     BackStatusMenu,
     SaveStatusMessage,
     ClearStatusMessage,
@@ -362,6 +364,7 @@ pub struct Desktop {
     account_preference_error: Option<talk_core::preferences::account::AccountPreferenceError>,
     own_status_open: bool,
     own_status_editing: bool,
+    own_status_emoji_open: bool,
     own_status_message_input: Entity<TextInput>,
     own_status_icon_input: Entity<TextInput>,
     own_status_clear_after: talk_core::preferences::account::StatusClearAfter,
@@ -678,6 +681,7 @@ impl Desktop {
             account_preference_error: None,
             own_status_open: development && matches!(probe, Probe::Status | Probe::StatusMessage),
             own_status_editing: development && probe == Probe::StatusMessage,
+            own_status_emoji_open: false,
             own_status_message_input,
             own_status_icon_input,
             own_status_clear_after: talk_core::preferences::account::StatusClearAfter::Never,
@@ -2150,6 +2154,11 @@ impl Desktop {
             LocalAction::StopDevice(kind) => self.stop_one_device(kind, cx),
             LocalAction::ToggleOwnStatus => self.toggle_own_status(window, cx),
             LocalAction::EditStatusMessage => self.edit_status_message(window, cx),
+            LocalAction::ToggleStatusEmoji => self.own_status_emoji_open = !self.own_status_emoji_open,
+            LocalAction::SelectStatusEmoji(emoji) => {
+                self.own_status_icon_input.update(cx, |input, _| input.set_context_value(emoji));
+                self.own_status_emoji_open = false;
+            }
             LocalAction::BackStatusMenu => {
                 self.own_status_editing = false;
                 self.own_status_focus = true;

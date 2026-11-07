@@ -22,27 +22,7 @@ pub(in crate::presentation) fn theme(
 /// Keep enough tint for labels while letting the current-frame backdrop remain
 /// visible. The former 92% tint looked opaque even with a correct GPU blur pass.
 pub(in crate::presentation) fn surface(theme: crate::presentation::Theme) -> gpui::Background {
-    if cfg!(target_os = "windows") {
-        return theme.chat_header_surface();
-    }
-    let [top, bottom] = [0.84, 0.80];
-    gpui::linear_gradient(
-        180.,
-        gpui::linear_color_stop(
-            gpui::Hsla {
-                a: top,
-                ..theme.surface
-            },
-            0.,
-        ),
-        gpui::linear_color_stop(
-            gpui::Hsla {
-                a: bottom,
-                ..theme.surface
-            },
-            1.,
-        ),
-    )
+    theme.chat_header_surface()
 }
 
 type History = Box<dyn FnOnce(Pixels, &mut Window, &mut App) -> Div>;
@@ -208,11 +188,7 @@ mod tests {
                 let original = Theme::resolve(palette, mode, gpui::WindowAppearance::Light);
                 let header = theme(original, palette);
                 let tint = gpui::Rgba::from(header.surface);
-                let alphas = if cfg!(target_os = "windows") {
-                    [1., 1.]
-                } else {
-                    [0.84, 0.80]
-                };
+                let alphas = [1., 1.];
                 for alpha in alphas {
                     for underlying in [0., 1.] {
                         let background = gpui::Rgba {

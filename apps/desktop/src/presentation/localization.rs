@@ -77,6 +77,39 @@ impl Desktop {
         result
     }
 }
+/// Format bounded byte counts without depending on the process locale.
+pub(super) fn file_size(locale: Locale, size: Option<u64>) -> String {
+    let Some(size) = size else { return String::new(); };
+    if size < 1024 { return format!("{size} B"); }
+    let (value, unit) = if size < 1024 * 1024 {
+        (size as f64 / 1024., "KB")
+    } else if size < 1024 * 1024 * 1024 {
+        (size as f64 / (1024. * 1024.), "MB")
+    } else {
+        (size as f64 / (1024. * 1024. * 1024.), "GB")
+    };
+    let number = format!("{value:.1}");
+    format!("{} {unit}", if locale == Locale::English { number } else { number.replace('.', ",") })
+}
+
+/// The server sends WebDAV dates in HTTP-date form. Only display dates we can
+/// recognize; never present protocol text as a localized date.
+pub(super) fn file_date(locale: Locale, raw: &str) -> Option<String> {
+    let parts: Vec<_> = raw.split_whitespace().collect();
+    let day_index = parts.iter().position(|part| part.trim_end_matches(',').parse::<u8>().is_ok())?;
+    let day = parts.get(day_index)?.trim_end_matches(',').parse::<u8>().ok()?;
+    let month = match *parts.get(day_index + 1)? {
+        "Jan" => 1, "Feb" => 2, "Mar" => 3, "Apr" => 4, "May" => 5, "Jun" => 6,
+        "Jul" => 7, "Aug" => 8, "Sep" => 9, "Oct" => 10, "Nov" => 11, "Dec" => 12, _ => return None,
+    };
+    let year = parts.get(day_index + 2)?.parse::<u16>().ok()?;
+    if !(1..=31).contains(&day) || year < 1000 { return None; }
+    Some(match locale {
+        Locale::German => format!("{day:02}.{month:02}.{year}"),
+        Locale::Spanish => format!("{day:02}/{month:02}/{year}"),
+        Locale::English => format!("{month:02}/{day:02}/{year}"),
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
