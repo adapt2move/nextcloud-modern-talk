@@ -219,15 +219,14 @@ fn control_colors(t: super::Theme, style: ButtonStyle, enabled: bool) -> (Hsla, 
             ButtonStyle::Quiet => (gpui::transparent_black(), t.disabled_fg),
             ButtonStyle::Primary | ButtonStyle::Danger => (t.subtle, t.disabled_fg),
             ButtonStyle::Secondary => (t.surface, t.disabled_fg),
-            ButtonStyle::Stage | ButtonStyle::StageDanger => (t.stage_panel, t.stage_disabled),
+            ButtonStyle::Stage | ButtonStyle::StageDanger => (t.stage_panel, t.stage_muted),
         };
     }
     match style {
         ButtonStyle::Primary => (t.accent, t.on_accent),
         ButtonStyle::Danger => (t.danger_bg, t.danger),
         ButtonStyle::Stage => (t.stage_panel, t.stage_text),
-        ButtonStyle::StageDanger if t.dark => (t.danger_bg, t.danger),
-        ButtonStyle::StageDanger => (t.danger, t.danger_bg),
+        ButtonStyle::StageDanger => (gpui::rgb(0xc0483a).into(), gpui::white().into()),
         ButtonStyle::Quiet => (gpui::transparent_black(), t.sidebar_secondary),
         ButtonStyle::Secondary => (t.surface, t.text),
     }
@@ -246,8 +245,7 @@ fn control_focus_color(t: super::Theme, style: ButtonStyle, enabled: bool) -> Hs
     match (style, enabled) {
         (ButtonStyle::Primary, true) => t.on_accent,
         (ButtonStyle::Danger, true) => t.danger,
-        (ButtonStyle::StageDanger, true) if t.dark => t.danger,
-        (ButtonStyle::StageDanger, true) => t.danger_bg,
+        (ButtonStyle::StageDanger, true) => gpui::white().into(),
         (ButtonStyle::Stage | ButtonStyle::StageDanger, _) => t.stage_text,
         _ => t.focus,
     }
@@ -1652,10 +1650,7 @@ mod tests {
                 for style in [ButtonStyle::Stage, ButtonStyle::StageDanger] {
                     let (bg, fg) = control_colors(t, style, false);
                     let ratio = contrast(bg, fg);
-                    assert!(
-                        (2.0..=3.6).contains(&ratio),
-                        "{p:?}/{a:?}: unavailable stage {ratio}"
-                    );
+                    assert!(ratio >= 4.5, "{p:?}/{a:?}: unavailable stage {ratio}");
                     let (active_bg, active_fg) = control_colors(t, style, true);
                     assert!(contrast(active_bg, active_fg) >= 4.5);
                 }

@@ -344,6 +344,7 @@ pub struct Desktop {
     call_started: Option<(CallScope, std::time::Instant)>,
     call_reconnecting_since: Option<(CallScope, Instant)>,
     call_ended_since: Option<(CallScope, Instant)>,
+    call_ended_frame_pending: Option<CallScope>,
     dismissed_recording_failure: Option<CallScope>,
     call_recovery: call::recovery::Recovery,
     call_clock: Option<gpui::Task<()>>,
@@ -574,11 +575,6 @@ impl Desktop {
             .as_ref()
             .filter(|call| call.stage == CallStage::Active)
             .map(|call| (call.scope, std::time::Instant::now()));
-        let call_ended_since = snapshot
-            .call
-            .as_ref()
-            .filter(|call| call.stage == CallStage::Ended)
-            .map(|call| (call.scope, Instant::now()));
         let call_reconnecting_since = snapshot
             .call
             .as_ref()
@@ -681,7 +677,8 @@ impl Desktop {
             call_minimized,
             call_started,
             call_reconnecting_since,
-            call_ended_since,
+            call_ended_since: None,
+            call_ended_frame_pending: None,
             dismissed_recording_failure: None,
             call_recovery: call::recovery::Recovery::default(),
             call_clock: None,
@@ -770,12 +767,12 @@ impl Desktop {
             .call_recovery
             .observe(desktop.snapshot.call.as_ref(), Instant::now());
         desktop.refresh_message_ui(cx);
-        if desktop.snapshot.call.as_ref().is_some_and(|c| {
-            matches!(
-                c.stage,
-                CallStage::Active | CallStage::Reconnecting | CallStage::Ended
-            )
-        }) {
+        if desktop
+            .snapshot
+            .call
+            .as_ref()
+            .is_some_and(|c| matches!(c.stage, CallStage::Active | CallStage::Reconnecting))
+        {
             desktop.start_call_clock(cx);
         }
         desktop
@@ -1035,20 +1032,13 @@ impl Desktop {
         } else {
             self.call_reconnecting_since = None;
         }
-        if let Some(call) = next
+        if next
             .call
             .as_ref()
-            .filter(|call| call.stage == CallStage::Ended)
+            .is_none_or(|call| call.stage != CallStage::Ended)
         {
-            if self
-                .call_ended_since
-                .is_none_or(|(scope, _)| scope != call.scope)
-                && self.dismissed_terminal_call != Some(call.scope)
-            {
-                self.call_ended_since = Some((call.scope, Instant::now()));
-            }
-        } else {
             self.call_ended_since = None;
+            self.call_ended_frame_pending = None;
         }
         if next.call.as_ref().is_none_or(|call| {
             call.recording != talk_core::ui::presentation::CallRecordingState::Failed
@@ -1056,14 +1046,17 @@ impl Desktop {
         }) {
             self.dismissed_recording_failure = None;
         }
-        if next.call.as_ref().is_some_and(|call| {
-            matches!(
-                call.stage,
-                CallStage::Active | CallStage::Reconnecting | CallStage::Ended
-            )
-        }) {
+        if next
+            .call
+            .as_ref()
+            .is_some_and(|call| matches!(call.stage, CallStage::Active | CallStage::Reconnecting))
+        {
             self.start_call_clock(cx);
-        } else {
+        } else if next
+            .call
+            .as_ref()
+            .is_none_or(|call| call.stage != CallStage::Ended)
+        {
             self.call_clock = None;
         }
         if next
@@ -2775,6 +2768,29 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+            call.stage == CallStage::Ended && self.dismissed_terminal_call != Some(call.scope)
+        }) && self.call_ended_since.is_none()
+            && self.call_ended_frame_pending != Some(call.scope)
+        {
+            let scope = call.scope;
+            self.call_ended_frame_pending = Some(scope);
+            let weak = cx.weak_entity();
+            window.on_next_frame(move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if this.call_ended_frame_pending == Some(scope) {
+                        this.call_ended_frame_pending = None;
+                        if this.snapshot.call.as_ref().is_some_and(|call| {
+                            call.scope == scope && call.stage == CallStage::Ended
+                        }) && this.dismissed_terminal_call != Some(scope)
+                        {
+                            this.call_ended_since = Some((scope, Instant::now()));
+                            this.start_call_clock(cx);
+                        }
+                    }
+                });
+            });
+        }
         self.text_selection
             .update(cx, |owner, _| owner.begin_frame());
         // Retained parent focus includes toolbar controls reached by Tab.

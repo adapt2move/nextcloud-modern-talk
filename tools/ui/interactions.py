@@ -333,6 +333,14 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('escape never hangs up a call', ['Verbindung wird aufgebaut'])
         click('Verlassen')
         expect('explicit leave returns to conversation', ['Nachricht an Mara Fischer'])
+    elif scenario == 'call-recovery':
+        expect('missing media recovery appears after the waiting period', ['Ton oder Bild fehlen', 'Neu beitreten'])
+        click('beitreten')
+        time.sleep(.5)
+        log = (out / f'{label}.log').read_text()
+        if log.count('UI_INTENT recover-call-media room=') != 1:
+            raise AssertionError('Recovery did not submit exactly one scoped intent')
+        expect('explicit recovery starts a fresh admission', ['Verbindung wird aufgebaut'], ['Ton oder Bild fehlen'])
     elif scenario == 'call-participants-raised':
         # Exercise the real keyboard path with the call side panel focused.
         # Fixture diagnostics contain only local identities and the hand state.

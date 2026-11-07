@@ -269,6 +269,8 @@ impl Desktop {
         let show_people = joined && wide && self.call_participants_open && self.overlay.is_none();
         let (stage_height, feature_height, _filmstrip_height) =
             stage_metrics(f32::from(window.viewport_size().height));
+        let rail_width = 160. * f32::from(self.scale) / 100.;
+        let feature_height = (feature_height - (rail_width * 9. / 16. - 90.)).max(74.);
         let status = match call.stage {
             CallStage::Incoming => "Eingehender Anruf",
             CallStage::Outgoing => "Anruf wird angefragt …",
@@ -420,9 +422,15 @@ impl Desktop {
                         RequiredGate::MicrophonePermission => Some(talk_core::preferences::permissions::PermissionKind::Microphone),
                         RequiredGate::CameraPermission => Some(talk_core::preferences::permissions::PermissionKind::Camera),
                         _ => None,
-                    }, |d, kind| d.child(self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary,
-                        Availability::when(self.observation(kind).can_open_settings, "Systemeinstellungen sind auf diesem System nicht verfügbar."),
-                        LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx)))
+                    }, |d, kind| {
+                        if self.observation(kind).can_open_settings {
+                            d.child(self.button("gate-system-settings", "Systemeinstellungen öffnen", ButtonStyle::Secondary, true,
+                                LocalAction::Permission(kind, talk_core::preferences::permissions::PermissionAction::OpenSystemSettings), cx))
+                        } else {
+                            d.child(div().text_size(self.sp(12.)).text_color(if t.dark { t.stage_text } else { t.muted })
+                                .child(self.l("Systemeinstellungen sind auf diesem System nicht verfügbar.")))
+                        }
+                    })
                     .when(gate == RequiredGate::RecordingConsent, |d| {
                                 d.child(self.button(
                                     "required-gate",
@@ -558,7 +566,7 @@ impl Desktop {
             let tile_width = if pip {
                 stage_width.min(stage_height * 16. / 9.)
             } else if filmstrip {
-                160.
+                rail_width
             } else {
                 ((stage_width - f32::from(columns.saturating_sub(1)) * 12.) / f32::from(columns))
                     .min(
@@ -576,9 +584,8 @@ impl Desktop {
                 .justify_center()
                 .gap_3()
                 .when(filmstrip, |d| {
-                    d.w(px(
-                        strip_count as f32 * 160. + strip_count.saturating_sub(1) as f32 * 12.
-                    ))
+                    d.w(px(strip_count as f32 * rail_width
+                        + strip_count.saturating_sub(1) as f32 * 12.))
                 })
                 .when(!filmstrip, |d| {
                     d.w(px(f32::from(if pip { 1 } else { columns }) * tile_width
@@ -891,9 +898,17 @@ impl Desktop {
                     div()
                         .w(px(300.))
                         .flex_none()
-                        .bg(t.surface)
+                        .bg(if t.dark {
+                            gpui::rgb(0x16202f).into()
+                        } else {
+                            t.surface
+                        })
                         .border_l_1()
-                        .border_color(t.border)
+                        .border_color(if t.dark {
+                            gpui::rgb(0x2c3b52).into()
+                        } else {
+                            t.border
+                        })
                         .text_color(t.text)
                         .child(self.call_chat(cx)),
                 )
@@ -903,9 +918,17 @@ impl Desktop {
                     div()
                         .w(px(300.))
                         .flex_none()
-                        .bg(t.surface)
+                        .bg(if t.dark {
+                            gpui::rgb(0x16202f).into()
+                        } else {
+                            t.surface
+                        })
                         .border_l_1()
-                        .border_color(t.border)
+                        .border_color(if t.dark {
+                            gpui::rgb(0x2c3b52).into()
+                        } else {
+                            t.border
+                        })
                         .text_color(t.text)
                         .flex()
                         .flex_col()
