@@ -5,23 +5,13 @@ use gpui::{Context, Div, Focusable, Window, div, prelude::*, px};
 use std::time::{Duration, Instant};
 use talk_core::ui::{Decision, presentation::ConversationRef};
 
+#[derive(Default)]
 pub(super) struct Input {
     context: Option<ConversationRef>,
     generation: u64,
     last_edit: Option<Instant>,
     last_sent: Option<Instant>,
     active: bool,
-}
-impl Default for Input {
-    fn default() -> Self {
-        Self {
-            context: None,
-            generation: 0,
-            last_edit: None,
-            last_sent: None,
-            active: false,
-        }
-    }
 }
 impl Input {
     fn change(

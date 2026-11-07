@@ -104,11 +104,10 @@ impl Shared {
                         }
                     }
                     (Some("roomlist"), Some("update"))
-                        if event["update"]["roomid"].as_str() == Some(room.token.as_str()) =>
+                        if event["update"]["roomid"].as_str() == Some(room.token.as_str())
+                            && room.purpose == RoomPurpose::Call =>
                     {
-                        if room.purpose == RoomPurpose::Call {
-                            room.push(Event::PolicyChanged)?;
-                        }
+                        room.push(Event::PolicyChanged)?;
                     }
                     _ => {}
                 }

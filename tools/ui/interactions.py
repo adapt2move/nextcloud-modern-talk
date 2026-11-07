@@ -138,6 +138,17 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('Escape closes the account status picker', absent=['Status festlegen'])
         click('Alex')
         expect('account control reopens the status picker', ['Status festlegen', 'Unsichtbar'])
+    elif scenario == 'people-card':
+        expect('person card shows status and actions', ['Abwesend', 'Nachricht senden', 'Anrufen'])
+        key('Escape')
+        expect('Escape dismisses the person card', absent=['Abwesend'])
+        click('Mara', xmin=300, ymin=180)
+        expect('author name reopens the person card', ['Abwesend', 'Anrufen'])
+        run(['xdotool', 'mousemove', '--window', xid, '1000', '650', 'click', '1'], env)
+        expect('outside click dismisses the person card', absent=['Abwesend'])
+        click('Mara', xmin=300, ymin=180)
+        click('Anrufen', xmin=280, ymin=200)
+        expect('group person call resolves the fictional direct room', ['Verbindung wird aufgebaut'])
     elif scenario == 'clipboard-denied':
         key('ctrl+k');type_text('CLIPMARK');key('ctrl+a');key('ctrl+c');key('BackSpace')
         click('schreiben');type_text('DRAFTSAFE');key('ctrl+a');key('ctrl+x')

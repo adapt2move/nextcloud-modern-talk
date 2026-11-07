@@ -147,16 +147,15 @@ impl Accounts {
             )),
             _ => None,
         };
-        if let Some((context, work, command)) = next {
-            if self
+        if let Some((context, work, command)) = next
+            && self
                 .request(context.account, command, Purpose::Typing(context, work))
                 .is_err()
-            {
-                if matches!(work, Work::Stop) && self.current(context.account).is_err() {
-                    self.typing.current = None;
-                }
-                self.typing.due = Instant::now() + Duration::from_secs(2);
+        {
+            if matches!(work, Work::Stop) && self.current(context.account).is_err() {
+                self.typing.current = None;
             }
+            self.typing.due = Instant::now() + Duration::from_secs(2);
         }
     }
     fn observe_typing_messages(&mut self) {
