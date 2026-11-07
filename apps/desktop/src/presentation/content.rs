@@ -188,6 +188,7 @@ impl Desktop {
             }
             Some("poll-drafts") => self.content_ui.drafts_open = true,
             Some("poll-details") => self.content_ui.details_poll = Some(9001),
+            Some("poll-settings") => self.open_room_dialog(Overlay::RoomInfo, cx),
             Some("voice-recording") => {
                 self.content_ui.voice_levels = vec![
                     90, 200, 360, 580, 370, 170, 220, 460, 710, 490, 240, 120, 280, 540, 680, 390,
@@ -1208,6 +1209,11 @@ impl Desktop {
                 self.choose_composer_menu(target, choice, window, cx);
             }
             Action::CreatePoll => {
+                if !self.content_scope_current()
+                    || !self.snapshot.content_panel.poll_create.enabled()
+                {
+                    return;
+                }
                 self.content_ui.return_overlay = self.overlay;
                 self.content_ui.menu = false;
                 self.handle(LocalAction::Open(Overlay::CreatePoll), window, cx);
@@ -2422,6 +2428,9 @@ impl Desktop {
             if self.content_ui.confirm_close == Some(poll.id) {
                 secondary = secondary
                     .child(self.hint(self.l("Umfrage wirklich beenden?")))
+                    .child(self.hint(self.l(
+                        "Danach kann nicht mehr abgestimmt werden; die Ergebnisse sind sichtbar.",
+                    )))
                     .child(self.button(
                         ("poll-close-confirm", poll.id as usize),
                         "Jetzt beenden",

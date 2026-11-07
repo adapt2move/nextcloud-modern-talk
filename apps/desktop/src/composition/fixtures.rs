@@ -55,6 +55,7 @@ pub const SCENARIOS: &[&str] = &[
     "poll-dialog",
     "poll-drafts",
     "poll-details",
+    "poll-settings",
     "chat-voice",
     "voice-recording",
     "voice-review",
@@ -399,6 +400,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                 | "poll-dialog"
                 | "poll-drafts"
                 | "poll-details"
+                | "poll-settings"
                 | "chat-voice"
                 | "voice-recording"
                 | "voice-review"
@@ -414,9 +416,12 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         content::configure(&mut state);
         if matches!(
             scenario,
-            Some("chat-polls" | "poll-dialog" | "poll-drafts" | "poll-details")
+            Some("chat-polls" | "poll-dialog" | "poll-drafts" | "poll-details" | "poll-settings")
         ) {
             content::polls(&mut state);
+        }
+        if scenario == Some("poll-settings") {
+            dialog::configure(&mut state);
         }
         if scenario == Some("poll-details") {
             content::poll_details(&mut state);
@@ -1205,6 +1210,7 @@ impl DevelopmentPort {
                         | "poll-dialog"
                         | "poll-drafts"
                         | "poll-details"
+                        | "poll-settings"
                         | "chat-voice"
                         | "voice-recording"
                         | "voice-review"

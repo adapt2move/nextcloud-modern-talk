@@ -218,7 +218,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
     let development = options.scenario.is_some();
     let overlay = match options.scenario.as_deref() {
         Some("settings") => Some(Overlay::Settings),
-        Some("details") => Some(Overlay::RoomInfo),
+        Some("details" | "poll-settings") => Some(Overlay::RoomInfo),
         Some("participants") => Some(Overlay::Participants),
         Some("files") => Some(Overlay::Files),
         Some("thread") => Some(Overlay::Thread),
