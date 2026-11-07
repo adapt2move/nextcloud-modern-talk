@@ -143,7 +143,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         return checks
 
     if scenario == 'server':
-        click('cloud.example.test')
+        click('cloud.example.test', inspected_point=(1280, 800, 700, 328))
         key('ctrl+a'); type_text('probe.example.test'); key('ctrl+a'); key('ctrl+c')
         key('BackSpace'); key('ctrl+v')
         expect('native selection and explicit clipboard roundtrip', ['probe.example.test'])
