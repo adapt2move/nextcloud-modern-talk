@@ -179,7 +179,11 @@ impl ContentUi {
 impl Desktop {
     /// Only disconnected development scenarios call this after installing
     /// their fictional snapshot; it never opens a server or a media device.
-    pub(crate) fn configure_content_scenario(&mut self, scenario: Option<&str>) {
+    pub(crate) fn configure_content_scenario(
+        &mut self,
+        scenario: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
         match scenario {
             Some("chat-polls") => {
                 let mut selection = Page::empty();

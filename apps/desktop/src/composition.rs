@@ -313,7 +313,7 @@ fn open_desktop(options: Options, services: std::rc::Rc<preferences::Services>, 
         }
             cx.new(|cx|{
                 let mut desktop=Desktop::new(port,InitialView{probe,development,palette:saved.active.palette,appearance:saved.active.appearance,overlay,prejoin,onboarding:options.scenario.as_deref()==Some("ready"),scale:saved.active.scale.percent()},bridge,window,cx);
-                if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref()); }
+                if disconnected_fixture { desktop.configure_content_scenario(options.scenario.as_deref(), cx); }
                 desktop
             })
         });
