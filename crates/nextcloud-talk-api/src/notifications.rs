@@ -98,26 +98,25 @@ fn decode(data: &Value, user: &str, allowed: bool) -> Result<MessageNotification
                 .filter(|id| *id > 0)
                 .ok_or(ErrorKind::Malformed)
         };
-        let message = if reminder {
-            if parts.next().is_some() {
-                return Err(ErrorKind::Malformed);
-            }
-            // The Notifications endpoint only exposes the parsed rich subject.
-            // If privacy settings omit the structured message target, do not
-            // infer it from localized text, an action URL, or another message.
+        // Talk 24/25's Notifier appends the message and optional thread to
+        // non-sensitive notification object IDs for both chat and reminders.
+        // Push preparation may instead expose the ID in the rich subject.
+        let object_message = parts.next().map(positive).transpose()?;
+        if let Some(thread) = parts.next() {
+            positive(thread)?;
+        }
+        if parts.next().is_some() {
+            return Err(ErrorKind::Malformed);
+        }
+        let message = if reminder && object_message.is_none() {
+            // Sensitive notifications omit the structured target. Never infer
+            // it from translated text, an action URL, or another message.
             let Some(id) = row["subjectRichParameters"]["message"]["id"].as_str() else {
                 continue;
             };
             Some(positive(id)?)
         } else {
-            let message = parts.next().map(positive).transpose()?;
-            if let Some(thread) = parts.next() {
-                positive(thread)?;
-            }
-            if parts.next().is_some() {
-                return Err(ErrorKind::Malformed);
-            }
-            message
+            object_message
         };
         let timestamp = timestamp(row["datetime"].as_str().ok_or(ErrorKind::Malformed)?)?;
         messages.push(MessageNotification {
@@ -226,6 +225,17 @@ mod tests {
         let parsed = decode(&json!([reminder]), "alice", true).unwrap();
         assert!(parsed.messages[0].reminder);
         assert_eq!(parsed.messages[0].message, Some(42));
+
+        let mut endpoint = row(12, "testroom/43/40");
+        endpoint["object_type"] = json!("reminder");
+        let parsed = decode(&json!([endpoint.clone()]), "alice", true).unwrap();
+        assert!(parsed.messages[0].reminder);
+        assert_eq!(parsed.messages[0].message, Some(43));
+        endpoint["object_id"] = json!("testroom/0");
+        assert!(matches!(
+            decode(&json!([endpoint]), "alice", true),
+            Err(ErrorKind::Malformed)
+        ));
     }
 
     #[test]

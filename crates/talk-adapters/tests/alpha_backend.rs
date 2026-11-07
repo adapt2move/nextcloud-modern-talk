@@ -872,6 +872,53 @@ async fn released_server_messaging_and_room_controls() {
         },
     )
     .await;
+    let baseline = client
+        .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
+        .await
+        .expect("notification baseline");
+    assert!(
+        matches!(baseline, ProtocolReply::MessageNotifications(ref value)
+        if value.source == talk_core::protocol::NotificationSourceState::Available)
+    );
+    m(
+        &mut client,
+        &runtime,
+        id,
+        1180,
+        "reminder-due",
+        M::Reminder {
+            message: first,
+            timestamp: Some(now.saturating_sub(5)),
+        },
+    )
+    .await;
+    // The private lab triggers Talk's registered background job after the
+    // client's baseline, so the next observation must deliver a new event.
+    std::fs::write(root.join("reminder.request"), b"run").expect("lab signal");
+    tokio::time::timeout(std::time::Duration::from_secs(45), async {
+        while !root.join("reminder.done").exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("lab reminder job");
+    let ProtocolReply::MessageNotifications(observed) = client
+        .request(context(&runtime), ProtocolRequest::PollMessageNotifications)
+        .await
+        .expect("notification observation")
+    else {
+        panic!("notification observation")
+    };
+    assert!(
+        observed
+            .notices
+            .as_slice()
+            .iter()
+            .any(|notice| notice.reminder
+                && notice.conversation == id
+                && notice.message == first.sequence)
+    );
+    println!("alpha-backend reminder-notification-target: pass");
     let MR::Schedule(schedule) = m(
         &mut client,
         &runtime,
