@@ -1057,14 +1057,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     },
                 ));
             }
-            let mut reply = message(
-                40,
-                "Mara Fischer",
-                "MF",
-                "10:00",
-                "Das passt für mich.",
-                false,
-            );
+            let mut reply = message(40, "Mara Fischer", "MF", "10:00", "Das klingt gut.", false);
             reply.metadata.thread = Some(root);
             reply.metadata.author_key = Some(text("5:users:mara"));
             reply.metadata.replyable = true;

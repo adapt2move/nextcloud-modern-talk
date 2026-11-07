@@ -253,7 +253,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('thread translation and account navigation coexist',
                ['Design review', 'Das passt', 'Original anzeigen', 'Threads', 'Erinnerungen'])
         click('anzeigen', xmin=950, ymin=300)
-        expect('thread translation can return to its original', ['That works for me.'], ['Das passt'])
+        expect('thread translation can return to its original', ['Das klingt gut.'], ['Das passt'])
         click('antworten', xmin=900, ymin=650, inspected_point=(1280,800,1030,700))
         type_text('THREADTOOLS')
         expect_settled('thread tools preserve an unsent reply', ['THREADTOOLS'])
@@ -533,7 +533,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         words = expect('thread pane uses shared message and composer surfaces',
                        ['Design review', '2 Antworten', 'Mara Fischer', 'Im Thread antworten'])
         run(['xdotool', 'mousemove', '--window', xid, '1050', '407'], env)
-        expect('thread hover keeps reply text readable', ["I'll update the final details."])
+        expect('thread hover keeps reply text readable', ['Ich aktualisiere die letzten Details.'])
         run(['xdotool', 'mousemove', '--window', xid, '1204', '400', 'click', '1'], env)
         words = expect('reply to own thread message opens a quote', ['Alex Sommer'])
         if not any(normalized(word['text']) == 'alex' and int(word['left']) > 900
