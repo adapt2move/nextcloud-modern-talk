@@ -320,6 +320,15 @@ impl Desktop {
                     ),
             );
 
+        let discovery_support = self.snapshot.discover_panel.as_ref().map_or(talk_core::ui::presentation::FeatureSupport::Unknown, |panel| panel.support);
+        let discovery_supported = discovery_support == talk_core::ui::presentation::FeatureSupport::Supported;
+        sidebar = sidebar.child(self.button_with_leading_icon(
+            "open-discovery", ("Offene Gespräche", "compass"), ButtonStyle::Quiet,
+            Availability::when(self.active_account_connected() && discovery_supported,
+                if !self.active_account_connected() { "Das Verzeichnis benötigt eine Verbindung." } else if discovery_support == talk_core::ui::presentation::FeatureSupport::Unknown { "Das Verzeichnis wird geprüft." } else { "Das Gesprächsverzeichnis ist auf diesem Server nicht verfügbar." }),
+            LocalAction::Open(Overlay::Discover), cx,
+        ).w_full());
+
         let filter = self
             .account_layout()
             .map_or(SidebarFilter::All, AccountNavigation::filter);

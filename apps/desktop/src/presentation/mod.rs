@@ -10,6 +10,7 @@ mod controls;
 mod conversation_dialog;
 mod creation;
 mod device_settings;
+mod discovery;
 mod feedback;
 mod focus;
 pub mod input;
@@ -168,6 +169,8 @@ pub enum LocalAction {
     AccountSearchRooms,
     AccountSearchRoom(Option<ConversationRef>),
     AccountSearchHit(ConversationRef, u128),
+    DiscoverSearch,
+    DiscoverJoin(ConversationRef),
     RetrySwitcherPeople,
     CreateGroup,
     RenameLocalGroup(talk_core::preferences::navigation::NavigationGroupId),
@@ -224,6 +227,9 @@ pub struct Desktop {
     update_restart_pending: bool,
     room_ui: conversation_dialog::RoomUi,
     account_search_ui: account_search::AccountSearchUi,
+    discovery_search: Entity<TextInput>,
+    discovery_request: u64,
+    discovery_join: Option<ConversationRef>,
     message_ui: messaging::MessageUi,
     content_ui: content::ContentUi,
     offline_notice: connectivity::Notice,
@@ -443,6 +449,7 @@ impl Desktop {
             };
         let room_ui = conversation_dialog::RoomUi::new(theme, cx);
         let account_search_ui = account_search::AccountSearchUi::new(theme, cx);
+        let discovery_search = cx.new(|cx| TextInput::new("Offene Gespräche suchen …", 256, theme, cx));
         let message_ui = messaging::MessageUi::new(cx);
         let content_ui =
             content::ContentUi::new(theme, snapshot.active_account, snapshot.selected, cx);
@@ -451,6 +458,7 @@ impl Desktop {
             .inputs()
             .into_iter()
             .chain(account_search_ui.inputs())
+            .chain([discovery_search.clone()])
             .chain([message_ui.search.clone(), message_ui.time_input.clone()])
             .chain(content_ui.inputs().cloned())
         {
@@ -464,6 +472,9 @@ impl Desktop {
             _text_link_subscription: text_link_subscription,
             room_ui,
             account_search_ui,
+            discovery_search,
+            discovery_request: 0,
+            discovery_join: None,
             message_ui,
             content_ui,
             offline_notice: connectivity::Notice::default(),
@@ -763,6 +774,7 @@ impl Desktop {
         self.refresh_content_ui(cx);
         self.refresh_creation(cx);
         self.refresh_account_search_jump();
+        self.refresh_discovery();
         self.refresh_room_dialog(cx);
         self.refresh_message_ui_after_rebind(
             selected_rebind && self.message_ui.editing.is_some(),
@@ -784,6 +796,8 @@ impl Desktop {
             self.highlighted_message = None;
             self.sidebar_filter.update(cx, |i, _| i.reset());
             self.account_search_ui.reset(cx);
+            self.discovery_search.update(cx, |input, _| input.reset());
+            self.discovery_join = None;
             self.feedback_return_focus = None;
             self.pending_feedback_focus = false;
             self.search.update(cx, |i, cx| {
@@ -1159,6 +1173,9 @@ impl Desktop {
                 if overlay == Overlay::Create {
                     self.open_creation(cx);
                 }
+                if overlay == Overlay::Discover {
+                    self.open_discovery(cx);
+                }
                 if matches!(overlay, Overlay::RoomInfo | Overlay::Participants) {
                     self.open_room_dialog(overlay, cx);
                 }
@@ -1168,6 +1185,8 @@ impl Desktop {
                     self.switcher_input_changed(cx);
                     self.schedule_switcher_directory(cx);
                     self.search.focus_handle(cx).focus(window);
+                } else if overlay == Overlay::Discover {
+                    self.discovery_search.focus_handle(cx).focus(window);
                 } else {
                     self.modal_focus.focus(window);
                 }
@@ -1243,6 +1262,8 @@ impl Desktop {
                     self.root_focus.focus(window);
                 }
             }
+            LocalAction::DiscoverSearch => self.search_discovery(cx),
+            LocalAction::DiscoverJoin(context) => self.join_discovery(context),
             LocalAction::CreateGroup => self.create_group(cx),
             LocalAction::RenameLocalGroup(id) => self.rename_local_group(id, cx),
             LocalAction::MoveLocalGroup(id, up) => self.move_local_group(id, up, cx),
@@ -1950,6 +1971,13 @@ impl Desktop {
             self.handle(LocalAction::Open(Overlay::Settings), window, cx);
             cx.stop_propagation();
         } else if key == "enter"
+            && self.overlay == Some(Overlay::Discover)
+            && self.discovery_search.focus_handle(cx).is_focused(window)
+            && !self.discovery_search.read(cx).composing()
+        {
+            self.search_discovery(cx);
+            cx.stop_propagation();
+        } else if key == "enter"
             && self.overlay == Some(Overlay::Search)
             && self.search.focus_handle(cx).is_focused(window)
             && !self.search.read(cx).composing()
@@ -2027,6 +2055,7 @@ impl Desktop {
             &self.upload_folder,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -2047,6 +2076,7 @@ impl Desktop {
             &self.upload_folder,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())
@@ -2189,6 +2219,12 @@ impl Render for Desktop {
                     && !incoming;
             });
         }
+        self.discovery_search.update(cx, |input, _| {
+            input.theme = t;
+            input.text_scale = f32::from(self.scale) / 100.;
+            input.interactive = self.overlay == Some(Overlay::Discover) && !incoming;
+            input.set_placeholder(self.l("Offene Gespräche suchen …"));
+        });
         for input in self.room_ui.inputs() {
             input.update(cx, |i, _| {
                 i.theme = t;
@@ -2316,6 +2352,7 @@ impl Render for Desktop {
             &self.upload_folder,
             &self.message_ui.search,
             &self.message_ui.time_input,
+            &self.discovery_search,
         ]
         .into_iter()
         .chain(self.account_search_ui.inputs().iter())

@@ -151,6 +151,10 @@ pub enum ProtocolRequest {
         tags: Page<ConversationTagId, 20>,
     },
     ListConversations,
+    ListOpenConversations {
+        query: Text<256>,
+    },
+    JoinOpenConversation(ConversationId),
     Participants(ConversationId),
     History {
         conversation: ConversationId,
@@ -204,6 +208,7 @@ pub enum ProtocolReply {
     Tags(ConversationTags),
     TagCreated(ConversationTag),
     Conversations(ConversationList),
+    OpenConversations(crate::protocol::OpenConversations),
     Conversation(Conversation),
     People(Page<crate::protocol::conversation::Recipient, 100>),
     Participants(Participants),

@@ -3,6 +3,8 @@ use super::*;
 mod alpha_tests;
 #[path = "content_tests.rs"]
 mod content_tests;
+#[path = "discover_tests.rs"]
+mod discover_tests;
 #[path = "note_tests.rs"]
 mod note_tests;
 #[path = "notification_tests.rs"]

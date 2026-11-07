@@ -444,6 +444,8 @@ impl Purpose {
         self.room().map(|c| c.account).or(match self {
             Self::Create(_, s, _)
             | Self::Search(_, s, _)
+            | Self::Discover(_, s, _)
+            | Self::DiscoverProbe(s, _)
             | Self::IncomingCalls(s)
             | Self::MessageNotifications(s)
             | Self::LiveEvents(s)
@@ -914,6 +916,30 @@ impl Accounts {
                     );
                 }
                 if self.snapshot.active_account == Some(scope) {
+                    if let Some(panel) = self
+                        .snapshot
+                        .discover_panel
+                        .as_mut()
+                        .filter(|panel| panel.account == scope && panel.uncertain)
+                        && let Some(context) = panel.joining
+                        && list
+                            .rooms
+                            .as_slice()
+                            .iter()
+                            .any(|room| room.id == context.conversation)
+                    {
+                        panel.uncertain = false;
+                        panel.joining = None;
+                        panel.state = talk_core::ui::conversation::RemoteState::Idle;
+                        panel.rooms = page(
+                            panel
+                                .rooms
+                                .as_slice()
+                                .iter()
+                                .filter(|room| room.context != context)
+                                .cloned(),
+                        );
+                    }
                     if let Some(panel) = self
                         .snapshot
                         .search_panel

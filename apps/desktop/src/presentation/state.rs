@@ -592,6 +592,25 @@ impl Drafts {
 
 /// Defensive renderer validation. Producers still own full permission/lifecycle decisions.
 pub fn valid_snapshot(snapshot: &PresentationSnapshot) -> bool {
+    if snapshot.discover_panel.as_ref().is_some_and(|panel| {
+        Some(panel.account) != snapshot.active_account
+            || panel
+                .rooms
+                .as_slice()
+                .iter()
+                .any(|room| room.context.account != panel.account || !room.context.is_consistent())
+            || panel.joining.is_some_and(|context| {
+                context.account != panel.account
+                    || !context.is_consistent()
+                    || !panel
+                        .rooms
+                        .as_slice()
+                        .iter()
+                        .any(|room| room.context == context)
+            })
+    }) {
+        return false;
+    }
     if snapshot.search_panel.as_ref().is_some_and(|panel| {
         Some(panel.account) != snapshot.active_account
             || panel
@@ -823,6 +842,7 @@ mod tests {
             content_panel: Default::default(),
             file_export: None,
             create_panel: None,
+            discover_panel: None,
             search_panel: None,
             revision: 1,
             login: LoginView {

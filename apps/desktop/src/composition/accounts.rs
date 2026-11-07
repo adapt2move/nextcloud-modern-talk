@@ -5,6 +5,7 @@ mod calls;
 pub(super) mod content;
 mod conversations;
 mod creation;
+mod discover;
 pub(super) mod files;
 mod history;
 mod messaging;
@@ -59,6 +60,8 @@ enum Purpose {
     Files(files::Work),
     Create(RequestId, AccountScope, creation::Work),
     Search(RequestId, AccountScope, bool),
+    Discover(RequestId, AccountScope, Option<ConversationRef>),
+    DiscoverProbe(AccountScope, u64),
     ParticipantIndex(ConversationRef, u64),
     Room(RequestId, ConversationRef, OperationId, conversations::Work),
     Message(RequestId, ConversationRef, OperationId, messaging::Work),
@@ -147,6 +150,9 @@ pub struct Accounts {
     message_search: Option<(ConversationRef, Text<256>, Option<Text<1024>>)>,
     account_search: Option<protocol::search::Query>,
     account_search_retry: Option<search::Retry>,
+    discover_probe: Option<discover::Probe>,
+    discover_probe_generation: u64,
+    discovery_retry: Option<discover::Retry>,
     notices: notifications::Notices,
     background: background::Background,
     history: history::Cache,
@@ -195,6 +201,9 @@ impl Accounts {
             message_search: None,
             account_search: None,
             account_search_retry: None,
+            discover_probe: None,
+            discover_probe_generation: 0,
+            discovery_retry: None,
             notices: notifications::Notices::default(),
             background: background::Background::default(),
             history: history::Cache::default(),
@@ -329,6 +338,10 @@ impl Accounts {
         self.account_search = None;
         self.account_search_retry = None;
         self.snapshot.search_panel = None;
+        self.snapshot.discover_panel = scope.map(discover::empty_panel);
+        self.discovery_retry = None;
+        self.discover_probe_generation = self.discover_probe_generation.saturating_add(1);
+        self.discover_probe = scope.map(|scope| discover::Probe::new(scope, self.discover_probe_generation));
         self.snapshot.create_panel = scope.map(talk_core::ui::conversation::CreatePanel::new);
         self.snapshot.conversations = scope
             .and_then(|s| self.background.account(s))
@@ -552,6 +565,8 @@ impl Accounts {
         self.tick_content();
         self.tick_file_work();
         self.tick_account_search();
+        self.tick_discovery_probe();
+        self.tick_discovery_retry();
         self.tick_background();
         self.tick_calls();
         self.poll_messages();
@@ -673,6 +688,8 @@ impl Accounts {
             Purpose::Files(work) => self.complete_file_work(work, result),
             Purpose::Create(request,account,work)=>self.complete_creation(request,account,work,result),
             Purpose::Search(request,account,append)=>self.complete_account_search(request,account,append,result),
+            Purpose::Discover(request,account,joining)=>self.complete_discovery(request,account,joining,result),
+            Purpose::DiscoverProbe(account,generation)=>self.complete_discovery_probe(account,generation,result),
             Purpose::ParticipantIndex(context, generation)=>self.complete_participant_index(context,generation,result),
             Purpose::Room(request, context, operation, work) => self.complete_room(request, context, operation, work, result),
             Purpose::Message(request, context, operation, work) => {
@@ -989,6 +1006,7 @@ impl Accounts {
             return result;
         }
         match intent {
+            UiIntent::Discover { account, request, action } => self.submit_discovery(account, request, action)?,
             UiIntent::AccountSearch {
                 account,
                 request,

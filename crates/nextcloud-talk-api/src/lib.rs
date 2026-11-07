@@ -79,6 +79,9 @@ pub enum Request {
     Account,
     Capabilities,
     Rooms,
+    ListedRooms {
+        search: String,
+    },
     Room(RoomToken),
     Participants(RoomToken),
     History {
@@ -329,6 +332,7 @@ impl Client {
             request,
             Request::CreateGroup { .. } | Request::CreateDirect { .. }
         );
+        let full_room_list = matches!(&request, Request::Rooms);
         if let Request::CreateDirect { user } = &request
             && user == self.transport.user()
         {
@@ -683,7 +687,7 @@ impl Client {
             self.sends[index].uncertain = false;
         }
         match &decoded {
-            Reply::Rooms(_) => self.creation_uncertain = false,
+            Reply::Rooms(_) if full_room_list => self.creation_uncertain = false,
             Reply::Tags(_) => self.tag_creation_uncertain = false,
             Reply::History { messages, .. } => {
                 for message in messages {
@@ -782,6 +786,16 @@ fn plan(request: &Request) -> Result<Plan, ErrorKind> {
             vec![],
             Kind::Rooms,
         ),
+        Request::ListedRooms { search } => {
+            bounded(search, 256)?;
+            (
+                Method::GET,
+                "ocs/v2.php/apps/spreed/api/v4/listed-room".into(),
+                vec![("searchTerm", search.clone())],
+                vec![],
+                Kind::Rooms,
+            )
+        }
         Request::Room(t) => (
             Method::GET,
             room("v4/room", t, ""),

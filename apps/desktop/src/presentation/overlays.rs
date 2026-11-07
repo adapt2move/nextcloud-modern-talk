@@ -597,10 +597,4 @@ impl Desktop {
         }
         body
     }
-    fn discover_body(&self, cx: &Context<Self>) -> Div {
-        div().flex().flex_col().gap_5().child(self.hint(self.l("Finde Gespräche, die für dich im Verzeichnis freigegeben sind.")))
-            .child(self.state_note("compass","Verzeichnis nicht verfügbar","Auffindbarkeit und Beitrittsrechte sind noch nicht bekannt. Ein Gastlink allein macht ein Gespräch nicht öffentlich auffindbar."))
-            .child(self.button_with_icon("discover-refresh",("Verzeichnis laden","refresh"),ButtonStyle::Secondary,Availability::when(false,"Das Gesprächsverzeichnis ist in diesem Client noch nicht verfügbar."),LocalAction::Notice(""),cx))
-            .child(self.button("discover-back","Zurück zu deinen Gesprächen",ButtonStyle::Quiet,true,LocalAction::Close,cx))
-    }
 }

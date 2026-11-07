@@ -476,6 +476,7 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
         content_panel: talk_core::ui::content::ContentPanel::default(),
         file_export: None,
         create_panel: None,
+        discover_panel: None,
         search_panel: None,
         revision: 1,
         login: LoginView {
@@ -936,6 +937,23 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
             ]),
             loaded: true,
             more: true,
+        });
+    }
+    if scenario == "discover" {
+        s.accounts = page(s.accounts.as_slice().iter().cloned().map(|mut account| {
+            account.connection = talk_core::ui::presentation::AccountConnectionState::Connected;
+            account
+        }));
+        s.discover_panel = Some(talk_core::ui::discover::Panel {
+            account: scope(), request: RequestId(1), query: text(""),
+            support: talk_core::ui::presentation::FeatureSupport::Supported,
+            state: talk_core::ui::conversation::RemoteState::Idle,
+            rooms: page([
+                talk_core::ui::discover::Room { context: context(7), name: text("Designrunde"), description: Some(text("Ideen, Entwürfe und offene Fragen aus dem Designteam.")), participants: Some(18), join: Decision::Allowed },
+                talk_core::ui::discover::Room { context: context(8), name: text("Kaffeepause"), description: Some(text("Ein Ort für kurze Gespräche zwischendurch.")), participants: Some(9), join: Decision::Allowed },
+                talk_core::ui::discover::Room { context: context(9), name: text("Community-Projekte"), description: Some(text("Gemeinsam an neuen Projekten arbeiten.")), participants: None, join: Decision::Allowed },
+            ]),
+            loaded: true, joining: None, uncertain: false,
         });
     }
     s

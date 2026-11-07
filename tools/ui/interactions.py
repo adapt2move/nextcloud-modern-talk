@@ -169,6 +169,13 @@ def exercise(scenario, env, xid, out, label, large=False):
         expect('account search groups matching messages', ['Produktteam', 'Navigation', 'Mara Fischer'])
         key('Return')
         expect('Enter opens the selected message in context', ['Nachricht an Produktteam'], ['Weitere Ergebnisse'])
+    elif scenario == 'discover':
+        expect('open conversations show descriptions and counts', ['Designrunde', 'Kaffeepause', '18 Teilnehmende'])
+        click('suchen', xmin=300, ymin=180)
+        type_text('Design')
+        expect('typing narrows the loaded rooms immediately', ['Designrunde'], ['Kaffeepause'])
+        key('Escape')
+        expect('Escape closes open conversation browsing', ['Nachricht an Produktteam'], ['Designrunde'])
     elif scenario == 'incoming':
         key('Return')
         expect('unrelated Enter does not accept incoming call', ['Annehmen'], ['Verbindung wird'])

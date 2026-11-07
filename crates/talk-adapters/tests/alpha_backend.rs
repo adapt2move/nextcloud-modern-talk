@@ -136,6 +136,56 @@ async fn released_server_messaging_and_room_controls() {
         .await
         .unwrap();
     let id = client.fixture_conversation().unwrap();
+    let ProtocolReply::OpenConversations(open) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::ListOpenConversations {
+                query: text("Disposable discovery"),
+            },
+        )
+        .await
+        .expect("open conversations")
+    else {
+        panic!("open conversations reply")
+    };
+    let listed = open
+        .rooms
+        .as_slice()
+        .iter()
+        .find(|room| room.name.as_str() == "Disposable discovery fixture")
+        .expect("listed room");
+    assert_eq!(
+        listed.description.as_ref().map(Text::as_str),
+        Some("Synthetic open conversation")
+    );
+    assert_eq!(listed.password_required, Some(false));
+    let listed_id = listed.id;
+    let ProtocolReply::Conversation(joined) = client
+        .request(
+            context(&runtime),
+            ProtocolRequest::JoinOpenConversation(listed_id),
+        )
+        .await
+        .expect("join listed room")
+    else {
+        panic!("join reply")
+    };
+    assert_eq!(joined.id, listed_id);
+    let ProtocolReply::Conversations(rooms) = client
+        .request(context(&runtime), ProtocolRequest::ListConversations)
+        .await
+        .expect("joined conversations")
+    else {
+        panic!("rooms")
+    };
+    assert!(
+        rooms
+            .rooms
+            .as_slice()
+            .iter()
+            .any(|room| room.id == listed_id)
+    );
+    println!("alpha-backend listable room search and join: pass");
     let CR::Details(details) =
         settings(&mut client, &runtime, id, 1, "settings-read", C::Read).await
     else {

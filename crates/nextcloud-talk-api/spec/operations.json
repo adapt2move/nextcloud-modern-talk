@@ -779,9 +779,9 @@
       "operation_id": "room-get-listed-rooms",
       "method": "GET",
       "path": "/ocs/v2.php/apps/spreed/api/{apiVersion}/listed-room",
-      "status": "missing",
-      "api": null,
-      "scope": "Not implemented in this client. This is distinct from an unavailable server capability."
+      "status": "implemented",
+      "api": "Request::ListedRooms",
+      "scope": "Bounded listable-room search; application checks the listable-rooms capability and scopes join tickets."
     },
     {
       "operation_id": "room-get-breakout-rooms",

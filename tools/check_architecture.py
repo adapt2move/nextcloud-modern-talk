@@ -215,6 +215,7 @@ UI_MODULE_TYPES = {
     "messaging": {"MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
     "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
     "search": {"Action", "Filters", "Hit", "Panel"},
+    "discover": {"Action", "Panel", "Room"},
 }
 UNBOUNDED = (
     r"\b(?:String|Vec|Box|VecDeque|LinkedList|HashMap|HashSet|BTreeMap|BTreeSet|"

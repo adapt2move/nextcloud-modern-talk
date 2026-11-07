@@ -144,6 +144,7 @@ impl Capabilities {
             } else {
                 Decision::Unknown
             },
+            listable_rooms: self.feature("listable-rooms"),
             message_limit: self.message_limit,
             reference_correlation: self.has("chat-reference-id"),
             channel_semantics: self.has("announcement-preset"),

@@ -3,6 +3,7 @@
 
 pub mod content;
 pub mod conversation;
+pub mod discover;
 pub mod messaging;
 /// Additive native presentation contract; the bootstrap consumer remains source-compatible.
 pub mod presentation;

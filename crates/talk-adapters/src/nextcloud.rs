@@ -4,6 +4,7 @@ pub(crate) mod avatars;
 mod call_policy;
 mod content;
 mod conversation;
+mod discover;
 #[cfg(any(test, feature = "backend-test"))]
 pub mod diagnostics;
 mod live;
@@ -119,6 +120,8 @@ pub struct NextcloudClient {
     members: Vec<conversation::MemberBinding>,
     recipients: Vec<conversation::RecipientBinding>,
     people: Vec<people::PersonBinding>,
+    listed_rooms: Vec<discover::ListedRoom>,
+    listed_join_uncertain: Option<ConversationId>,
     direct_attempts: Vec<people::DirectAttempt>,
     integrations: Vec<conversation::IntegrationBinding>,
     active: Option<ActiveConversation>,
@@ -220,6 +223,8 @@ impl NextcloudClient {
             members: Vec::new(),
             recipients: Vec::new(),
             people: Vec::new(),
+            listed_rooms: Vec::new(),
+            listed_join_uncertain: None,
             direct_attempts: Vec::new(),
             integrations: Vec::new(),
             active: None,
@@ -689,6 +694,7 @@ impl NextcloudClient {
         let room_id = match &request {
             ProtocolRequest::ReconcileConversation(id)
             | ProtocolRequest::Participants(id)
+            | ProtocolRequest::JoinOpenConversation(id)
             | ProtocolRequest::LeaveConversation(id)
             | ProtocolRequest::ActivateConversation(id)
             | ProtocolRequest::DeactivateConversation(id) => Some(*id),
@@ -787,6 +793,12 @@ impl NextcloudClient {
             ProtocolRequest::SearchMessages(query) => {
                 self.account_search(context, query, &caps).await
             }
+            ProtocolRequest::ListOpenConversations { query } => {
+                self.list_open_conversations(context, query, &caps).await
+            }
+            ProtocolRequest::JoinOpenConversation(id) => {
+                self.join_open_conversation(context, id, &caps).await
+            }
             ProtocolRequest::Content { operation, command } => Ok(ProtocolReply::Content {
                 operation,
                 result: self.content(context, operation, command, &caps).await?,
@@ -814,6 +826,7 @@ impl NextcloudClient {
                     .await?,
             }),
             ProtocolRequest::ListConversations => {
+                self.cleanup_listed_join(context).await;
                 let response = self
                     .transport
                     .ocs(
@@ -846,6 +859,9 @@ impl NextcloudClient {
                         .map_err(|_| self.error(ErrorKind::TooLarge))?;
                 }
                 self.transport.validate(context)?;
+                if self.listed_join_uncertain.is_some_and(|id| rooms.as_slice().iter().any(|room| room.id == id)) {
+                    self.listed_join_uncertain = None;
+                }
                 let retained_avatars: Vec<_> = rooms
                     .as_slice()
                     .iter()

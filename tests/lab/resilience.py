@@ -82,6 +82,13 @@ class RecoveryLab(Lab):
                             expected=(201,), name="recovery.create-room")
         self.request("lab_alice", "POST", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"] + "/participants",
                      body={"newParticipant": "lab_bob", "source": "users"}, name="recovery.add-member")
+        listed = self.request("lab_bob", "POST", "/ocs/v2.php/apps/spreed/api/v4/room",
+                              body={"roomType": 2, "roomName": "Disposable discovery fixture"},
+                              expected=(201,), name="recovery.create-listed-room")
+        self.sensitive.append(listed["token"])
+        listed_path = "/ocs/v2.php/apps/spreed/api/v4/room/" + listed["token"]
+        self.request("lab_bob", "PUT", listed_path + "/listable", body={"scope": 1}, name="recovery.open-room")
+        self.request("lab_bob", "PUT", listed_path + "/description", body={"description": "Synthetic open conversation"}, name="recovery.describe-room")
         directory = self.runtime / f"{key}-recovery"
         directory.mkdir(mode=0o700)
         save(directory / "alice.json", {"origin": f"http://127.0.0.1:{port}",
@@ -93,6 +100,7 @@ class RecoveryLab(Lab):
         for mode, count in injected.items():
             self.require("recovery.injected." + mode, count > 0, {"requests": count})
         self.request("lab_alice", "DELETE", "/ocs/v2.php/apps/spreed/api/v4/room/" + room["token"], expected=(200, 404), name="recovery.remove-room")
+        self.request("lab_bob", "DELETE", listed_path, expected=(200, 404), name="recovery.remove-listed-room")
         self.current.update(result="pass", finished=now())
 
     async def client(self, directory, port, output):
