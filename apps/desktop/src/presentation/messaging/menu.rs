@@ -346,7 +346,10 @@ impl Desktop {
                     items.push(Item::new(
                         Choice::Thread,
                         "Thread öffnen",
-                        feature(MessageFeature::Threads),
+                        idle && self.can_open_thread(
+                            target.context,
+                            message.metadata.thread.unwrap_or(message.local_id),
+                        ),
                         "Threads sind derzeit nicht verfügbar.",
                     ));
                 }

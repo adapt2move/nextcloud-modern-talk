@@ -168,6 +168,10 @@ impl ThreadLoad {
             RemoteState::Idle => ContentState::Ready,
             RemoteState::Failed(id, reason) if id == request => match reason {
                 UnavailableReason::PermissionDenied => ContentState::Denied,
+                UnavailableReason::Connection(_) => ContentState::Offline,
+                UnavailableReason::Unconfigured if !panel.thread_messages.as_slice().is_empty() => {
+                    ContentState::Offline
+                }
                 UnavailableReason::Unsupported | UnavailableReason::Unconfigured => {
                     ContentState::Unconfigured
                 }
@@ -1070,6 +1074,38 @@ impl Desktop {
     pub(super) fn message_feature_enabled(&self, feature: MessageFeature) -> bool {
         self.message_available(feature).is_enabled()
     }
+    pub(super) fn can_start_thread(&self) -> bool {
+        use talk_core::ui::presentation::FeatureSupport;
+        self.message_feature_enabled(MessageFeature::Threads)
+            || self.snapshot.content == ContentState::Offline
+                && self.local_message_intents()
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    Some(panel.context) == self.snapshot.selected
+                        && panel.availability(MessageFeature::Threads).implemented
+                        && panel.availability(MessageFeature::Threads).server
+                            == FeatureSupport::Supported
+                        && panel.availability(MessageFeature::Threads).allowed != Decision::Denied
+                })
+    }
+    /// Offline thread content is a read-only cached observation. A previously
+    /// observed root may be opened while fresh server authority is unavailable.
+    pub(super) fn can_open_thread(&self, context: ConversationRef, root: u128) -> bool {
+        use talk_core::ui::presentation::FeatureSupport;
+        self.message_feature_enabled(MessageFeature::Threads)
+            || self.snapshot.content == ContentState::Offline
+                && self.snapshot.selected == Some(context)
+                && self.snapshot.message_panel.as_ref().is_some_and(|panel| {
+                    panel.context == context
+                        && panel.availability(MessageFeature::Threads).server
+                            != FeatureSupport::Unsupported
+                })
+                && (self.thread_parent == Some((context, root))
+                    || self.snapshot.messages.as_slice().iter().any(|message| {
+                        (message.local_id == root
+                            && (message.reply_count > 0 || message.metadata.thread == Some(root)))
+                            || message.metadata.thread == Some(root)
+                    }))
+    }
     pub(super) fn local_message_intents(&self) -> bool {
         matches!(
             self.snapshot.content,
@@ -1265,7 +1301,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         if Some(context) != self.snapshot.selected
-            || !self.message_feature_enabled(MessageFeature::Threads)
+            || !self.can_start_thread()
             || self.message_ui.editing.is_some()
             || self.drafts.pending(context)
             || self.has_staged_attachments()
@@ -2904,7 +2940,6 @@ fn feature_allows_intent(
             | MessageFeature::Schedules
             | MessageFeature::Forward
             | MessageFeature::MarkUnread
-            | MessageFeature::Threads
     );
     value.enabled() && content == ContentState::Ready
         || queue_available

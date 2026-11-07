@@ -188,6 +188,10 @@ fn project(panel: &mut view::MessagePanel, job: &QueuedRead, state: RemoteState,
             if initial {
                 if panel.thread_root != Some(*root) {
                     panel.thread_messages = Page::empty();
+                    panel.thread_root_message = None;
+                    panel.thread_root_state = RemoteState::Idle;
+                    panel.thread_details = None;
+                    panel.thread_details_request = None;
                 }
                 panel.thread_root = Some(*root);
             }
@@ -266,8 +270,23 @@ impl Accounts {
                 read,
                 deadline: Instant::now() + Duration::from_secs(10),
             };
+            self.history.expire(history::now_unix());
+            let cached_thread = match &job.read {
+                Read::Thread(root) => self.history.get(context).and_then(|history| {
+                    history
+                        .thread(*root)
+                        .map(|rows| (*root, rows.clone(), history.thread_root(*root).cloned()))
+                }),
+                _ => None,
+            };
             if let Some(panel) = self.snapshot.message_panel.as_mut() {
                 project(panel, &job, RemoteState::Loading(request), true);
+                if let Some((root, rows, root_message)) = cached_thread
+                    && panel.thread_root == Some(root)
+                {
+                    panel.thread_messages = rows;
+                    panel.thread_root_message = root_message;
+                }
             }
             // Local acceptance always has a correlated loading/failure result.
             // No operation ticket is created until start_message admits it.

@@ -476,7 +476,7 @@ impl Desktop {
                 .or_else(|| {
                     activity.and_then(|a| a.last_time.as_ref().map(|time| time.as_str().to_owned()))
                 });
-            content = if self.message_feature_enabled(MessageFeature::Threads) {
+            content = if self.can_open_thread(context, m.local_id) {
                 content.child(
                     self.control(
                         scoped_id("thread-footer", context, m.local_id, 0),
@@ -496,12 +496,13 @@ impl Desktop {
                             .map(|reply| self.person_avatar(reply.initials.as_str(), 20.)),
                     )
                     .when(recent.is_empty(), |button| {
-                        button.when_some(
-                            activity.and_then(|a| a.last_initials.as_ref()),
-                            |button, initials| {
-                                button.child(self.person_avatar(initials.as_str(), 20.))
-                            },
-                        )
+                        button.children(activity.into_iter().flat_map(|activity| {
+                            activity
+                                .recent_initials
+                                .as_slice()
+                                .iter()
+                                .map(|initials| self.person_avatar(initials.as_str(), 20.))
+                        }))
                     })
                     .child(count)
                     .when_some(last_time, |button, time| button.child(self.hint(&time))),
@@ -666,7 +667,7 @@ impl Desktop {
                                 )
                             })
                             .when(
-                                !thread && self.message_feature_enabled(MessageFeature::Threads)
+                                !thread && self.can_open_thread(context, m.metadata.thread.unwrap_or(m.local_id))
                                     && (m.metadata.thread.is_some() || m.reply_count > 0),
                                 |d| {
                                     d.child(

@@ -56,6 +56,7 @@ pub struct ThreadActivity {
     pub root: u128,
     pub replies: u16,
     pub last_initials: Option<Text<16>>,
+    pub recent_initials: Page<Text<16>, 3>,
     pub last_time: Option<Text<32>>,
     pub expires: Option<u64>,
 }

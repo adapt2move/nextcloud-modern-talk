@@ -178,11 +178,45 @@ fn history(key: &NavigationRoomKey, saved_at: u64) -> CacheHistory {
         messages: page([message(7)]),
         pins: page([7]),
         pin_messages: Page::empty(),
+        threads: Page::empty(),
         pins_loaded: true,
         older: Some(7),
         latest: Some(9),
         saved_at,
     }
+}
+
+#[test]
+fn cached_thread_history_is_backward_compatible_and_purges_expired_quotes() {
+    let fixture = Fixture::new();
+    let mut history = history(&fixture.room, 100);
+    let mut expired = message(8);
+    expired.thread = Some(7);
+    expired.expires_at = Some(90);
+    let mut reply = message(9);
+    reply.thread = Some(7);
+    reply.parent = Some(CachedReply {
+        id: 8,
+        external: false,
+        author: text("Synthetic actor"),
+        text: text("Expired"),
+        unavailable: false,
+    });
+    history.threads = page([CachedThread {
+        root: 7,
+        root_message: Some(message(7)),
+        replies: page([expired, reply]),
+    }]);
+    let clean = clean_history(&history, 100).unwrap();
+    let rows = clean.threads.as_slice()[0].replies.as_slice();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].parent.as_ref().unwrap().unavailable);
+    assert!(rows[0].parent.as_ref().unwrap().text.as_str().is_empty());
+
+    let mut legacy = serde_json::to_value(history).unwrap();
+    legacy.as_object_mut().unwrap().remove("threads");
+    let restored: CacheHistory = serde_json::from_value(legacy).unwrap();
+    assert!(restored.threads.as_slice().is_empty());
 }
 fn record(key: &NavigationRoomKey, id: u128) -> OutboxRecord {
     OutboxRecord {

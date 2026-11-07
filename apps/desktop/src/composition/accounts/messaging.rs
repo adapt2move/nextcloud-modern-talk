@@ -909,10 +909,11 @@ impl Accounts {
             V::ShareFile { path, caption } => W::ShareFile { path, caption },
         };
         let cached_thread = thread_root.and_then(|root| {
-            self.history
-                .get(context)
-                .and_then(|history| history.thread(root))
-                .cloned()
+            self.history.get(context).and_then(|history| {
+                history
+                    .thread(root)
+                    .map(|rows| (rows.clone(), history.thread_root(root).cloned()))
+            })
         });
         self.start_message(request, context, command, work)?;
         if let Work::ThreadInfo(root) = work
@@ -941,11 +942,12 @@ impl Accounts {
             && let Some(panel) = self.snapshot.message_panel.as_mut()
         {
             if panel.thread_root != Some(root) {
-                panel.thread_messages = cached_thread.unwrap_or_else(Page::empty);
+                let (rows, root_message) = cached_thread.unwrap_or_else(|| (Page::empty(), None));
+                panel.thread_messages = rows;
                 panel.thread_details = None;
                 panel.thread_details_request = None;
                 panel.thread_root_state = RemoteState::Idle;
-                panel.thread_root_message = None;
+                panel.thread_root_message = root_message;
             }
             panel.thread_root = Some(root);
         }
@@ -1634,14 +1636,28 @@ impl Accounts {
         let thread_cache = if completion == Completion::ServerAccepted
             && (thread_changed || !changed.is_empty())
         {
-            panel
-                .thread_root
-                .map(|root| (root, panel.thread_messages.clone()))
+            panel.thread_root.map(|root| {
+                let root_message = panel
+                    .thread_root_message
+                    .as_ref()
+                    .filter(|message| message.local_id == root)
+                    .cloned()
+                    .or_else(|| {
+                        self.snapshot
+                            .messages
+                            .as_slice()
+                            .iter()
+                            .find(|message| message.local_id == root)
+                            .cloned()
+                    });
+                (root, panel.thread_messages.clone(), root_message)
+            })
         } else {
             None
         };
-        if let Some((root, rows)) = thread_cache {
-            self.history.remember_thread(context, root, rows);
+        if let Some((root, rows, root_message)) = thread_cache {
+            self.history
+                .remember_thread(context, root, rows, root_message);
         }
         if matches!(work, Work::ThreadChange(_)) && completion == Completion::ServerAccepted {
             let _ = self.refresh_threads(context.account);

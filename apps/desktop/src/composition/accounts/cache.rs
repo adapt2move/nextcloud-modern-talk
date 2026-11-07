@@ -1614,6 +1614,7 @@ mod tests {
             }]),
             pins: Page::empty(),
             pin_messages: Page::empty(),
+            threads: Page::empty(),
             pins_loaded: false,
             older: None,
             latest: Some(7),

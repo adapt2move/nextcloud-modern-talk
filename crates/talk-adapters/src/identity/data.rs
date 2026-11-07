@@ -189,6 +189,14 @@ pub struct CachedMessage {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CachedThread {
+    pub root: u64,
+    pub root_message: Option<CachedMessage>,
+    #[serde(with = "codec::page")]
+    pub replies: Page<CachedMessage, 50>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CacheHistory {
     #[serde(with = "codec::room_key")]
     pub room: NavigationRoomKey,
@@ -198,6 +206,9 @@ pub struct CacheHistory {
     pub pins: Page<u64, 50>,
     #[serde(default = "Page::empty", with = "codec::page")]
     pub pin_messages: Page<CachedMessage, 50>,
+    /// Four recently opened thread windows, subject to the same room policy.
+    #[serde(default = "Page::empty", with = "codec::page")]
+    pub threads: Page<CachedThread, 4>,
     pub pins_loaded: bool,
     pub older: Option<u64>,
     pub latest: Option<u64>,
@@ -526,8 +537,24 @@ impl Store {
         if !fresh(history.saved_at, now) {
             return Err(DataError::InvalidInput);
         }
-        let cleaned = clean_history(history, now)?;
-        let bytes = codec::encode(&cleaned, HISTORY_BYTES)?;
+        let mut cleaned = clean_history(history, now)?;
+        let bytes = loop {
+            match codec::encode(&cleaned, HISTORY_BYTES) {
+                Ok(bytes) => break bytes,
+                Err(DataError::Capacity) if !cleaned.threads.as_slice().is_empty() => {
+                    // Thread windows are disposable. Preserve the established
+                    // room-history budget if one contains unusually large rows.
+                    let mut retained = Page::empty();
+                    for thread in cleaned.threads.as_slice().iter().skip(1) {
+                        retained
+                            .try_push(thread.clone())
+                            .map_err(|_| DataError::Capacity)?;
+                    }
+                    cleaned.threads = retained;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         let (ledger, mut db) = self.connection()?;
         self.check_room(&ledger, &history.room)?;
         prune(&mut db, now)?;
@@ -973,6 +1000,13 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
         .as_slice()
         .iter()
         .chain(history.pin_messages.as_slice())
+        .chain(
+            history
+                .threads
+                .as_slice()
+                .iter()
+                .flat_map(|thread| thread.root_message.iter().chain(thread.replies.as_slice())),
+        )
         .filter(|m| m.deleted || m.expires_at.is_some_and(|at| at > 0 && at <= now))
         .map(|m| m.id)
         .collect();
@@ -1017,6 +1051,45 @@ fn clean_history(history: &CacheHistory, now: u64) -> Result<CacheHistory> {
                 .try_push(message)
                 .map_err(|_| DataError::Capacity)?;
         }
+    }
+    result.threads = Page::empty();
+    for thread in history.threads.as_slice() {
+        if thread.root == 0
+            || thread
+                .root_message
+                .as_ref()
+                .is_some_and(|message| message.id != thread.root)
+            || result
+                .threads
+                .as_slice()
+                .iter()
+                .any(|old| old.root == thread.root)
+        {
+            return Err(DataError::InvalidInput);
+        }
+        let root_message = thread
+            .root_message
+            .as_ref()
+            .map(clean_message)
+            .transpose()?
+            .flatten();
+        let mut replies = Page::empty();
+        for message in thread.replies.as_slice() {
+            if message.id != thread.root && message.thread != Some(thread.root) {
+                return Err(DataError::InvalidInput);
+            }
+            if let Some(message) = clean_message(message)? {
+                replies.try_push(message).map_err(|_| DataError::Capacity)?;
+            }
+        }
+        result
+            .threads
+            .try_push(CachedThread {
+                root: thread.root,
+                root_message,
+                replies,
+            })
+            .map_err(|_| DataError::Capacity)?;
     }
     result.pins = Page::empty();
     for &id in history.pins.as_slice() {

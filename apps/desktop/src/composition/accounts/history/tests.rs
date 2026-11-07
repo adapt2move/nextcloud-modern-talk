@@ -17,6 +17,103 @@ fn cached_thread_count_roundtrips_without_restoring_authority() {
 }
 
 #[test]
+fn thread_windows_survive_restart_and_expire_even_outside_the_room_timeline() {
+    use talk_core::ui::messaging::Reply;
+    use talk_core::ui::presentation::DeliveryState;
+
+    let original = context(1, 1, 1, 1);
+    let now = now_unix();
+    let mut cache = Cache::default();
+    cache.open(original);
+    complete(
+        &mut cache,
+        original,
+        1,
+        Work::History,
+        messages(original, [], None),
+    );
+    let root = message_view(&message(original, 7, "Root"));
+    let mut expired = message_view(&message(original, 8, "Expires"));
+    expired.metadata.thread = Some(7);
+    expired.metadata.expires_at = Some(now.saturating_add(60));
+    let mut reply = message_view(&message(original, 9, "Reply"));
+    reply.metadata.thread = Some(7);
+    reply.metadata.parent = Some(Reply {
+        id: 8,
+        external: false,
+        author: text("Synthetic user"),
+        text: text("Expires"),
+        unavailable: false,
+    });
+    let mut pending = message_view(&message(original, 10, "Not confirmed"));
+    pending.delivery = DeliveryState::Pending;
+    cache.remember_thread(original, 7, page([expired, reply, pending]), Some(root));
+    let stable = NavigationRoomKey::new("r1:00000000000000000000000000000001").unwrap();
+    let durable = cache.durable(original, stable, now).unwrap();
+    assert_eq!(durable.threads.as_slice()[0].replies.as_slice().len(), 2);
+
+    let restored = context(1, 2, 0, 1);
+    let mut cache = Cache::default();
+    cache.restore(restored, &durable);
+    let thread = cache.get(restored).unwrap();
+    assert_eq!(thread.thread_root(7).unwrap().body.as_str(), "Root");
+    assert_eq!(thread.thread(7).unwrap().as_slice().len(), 2);
+    let mut panel = MessagePanel::new(restored);
+    thread.project(&mut panel);
+    assert_eq!(
+        panel.thread_activity.as_slice()[0]
+            .recent_initials
+            .as_slice()
+            .len(),
+        1
+    );
+    assert!(panel.thread_activity.as_slice()[0].last_time.is_some());
+    assert_eq!(
+        thread.thread(7).unwrap().as_slice()[0].metadata.edit,
+        Decision::Unknown
+    );
+    cache.expire(now.saturating_add(60));
+    let rows = cache.get(restored).unwrap().thread(7).unwrap().as_slice();
+    assert_eq!(rows.len(), 1);
+    let parent = rows[0].metadata.parent.as_ref().unwrap();
+    assert!(parent.unavailable && parent.text.as_str().is_empty());
+}
+
+#[test]
+fn deletion_redacts_closed_thread_copies_and_quoted_parents() {
+    use talk_core::ui::messaging::Reply;
+    let room = context(1, 1, 1, 1);
+    let mut cache = Cache::default();
+    cache.open(room);
+    complete(&mut cache, room, 1, Work::History, messages(room, [], None));
+    let mut deleted = message_view(&message(room, 8, "Private content"));
+    deleted.metadata.thread = Some(7);
+    let mut reply = message_view(&message(room, 9, "Later"));
+    reply.metadata.thread = Some(7);
+    reply.metadata.parent = Some(Reply {
+        id: 8,
+        external: false,
+        author: text("Synthetic user"),
+        text: text("Private content"),
+        unavailable: false,
+    });
+    cache.remember_thread(room, 7, page([deleted, reply]), None);
+    let mut event = message(room, 8, "ignored");
+    event.message.kind = MessageKind::Deleted;
+    complete(
+        &mut cache,
+        room,
+        2,
+        Work::Poll,
+        messages(room, [event], Some(9)),
+    );
+    let rows = cache.get(room).unwrap().thread(7).unwrap().as_slice();
+    assert!(rows[0].metadata.deleted && rows[0].body.as_str().is_empty());
+    let parent = rows[1].metadata.parent.as_ref().unwrap();
+    assert!(parent.unavailable && parent.text.as_str().is_empty());
+}
+
+#[test]
 fn recent_thread_activity_is_scoped_versioned_and_expires() {
     let mut model = super::super::tests::model();
     let key = context(1, 1, 1, 1);

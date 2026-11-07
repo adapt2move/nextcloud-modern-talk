@@ -1274,6 +1274,7 @@ impl Desktop {
             }
             LocalAction::Thread(context, id) => {
                 if Some(context) == self.snapshot.selected
+                    && self.can_open_thread(context, id)
                     && ((self.thread_parent == Some((context, id))
                         && self.overlay == Some(Overlay::Thread))
                         || self
@@ -1293,7 +1294,11 @@ impl Desktop {
                     self.thread_parent = Some((context, id));
                     let request =
                         self.submit_message(talk_core::ui::messaging::MessageAction::Thread(id));
-                    self.submit_message(talk_core::ui::messaging::MessageAction::ThreadInfo(id));
+                    if self.snapshot.content == ContentState::Ready {
+                        self.submit_message(talk_core::ui::messaging::MessageAction::ThreadInfo(
+                            id,
+                        ));
+                    }
                     self.message_ui.thread_load = Some(messaging::ThreadLoad {
                         context,
                         root: id,
@@ -1617,10 +1622,7 @@ impl Desktop {
                     return;
                 }
                 if self.snapshot.selected.is_some_and(|context| {
-                    self.drafts.target(context).new_thread
-                        && !self.message_feature_enabled(
-                            talk_core::ui::messaging::MessageFeature::Threads,
-                        )
+                    self.drafts.target(context).new_thread && !self.can_start_thread()
                 }) {
                     return;
                 }

@@ -110,6 +110,41 @@ fn queued_thread_is_locally_accepted_and_correlated_before_any_operation_is_admi
     );
     assert_eq!(model.pending.len(), 1);
 }
+
+#[test]
+fn switching_threads_projects_the_cached_root_and_replies_before_network_admission() {
+    let mut model = model();
+    let context = model.snapshot.selected.unwrap();
+    let mut root = model.snapshot.messages.as_slice()[0].clone();
+    root.local_id = 7;
+    root.body = text("Cached root");
+    let mut reply = root.clone();
+    reply.local_id = 8;
+    reply.body = text("Cached reply");
+    reply.metadata.thread = Some(7);
+    model
+        .history
+        .remember_thread(context, 7, page([reply]), Some(root));
+    let panel = model.snapshot.message_panel.as_mut().unwrap();
+    panel.thread_root = Some(9);
+    panel.thread_root_message = Some(model.snapshot.messages.as_slice()[0].clone());
+    occupied(&mut model, Work::Thread);
+    assert_eq!(
+        model.message_action(RequestId(42), context, view::MessageAction::Thread(7)),
+        Ok(())
+    );
+    let panel = model.snapshot.message_panel.as_ref().unwrap();
+    assert_eq!(panel.thread_root, Some(7));
+    assert_eq!(
+        panel.thread_root_message.as_ref().unwrap().body.as_str(),
+        "Cached root"
+    );
+    assert_eq!(
+        panel.thread_messages.as_slice()[0].body.as_str(),
+        "Cached reply"
+    );
+    assert_eq!(panel.thread_state, RemoteState::Loading(RequestId(42)));
+}
 #[test]
 fn newest_target_supersedes_the_single_slot_and_never_steals_a_mutation_lease() {
     let mut model = model();

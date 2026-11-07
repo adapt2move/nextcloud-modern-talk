@@ -6,7 +6,9 @@
 //! reply tickets: an old completion cannot recreate a removed cache entry.
 use super::messaging::{Work, merge, message_view};
 use super::*;
-use talk_adapters::identity::{CacheHistory, CachedMessage, CachedReaction, CachedReply};
+use talk_adapters::identity::{
+    CacheHistory, CachedMessage, CachedReaction, CachedReply, CachedThread,
+};
 use talk_core::preferences::navigation::NavigationRoomKey;
 use talk_core::protocol::messaging::MessagingResult;
 use talk_core::ui::presentation::MessageView;
@@ -69,7 +71,7 @@ pub(super) struct History {
     // This also protects thread/pin rows outside the main 100-message page.
     reaction_snapshots: Vec<ReactionSnapshot>,
     // Four recently opened threads per scoped room; no permission is cached.
-    threads: Vec<(u128, Page<MessageView, 50>)>,
+    threads: Vec<(u128, Page<MessageView, 50>, Option<MessageView>)>,
     thread_activity: Page<talk_core::ui::messaging::ThreadActivity, 50>,
     thread_activity_version: Version,
     thread_activity_requested: Option<Instant>,
@@ -130,15 +132,74 @@ impl History {
         panel.pins_state = self.pins_state;
         panel.pins_loaded = self.pins_loaded;
         let now = now_unix();
-        panel.thread_activity = page(self.thread_activity.as_slice().iter().cloned().map(
-            |mut activity| {
-                if activity.expires.is_some_and(|at| at > 0 && at <= now) {
-                    activity.last_initials = None;
-                    activity.last_time = None;
+        let mut activities = self.thread_activity.as_slice().to_vec();
+        for (root, rows, cached_root) in &self.threads {
+            if activities.iter().any(|activity| activity.root == *root) {
+                continue;
+            }
+            let last = rows.as_slice().iter().rev().find(|row| {
+                row.local_id != *root
+                    && !row.metadata.deleted
+                    && !row
+                        .metadata
+                        .expires_at
+                        .is_some_and(|at| at > 0 && at <= now)
+            });
+            let root_count = cached_root
+                .as_ref()
+                .or_else(|| {
+                    self.messages
+                        .as_slice()
+                        .iter()
+                        .find(|message| message.local_id == *root)
+                })
+                .map_or(0, |message| message.reply_count);
+            let loaded = rows
+                .as_slice()
+                .iter()
+                .filter(|row| row.local_id != *root)
+                .count();
+            if activities.len() >= 50 {
+                activities.pop();
+            }
+            activities.push(talk_core::ui::messaging::ThreadActivity {
+                root: *root,
+                replies: root_count.max(u16::try_from(loaded).unwrap_or(u16::MAX)),
+                last_initials: last.map(|message| message.initials.clone()),
+                recent_initials: Page::empty(),
+                last_time: last.map(|message| message.time_label.clone()),
+                expires: last.and_then(|message| message.metadata.expires_at),
+            });
+        }
+        panel.thread_activity = page(activities.into_iter().map(|mut activity| {
+            if activity.expires.is_some_and(|at| at > 0 && at <= now) {
+                activity.last_initials = None;
+                activity.last_time = None;
+            }
+            let mut recent = Vec::new();
+            if let Some(initials) = &activity.last_initials {
+                recent.push(initials.clone());
+            }
+            if let Some(rows) = self.thread(activity.root) {
+                for reply in rows.as_slice().iter().rev().filter(|reply| {
+                    reply.local_id != activity.root
+                        && !reply.metadata.deleted
+                        && !reply
+                            .metadata
+                            .expires_at
+                            .is_some_and(|at| at > 0 && at <= now)
+                }) {
+                    if !recent.contains(&reply.initials) {
+                        recent.push(reply.initials.clone());
+                    }
+                    if recent.len() == 3 {
+                        break;
+                    }
                 }
-                activity
-            },
-        ));
+            }
+            activity.recent_initials = page(recent);
+            activity
+        }));
         if let Some((expires, _, capabilities)) = &self.capabilities
             && Instant::now() < *expires
         {
@@ -161,6 +222,17 @@ impl History {
                         && !message.metadata.deleted
                     {
                         visible.reply_count = activity.replies;
+                    } else if let Some(rows) = self.thread(message.local_id)
+                        && !message.metadata.deleted
+                    {
+                        let loaded = rows
+                            .as_slice()
+                            .iter()
+                            .filter(|row| row.local_id != message.local_id)
+                            .count();
+                        visible.reply_count = visible
+                            .reply_count
+                            .max(u16::try_from(loaded).unwrap_or(u16::MAX));
                     }
                     let target = self.read_through_pin_notices(message.local_id);
                     visible.metadata.read_through = (target != message.local_id).then_some(target);
@@ -173,8 +245,15 @@ impl History {
     pub(super) fn thread(&self, root: u128) -> Option<&Page<MessageView, 50>> {
         self.threads
             .iter()
-            .find(|(id, _)| *id == root)
-            .map(|(_, rows)| rows)
+            .find(|(id, _, _)| *id == root)
+            .map(|(_, rows, _)| rows)
+    }
+
+    pub(super) fn thread_root(&self, root: u128) -> Option<&MessageView> {
+        self.threads
+            .iter()
+            .find(|(id, _, _)| *id == root)
+            .and_then(|(_, _, message)| message.as_ref())
     }
 
     pub(super) fn needs_thread_activity(&self, now: Instant) -> bool {
@@ -382,24 +461,23 @@ impl History {
         }
     }
     fn expire(&mut self, now: u64) {
-        self.pins = page(
-            self.pins
-                .as_slice()
-                .iter()
-                .filter(|m| !m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
-                .cloned(),
-        );
         let expired: Vec<_> = self
             .messages
             .as_slice()
             .iter()
+            .chain(self.pins.as_slice())
+            .chain(
+                self.threads
+                    .iter()
+                    .flat_map(|(_, rows, root)| rows.as_slice().iter().chain(root.iter())),
+            )
             .filter(|m| m.metadata.expires_at.is_some_and(|at| at > 0 && at <= now))
             .map(|m| m.local_id)
             .collect();
         if expired.is_empty() {
             return;
         }
-        self.messages = page(self.messages.as_slice().iter().filter_map(|message| {
+        let retain = |message: &MessageView| {
             if expired.contains(&message.local_id) {
                 return None;
             }
@@ -412,13 +490,53 @@ impl History {
                 parent.text = text("");
             }
             Some(message)
-        }));
+        };
+        self.messages = page(self.messages.as_slice().iter().filter_map(retain));
+        self.pins = page(self.pins.as_slice().iter().filter_map(retain));
+        for (_, rows, root) in &mut self.threads {
+            *rows = page(rows.as_slice().iter().filter_map(retain));
+            *root = root.as_ref().and_then(retain);
+        }
         self.versions.retain(|(id, _)| !expired.contains(id));
         self.read_edges
             .retain(|(from, to)| !expired.contains(from) && !expired.contains(to));
         self.read_tail = self
             .read_tail
             .filter(|(anchor, _)| !expired.contains(anchor));
+    }
+
+    /// Deletions are terminal observations. Scrub every retained thread copy,
+    /// including closed panes that do not currently receive row reconciliation.
+    fn redact_threads(&mut self, deleted: &[u128]) {
+        if deleted.is_empty() {
+            return;
+        }
+        let redact = |message: &mut MessageView| {
+            if deleted.contains(&message.local_id) {
+                message.body = text("");
+                message.attachments = Page::empty();
+                message.metadata.deleted = true;
+                message.metadata.reactions = Page::empty();
+                message.metadata.rich = Page::empty();
+                message.metadata.replyable = false;
+            }
+            if let Some(parent) = message.metadata.parent.as_mut()
+                && !parent.external
+                && deleted.contains(&parent.id)
+            {
+                parent.unavailable = true;
+                parent.text = text("");
+            }
+        };
+        for (_, rows, root) in &mut self.threads {
+            *rows = page(rows.as_slice().iter().cloned().map(|mut message| {
+                redact(&mut message);
+                message
+            }));
+            if let Some(root) = root {
+                redact(root);
+            }
+        }
     }
 }
 
@@ -434,15 +552,18 @@ impl Cache {
         context: ConversationRef,
         root: u128,
         rows: Page<MessageView, 50>,
+        root_message: Option<MessageView>,
     ) {
         let Some(room) = self.get_mut(context) else {
             return;
         };
-        room.threads.retain(|(id, _)| *id != root);
+        let previous_root = room.thread_root(root).cloned();
+        room.threads.retain(|(id, _, _)| *id != root);
         if room.threads.len() >= 4 {
             room.threads.remove(0);
         }
-        room.threads.push((root, rows));
+        room.threads
+            .push((root, rows, root_message.or(previous_root)));
     }
     /// Record the actual dispatched cursor, including a bounded hidden-tail
     /// repair. The flight must not infer it from a newer canonical event cursor.
@@ -596,6 +717,39 @@ impl Cache {
                     .filter(|id| *id > 0),
             ),
             pin_messages: page(room.pins.as_slice().iter().filter_map(cached_message)),
+            threads: page(
+                room.threads
+                    .iter()
+                    .filter_map(|(root, replies, root_message)| {
+                        let root = u64::try_from(*root).ok().filter(|root| *root > 0)?;
+                        let confirmed =
+                            |message: &MessageView| {
+                                matches!(message.delivery,
+                        talk_core::ui::presentation::DeliveryState::Received
+                        | talk_core::ui::presentation::DeliveryState::ServerAccepted)
+                            };
+                        Some(CachedThread {
+                            root,
+                            root_message: root_message
+                                .as_ref()
+                                .filter(|message| confirmed(message))
+                                .and_then(cached_message),
+                            replies: page(
+                                replies
+                                    .as_slice()
+                                    .iter()
+                                    .filter(|message| confirmed(message))
+                                    .filter_map(|message| {
+                                        let mut cached = cached_message(message)?;
+                                        if cached.id != root {
+                                            cached.thread = Some(root);
+                                        }
+                                        Some(cached)
+                                    }),
+                            ),
+                        })
+                    }),
+            ),
             pins_loaded: room.pins_loaded,
             older: room.older.and_then(|id| u64::try_from(id).ok()),
             latest: room.latest.and_then(|id| u64::try_from(id).ok()),
@@ -617,6 +771,18 @@ impl Cache {
             return;
         };
         room.messages = page(cached.messages.as_slice().iter().map(restored_message));
+        room.threads = cached
+            .threads
+            .as_slice()
+            .iter()
+            .map(|thread| {
+                (
+                    u128::from(thread.root),
+                    page(thread.replies.as_slice().iter().map(restored_message)),
+                    thread.root_message.as_ref().map(restored_message),
+                )
+            })
+            .collect();
         if room.pins_version.0 == 0 {
             room.pins = page(cached.pins.as_slice().iter().filter_map(|id| {
                 cached
@@ -770,6 +936,16 @@ impl Cache {
         let Some(room) = self.get_mut(context) else {
             return false;
         };
+        let deleted = match result {
+            Ok(MessagingResult::Message(message)) => vec![message.as_ref()],
+            Ok(MessagingResult::Messages { messages, .. }) => messages.as_slice().iter().collect(),
+            _ => Vec::new(),
+        }
+        .into_iter()
+        .filter(|message| message.message.kind == protocol::MessageKind::Deleted)
+        .map(|message| u128::from(message.message.id.sequence))
+        .collect::<Vec<_>>();
+        room.redact_threads(&deleted);
         if work == Work::Metadata
             && let Some((_, at)) = room.metadata_probe.as_mut()
         {
@@ -803,6 +979,7 @@ impl Cache {
                         root: u128::from(thread.root.sequence),
                         replies: u16::try_from(thread.replies).unwrap_or(u16::MAX),
                         last_initials: last.map(|last| initials(last.author.as_str())),
+                        recent_initials: Page::empty(),
                         last_time: last
                             .map(|last| text(&super::messaging::time_label(last.timestamp))),
                         expires: last.and_then(|last| last.expires),

@@ -309,7 +309,7 @@ impl Desktop {
                                 .group_hover("conversation-header", |s| s.opacity(1.))
                                 .focus(|s| s.opacity(1.)),
                             )
-                            .when(self.message_feature_enabled(MessageFeature::Threads), |title| {
+                            .when(self.can_start_thread(), |title| {
                                 title.child(
                                     self.icon_button(
                                         "new-thread",
@@ -570,7 +570,7 @@ impl Desktop {
                     && (!attached || self.can_send_attachments())
                     && (thread
                         || !self.drafts.target(row.context).new_thread
-                        || self.message_feature_enabled(MessageFeature::Threads))
+                        || self.can_start_thread())
                     && if thread {
                         self.thread_send_available(cx)
                     } else {
