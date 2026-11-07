@@ -88,6 +88,18 @@ def exercise(scenario, env, xid, out, label, large=False):
     def type_text(value):
         run(['xdotool', 'type', '--clearmodifiers', '--delay', '4', '--', value], env)
 
+    def expect_settled(*args, **kwargs):
+        # Read-only observation of an asynchronous native paint. The action is
+        # sent exactly once; its required outcome must appear within six seconds.
+        deadline = time.monotonic() + 6
+        while True:
+            try:
+                return expect(*args, **kwargs)
+            except AssertionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(.15)
+
     def click(word, xmin=0, ymin=0, inspected_point=None):
         path, words, _ = observe()
         choices = [r for r in words if normalized(r['text']) == normalized(word) and int(r['left'])>=xmin and int(r['top'])>=ymin]
@@ -373,6 +385,7 @@ def exercise(scenario, env, xid, out, label, large=False):
                             and int(word['top']) < 120 and int(word['left']) > 700)
             if keyboard - after >= 20:
                 break
+            checks.pop()  # Presence alone is not a successful keyboard resize.
             if time.monotonic() >= deadline:
                 raise AssertionError('The focused thread resize handle did not respond to Right')
         key('Left')
@@ -381,7 +394,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         time.sleep(1.5)
         expect('thread composer accepts text', ['THREADDRAFT'])
         key('Return')
-        words = expect('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'], footer_height=200, include_footer_words=True)
+        words = expect_settled('thread Enter retains the draft after a rejected submission', ['THREADDRAFT', 'Nicht gesendet'], footer_height=200, include_footer_words=True)
         if not any(normalized(word['text']) == 'nicht' and int(word['left']) >= after - 10 for word in words):
             raise AssertionError('Thread submission feedback did not appear beside its composer')
         if any(normalized(word['text']) == 'nicht' and int(word['left']) < after - 10 for word in words):
