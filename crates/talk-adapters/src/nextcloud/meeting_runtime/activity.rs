@@ -114,11 +114,8 @@ mod tests {
                 .is_none()
         );
         let peers = [first.clone(), second.clone()];
-        assert_eq!(
-            announcements.refresh(&peers, true, 10).unwrap().1,
-            vec![second]
-        );
-        assert_eq!(announcements.refresh(&peers, false, 11).unwrap().1, peers);
+        assert!(announcements.refresh(&peers, true, 10).unwrap().1 == vec![second]);
+        assert!(announcements.refresh(&peers, false, 11).unwrap().1 == peers);
     }
 }
 

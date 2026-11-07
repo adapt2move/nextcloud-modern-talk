@@ -724,6 +724,7 @@ fn pending_snapshot(call: &CallSession) -> Snapshot {
         participants: talk_core::bounded::Page::empty(),
         phase: call.phase(),
         microphone: DeviceState::Off,
+        local_speaking: false,
         camera: DeviceState::Off,
         screen: DeviceState::Unavailable,
         peers: 0,

@@ -482,6 +482,8 @@ pub struct Snapshot {
     pub participants: crate::bounded::Page<Participant, 16>,
     pub phase: Phase,
     pub microphone: DeviceState,
+    /// Short-lived level indication from already authorized local audio.
+    pub local_speaking: bool,
     pub camera: DeviceState,
     pub screen: DeviceState,
     pub peers: u16,

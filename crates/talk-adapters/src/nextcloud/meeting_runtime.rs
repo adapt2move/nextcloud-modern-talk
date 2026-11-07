@@ -181,6 +181,7 @@ impl LiveCall {
             participants: talk_core::bounded::Page::empty(),
             phase: Phase::Connecting,
             microphone: DeviceState::Off,
+            local_speaking: false,
             camera: DeviceState::Off,
             screen: DeviceState::Unavailable,
             peers: 0,
@@ -681,6 +682,7 @@ async fn media_loop(
     let mut tick = tokio::time::interval(Duration::from_millis(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_flags = call.wishes();
+    let mut local_speaking = speaking::Speaking::default();
     let mut hand_raised = false;
     let mut hand_timestamp = 0u64;
     let mut announced_refresh = 0u64;
@@ -996,6 +998,13 @@ async fn media_loop(
             stage = "media exchange";
             let wishes = session.publication();
             let audio = session.take_audio();
+            if policy_ready && wishes.microphone {
+                if let Some(samples) = &audio {
+                    local_speaking.observe(samples, Instant::now());
+                }
+            } else {
+                local_speaking = speaking::Speaking::default();
+            }
             let video = session.take_video();
             let mut totals = MediaCounters::default();
             let mut any_connected = false;
@@ -1127,6 +1136,7 @@ async fn media_loop(
                 let (mic_failed, camera_failed) = session.failed();
                 snapshot.phase = call.phase();
                 snapshot.microphone = if mic_failed { DeviceState::Unavailable } else if mic { DeviceState::Active } else if wishes.microphone { DeviceState::Requested } else { DeviceState::Off };
+                snapshot.local_speaking = policy_ready && mic && local_speaking.active(Instant::now());
                 snapshot.camera = if camera_failed { DeviceState::Unavailable } else if camera { DeviceState::Active } else if wishes.camera { DeviceState::Requested } else { DeviceState::Off };
                 snapshot.peers = participants.0.len() as u16;
                 snapshot.participants = participant_snapshot;

@@ -104,7 +104,7 @@ mod tests {
         let pending = message(true, 1, vec![first.clone()]);
         let joined = message(true, 1, vec![second.clone()]);
         let merged = merge_hands(Some(pending), Some(joined)).unwrap();
-        assert_eq!(merged.peers, vec![second.clone(), first.clone()]);
+        assert!(merged.peers == vec![second.clone(), first.clone()]);
         let lower = message(false, 2, vec![first, second]);
         let latest = merge_hands(Some(merged), Some(lower)).unwrap();
         assert_eq!(

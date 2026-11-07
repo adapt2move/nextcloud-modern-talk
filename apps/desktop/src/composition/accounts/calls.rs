@@ -1024,7 +1024,7 @@ fn project(
                     presence: account.presence,
                     self_user: true,
                     raised_hand: value.hand_raised,
-                    speaking: false,
+                    speaking: value.local_speaking,
                     call_can_mute: false,
                     call_microphone: local_device_state(value.microphone),
                     call_camera: local_device_state(value.camera),
@@ -1083,6 +1083,7 @@ mod action_tests {
                 phase: Phase::Ringing,
                 participants: Page::empty(),
                 microphone: DeviceState::Off,
+                local_speaking: false,
                 camera: DeviceState::Off,
                 screen: DeviceState::Off,
                 peers: 0,
@@ -1132,7 +1133,8 @@ mod action_tests {
         );
         snapshot.phase = Phase::Active;
         snapshot.hand_raised = true;
-        snapshot.microphone = DeviceState::Requested;
+        snapshot.local_speaking = true;
+        snapshot.microphone = DeviceState::Active;
         for id in 1..=16 {
             snapshot
                 .participants
@@ -1151,13 +1153,18 @@ mod action_tests {
         assert_eq!(view.participants.as_slice().len(), 17);
         let local = &view.participants.as_slice()[0];
         assert_eq!(local.local_id, 0);
-        assert!(local.self_user && local.raised_hand && !local.call_can_mute);
-        assert_eq!(local.call_microphone, None);
+        assert!(local.self_user && local.raised_hand && local.speaking && !local.call_can_mute);
+        assert_eq!(local.call_microphone, Some(true));
         assert!(
             view.participants.as_slice()[1..]
                 .iter()
                 .all(|p| !p.self_user && p.local_id != 0)
         );
+        snapshot.microphone = DeviceState::Requested;
+        snapshot.local_speaking = false;
+        let view = project(&snapshot, &text("Room"), false, Some(&account));
+        assert_eq!(view.participants.as_slice()[0].call_microphone, None);
+        assert!(!view.participants.as_slice()[0].speaking);
     }
 
     #[test]

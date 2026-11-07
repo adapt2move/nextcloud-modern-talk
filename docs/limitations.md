@@ -16,8 +16,9 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   A remote screen offer ends the unsupported call. Permission guidance is not
   a sharing engine.
 - The call view has adaptive gallery, local focus and a speaking-level-based
-  speaker view. The level is a short-lived indicator from received audio, not
-  speech recognition or a connection-quality measurement. The dock is inside
+  speaker view. The level is a short-lived indicator from received audio or
+  authorized local microphone samples, not speech recognition or a
+  connection-quality measurement. The dock is inside
   the main window; it is not a separate always-on-top window. Sidebar avatars
   come from the current call; other active rooms show the call badge until
   participant identities are available.
