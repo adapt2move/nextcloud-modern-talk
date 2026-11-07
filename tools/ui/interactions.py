@@ -269,6 +269,8 @@ def exercise(scenario, env, xid, out, label, large=False):
     elif scenario == 'chat-polls':
         click('Abstimmen', inspected_point=(1280, 800, 390, 552))
         expect('accepted fictional vote stays visible', ['Deine Stimme'])
+        # The poll's secondary action is behind its inspected ellipsis control.
+        run(['xdotool', 'mousemove', '--window', xid, '364', '594', 'click', '1'], env)
         click('beenden')
         expect('closing asks for confirmation', ['Umfrage wirklich beenden', 'Jetzt beenden'])
         click('Jetzt')
@@ -305,7 +307,7 @@ def exercise(scenario, env, xid, out, label, large=False):
         if (width, height) != (1280, 800):
             raise AssertionError('Recording interaction requires the inspected 1280x800 fixture')
         # The rightmost round button is the explicit direct-send action.
-        run(['xdotool', 'mousemove', '--window', xid, '1214', '734',
+        run(['xdotool', 'mousemove', '--window', xid, '1214', '724',
              'click', '--repeat', '2', '--delay', '50', '1'], env)
         time.sleep(.8)
         log = (out / f'{label}.log').read_text()
