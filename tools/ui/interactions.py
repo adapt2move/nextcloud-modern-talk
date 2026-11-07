@@ -44,6 +44,12 @@ def exercise(scenario, env, xid, out, label, large=False):
         run(["convert",str(path),"-crop",f"{width}x120+0+{height-120}","+repage","-resize","300%","-colorspace","gray","-auto-level",str(ocr_path)],env)
         text += normalized(run(["tesseract",str(ocr_path),"stdout","--psm","6"],env).stdout)
         ocr_path.unlink()
+        if scenario == 'chat-cloud-files-offline' and (width, height) == (1280, 800):
+            banner_path = out / f'{label}-ocr-banner.png'
+            run(['convert', str(path), '-crop', '700x36+277+288', '+repage', '-resize', '400%',
+                 '-colorspace', 'gray', '-threshold', '75%', str(banner_path)], env)
+            text += normalized(run(['tesseract', str(banner_path), 'stdout', '--psm', '7'], env).stdout)
+            banner_path.unlink()
         for term in required:
             # At small sizes Tesseract sometimes reads the highlighted German
             # selection count's final letters as "ahit". Keep the numeric count
@@ -57,9 +63,8 @@ def exercise(scenario, env, xid, out, label, large=False):
                 # This inspected footer location is stable in the fixed-size
                 # fixture. A contrast-enhanced crop also works in dark mode.
                 count_path=out/f'{label}-ocr-count.png'
-                run(['convert', str(path), '-crop', '120x35+440+660', '+repage',
-                     '-resize', '400%', '-colorspace', 'gray', '-negate',
-                     '-contrast-stretch', '2%x2%', str(count_path)], env)
+                run(['convert', str(path), '-crop', '100x25+652+692', '+repage',
+                     '-resize', '400%', '-colorspace', 'gray', '-auto-level', '-negate', str(count_path)], env)
                 count_text=normalized(run(['tesseract', str(count_path), 'stdout', '--psm', '7'], env).stdout)
                 count_path.unlink()
                 fuzzy_count=re.search(rf'\b{selection_count.group(1)}\s*ausge\w{{4,8}}', count_text)

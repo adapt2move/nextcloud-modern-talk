@@ -174,6 +174,11 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
     ("Stimme abgeben", "Submit vote", "Enviar voto"),
     ("Stimme zurückziehen", "Withdraw vote", "Retirar voto"),
     (
+        "Teilnehmende können mehr als eine Antwort wählen.",
+        "Participants can choose more than one answer.",
+        "Los participantes pueden elegir más de una respuesta.",
+    ),
+    (
         "Umfrage erneut prüfen",
         "Check poll again",
         "Volver a comprobar la encuesta",
@@ -187,11 +192,6 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Umfrage wirklich beenden?",
         "Close this poll?",
         "¿Finalizar esta encuesta?",
-    ),
-    (
-        "Teilnehmende können mehr als eine Antwort wählen.",
-        "Participants can choose more than one answer.",
-        "Los participantes pueden elegir más de una respuesta.",
     ),
     ("Umfragedetails", "Poll details", "Detalles de la encuesta"),
     ("Umfrageentwürfe", "Poll drafts", "Borradores de encuestas"),

@@ -60,12 +60,12 @@ pub const MESSAGES: &[(&str, &str, &str)] = &[
         "Este formato de imagen no es compatible.",
     ),
     ("Eine Ebene nach oben", "Up one level", "Subir un nivel"),
+    ("Erstellen", "Create", "Crear"),
     (
         "Für diesen Bereich sind offline keine Dateien gespeichert.",
         "No files are saved offline for this location.",
         "No hay archivos guardados sin conexión para esta ubicación.",
     ),
-    ("Erstellen", "Create", "Crear"),
     ("Größe", "Size", "Tamaño"),
     ("Hochladen", "Upload", "Subir"),
     (
