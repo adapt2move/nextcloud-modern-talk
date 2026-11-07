@@ -267,6 +267,11 @@ impl Desktop {
                                     div()
                                         .min_w_0()
                                         .text_size(self.sp(if side { 18. } else { 24. }))
+                                        // Keep the single-word consent title visible when
+                                        // large text leaves little room beside the close control.
+                                        .when(overlay == Overlay::RecordingConsent, |title| {
+                                            title.flex_1().text_size(self.sp(24.).min(px(40.)))
+                                        })
                                         .when(
                                             matches!(
                                                 overlay,
