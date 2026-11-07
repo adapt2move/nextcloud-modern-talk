@@ -18,6 +18,11 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
     ),
     ("Anruf öffnen", "Open call", "Abrir llamada"),
     (
+        "Aufzeichnung auf dem Server starten?",
+        "Start recording on the server?",
+        "¿Iniciar la grabación en el servidor?",
+    ),
+    (
         "Aufzeichnung fehlgeschlagen",
         "Recording failed",
         "La grabación ha fallado",
@@ -28,9 +33,24 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Grabación en curso",
     ),
     (
+        "Aufzeichnung starten",
+        "Start recording",
+        "Iniciar grabación",
+    ),
+    (
         "Aufzeichnung startet …",
         "Recording is starting…",
         "Iniciando grabación…",
+    ),
+    (
+        "Aufzeichnung stoppen",
+        "Stop recording",
+        "Detener grabación",
+    ),
+    (
+        "Aufzeichnung wird aktualisiert …",
+        "Updating recording…",
+        "Actualizando grabación…",
     ),
     (
         "Aufzeichnung wird beendet …",
@@ -51,6 +71,16 @@ pub(super) const MESSAGES: &[(&str, &str, &str)] = &[
         "Der Anrufstatus ist unklar. Verlasse den Anruf und prüfe, ob er beendet wurde.",
         "The call status is unclear. Leave the call and check whether it ended.",
         "El estado de la llamada no está claro. Sal de la llamada y comprueba si terminó.",
+    ),
+    (
+        "Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.",
+        "The server will record this call’s audio and video. Everyone in the call can see the recording.",
+        "El servidor grabará el audio y el vídeo de esta llamada. Todas las personas de la llamada pueden ver la grabación.",
+    ),
+    (
+        "Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status, bevor du erneut eine Änderung anforderst.",
+        "The recording change could not be confirmed. Check its status before requesting another change.",
+        "No se pudo confirmar el cambio de grabación. Comprueba su estado antes de solicitar otro cambio.",
     ),
     (
         "Ein Gerätewechsel stoppt die aktuelle Übertragung. Aktiviere das Gerät danach erneut.",

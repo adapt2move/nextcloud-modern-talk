@@ -38,6 +38,7 @@ impl Desktop {
             Overlay::CallParticipants => ("Im Anruf", 400.),
             Overlay::CallChat => ("Chat im Anruf", 440.),
             Overlay::ConfirmEndCall => ("Anruf für alle beenden?", 440.),
+            Overlay::ConfirmRecording => ("Aufzeichnung auf dem Server starten?", 440.),
             Overlay::Search => ("Suchen", 700.),
             Overlay::Create => ("Neues Gespräch", 716.),
             Overlay::Discover => ("Offene Gespräche", 760.),
@@ -129,6 +130,24 @@ impl Desktop {
                             );
                         }
                     }
+                    if call.recording_pending {
+                        body = body.child(self.hint(self.l("Aufzeichnung wird aktualisiert …")));
+                    }
+                    if call.recording_uncertain {
+                        body = body.child(self.hint(self.l("Die Aufzeichnungsänderung konnte nicht bestätigt werden. Prüfe den Status, bevor du erneut eine Änderung anforderst.")));
+                    }
+                    if let Some(start) = call.recording_control {
+                        body = body.child(self.button(
+                            "call-recording-control",
+                            if start { "Aufzeichnung starten" } else { "Aufzeichnung stoppen" },
+                            ButtonStyle::Secondary,
+                            Availability::when(!call.recording_pending && !call.recording_uncertain,
+                                "Eine Anfrage wird bereits bearbeitet."),
+                            if start { LocalAction::Open(Overlay::ConfirmRecording) }
+                            else { LocalAction::Intent(talk_core::ui::presentation::UiIntent::SetCallRecording { call: call.scope, start: false }) },
+                            cx,
+                        ));
+                    }
                     if call.can_end_everyone {
                         body = body.child(self.button(
                             "end-everyone", "Für alle beenden", ButtonStyle::Secondary,
@@ -140,6 +159,11 @@ impl Desktop {
                 body
             }
             Overlay::CallChat => self.call_chat(cx),
+            Overlay::ConfirmRecording => div().flex().flex_col().gap_4()
+                .child(self.hint(self.l("Der Server zeichnet Audio und Video dieses Anrufs auf. Alle Teilnehmenden sehen die Aufzeichnung.")))
+                .child(div().flex().gap_3()
+                    .child(self.button("cancel-recording", "Abbrechen", ButtonStyle::Secondary, true, LocalAction::Close, cx))
+                    .child(self.button("confirm-recording", "Aufzeichnung starten", ButtonStyle::Primary, true, LocalAction::ConfirmRecording, cx))),
             Overlay::ConfirmEndCall => div().flex().flex_col().gap_4()
                 .child(self.hint(self.l("Alle Teilnehmenden verlassen den Anruf. Das Gespräch und seine Nachrichten bleiben bestehen.")))
                 .child(div().flex().gap_3()

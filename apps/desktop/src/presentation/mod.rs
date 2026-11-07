@@ -58,6 +58,7 @@ pub enum Overlay {
     CallParticipants,
     CallChat,
     ConfirmEndCall,
+    ConfirmRecording,
     Search,
     Create,
     Discover,
@@ -104,6 +105,7 @@ pub enum LocalAction {
     ToggleCallChat,
     ToggleCallReactions(CallScope),
     ConfirmEndCall,
+    ConfirmRecording,
     MinimizeCall(CallScope),
     ExpandCall(CallScope),
     ToggleCallFullscreen(CallScope),
@@ -1232,6 +1234,16 @@ impl Desktop {
                 {
                     return;
                 }
+                if overlay == Overlay::ConfirmRecording
+                    && self.snapshot.call.as_ref().is_none_or(|call| {
+                        call.recording_control != Some(true)
+                            || call.recording_pending
+                            || call.recording_uncertain
+                            || call.stage != CallStage::Active
+                    })
+                {
+                    return;
+                }
                 if overlay == Overlay::Participants && !self.room_members_applicable() {
                     return;
                 }
@@ -1509,6 +1521,25 @@ impl Desktop {
                         (self.call_reactions_open != Some(scope)).then_some(scope);
                     self.call_device_picker = None;
                     self.device_picker = None;
+                }
+            }
+            LocalAction::ConfirmRecording => {
+                if self.overlay == Some(Overlay::ConfirmRecording)
+                    && let Some(call) = self.snapshot.call.as_ref().filter(|call| {
+                        call.recording_control == Some(true)
+                            && !call.recording_pending
+                            && !call.recording_uncertain
+                            && call.stage == CallStage::Active
+                    })
+                {
+                    let scope = call.scope;
+                    if self.submit(UiIntent::SetCallRecording {
+                        call: scope,
+                        start: true,
+                    }) {
+                        self.overlay = None;
+                        self.root_focus.focus(window);
+                    }
                 }
             }
             LocalAction::ToggleCallChat => {
