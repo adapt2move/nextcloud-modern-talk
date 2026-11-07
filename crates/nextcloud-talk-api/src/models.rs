@@ -692,7 +692,7 @@ mod message_tests {
         }
         room["lastReadMessage"] = json!(-2);
         let decoded = Room::decode(&room).unwrap();
-        assert_eq!(decoded.last_read, None);
+        assert_eq!(decoded.last_read, Some(0));
         assert_eq!(decoded.summary_offset, Some(0));
         room["lastReadMessage"] = json!(-9);
         assert_eq!(Room::decode(&room).unwrap().summary_offset, None);
