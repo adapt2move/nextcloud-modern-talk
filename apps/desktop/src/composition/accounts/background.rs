@@ -387,7 +387,7 @@ impl Purpose {
             | Self::MessageNotifications(s)
             | Self::LiveEvents(s)
             | Self::Rooms(s)
-            | Self::Threads(s)
+            | Self::Threads(s, _)
             | Self::Tags(s)
             | Self::TagMutation(_, s)
             | Self::Preferences(s, _) => Some(s),

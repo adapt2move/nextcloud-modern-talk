@@ -372,6 +372,8 @@ pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
                     message.reply_count = if message.local_id == 1 { 2 } else { 0 };
                     if message.local_id == 1 {
                         message.metadata.thread = Some(1);
+                        message.metadata.rich = Page::empty();
+                        message.attachments = Page::empty();
                     }
                     message
                 }),

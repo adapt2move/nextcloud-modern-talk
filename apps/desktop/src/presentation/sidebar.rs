@@ -932,7 +932,13 @@ impl Desktop {
             else {
                 continue;
             };
-            let unread = thread_unread(thread, room) == Some(true);
+            let unread = thread_unread(
+                room.last_read_message,
+                room.unread,
+                thread.root,
+                thread.replies,
+                thread.last_message,
+            ) == Some(true);
             rows = rows.child(
                 self.control(
                     scoped_id("subscribed-thread", thread.context, thread.root, 0),
@@ -1054,14 +1060,15 @@ impl Desktop {
 }
 
 fn thread_unread(
-    thread: &talk_core::ui::presentation::ThreadView,
-    room: &talk_core::ui::presentation::ConversationView,
+    marker: Option<u128>,
+    unread: u32,
+    root: u128,
+    replies: u32,
+    last_message: Option<u128>,
 ) -> Option<bool> {
-    let marker = room.last_read_message?;
-    let latest = thread
-        .last_message
-        .or_else(|| (thread.replies == 0).then_some(thread.root))?;
-    Some(room.unread > 0 && latest > marker)
+    let marker = marker?;
+    let latest = last_message.or_else(|| (replies == 0).then_some(root))?;
+    Some(unread > 0 && latest > marker)
 }
 
 #[cfg(test)]
@@ -1069,24 +1076,11 @@ mod tests {
     use super::*;
     #[test]
     fn unread_thread_requires_a_known_room_marker_and_recent_message() {
-        let snapshot = crate::composition::fixtures::snapshot(Some("thread-list"));
-        let mut room = snapshot.conversations.as_slice()[0].clone();
-        let mut thread = snapshot.threads.entries.as_slice()[0].clone();
-        room.unread = 1;
-        room.last_read_message = Some(40);
-        thread.last_message = Some(41);
-        assert_eq!(thread_unread(&thread, &room), Some(true));
-        room.last_read_message = Some(41);
-        assert_eq!(thread_unread(&thread, &room), Some(false));
-        room.last_read_message = None;
-        assert_eq!(thread_unread(&thread, &room), None);
-        room.last_read_message = Some(40);
-        thread.last_message = None;
-        thread.replies = 2;
-        assert_eq!(thread_unread(&thread, &room), None);
-        thread.replies = 0;
-        thread.root = 41;
-        assert_eq!(thread_unread(&thread, &room), Some(true));
+        assert_eq!(thread_unread(Some(40), 1, 5, 2, Some(41)), Some(true));
+        assert_eq!(thread_unread(Some(41), 1, 5, 2, Some(41)), Some(false));
+        assert_eq!(thread_unread(None, 1, 5, 2, Some(41)), None);
+        assert_eq!(thread_unread(Some(40), 1, 5, 2, None), None);
+        assert_eq!(thread_unread(Some(40), 1, 41, 0, None), Some(true));
     }
     #[test]
     fn direct_conversations_stay_first_and_titles_cannot_grant_a_category() {

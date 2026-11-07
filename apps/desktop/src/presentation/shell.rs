@@ -688,18 +688,23 @@ impl Desktop {
                                         cx,
                                     )),
                             )
-                            .child(div().flex().items_center().gap_3().child(self.icon_button(
-                                send_id,
-                                ("arrow-up", "Senden"),
-                                ButtonStyle::Primary,
-                                send_availability,
-                                if thread {
-                                    LocalAction::SendThread
-                                } else {
-                                    LocalAction::Send
-                                },
-                                cx,
-                            ))),
+                            .child(
+                                div().flex().items_center().gap_3().child(
+                                    self.icon_button(
+                                        send_id,
+                                        ("arrow-up", "Senden"),
+                                        ButtonStyle::Primary,
+                                        send_availability,
+                                        if thread {
+                                            LocalAction::SendThread
+                                        } else {
+                                            LocalAction::Send
+                                        },
+                                        cx,
+                                    )
+                                    .rounded_full(),
+                                ),
+                            ),
                     ),
             )
             .children(

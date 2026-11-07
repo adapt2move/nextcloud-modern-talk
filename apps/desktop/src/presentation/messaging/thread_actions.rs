@@ -1,5 +1,6 @@
 //! Reply and edit state belongs to the thread editor, independently of the timeline draft.
 use super::*;
+use crate::presentation::state::PendingEdit;
 
 pub(super) struct Edit {
     pub context: ConversationRef,
@@ -7,7 +8,7 @@ pub(super) struct Edit {
     pub message: u128,
     pub generation: u64,
     pub body: Text<4096>,
-    pub pending: Option<super::super::state::PendingEdit>,
+    pub pending: Option<PendingEdit>,
 }
 
 impl Desktop {
@@ -358,7 +359,7 @@ impl Desktop {
             body: body.clone(),
         }) && let Some(edit) = self.message_ui.thread_edit.as_mut()
         {
-            edit.pending = Some(super::super::state::PendingEdit {
+            edit.pending = Some(PendingEdit {
                 request,
                 message,
                 generation,
@@ -388,7 +389,7 @@ impl Desktop {
         };
         let editor_generation = active.then(|| input.edit_generation());
         let unchanged = if active {
-            super::super::state::PendingEdit::complete(
+            PendingEdit::complete(
                 &mut edit.pending,
                 request,
                 completion,

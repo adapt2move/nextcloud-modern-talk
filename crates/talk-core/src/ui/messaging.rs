@@ -2,6 +2,7 @@
 use super::conversation::{Availability, RemoteState};
 use super::presentation::{Completion, ConversationRef, RequestId};
 use super::{Decision, Page, Text, UnavailableReason};
+use crate::preferences::navigation::NavigationRoomKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageFeature {
@@ -361,7 +362,7 @@ pub struct ComposeTarget {
 /// Displayed quote and durable lookup key; neither grants access to the source.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateReplyTarget {
-    pub source: crate::preferences::navigation::NavigationRoomKey,
+    pub source: NavigationRoomKey,
     pub message: u128,
     pub author: Text<128>,
     pub body: Text<512>,
