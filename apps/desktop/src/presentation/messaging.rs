@@ -80,6 +80,8 @@ pub(super) struct MessageUi {
     context: Option<ConversationRef>,
     observed: Vec<MessageView>,
     observed_pins: Vec<u128>,
+    // Session-only anchors, bounded independently of virtual list metadata.
+    scroll_anchors: Vec<(ConversationRef, Option<u128>, gpui::Pixels)>,
     arrival: Rc<RefCell<arrival::Arrival>>,
     geometry: Rc<RefCell<MessageGeometry>>,
     pub editing: Option<u128>,
@@ -273,6 +275,7 @@ impl MessageUi {
             context: None,
             observed: Vec::new(),
             observed_pins: Vec::new(),
+            scroll_anchors: Vec::new(),
             editing: None,
             composer_load_failed: None,
             edit_generation: 0,
@@ -385,10 +388,7 @@ impl Desktop {
         if !self.save_thread_draft(cx)
             || !self.thread_drafts.set_target(
                 context,
-                ComposeTarget {
-                    thread: Some(root),
-                    ..ComposeTarget::default()
-                },
+                self.thread_drafts.restored_thread_target(context, root),
             )
         {
             return false;
@@ -728,6 +728,30 @@ impl Desktop {
                 self.return_focus = None;
                 self.pending_modal_focus = false;
             }
+            self.message_ui.scroll_anchors.retain(|(c, _, _)| {
+                self.snapshot
+                    .accounts
+                    .as_slice()
+                    .iter()
+                    .any(|a| a.scope == c.account)
+            });
+            if let Some(context) = self.message_ui.context {
+                let top = self.message_ui.list.logical_scroll_top();
+                let anchor = self
+                    .message_ui
+                    .observed
+                    .get(top.item_ix)
+                    .map(|m| m.local_id);
+                self.message_ui
+                    .scroll_anchors
+                    .retain(|(c, _, _)| *c != context);
+                if self.message_ui.scroll_anchors.len() == 32 {
+                    self.message_ui.scroll_anchors.remove(0);
+                }
+                self.message_ui
+                    .scroll_anchors
+                    .push((context, anchor, top.offset_in_item));
+            }
             self.message_ui.context = self.snapshot.selected;
             self.message_ui.unread_marker = self.snapshot.selected.and_then(|context| {
                 self.snapshot
@@ -740,6 +764,19 @@ impl Desktop {
             self.message_ui.first_unread = None;
             self.message_ui.unread_jump = None;
             self.message_ui.list.reset(rows.len());
+            if let Some((_, anchor, offset)) = self
+                .message_ui
+                .scroll_anchors
+                .iter()
+                .find(|(c, _, _)| Some(*c) == self.snapshot.selected)
+                && let Some(index) =
+                    anchor.and_then(|id| rows.iter().position(|m| m.local_id == id))
+            {
+                self.message_ui.list.scroll_to(ListOffset {
+                    item_ix: index,
+                    offset_in_item: *offset,
+                });
+            }
             self.message_ui.observed = rows.to_vec();
             self.message_ui.menu.clear();
             self.message_ui.reaction_request = None;

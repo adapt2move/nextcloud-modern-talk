@@ -1,5 +1,6 @@
 //! Native presentation projection. Producers own policy, identity and operation lifetimes.
 //! All collections/text are bounded. No transport DTO, endpoint, secret or frame is exported.
+use super::messaging::ComposerDraft;
 use super::{
     AccountId, AccountScope, CallScope, ConversationId, Decision, MediaIntent, Page, SubmitError,
     Text, UnavailableReason, UserIntent,
@@ -924,6 +925,21 @@ pub enum UiIntent {
 /// One coalesced snapshot and at most 64 queued intents; priority leave/logout must
 /// remain independently admissible as required by ADR-002.
 pub trait NativeDesktopPort {
+    /// Debug observation of prepared render content, not display presentation.
+    #[cfg(debug_assertions)]
+    fn observe_rendered(&mut self, _snapshot: &PresentationSnapshot) {}
+
+    fn composer_drafts(&self, _context: ConversationRef) -> Page<ComposerDraft, 32> {
+        Page::empty()
+    }
+    fn save_composer_draft(
+        &mut self,
+        _context: ConversationRef,
+        _draft: ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        Err(SubmitError::Unavailable(UnavailableReason::Unsupported))
+    }
+
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError>;
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot>;
 }

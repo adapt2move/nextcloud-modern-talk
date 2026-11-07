@@ -89,6 +89,18 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
 
 ## Messages and background activity
 
+- Favorite and archive changes project immediately during an admitted live
+  request and reconcile against canonical room observations. Failure removes
+  the overlay. They do not yet have durable offline replay. Poll votes and
+  notification-level changes still require a live request with pending feedback.
+- Speculative history warms at most four policy-approved rooms, preferring unread,
+  favorites and recent activity. It has one global in-flight slot and a 60-second
+  planning window, yields to foreground reads/actions, and is cancelled when its
+  account becomes inactive. Repeated room-list transport failures pause ordinary
+  background reads with a bounded jittered cooldown. This is not a full priority
+  scheduler for every avatar/preview/presence transport or an OS network-change
+  observer; sleep/network handover qualification remains incomplete.
+
 - Marking unread from a message requires a live-proven preceding message or an
   exhausted live history page proving the first message; cached-only gaps do not
   establish adjacency. This message action requires a connection. Room-level
@@ -214,13 +226,17 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   and notification reception with a hidden window still need Mac qualification.
   Explicit quit stops background reception.
 - Session history retains up to 32 rooms with 100 messages per room. Eligible
-  durable accounts also restore up to eight ordinary-room histories, member
+  durable accounts also restore up to 32 ordinary-room histories with the newest 50 timeline messages each, member
   counts, read-only scalar room settings and deliberately staged outgoing intents from private, unencrypted
   storage. Up to four recently opened 50-message thread windows per stored room
   share the existing cache size and eligibility limits; older windows are dropped
   first when the account cache is full. Restricted, unknown-policy and session-only
-  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted drafts are
-  session-local. Small reencoded previews persist for up to seven days, with
+  content stays in memory. Inactive rooms are not continuously mirrored in full. Unsubmitted ordinary-room main/thread drafts persist separately,
+  up to 32 entries and 128 KiB serialized per account, with a 30-day expiry.
+  Attachments and cross-room private replies remain session-local. Saving is
+  asynchronous: a sudden exit before a write/clear commits can restore older
+  text. Failed or ineligible saves show session-only retention; unsent text is
+  never evicted to admit another draft. Small reencoded previews persist for up to seven days, with
   at most 24 entries and 4 MiB per account; original attachments are not cached.
 - The outgoing queue is bounded to 64 intents and 512 KiB per account. It
   revalidates current server authority before dispatch. Read-only uncertainty

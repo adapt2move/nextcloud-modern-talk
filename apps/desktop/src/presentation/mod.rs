@@ -411,6 +411,7 @@ pub struct Desktop {
     thread_renaming: bool,
     drafts: Drafts,
     thread_drafts: Drafts,
+    draft_storage_unavailable: Option<ConversationRef>,
     root_focus: FocusHandle,
     modal_focus: FocusHandle,
     pending_modal_focus: bool,
@@ -760,6 +761,7 @@ impl Desktop {
             thread_renaming: false,
             drafts: Drafts::default(),
             thread_drafts: Drafts::thread_editor(),
+            draft_storage_unavailable: None,
             root_focus,
             modal_focus,
             pending_modal_focus: initial_overlay.is_some() || prejoin.is_some(),
@@ -904,6 +906,24 @@ impl Desktop {
                 .is_ok()
         {
             self.pending_ack = None;
+        }
+        if let Some(context) = self.snapshot.selected
+            && self.message_ui.editing.is_none()
+            && self.message_ui.composer_load_failed != Some(context)
+            && !self.composer.read(cx).composing()
+        {
+            let _ = self
+                .drafts
+                .save(context, self.composer.read(cx).committed_value());
+        }
+        let _ = self.save_thread_draft(cx);
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
         }
         let Some(next) = self.port.take_snapshot() else {
             return;
@@ -1136,6 +1156,25 @@ impl Desktop {
             self.recent_call_reaction = Some((call.scope, reaction.clone(), Instant::now()));
         }
         self.snapshot = next;
+        if let Some(context) = self.snapshot.selected {
+            let stored = self.port.composer_drafts(context);
+            if self
+                .drafts
+                .restore_durable(context, stored.as_slice(), false)
+            {
+                reset_draft = true;
+            }
+            self.thread_drafts
+                .restore_durable(context, stored.as_slice(), true);
+        }
+        let draft_error = self
+            .drafts
+            .persist(self.port.as_mut())
+            .or(self.thread_drafts.persist(self.port.as_mut()));
+        if self.draft_storage_unavailable != draft_error {
+            self.draft_storage_unavailable = draft_error;
+            cx.notify();
+        }
         self.retain_thread_edit();
         let limit = self.composer_message_limit();
         self.composer
@@ -2958,6 +2997,8 @@ impl Desktop {
 }
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(debug_assertions)]
+        self.port.observe_rendered(&self.snapshot);
         if let Some(started) = self.highlight_started {
             if started.elapsed() >= std::time::Duration::from_millis(1400) {
                 self.highlight_started = None;

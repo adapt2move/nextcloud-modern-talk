@@ -178,7 +178,7 @@ UI_MODULE_TYPES = {
         "AccountPersonRef", "AccountPerson", "CreateAction", "CreationResult", "CreatePanel",
         "CsvFileError", "CsvFileOutcome", "CsvFileResult",
     },
-    "messaging": {"MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
+    "messaging": {"ComposerDraft", "MessageMetadata", "MessagePanel", "MessageAction", "SystemEvent"},
     "content": {"ContentPanel", "ContentAction", "AttachmentRef", "FileExportView"},
 }
 UNBOUNDED = (

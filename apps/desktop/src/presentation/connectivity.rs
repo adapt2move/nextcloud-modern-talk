@@ -7,7 +7,7 @@ use talk_core::ui::{
     presentation::{ConnectionFailure, ContentState, ConversationRef, UiIntent},
 };
 
-const OFFLINE_GRACE: Duration = Duration::from_secs(4);
+const OFFLINE_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy)]
 enum Observation {
@@ -132,7 +132,19 @@ impl Desktop {
     ) -> Div {
         let (label, detail) = failure
             .map(super::state::connection_failure_copy)
-            .unwrap_or(("Offline", ""));
+            .unwrap_or((
+                if self
+                    .snapshot
+                    .message_panel
+                    .as_ref()
+                    .is_some_and(|p| p.queued_actions > 0)
+                {
+                    "Offline – Änderungen werden gesendet, sobald du wieder online bist"
+                } else {
+                    "Verbindung wird wiederhergestellt …"
+                },
+                "",
+            ));
         let tint = if failure.is_some() {
             self.theme.danger
         } else {

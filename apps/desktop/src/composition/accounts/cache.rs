@@ -86,6 +86,8 @@ pub(super) struct Cache {
     // in the existing 24-write budget and collapses to a preview-only clear.
     cleanup_failures: Vec<CleanupFailure>,
     last_presence_second: Option<u64>,
+    draft_failures: Vec<(AccountId, NavigationRoomKey, Option<u64>)>,
+    draft_retry_at: Option<Instant>,
 }
 fn required_cleanup(command: &DataCommand) -> bool {
     matches!(
@@ -110,9 +112,12 @@ impl Cache {
                     })
             })
             .or_else(|| {
-                self.writes
-                    .iter()
-                    .position(|w| current(w) && !required_cleanup(&w.command))
+                self.writes.iter().position(|w| {
+                    current(w)
+                        && !required_cleanup(&w.command)
+                        && (!matches!(w.command, DataCommand::PutDraft(_))
+                            || self.draft_retry_at.is_none_or(|at| now >= at))
+                })
             })
     }
     fn cleanup_failed(&mut self, account: AccountId, generation: u64, now: Instant) -> bool {
@@ -249,6 +254,7 @@ impl Cache {
             if let DataCommand::PutRooms(rooms) = &command {
                 return match &w.command {
                     DataCommand::PutRooms(_) | DataCommand::RemoveRoom(_) => false,
+                    DataCommand::PutDraft(draft) => rooms.as_slice().iter().any(|r| r.key == draft.room),
                     DataCommand::PutHistory(history) => {
                         rooms.as_slice().iter().any(|r| r.key == history.room)
                     }
@@ -285,6 +291,7 @@ impl Cache {
                 !matches!(
                     w.command,
                     DataCommand::PutRooms(_)
+                        | DataCommand::PutDraft(_)
                         | DataCommand::RemoveThumbnail { .. }
                         | DataCommand::ClearThumbnails
                 )
@@ -511,6 +518,9 @@ fn same_slot(a: &DataCommand, b: &DataCommand) -> bool {
     match (a, b) {
         (DataCommand::PutRooms(_), DataCommand::PutRooms(_)) => true,
         (DataCommand::PutHistory(a), DataCommand::PutHistory(b)) => a.room == b.room,
+        (DataCommand::PutDraft(a), DataCommand::PutDraft(b)) => {
+            a.room == b.room && a.thread == b.thread
+        }
         (DataCommand::PutThumbnail(a), DataCommand::PutThumbnail(b)) => {
             a.room == b.room && a.message == b.message && a.placeholder == b.placeholder
         }
@@ -894,6 +904,32 @@ impl Accounts {
             let Some(write) = self.cache.in_flight.take() else {
                 return;
             };
+            if let DataCommand::PutDraft(draft) = &write.command {
+                let key = (account, draft.room.clone(), draft.thread);
+                if matches!(&result, Ok(RuntimeReply::AccountData { account: returned, result: Ok(DataResult::Saved) }) if *returned == account)
+                {
+                    self.cache.draft_failures.retain(|old| *old != key);
+                } else if self.cache.accounts.iter().any(|a| {
+                    a.id == account
+                        && a.generation == generation
+                        && a.bindings.iter().any(|b| b.ordinary && b.key == draft.room)
+                }) {
+                    if !self.cache.draft_failures.contains(&key)
+                        && self.cache.draft_failures.len() < 256
+                    {
+                        self.cache.draft_failures.push(key);
+                    }
+                    self.cache.draft_retry_at = Some(Instant::now() + CLEANUP_RETRY);
+                    if !self
+                        .cache
+                        .writes
+                        .iter()
+                        .any(|w| w.account == account && same_slot(&w.command, &write.command))
+                    {
+                        self.cache.enqueue(account, write.command.clone());
+                    }
+                }
+            }
             if required_cleanup(&write.command)
                 && self
                     .cache
@@ -989,10 +1025,18 @@ impl Accounts {
                             retain_thumbnail(&mut current.thumbnails, thumbnail.clone(), now);
                         }
                     }
+                    current.drafts = page(
+                        snapshot
+                            .drafts
+                            .as_slice()
+                            .iter()
+                            .filter(|d| a.bindings.iter().any(|b| b.ordinary && b.key == d.room))
+                            .cloned(),
+                    );
                     current.outbox = snapshot.outbox;
                     let mut histories: Vec<_> = current.histories.as_slice().to_vec();
                     for h in snapshot.histories.as_slice() {
-                        if histories.len() < 8
+                        if histories.len() < talk_adapters::identity::CACHE_HISTORY_LIMIT
                             && !histories.iter().any(|old| old.room == h.room)
                             && a.bindings.iter().any(|b| b.ordinary && b.key == h.room)
                         {
@@ -1404,6 +1448,7 @@ impl Accounts {
         }
         account.observed = true;
         let snapshot = account.snapshot.get_or_insert_with(|| DataSnapshot {
+            drafts: Page::empty(),
             thumbnails: Page::empty(),
             rooms: Page::empty(),
             histories: Page::empty(),
@@ -1411,6 +1456,14 @@ impl Accounts {
         });
         {
             snapshot.rooms = rooms.clone();
+            snapshot.drafts = page(
+                snapshot
+                    .drafts
+                    .as_slice()
+                    .iter()
+                    .filter(|d| rooms.as_slice().iter().any(|r| r.key == d.room))
+                    .cloned(),
+            );
             snapshot.histories = page(
                 snapshot
                     .histories
@@ -1506,6 +1559,14 @@ impl Accounts {
         let Some(snapshot) = account.snapshot.as_mut() else {
             return;
         };
+        snapshot.drafts = page(
+            snapshot
+                .drafts
+                .as_slice()
+                .iter()
+                .filter(|d| d.room != key)
+                .cloned(),
+        );
         snapshot.rooms = page(
             snapshot
                 .rooms
@@ -1581,10 +1642,133 @@ impl Accounts {
                 .collect();
             histories.push(cached.clone());
             histories.sort_by_key(|h| std::cmp::Reverse(h.saved_at));
-            snapshot.histories = page(histories.into_iter().take(8));
+            snapshot.histories = page(
+                histories
+                    .into_iter()
+                    .take(talk_adapters::identity::CACHE_HISTORY_LIMIT),
+            );
         }
         self.cache
             .enqueue(context.account.account, DataCommand::PutHistory(cached));
+    }
+}
+
+impl Accounts {
+    pub(super) fn composer_drafts(
+        &self,
+        context: ConversationRef,
+    ) -> Page<talk_core::ui::messaging::ComposerDraft, 32> {
+        let Some(key) = self.cache.stable_room(context) else {
+            return Page::empty();
+        };
+        page(
+            self.cache
+                .loaded(context.account.account)
+                .into_iter()
+                .flat_map(|s| s.drafts.as_slice())
+                .filter(|d| d.room == key)
+                .map(|d| talk_core::ui::messaging::ComposerDraft {
+                    thread: d.thread.map(u128::from),
+                    reply: d.reply.map(u128::from),
+                    body: d.text.clone(),
+                }),
+        )
+    }
+    pub(super) fn save_composer_draft(
+        &mut self,
+        context: ConversationRef,
+        draft: talk_core::ui::messaging::ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        use talk_adapters::identity::{CACHE_DRAFT_LIMIT, CacheDraft};
+        if !self.cache.persistable(context) {
+            return Err(SubmitError::Unavailable(UnavailableReason::PolicyUnknown));
+        }
+        let key = self
+            .cache
+            .stable_room(context)
+            .ok_or(SubmitError::StaleScope)?;
+        let checked = |id| {
+            u64::try_from(id)
+                .ok()
+                .filter(|id| *id > 0)
+                .ok_or(SubmitError::StaleScope)
+        };
+        let draft = CacheDraft {
+            room: key,
+            thread: draft.thread.map(checked).transpose()?,
+            reply: draft.reply.map(checked).transpose()?,
+            text: draft.body,
+            saved_at: history::now_unix(),
+        };
+        let failed = self.cache.draft_failures.contains(&(
+            context.account.account,
+            draft.room.clone(),
+            draft.thread,
+        ));
+        let snapshot = self
+            .cache
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == context.account.account)
+            .and_then(|a| a.snapshot.as_mut())
+            .ok_or(SubmitError::Busy)?;
+        let old = snapshot
+            .drafts
+            .as_slice()
+            .iter()
+            .find(|d| d.room == draft.room && d.thread == draft.thread);
+        if old.is_some_and(|old| old.text == draft.text && old.reply == draft.reply)
+            || old.is_none() && draft.text.as_str().is_empty()
+        {
+            if failed
+                && self.cache.writes.len() < WRITES
+                && !self
+                    .cache
+                    .writes
+                    .iter()
+                    .chain(self.cache.in_flight.iter())
+                    .any(|w| {
+                        w.account == context.account.account
+                            && same_slot(&w.command, &DataCommand::PutDraft(draft.clone()))
+                    })
+            {
+                self.cache.enqueue(
+                    context.account.account,
+                    DataCommand::PutDraft(draft.clone()),
+                );
+            }
+            return if failed {
+                Err(SubmitError::Busy)
+            } else {
+                Ok(())
+            };
+        }
+        if old.is_none() && snapshot.drafts.as_slice().len() == CACHE_DRAFT_LIMIT {
+            return Err(SubmitError::Busy);
+        }
+        // Reserve a write slot before accepting a changed draft. Never evict an
+        // unsent draft to admit disposable history, preview or metadata work.
+        let command = DataCommand::PutDraft(draft.clone());
+        if self.cache.writes.len() >= WRITES
+            && !self
+                .cache
+                .writes
+                .iter()
+                .any(|w| w.account == context.account.account && same_slot(&w.command, &command))
+        {
+            return Err(SubmitError::Busy);
+        }
+        snapshot.drafts = page(
+            snapshot
+                .drafts
+                .as_slice()
+                .iter()
+                .filter(|d| d.room != draft.room || d.thread != draft.thread)
+                .cloned()
+                .chain((!draft.text.as_str().is_empty()).then_some(draft.clone())),
+        );
+        self.cache.enqueue(context.account.account, command);
+        Ok(())
     }
 }
 
@@ -1649,6 +1833,7 @@ mod tests {
             observed: false,
             loaded: true,
             snapshot: Some(DataSnapshot {
+                drafts: Page::empty(),
                 thumbnails: Page::empty(),
                 rooms: page([metadata()]),
                 histories: Page::empty(),
@@ -2071,6 +2256,7 @@ mod tests {
     }
     fn disk_snapshot() -> DataSnapshot {
         DataSnapshot {
+            drafts: Page::empty(),
             thumbnails: Page::empty(),
             rooms: page([metadata()]),
             histories: Page::empty(),
@@ -2213,6 +2399,66 @@ mod tests {
         assert!(
             !model.cache.revoked(scope.account, &stable()),
             "new runtime needs a new policy observation"
+        );
+    }
+    #[test]
+    fn draft_writes_coalesce_keep_newer_text_and_retain_failed_storage_work() {
+        let mut model = super::super::tests::model();
+        model.snapshot = super::super::super::fixtures::snapshot(Some("chat"));
+        let context = model.snapshot.selected.unwrap();
+        install(&mut model, context.account);
+        model.cache.accounts[0].bindings.push(Binding {
+            context,
+            key: metadata().key,
+            ordinary: true,
+            metadata_observed: false,
+        });
+        let draft = talk_core::ui::messaging::ComposerDraft {
+            thread: None,
+            reply: Some(7),
+            body: text("First"),
+        };
+        model.save_composer_draft(context, draft.clone()).unwrap();
+        model.save_composer_draft(context, draft.clone()).unwrap();
+        assert_eq!(model.cache.writes.len(), 1);
+        model.cache.in_flight = model.cache.writes.pop();
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Err(IdentityError::WorkerUnavailable),
+        );
+        assert_eq!(model.cache.writes.len(), 1);
+        assert_eq!(
+            model.save_composer_draft(context, draft.clone()),
+            Err(SubmitError::Busy)
+        );
+        let newer = talk_core::ui::messaging::ComposerDraft {
+            body: text("Newer"),
+            ..draft
+        };
+        model.save_composer_draft(context, newer.clone()).unwrap();
+        assert_eq!(model.cache.writes.len(), 1);
+        assert_eq!(model.composer_drafts(context).as_slice(), &[newer]);
+        model.cache.in_flight = model.cache.writes.pop();
+        model.complete_data(
+            Work::Write(context.account.account, 1),
+            Ok(RuntimeReply::AccountData {
+                account: context.account.account,
+                result: Ok(DataResult::Saved),
+            }),
+        );
+        assert!(model.cache.draft_failures.is_empty());
+        model.cache.accounts[0].bindings[0].ordinary = false;
+        assert!(
+            model
+                .save_composer_draft(
+                    context,
+                    talk_core::ui::messaging::ComposerDraft {
+                        thread: None,
+                        reply: None,
+                        body: text("Restricted")
+                    }
+                )
+                .is_err()
         );
     }
 }

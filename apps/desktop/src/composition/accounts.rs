@@ -7,6 +7,8 @@ mod conversations;
 mod creation;
 pub(super) mod files;
 mod history;
+#[cfg(debug_assertions)]
+mod latency;
 mod messaging;
 mod notifications;
 mod outbox;
@@ -118,6 +120,32 @@ struct Unresolved {
     operation: OperationId,
 }
 
+#[derive(Clone, Copy)]
+struct OptimisticRoom {
+    request: RequestId,
+    context: ConversationRef,
+    favorite: Option<bool>,
+    archived: Option<bool>,
+}
+
+impl OptimisticRoom {
+    fn project(self, snapshot: &mut PresentationSnapshot) {
+        snapshot.conversations = page(snapshot.conversations.as_slice().iter().cloned().map(
+            |mut row| {
+                if row.context == self.context {
+                    if let Some(value) = self.favorite {
+                        row.favorite = Some(value);
+                    }
+                    if let Some(value) = self.archived {
+                        row.archived = Some(value);
+                    }
+                }
+                row
+            },
+        ));
+    }
+}
+
 pub struct Accounts {
     content_owner: content::ContentOwner,
     media: std::sync::Arc<talk_adapters::media::MediaService>,
@@ -150,6 +178,7 @@ pub struct Accounts {
     failures: Vec<(AccountId, LoginFailure)>,
     unresolved: Vec<Unresolved>,
     queued_send: Option<messaging::QueuedSend>,
+    optimistic_room: Option<OptimisticRoom>,
     queued_read: reads::Reads,
     outbox: outbox::Outbox,
     room_invite: Option<(RequestId, talk_core::ui::conversation::PersonRef)>,
@@ -159,6 +188,8 @@ pub struct Accounts {
     typing: typing::Typing,
     history: history::Cache,
     cache: cache::Cache,
+    #[cfg(debug_assertions)]
+    latency: latency::Metrics,
     picker: Option<files::Picker>,
     picker_open: bool,
     csv_file_owner: files::CsvOwner,
@@ -200,6 +231,7 @@ impl Accounts {
             failures: Vec::new(),
             unresolved: Vec::new(),
             queued_send: None,
+            optimistic_room: None,
             queued_read: reads::Reads::default(),
             outbox: outbox::Outbox::default(),
             room_invite: None,
@@ -209,6 +241,8 @@ impl Accounts {
             typing: typing::Typing::default(),
             history: history::Cache::default(),
             cache: cache::Cache::default(),
+            #[cfg(debug_assertions)]
+            latency: latency::Metrics::default(),
             picker: None,
             picker_open: false,
             csv_file_owner: files::CsvOwner::default(),
@@ -301,6 +335,44 @@ impl Accounts {
         purpose: Purpose,
     ) -> Result<(), SubmitError> {
         self.current(scope)?;
+        let priority = purpose.priority();
+        if priority == 2 {
+            if !self.background.background_ready(scope, Instant::now())
+                || self
+                    .pending
+                    .iter()
+                    .any(|p| p.purpose.account() == Some(scope) && p.purpose.priority() < priority)
+                || self.pending.len() >= 8
+            {
+                return Err(SubmitError::Busy);
+            }
+        } else if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                // Cancel only disposable reads. Durable work, call signaling
+                // and mutations retain their owners and uncertainty protocol.
+                if pending.purpose.account() == Some(scope)
+                    && pending.purpose.priority() > priority
+                    && (matches!(
+                        pending.purpose,
+                        Purpose::Message(_, _, _, messaging::Work::Prefetch)
+                    ) || pending.purpose.room() != self.snapshot.selected)
+                    && matches!(
+                        pending.purpose,
+                        Purpose::Message(
+                            _,
+                            _,
+                            _,
+                            messaging::Work::Prefetch
+                                | messaging::Work::Latest
+                                | messaging::Work::Poll
+                                | messaging::Work::Metadata
+                        )
+                    )
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
         self.admit(RuntimeCommand::Request { scope, request }, purpose)
             .map(|_| ())
             .map_err(submit_error)
@@ -823,6 +895,7 @@ impl Accounts {
                 }
             }
             Purpose::Mutation(request, context) => {
+                if self.optimistic_room.is_some_and(|p| p.request == request && p.context == context) { self.optimistic_room = None; }
                 let completion = match result {
                     Ok(RuntimeReply::Protocol(ProtocolReply::Conversation(row))) if row.id == context.conversation => {
                         if self.snapshot.active_account == Some(context.account) { self.snapshot.conversations = page(self.snapshot.conversations.as_slice().iter().map(|r| if r.context == context { conversation_with_existing(&row, context.account, r) } else { r.clone() })); }
@@ -1554,17 +1627,58 @@ impl Accounts {
         {
             return Err(SubmitError::Busy);
         }
+        let optimistic = match &protocol {
+            ProtocolRequest::SetFavorite { favorite, .. } => Some(OptimisticRoom {
+                request,
+                context,
+                favorite: Some(*favorite),
+                archived: None,
+            }),
+            ProtocolRequest::SetArchived { archived, .. } => Some(OptimisticRoom {
+                request,
+                context,
+                favorite: None,
+                archived: Some(*archived),
+            }),
+            _ => None,
+        };
         self.request(
             context.account,
             protocol,
             Purpose::Mutation(request, context),
-        )
+        )?;
+        self.optimistic_room = optimistic;
+        Ok(())
     }
 }
 pub struct Port(pub Rc<RefCell<Accounts>>);
 impl NativeDesktopPort for Port {
+    fn composer_drafts(
+        &self,
+        context: ConversationRef,
+    ) -> Page<talk_core::ui::messaging::ComposerDraft, 32> {
+        self.0.borrow().composer_drafts(context)
+    }
+    fn save_composer_draft(
+        &mut self,
+        context: ConversationRef,
+        draft: talk_core::ui::messaging::ComposerDraft,
+    ) -> Result<(), SubmitError> {
+        self.0.borrow_mut().save_composer_draft(context, draft)
+    }
+
+    #[cfg(debug_assertions)]
+    fn observe_rendered(&mut self, snapshot: &PresentationSnapshot) {
+        self.0.borrow_mut().latency.rendered(snapshot);
+    }
     fn try_submit(&mut self, intent: UiIntent) -> Result<(), SubmitError> {
-        self.0.borrow_mut().submit(intent)
+        let mut model = self.0.borrow_mut();
+        #[cfg(debug_assertions)]
+        let start = latency::Start::intent(&intent, &model.snapshot);
+        model.submit(intent)?;
+        #[cfg(debug_assertions)]
+        model.latency.begin(start);
+        Ok(())
     }
     fn take_snapshot(&mut self) -> Option<PresentationSnapshot> {
         let mut model = self.0.borrow_mut();
@@ -1577,6 +1691,9 @@ impl NativeDesktopPort for Port {
         let mut snapshot = model.snapshot.clone();
         model.project_room_unread(&mut snapshot);
         model.project_thread_list(&mut snapshot);
+        if let Some(pending) = model.optimistic_room {
+            pending.project(&mut snapshot);
+        }
         Some(snapshot)
     }
 }

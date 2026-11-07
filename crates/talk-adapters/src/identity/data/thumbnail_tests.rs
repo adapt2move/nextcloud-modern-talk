@@ -389,7 +389,7 @@ fn schema_one_migration_keeps_required_records_and_defaults_legacy_attachment_me
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
 }
 

@@ -186,6 +186,9 @@ pub const SCENARIOS: &[&str] = &[
     "voice-room",
     "prejoin-voice",
     "offline",
+    "connection-reconnecting",
+    "offline-with-queue",
+    "startup-from-cache",
     "offline-empty",
     "loading",
     "loading-retained",
@@ -287,6 +290,24 @@ fn message(
     }
 }
 pub fn snapshot(scenario: Option<&str>) -> PresentationSnapshot {
+    if matches!(
+        scenario,
+        Some("connection-reconnecting" | "offline-with-queue" | "startup-from-cache")
+    ) {
+        let mut state = snapshot(Some("offline"));
+        if let Some(context) = state.selected {
+            let mut panel = talk_core::ui::messaging::MessagePanel::new(context);
+            panel.queue_available = true;
+            panel.queued_actions = u32::from(scenario == Some("offline-with-queue"));
+            state.message_panel = Some(panel);
+        }
+        if scenario == Some("startup-from-cache") {
+            state.content = ContentState::Loading;
+            state.conversation_list.content = ContentState::Loading;
+        }
+        return state;
+    }
+
     if scenario == Some("private-reply") {
         let mut state = snapshot(Some("chat-ux"));
         let direct = context(3);

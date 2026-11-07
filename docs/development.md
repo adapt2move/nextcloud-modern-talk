@@ -142,6 +142,11 @@ Use `login-account-store-busy`, `login-account-store-device-changed` and
 destination and expose storage actions instead of a browser-login retry. These
 fixtures never reopen or repair an actual profile.
 
+Use `connection-reconnecting`, `offline-with-queue` and `startup-from-cache` for
+fictional offline/restart presentation. The capture tool waits through the normal
+five-second grace period for connection scenarios. These fixtures perform no server
+request and do not establish cache restoration, replay or native performance.
+
 Use `chat-send-pending` for the fictional pending-send presentation, repeated Enter and aligned delivery indicators on grouped, edited and wrapped messages. It deliberately leaves the send unconfirmed and does not qualify transport admission.
 
 Use `chat-busy` to inspect rejected automatic read receipts and explicit sends under fictional local backpressure. Automatic requests remain quiet; a rejected send keeps its draft and shows a scoped notice for at most eight seconds. This fixture performs no server request.

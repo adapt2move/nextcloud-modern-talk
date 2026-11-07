@@ -73,6 +73,8 @@ pub(super) struct Account {
     prefetch_deadline: Option<Instant>,
     live: Option<Result<protocol::AccountLiveState, IdentityError>>,
     first_transport_failure: Option<ErrorKind>,
+    transport_failures: u8,
+    background_paused_until: Option<Instant>,
     member_counts: Vec<MemberCount>,
     pub(super) metadata: conversations::Metadata,
     pub(super) rooms: Page<ConversationView, 100>,
@@ -99,6 +101,8 @@ impl Background {
                     prefetch_deadline: None,
                     live: None,
                     first_transport_failure: None,
+                    transport_failures: 0,
+                    background_paused_until: None,
                     member_counts: Vec::new(),
                     metadata: conversations::Metadata::default(),
                     rooms: Page::empty(),
@@ -115,6 +119,30 @@ impl Background {
     }
     pub(super) fn account_mut(&mut self, scope: AccountScope) -> Option<&mut Account> {
         self.accounts.iter_mut().find(|a| a.scope == scope)
+    }
+    pub(super) fn background_ready(&self, scope: AccountScope, now: Instant) -> bool {
+        self.account(scope)
+            .is_none_or(|a| a.background_paused_until.is_none_or(|at| now >= at))
+    }
+    fn transport_observed(&mut self, scope: AccountScope, success: bool, now: Instant) {
+        if let Some(a) = self.account_mut(scope) {
+            if success {
+                a.transport_failures = 0;
+                a.background_paused_until = None;
+            } else {
+                a.transport_failures = a.transport_failures.saturating_add(1).min(6);
+                if a.transport_failures >= 2 {
+                    // Stable per-runtime jitter needs neither a new random owner
+                    // nor a task. A failed probe cannot reset another account.
+                    let jitter = ((scope.account.as_local() ^ scope.runtime.as_local()) as u64)
+                        .wrapping_mul(u64::from(a.transport_failures) * 7919)
+                        % 1000;
+                    let delay = Duration::from_secs((5u64 << (a.transport_failures - 2)).min(120))
+                        + Duration::from_millis(jitter);
+                    a.background_paused_until = Some(now + delay);
+                }
+            }
+        }
     }
     pub(super) fn member_count(&self, context: ConversationRef) -> Option<u16> {
         self.account(context.account)?
@@ -301,7 +329,11 @@ impl Background {
                     .filter(move |kind| calls || *kind != Observation::Calls)
                     .map(move |kind| (a, kind))
             })
-            .filter(|(a, kind)| a.due[kind.index()] <= now)
+            .filter(|(a, kind)| {
+                a.due[kind.index()] <= now
+                    && (matches!(kind, Observation::Calls | Observation::LiveEvents)
+                        || a.background_paused_until.is_none_or(|at| now >= at))
+            })
             .min_by_key(|(a, kind)| (a.due[kind.index()], Some(a.scope) != active, kind.index()))
             .map(|(a, kind)| (a.scope, kind))
     }
@@ -336,7 +368,13 @@ fn recent_rooms(scope: AccountScope, list: &protocol::ConversationList) -> Vec<C
                 && r.last_activity.is_some_and(|at| at > 0)
         })
         .collect();
-    rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
+    rooms.sort_by_key(|r| {
+        std::cmp::Reverse((
+            r.unread_messages.unwrap_or(0) > 0,
+            r.favorite == Some(true),
+            r.last_activity,
+        ))
+    });
     rooms
         .into_iter()
         .take(4)
@@ -358,6 +396,34 @@ fn live_interval(state: Option<Result<protocol::AccountLiveState, IdentityError>
 }
 
 impl Purpose {
+    pub(super) fn priority(self) -> u8 {
+        match self {
+            Self::Message(
+                _,
+                _,
+                _,
+                messaging::Work::Prefetch
+                | messaging::Work::Latest
+                | messaging::Work::Poll
+                | messaging::Work::Metadata
+                | messaging::Work::ThreadActivity,
+            )
+            | Self::Rooms(_)
+            | Self::MessageNotifications(_) => 2,
+            Self::Message(
+                _,
+                _,
+                _,
+                messaging::Work::History
+                | messaging::Work::Older
+                | messaging::Work::Thread
+                | messaging::Work::ThreadOlder(_)
+                | messaging::Work::Context(_)
+                | messaging::Work::UnreadContext(_),
+            ) => 1,
+            _ => 0,
+        }
+    }
     fn observation(self) -> Option<(AccountScope, Observation)> {
         match self {
             Self::IncomingCalls(s) => Some((s, Observation::Calls)),
@@ -381,7 +447,7 @@ impl Purpose {
             _ => None,
         }
     }
-    fn account(self) -> Option<AccountScope> {
+    pub(super) fn account(self) -> Option<AccountScope> {
         self.room().map(|c| c.account).or(match self {
             Self::Create(_, s, _)
             | Self::IncomingCalls(s)
@@ -502,7 +568,11 @@ impl Accounts {
             .background
             .accounts
             .iter()
-            .filter(|a| !a.prefetch.is_empty())
+            .filter(|a| {
+                !a.prefetch.is_empty()
+                    && Some(a.scope) == active
+                    && self.background.background_ready(a.scope, now)
+            })
             .filter(|a| {
                 !self
                     .pending
@@ -547,6 +617,14 @@ impl Accounts {
             .iter()
             .map(|a| a.scope)
             .collect();
+        if let Ok(connection) = &mut self.connection {
+            for pending in &self.pending {
+                if matches!(pending.purpose, Purpose::Message(_, c, _, messaging::Work::Prefetch) if Some(c.account) != self.snapshot.active_account)
+                {
+                    let _ = connection.cancel_request(pending.id);
+                }
+            }
+        }
         self.background.sync(&scopes, Instant::now());
         self.history.retain_accounts(&scopes);
         self.notices.retain_accounts(&scopes);
@@ -676,6 +754,23 @@ impl Accounts {
         scope: AccountScope,
         result: Result<RuntimeReply, IdentityError>,
     ) {
+        match &result {
+            Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(list)))
+                if list.scope == scope && valid_rooms(list) =>
+            {
+                self.background
+                    .transport_observed(scope, true, Instant::now())
+            }
+            Err(IdentityError::Request(
+                ErrorKind::Transport
+                | ErrorKind::Deadline
+                | ErrorKind::ServerUnavailable
+                | ErrorKind::RateLimited,
+            )) => self
+                .background
+                .transport_observed(scope, false, Instant::now()),
+            _ => (),
+        }
         let list = match result {
             Ok(RuntimeReply::Protocol(ProtocolReply::Conversations(list)))
                 if list.scope == scope && valid_rooms(&list) =>
@@ -1492,5 +1587,43 @@ mod tests {
         );
         model.background.sync(&[], Instant::now());
         assert!(model.background.accounts.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+    #[test]
+    fn repeated_transport_failures_pause_only_the_affected_accounts_background_work() {
+        let now = Instant::now();
+        let a = AccountScope {
+            account: AccountId::from_local(1),
+            runtime: talk_core::ids::RuntimeGeneration::from_local(11),
+        };
+        let b = AccountScope {
+            account: AccountId::from_local(2),
+            ..a
+        };
+        let mut owner = Background::default();
+        owner.sync(&[a, b], now);
+        owner.transport_observed(a, false, now);
+        assert!(owner.background_ready(a, now));
+        owner.transport_observed(a, false, now);
+        assert!(!owner.background_ready(a, now + Duration::from_secs(4)));
+        assert!(owner.background_ready(b, now));
+        assert!(owner.background_ready(a, now + Duration::from_secs(6)));
+        owner.transport_observed(a, false, now + Duration::from_secs(6));
+        assert!(!owner.background_ready(a, now + Duration::from_secs(15)));
+        owner.transport_observed(a, true, now + Duration::from_secs(15));
+        assert!(owner.background_ready(a, now + Duration::from_secs(15)));
+        assert_eq!(owner.account(a).unwrap().transport_failures, 0);
+        owner.transport_observed(a, false, now);
+        owner.transport_observed(a, false, now);
+        let replacement = AccountScope {
+            runtime: talk_core::ids::RuntimeGeneration::from_local(12),
+            ..a
+        };
+        owner.sync(&[replacement, b], now);
+        assert!(owner.background_ready(replacement, now));
     }
 }

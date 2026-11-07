@@ -404,6 +404,14 @@ pub struct ComposeTarget {
     pub new_thread: bool,
     pub silent: bool,
 }
+/// Unsubmitted ordinary-room text. Stable identifiers are resolved by the
+/// composition/cache owner; this value grants no mutation authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerDraft {
+    pub thread: Option<u128>,
+    pub reply: Option<u128>,
+    pub body: Text<4096>,
+}
 /// Displayed quote and durable lookup key; neither grants access to the source.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateReplyTarget {

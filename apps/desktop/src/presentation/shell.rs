@@ -860,6 +860,9 @@ impl Desktop {
             } else {
                 self.offline_footer(row.context, cx)
             })
+            .when(self.draft_storage_unavailable == Some(row.context), |d| {
+                d.child(self.hint(self.l("Dieser Entwurf bleibt nur für diese Sitzung erhalten.")))
+            })
             .when(input.read(cx).rejected, |d| {
                 d.child(
                     div().text_color(t.danger).text_size(self.sp(12.)).child(

@@ -81,20 +81,19 @@ impl Desktop {
             Some(a.scope) == self.snapshot.active_account
                 && a.connection == talk_core::ui::presentation::AccountConnectionState::Connecting
         }) {
-            return div()
-                .px_2()
-                .py_2()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(self.pending_dots(self.theme.muted))
-                .child(self.hint(self.l("Konto wird verbunden …")));
+            return if state.retained {
+                div()
+            } else {
+                self.collection_skeleton(Skeleton::Rows)
+            };
         }
         if state.initial_loading() {
             return self.collection_skeleton(Skeleton::Rows);
         }
         if state.state == ContentState::Offline {
-            if !self.offline_notice_visible() {
+            // Chat owns one connection line in its composer footer. Retained
+            // collections must not introduce a second account-wide indicator.
+            if self.snapshot.selected.is_some() || !self.offline_notice_visible() {
                 return div();
             }
             return div()

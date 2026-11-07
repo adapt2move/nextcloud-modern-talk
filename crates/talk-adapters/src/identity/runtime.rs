@@ -1330,7 +1330,7 @@ impl Worker {
     }
     fn context(&self, scope: AccountScope, cancel: Cancellation) -> OperationContext {
         let mut deadline = self.network.now();
-        deadline.millis = deadline.millis.saturating_add(3000);
+        deadline.millis = deadline.millis.saturating_add(30_000);
         OperationContext {
             scope,
             deadline,
@@ -1668,6 +1668,7 @@ impl Worker {
             }
             RuntimeCommand::Request { scope, request } => {
                 let mut context = self.context(*scope, cancel.clone());
+                context.deadline.millis = self.network.now().millis.saturating_add(30_000);
                 // A bounded, streamed file transfer needs longer than a small JSON
                 // request. Keep account cancellation and the same admitted scope;
                 // this does not extend login/probe/provider deadlines.

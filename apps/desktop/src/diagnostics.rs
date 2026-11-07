@@ -34,6 +34,18 @@ static LOGGER: OnceLock<Handle> = OnceLock::new();
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Operation {
     Application,
+    #[cfg(debug_assertions)]
+    FeedbackStartup,
+    #[cfg(debug_assertions)]
+    FeedbackSwitch,
+    #[cfg(debug_assertions)]
+    FeedbackSend,
+    #[cfg(debug_assertions)]
+    FeedbackReaction,
+    #[cfg(debug_assertions)]
+    FeedbackRead,
+    #[cfg(debug_assertions)]
+    FeedbackFavorite,
     LoginBegin,
     LoginPoll,
     LoginSave,
@@ -56,6 +68,18 @@ impl Operation {
     fn name(self) -> &'static str {
         match self {
             Self::Application => "application",
+            #[cfg(debug_assertions)]
+            Self::FeedbackStartup => "feedback_startup_us",
+            #[cfg(debug_assertions)]
+            Self::FeedbackSwitch => "feedback_switch_us",
+            #[cfg(debug_assertions)]
+            Self::FeedbackSend => "feedback_send_us",
+            #[cfg(debug_assertions)]
+            Self::FeedbackReaction => "feedback_reaction_us",
+            #[cfg(debug_assertions)]
+            Self::FeedbackRead => "feedback_read_us",
+            #[cfg(debug_assertions)]
+            Self::FeedbackFavorite => "feedback_favorite_us",
             Self::LoginBegin => "login_begin",
             Self::LoginPoll => "login_poll",
             Self::LoginSave => "login_save",

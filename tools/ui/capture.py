@@ -105,6 +105,11 @@ def capture(args, before_runtime_cleanup=None):
                             if time.monotonic() >= paint_deadline:
                                 raise RuntimeError(f"Native window stayed blank: {label}")
                             time.sleep(0.5)
+                        if scenario in ("connection-reconnecting", "offline-with-queue"):
+                            # The production grace deadline advances on the normal
+                            # owner tick. Capture its sustained state, not a blip.
+                            time.sleep(5.5)
+                            run(["import", "-window", xid, str(screenshot)], env)
                         status = Path(f"/proc/{app.pid}/status").read_text()
                         memory = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith(("VmRSS:", "VmHWM:", "Threads:"))}
                         manifest["captures"].append({"scenario": scenario, "appearance": appearance, "theme": theme, "image": screenshot.name,

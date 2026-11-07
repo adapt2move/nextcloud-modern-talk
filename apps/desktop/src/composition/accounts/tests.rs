@@ -764,6 +764,7 @@ pub(super) fn model() -> Accounts {
         failures: Vec::new(),
         unresolved: Vec::new(),
         queued_send: None,
+        optimistic_room: None,
         queued_read: reads::Reads::default(),
         outbox: outbox::Outbox::default(),
         room_invite: None,
@@ -773,6 +774,8 @@ pub(super) fn model() -> Accounts {
         typing: typing::Typing::default(),
         history: history::Cache::default(),
         cache: cache::Cache::default(),
+        #[cfg(debug_assertions)]
+        latency: latency::Metrics::default(),
         picker: None,
         picker_open: false,
         csv_file_owner: files::CsvOwner::default(),
@@ -1234,5 +1237,38 @@ fn temporary_status_read_failure_preserves_message_but_observed_clear_removes_it
             .unwrap()
             .status_message
             .is_none()
+    );
+}
+
+#[test]
+fn favorite_and_archive_feedback_overlays_never_replace_canonical_rows_or_other_rooms() {
+    let canonical = super::super::fixtures::snapshot(Some("chat"));
+    let context = canonical.selected.unwrap();
+    let mut shown = canonical.clone();
+    OptimisticRoom {
+        request: RequestId(1),
+        context,
+        favorite: Some(true),
+        archived: Some(true),
+    }
+    .project(&mut shown);
+    for (old, new) in canonical
+        .conversations
+        .as_slice()
+        .iter()
+        .zip(shown.conversations.as_slice())
+    {
+        if old.context == context {
+            assert_eq!(new.favorite, Some(true));
+            assert_eq!(new.archived, Some(true));
+        } else {
+            assert_eq!(old, new);
+        }
+    }
+    // Dropping the failed/finished overlay exposes the latest canonical state,
+    // not a snapshot retained before an intervening room refresh.
+    assert_eq!(
+        canonical.conversations,
+        super::super::fixtures::snapshot(Some("chat")).conversations
     );
 }

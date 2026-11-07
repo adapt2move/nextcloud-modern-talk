@@ -37,7 +37,9 @@ pub(crate) use duplex::{
 };
 
 pub(crate) const BODY_LIMIT: usize = crate::MAX_RESPONSE_BYTES;
-const REQUEST_LIMIT: Duration = Duration::from_secs(3);
+// A slow server is not a failed connection. Keep connect establishment short,
+// but allow ordinary bounded JSON operations to complete behind optimistic UI.
+const REQUEST_LIMIT: Duration = Duration::from_secs(15);
 
 /// One application-wide owner, shared by every account transport. No work queue.
 #[derive(Clone)]
@@ -406,7 +408,7 @@ impl Transport {
             .no_brotli()
             .no_deflate()
             .no_zstd()
-            .connect_timeout(REQUEST_LIMIT)
+            .connect_timeout(Duration::from_secs(3))
             .read_timeout(Duration::from_secs(35))
             .timeout(REQUEST_LIMIT)
             .pool_max_idle_per_host(1)

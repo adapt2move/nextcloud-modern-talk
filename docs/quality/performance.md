@@ -102,3 +102,30 @@ A Linux VM can verify server behavior and platform-neutral components. It cannot
 Crossing a budget fails the relevant product gate. Missing process/peak evidence or workload validation makes the result incomplete/invalid and blocks a pass even when reported samples fit. Even within budget, a repeatable >10% regression in p95 footprint or interaction/startup latency requires review before acceptance. Investigate statistically noisy results with an explained repeat; do not discard inconvenient runs without recording the cause.
 
 Comparisons require identical hardware, OS, versions, features, account/history, media quality, topology, duration, approved workload-manifest/profile hash and accounting boundaries. Report absolute values and variability alongside any percentage. A manifest change needs review and a newly measured baseline; old passes do not transfer across materially different activity/media profiles. Different process models, missing media helpers or unequal workloads invalidate a “lighter/faster” conclusion. Bootstrap reviews assess measurability and resource ownership; only native product measurements can pass product budgets.
+
+## Offline responsiveness diagnostics
+
+Debug builds record bounded content-free `feedback_*_us` events through the existing
+local diagnostic owner: account composition creation to first room/message content,
+admitted room-open to a render with retained messages, and admitted send, reaction,
+read or favorite action to a changed prepared projection. Each `count` is elapsed
+microseconds. At most 16 interaction starts are retained; overflow is `dropped`
+and a 30-second timeout is `failed`, never a completed latency sample. Rejected
+admission has no sample. No message text, room/account identity or emoji enters
+these records. The release build has no observation seam or metric state.
+
+These are render-entry observations, not compositor/display presentation or frame
+times. An unrelated change in the same projection can satisfy a signature; validate
+the intended operation and final counts separately. Startup begins at account owner
+creation, excluding process launch, loader and GPUI setup. Do not use these events
+alone to claim Q.PERF acceptance.
+
+`tests/lab/resilience.py` retains six adapter-completion samples per profile/mode
+(normal, +1.5 seconds, +4 seconds, slow-poll configuration and intermittent faults).
+Latency delays every request; the slow-poll mode delays only forward chat or signaling
+polls. A history-only sample under that mode does not exercise a long poll. Deterministic
+intermittent read failures cycle gateway errors and dropped connections. Requests,
+headers and credentials are never included in timing records. Compilation and
+fixture setup are outside each recorded interval; process/compiler contention and
+server startup can still affect results. Retain failures and raw small samples,
+report ranges/medians and completion counts, and do not infer tail percentiles.
