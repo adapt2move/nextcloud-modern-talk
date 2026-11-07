@@ -265,6 +265,10 @@ For individual operations, see the [feature inventory](compatibility/feature-inv
   a structured message identifier are suppressed. Notification activation is
   available on Linux notification daemons with action support and via the macOS
   helper; native delivery and click-through still need platform qualification.
+  Linux also depends on the distribution's `notify-send` confinement policy:
+  the tested AppArmor profile allowed banner submission but denied
+  `GetCapabilities` and action signals. That policy delivers reminders without
+  click-through until the administrator permits those notification operations.
   Translation requires a provider with source-language detection and a target
   matching the interface locale; task-only translation providers are not used.
   Summary generation requires a configured server assistant and the server's
